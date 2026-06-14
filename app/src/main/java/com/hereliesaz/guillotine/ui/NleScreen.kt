@@ -1,0 +1,378 @@
+package com.hereliesaz.guillotine.ui
+
+import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hereliesaz.guillotine.ai.AiSettings
+import com.hereliesaz.guillotine.ai.Analysis
+import com.hereliesaz.guillotine.ai.ApiKeyStore
+import com.hereliesaz.guillotine.data.ProjectStore
+import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
+import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
+import com.hereliesaz.guillotine.editor.EditorUiState
+import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.export.Exporter
+import com.hereliesaz.guillotine.media.MediaImport
+import com.hereliesaz.guillotine.media.rememberMediaImportLauncher
+import com.hereliesaz.guillotine.model.ClipType
+import com.hereliesaz.guillotine.model.EditAction
+import com.hereliesaz.guillotine.model.MediaItem
+import com.hereliesaz.guillotine.model.MediaKind
+import com.hereliesaz.guillotine.model.TimelineMath
+import com.hereliesaz.guillotine.model.newId
+import com.hereliesaz.guillotine.ui.theme.Black
+import com.hereliesaz.guillotine.ui.theme.Neutral400
+import com.hereliesaz.guillotine.ui.theme.Neutral800
+import com.hereliesaz.guillotine.ui.theme.Neutral900
+import com.hereliesaz.guillotine.ui.theme.Neutral950
+import com.hereliesaz.guillotine.ui.theme.Red500
+import com.hereliesaz.guillotine.ui.theme.White
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+@Composable
+fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val vm: EditorViewModel = viewModel()
+    val state by vm.uiState.collectAsState()
+    val keyStore = remember { ApiKeyStore(context) }
+    val settings by keyStore.settings.collectAsState(initial = AiSettings())
+    val scope = rememberCoroutineScope()
+
+    var showSettings by remember { mutableStateOf(false) }
+    var showGenerate by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
+    var exportProgress by remember { mutableFloatStateOf(0f) }
+    var exportDone by remember { mutableStateOf<String?>(null) }
+    var exportError by remember { mutableStateOf<String?>(null) }
+
+    val importLauncher = rememberMediaImportLauncher { uris ->
+        scope.launch {
+            val items = uris.mapNotNull { withContext(Dispatchers.IO) { MediaImport.probe(context, it) } }
+            vm.addMedia(items)
+        }
+    }
+    val saveLauncher = rememberSaveProjectLauncher { uri ->
+        scope.launch { withContext(Dispatchers.IO) { runCatching { ProjectStore.save(context, uri, vm.uiState.value.document) } } }
+    }
+    val openLauncher = rememberOpenProjectLauncher { uri ->
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
+                ?.let { vm.loadDocument(it) }
+        }
+    }
+
+    val onAnalyze: () -> Unit = onAnalyze@{
+        val targets = vm.uiState.value.selectedClips.filter { it.prompt.isNotBlank() }
+        if (targets.isEmpty()) return@onAnalyze
+        vm.setProcessing(true, null)
+        vm.setAnalyzing(targets.map { it.id }, true)
+        scope.launch {
+            try {
+                for (clip in targets) {
+                    val media = vm.uiState.value.document.mediaFor(clip) ?: continue
+                    val edits = Analysis.run(context, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs)
+                    vm.applyEdits(clip.id, edits)
+                }
+                vm.setProcessing(false, null)
+            } catch (e: Exception) {
+                vm.setAnalyzing(targets.map { it.id }, false)
+                vm.setProcessing(false, e.message ?: "Analysis failed")
+            }
+        }
+    }
+
+    // Playback clock: advances the timeline and skips 'remove' ranges.
+    LaunchedEffectPlayback(vm, state.isPlaying)
+
+    // Keyboard shortcuts (Chromebook/desktop).
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffectFocus(focusRequester)
+
+    Column(
+        modifier
+            .fillMaxSize()
+            .background(Black)
+            .systemBarsPadding()
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { handleKey(it, vm) },
+    ) {
+        TopBar(
+            state = state,
+            onUndo = vm::undo,
+            onRedo = vm::redo,
+            onImport = importLauncher,
+            onGenerate = { showGenerate = true },
+            onSave = saveLauncher,
+            onLoad = openLauncher,
+            onExport = { exportDone = null; exportError = null; showExport = true },
+            onSettings = { showSettings = true },
+        )
+
+        if (widthClass == WindowWidthSizeClass.Expanded) {
+            Row(Modifier.weight(0.6f).fillMaxWidth()) {
+                Inspector(vm, state, onAnalyze, Modifier.width(340.dp).fillMaxHeight())
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    PreviewPlayer(state, Modifier.weight(1f).fillMaxWidth())
+                    TransportControls(vm, state)
+                }
+            }
+            TimelinePanel(vm, state, onOpenAi = { showGenerate = true }, modifier = Modifier.weight(0.4f).fillMaxWidth())
+        } else {
+            PreviewPlayer(state, Modifier.weight(0.42f).fillMaxWidth())
+            TransportControls(vm, state)
+            var tab by remember { mutableIntStateOf(0) }
+            CompactTabs(tab) { tab = it }
+            Box(Modifier.weight(0.58f).fillMaxWidth()) {
+                if (tab == 0) TimelinePanel(vm, state, onOpenAi = { showGenerate = true }, modifier = Modifier.fillMaxSize())
+                else Inspector(vm, state, onAnalyze, Modifier.fillMaxSize())
+            }
+        }
+    }
+
+    if (showSettings) {
+        SettingsSheet(
+            current = settings,
+            onSave = { newSettings ->
+                scope.launch { keyStore.save(newSettings) }
+                showSettings = false
+            },
+            onDismiss = { showSettings = false },
+        )
+    }
+    if (showGenerate) {
+        GenerateSheet(
+            onGenerate = { url, name ->
+                vm.addMedia(listOf(MediaItem(newId(), url, name, MediaKind.IMAGE, 5_000)))
+                showGenerate = false
+            },
+            onDismiss = { showGenerate = false },
+        )
+    }
+    if (showExport) {
+        ExportSheet(
+            totalDurationMs = state.document.totalDurationMs,
+            isExporting = exporting,
+            progress = exportProgress,
+            doneMessage = exportDone,
+            errorMessage = exportError,
+            onStart = { name ->
+                exporting = true; exportError = null; exportProgress = 0f
+                scope.launch {
+                    try {
+                        Exporter.export(context, vm.uiState.value.document, name) { p -> exportProgress = p }
+                        exportDone = "Saved to Movies/Guillotine."
+                    } catch (e: Exception) {
+                        exportError = e.message ?: "Export failed"
+                    } finally {
+                        exporting = false
+                    }
+                }
+            },
+            onDismiss = { if (!exporting) showExport = false },
+        )
+    }
+}
+
+@Composable
+private fun TopBar(
+    state: EditorUiState,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+    onImport: () -> Unit,
+    onGenerate: () -> Unit,
+    onSave: () -> Unit,
+    onLoad: () -> Unit,
+    onExport: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.ContentCut, null, tint = Red500, modifier = Modifier.height(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Guillotine", color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.weight(1f))
+        IconToolButton(Icons.Filled.Undo, "Undo", enabled = state.canUndo, onClick = onUndo)
+        IconToolButton(Icons.Filled.Redo, "Redo", enabled = state.canRedo, onClick = onRedo)
+        Box {
+            IconToolButton(Icons.Filled.Menu, "Menu", onClick = { menuOpen = true })
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                MenuRow("Import media") { menuOpen = false; onImport() }
+                MenuRow("Generate image (free)") { menuOpen = false; onGenerate() }
+                MenuRow("Save project") { menuOpen = false; onSave() }
+                MenuRow("Load project") { menuOpen = false; onLoad() }
+                MenuRow("Export video") { menuOpen = false; onExport() }
+                MenuRow("Settings") { menuOpen = false; onSettings() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuRow(label: String, onClick: () -> Unit) {
+    DropdownMenuItem(text = { Text(label, color = White, fontSize = 13.sp) }, onClick = onClick)
+}
+
+@Composable
+private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
+    val total = state.document.totalDurationMs
+    Row(
+        Modifier.fillMaxWidth().height(48.dp).background(Neutral950).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "${"%.2f".format(state.currentTimeMs / 1000f)}s / ${"%.2f".format(total / 1000f)}s",
+            color = Neutral400, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+        )
+        Spacer(Modifier.weight(1f))
+        IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
+        IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+        IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        Spacer(Modifier.weight(1f))
+        val rates = listOf(0.5f, 1f, 1.5f, 2f)
+        Text(
+            "${state.playbackRate}x",
+            color = Neutral400, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            modifier = Modifier
+                .clickable {
+                    val next = rates[(rates.indexOf(state.playbackRate).coerceAtLeast(0) + 1) % rates.size]
+                    vm.setPlaybackRate(next)
+                }
+                .padding(8.dp),
+        )
+    }
+}
+
+@Composable
+private fun CompactTabs(selected: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().background(Neutral900), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+        listOf("Timeline", "Inspector").forEachIndexed { i, label ->
+            Text(
+                label,
+                color = if (selected == i) White else Neutral400,
+                fontSize = 12.sp,
+                fontWeight = if (selected == i) FontWeight.Medium else FontWeight.Normal,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onSelect(i) }
+                    .background(if (selected == i) Neutral800 else Neutral900)
+                    .padding(vertical = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LaunchedEffectFocus(focusRequester: FocusRequester) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+}
+
+@Composable
+private fun LaunchedEffectPlayback(vm: EditorViewModel, isPlaying: Boolean) {
+    androidx.compose.runtime.LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (isActive) {
+            withFrameNanos { now ->
+                val rate = vm.uiState.value.playbackRate
+                val deltaMs = ((now - last) / 1_000_000.0 * rate).toLong()
+                last = now
+                if (deltaMs > 0) {
+                    vm.advancePlayhead(deltaMs)
+                    skipRemoved(vm)
+                }
+            }
+        }
+    }
+}
+
+/** If the playhead landed inside a 'remove' range, jump past it (preview cut). */
+private fun skipRemoved(vm: EditorViewModel) {
+    val s = vm.uiState.value
+    val clip = TimelineMath.activeClip(s.document.clips, ClipType.VIDEO, s.currentTimeMs) ?: return
+    val src = TimelineMath.sourceTimeMs(clip, s.currentTimeMs)
+    val seg = clip.edits.firstOrNull { it.action == EditAction.REMOVE && src >= it.startMs && src < it.endMs } ?: return
+    val jump = clip.startTimeMs + (seg.endMs - clip.trimStartMs)
+    vm.seekTo(jump)
+}
+
+private fun handleKey(e: KeyEvent, vm: EditorViewModel): Boolean {
+    if (e.type != KeyEventType.KeyDown) return false
+    val ctrl = e.isCtrlPressed || e.isMetaPressed
+    return when {
+        e.key == Key.Spacebar -> { vm.togglePlay(); true }
+        e.key == Key.Delete || e.key == Key.Backspace -> { vm.deleteSelected(); true }
+        ctrl && e.key == Key.Z -> { if (e.isShiftPressed) vm.redo() else vm.undo(); true }
+        ctrl && e.key == Key.Y -> { vm.redo(); true }
+        ctrl && e.isAltPressed && e.key == Key.C -> { vm.copySelectedFilters(); true }
+        ctrl && e.isAltPressed && e.key == Key.V -> { vm.pasteFiltersToSelected(); true }
+        ctrl && e.key == Key.C -> { vm.copySelected(); true }
+        ctrl && e.key == Key.V -> { vm.pasteClip(); true }
+        !ctrl && e.key == Key.S -> { vm.splitSelectedAtPlayhead(); true }
+        else -> false
+    }
+}
