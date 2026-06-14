@@ -1,2 +1,2 @@
 # Guillotine
-An AI-Powered Non-Linear Video Editor
+An AI-powered Non-Linear Video Editor
