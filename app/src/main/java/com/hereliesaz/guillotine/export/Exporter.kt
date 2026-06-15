@@ -19,6 +19,7 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import com.hereliesaz.guillotine.media.VideoEffects
+import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.Document
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineMath
@@ -95,35 +96,82 @@ object Exporter {
         uri
     }
 
-    /** Build a single video sequence from the kept ranges of all video clips. */
+    /**
+     * Build the export composition: a video sequence (kept ranges of video clips +
+     * image clips), plus a separate audio sequence for standalone audio-track clips
+     * so added music/voice is mixed in. Project crop + aspect are applied to every
+     * video clip via [VideoEffects.geometry].
+     *
+     * Known limits (verify on device): per-clip volume and keyframed opacity/scale
+     * are not yet baked into the export; a single video sequence mixing image clips
+     * (no audio) with video clips (audio) may need Transformer's force-audio-track
+     * flag — most projects are all-video or all-image and are unaffected.
+     */
     private fun buildComposition(document: Document): Composition? {
-        val videoClips = document.clips
-            .filter { it.type == com.hereliesaz.guillotine.model.ClipType.VIDEO }
-            .sortedBy { it.startTimeMs }
+        val geometry = VideoEffects.geometry(document.settings)
 
-        val items = mutableListOf<EditedMediaItem>()
-        for (clip in videoClips) {
-            val media = document.mediaFor(clip) ?: continue
-            if (media.kind == MediaKind.IMAGE) continue // images are a follow-up
-            val effects = Effects(emptyList(), VideoEffects.build(clip.filters))
-            for (range in TimelineMath.keptRanges(clip)) {
-                val startMs = range.first
-                val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
-                if (endMs <= startMs) continue
-                val mediaItem = ExoMediaItem.Builder()
-                    .setUri(Uri.parse(media.uri))
-                    .setClippingConfiguration(
-                        ExoMediaItem.ClippingConfiguration.Builder()
-                            .setStartPositionMs(startMs)
-                            .setEndPositionMs(endMs)
-                            .build(),
-                    )
-                    .build()
-                items += EditedMediaItem.Builder(mediaItem).setEffects(effects).build()
+        val videoItems = mutableListOf<EditedMediaItem>()
+        document.clips
+            .filter { it.type == ClipType.VIDEO }
+            .sortedBy { it.startTimeMs }
+            .forEach { clip ->
+                val media = document.mediaFor(clip) ?: return@forEach
+                val effects = Effects(emptyList(), VideoEffects.build(clip.filters) + geometry)
+                if (media.kind == MediaKind.IMAGE) {
+                    val mediaItem = ExoMediaItem.Builder()
+                        .setUri(Uri.parse(media.uri))
+                        .setImageDurationMs(if (clip.durationMs > 0) clip.durationMs else 5_000L)
+                        .build()
+                    videoItems += EditedMediaItem.Builder(mediaItem)
+                        .setFrameRate(30)
+                        .setEffects(effects)
+                        .build()
+                } else {
+                    for (range in TimelineMath.keptRanges(clip)) {
+                        val startMs = range.first
+                        val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
+                        if (endMs <= startMs) continue
+                        val mediaItem = ExoMediaItem.Builder()
+                            .setUri(Uri.parse(media.uri))
+                            .setClippingConfiguration(
+                                ExoMediaItem.ClippingConfiguration.Builder()
+                                    .setStartPositionMs(startMs)
+                                    .setEndPositionMs(endMs)
+                                    .build(),
+                            )
+                            .build()
+                        videoItems += EditedMediaItem.Builder(mediaItem).setEffects(effects).build()
+                    }
+                }
             }
-        }
-        if (items.isEmpty()) return null
-        return Composition.Builder(EditedMediaItemSequence(items)).build()
+        if (videoItems.isEmpty()) return null
+
+        val audioItems = mutableListOf<EditedMediaItem>()
+        document.clips
+            .filter { it.type == ClipType.AUDIO }
+            .sortedBy { it.startTimeMs }
+            .forEach { clip ->
+                val media = document.mediaFor(clip) ?: return@forEach
+                for (range in TimelineMath.keptRanges(clip)) {
+                    val startMs = range.first
+                    val endMs = range.last + 1
+                    if (endMs <= startMs) continue
+                    val mediaItem = ExoMediaItem.Builder()
+                        .setUri(Uri.parse(media.uri))
+                        .setClippingConfiguration(
+                            ExoMediaItem.ClippingConfiguration.Builder()
+                                .setStartPositionMs(startMs)
+                                .setEndPositionMs(endMs)
+                                .build(),
+                        )
+                        .build()
+                    audioItems += EditedMediaItem.Builder(mediaItem).setRemoveVideo(true).build()
+                }
+            }
+
+        val sequences = mutableListOf(EditedMediaItemSequence(videoItems))
+        if (audioItems.isNotEmpty()) sequences += EditedMediaItemSequence(audioItems)
+        return Composition.Builder(sequences).build()
     }
 
     /** Copy the encoded file into the gallery via MediaStore (no permission on API 29+). */
