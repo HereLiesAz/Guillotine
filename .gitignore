@@ -1,0 +1,25 @@
+# ---- Android / Gradle ----
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+
+# Android module build outputs
+app/build/
+build/
+
+# ---- Legacy web app (superseded by the native Android app) ----
+node_modules/
+dist/
+coverage/
+*.log
+.env*
+!.env.example
