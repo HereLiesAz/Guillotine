@@ -244,13 +244,18 @@ private fun ClipView(
     msToDp: (Long) -> androidx.compose.ui.unit.Dp,
 ) {
     val selected = clip.id in state.selectedClipIds
-    var dragPx by remember(clip.id) { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
+    var dragPx by remember(clip.id) { mutableFloatStateOf(0f) }
+    var dragPy by remember(clip.id) { mutableFloatStateOf(0f) }
+    var trimStartPx by remember(clip.id) { mutableFloatStateOf(0f) }
+    var trimEndPx by remember(clip.id) { mutableFloatStateOf(0f) }
     val baseLeftPx = with(density) { msToDp(clip.startTimeMs).toPx() }
+    val trackHeightPx = with(density) { TRACK_HEIGHT.toPx() }
+    val sameTypeTracks = if (clip.type == ClipType.VIDEO) state.document.videoTracks else state.document.audioTracks
 
     Box(
         Modifier
-            .offset { androidx.compose.ui.unit.IntOffset((baseLeftPx + dragPx).roundToInt(), 0) }
+            .offset { androidx.compose.ui.unit.IntOffset((baseLeftPx + dragPx).roundToInt(), dragPy.roundToInt()) }
             .padding(vertical = 6.dp)
             .width(msToDp(clip.durationMs))
             .fillMaxHeight()
@@ -268,18 +273,22 @@ private fun ClipView(
                     }
                 }
             }
-            // Drag horizontally to move (select tool only).
-            .pointerInput(clip.id, state.tool, pps) {
+            // Drag to move: horizontally on the timeline, vertically across same-type tracks.
+            .pointerInput(clip.id, state.tool, pps, sameTypeTracks) {
                 if (state.tool == EditorTool.SELECT) {
                     detectDragGestures(
-                        onDragStart = { dragPx = 0f },
+                        onDragStart = { dragPx = 0f; dragPy = 0f },
                         onDragEnd = {
                             val deltaMs = (dragPx / pps * 1000f).toLong()
-                            vm.moveClip(clip.id, clip.trackId, clip.startTimeMs + deltaMs)
-                            dragPx = 0f
+                            val curIndex = sameTypeTracks.indexOf(clip.trackId)
+                            val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
+                            val targetIndex = (curIndex + shift).coerceIn(0, (sameTypeTracks.size - 1).coerceAtLeast(0))
+                            val targetTrack = sameTypeTracks.getOrElse(targetIndex) { clip.trackId }
+                            vm.moveClip(clip.id, targetTrack, clip.startTimeMs + deltaMs)
+                            dragPx = 0f; dragPy = 0f
                         },
-                        onDragCancel = { dragPx = 0f },
-                        onDrag = { change, drag -> change.consume(); dragPx += drag.x },
+                        onDragCancel = { dragPx = 0f; dragPy = 0f },
+                        onDrag = { change, drag -> change.consume(); dragPx += drag.x; dragPy += drag.y },
                     )
                 }
             },
@@ -328,6 +337,40 @@ private fun ClipView(
                     drawPath(path, White)
                 }
             }
+        }
+
+        // Trim handles — drag clip edges to adjust in/out points (select tool, when selected).
+        if (selected && state.tool == EditorTool.SELECT) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .width(10.dp)
+                    .fillMaxHeight()
+                    .background(Red500)
+                    .pointerInput(clip.id, pps) {
+                        detectDragGestures(
+                            onDragStart = { trimStartPx = 0f },
+                            onDragEnd = { vm.trimClipStart(clip.id, (trimStartPx / pps * 1000f).toLong()); trimStartPx = 0f },
+                            onDragCancel = { trimStartPx = 0f },
+                            onDrag = { change, drag -> change.consume(); trimStartPx += drag.x },
+                        )
+                    },
+            )
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(10.dp)
+                    .fillMaxHeight()
+                    .background(Red500)
+                    .pointerInput(clip.id, pps) {
+                        detectDragGestures(
+                            onDragStart = { trimEndPx = 0f },
+                            onDragEnd = { vm.trimClipEnd(clip.id, (trimEndPx / pps * 1000f).toLong()); trimEndPx = 0f },
+                            onDragCancel = { trimEndPx = 0f },
+                            onDrag = { change, drag -> change.consume(); trimEndPx += drag.x },
+                        )
+                    },
+            )
         }
     }
 }

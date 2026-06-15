@@ -20,6 +20,7 @@ enum class EditorTool { SELECT, SPLIT, KEYFRAME }
 
 /** Default on-timeline duration for still images. */
 private const val IMAGE_DEFAULT_DURATION_MS = 5_000L
+private const val MIN_CLIP_DURATION_MS = 100L
 private const val HISTORY_LIMIT = 100
 
 data class EditorUiState(
@@ -224,6 +225,52 @@ class EditorViewModel : ViewModel() {
                     else it
                 },
             )
+        }
+    }
+
+    /**
+     * Drag the LEFT edge: shift the clip's start on both the timeline and within the
+     * source by [deltaMs], shortening the clip. Keyframes (clip-relative) are re-based
+     * and any that fall before the new start are dropped. Bounded so trimStart >= 0 and
+     * the clip keeps a minimum duration.
+     */
+    fun trimClipStart(clipId: String, deltaMs: Long) {
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            var d = deltaMs.coerceAtLeast(-clip.trimStartMs)
+            d = d.coerceAtMost(clip.durationMs - MIN_CLIP_DURATION_MS)
+            if (d == 0L) return@mutateDocument doc
+            doc.copy(clips = doc.clips.map {
+                if (it.id != clipId) it
+                else it.copy(
+                    startTimeMs = (it.startTimeMs + d).coerceAtLeast(0),
+                    trimStartMs = it.trimStartMs + d,
+                    durationMs = it.durationMs - d,
+                    keyframes = it.keyframes.map { k -> k.copy(timeMs = k.timeMs - d) }.filter { k -> k.timeMs >= 0 },
+                )
+            })
+        }
+    }
+
+    /**
+     * Drag the RIGHT edge: change the clip's duration by [deltaMs]. Bounded to a
+     * minimum duration and, for time-based media, to the remaining source length.
+     */
+    fun trimClipEnd(clipId: String, deltaMs: Long) {
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            var d = deltaMs.coerceAtLeast(MIN_CLIP_DURATION_MS - clip.durationMs)
+            val media = doc.mediaFor(clip)
+            if (media != null && media.kind != com.hereliesaz.guillotine.model.MediaKind.IMAGE && media.durationMs > 0) {
+                val maxDuration = media.durationMs - clip.trimStartMs
+                d = d.coerceAtMost(maxDuration - clip.durationMs)
+            }
+            if (d == 0L) return@mutateDocument doc
+            val newDuration = clip.durationMs + d
+            doc.copy(clips = doc.clips.map {
+                if (it.id != clipId) it
+                else it.copy(durationMs = newDuration, keyframes = it.keyframes.filter { k -> k.timeMs <= newDuration })
+            })
         }
     }
 
