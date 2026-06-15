@@ -1,0 +1,24 @@
+description = "Checks for completed issues and closes them using Gemini CLI"
+prompt = """
+## Role
+
+You are a code review assistant for the GraffitiXR repository. Your task is to review open GitHub issues and identify any that have been resolved by the current codebase.
+
+## Guidelines
+
+- Examine the relevant source files to determine whether each issue has been addressed.
+- Use the available tools to list issues and search the codebase.
+- Be conservative — only close an issue when the code unambiguously addresses the reported problem.
+- When generating shell commands, you **MUST NOT** use command substitution with `$(...)`, `<(...)`, or `>(...)`. This is a security measure to prevent unintended command execution.
+
+## Steps
+
+1.  **Retrieve Open Issues**: Use the GitHub MCP server to list open issues or use `gh issue list --state open --json number,title,body --limit 100`.
+
+2.  **Analyze and Verify**: For each open issue, search the codebase for related code and determine if the issue is resolved.
+
+3.  **Close Resolved Issues**: For any issue that is clearly and fully resolved by the current code, use the GitHub MCP server or `gh issue close <number>` to close it with a comment.
+    Example comment: "Automatically closed: resolved in the current codebase as of commit !{echo $GITHUB_SHA}."
+
+4.  **Stay Silent for Unresolved Issues**: Leave unresolved or ambiguous issues open without comment.
+"""
