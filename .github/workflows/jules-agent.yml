@@ -1,0 +1,20 @@
+name: Jules Agent
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  jules-triage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Invoke Jules (Placeholder)
+        run: echo "Jules invocation placeholder. Configure correct action here."
