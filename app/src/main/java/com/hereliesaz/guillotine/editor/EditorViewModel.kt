@@ -27,8 +27,12 @@ data class EditorUiState(
     val document: Document = Document(),
     val currentTimeMs: Long = 0L,
     val isPlaying: Boolean = false,
-    /** Timeline zoom in pixels-per-second. */
+    /** Timeline zoom in pixels-per-second (horizontal). */
     val pixelsPerSecond: Float = 100f,
+    /** Per-track lane heights in dp (vertical zoom); absent = default. */
+    val trackHeights: Map<String, Float> = emptyMap(),
+    /** New keyframes get a smooth ease by default; off = linear. */
+    val autoEase: Boolean = true,
     val playbackRate: Float = 1f,
     val selectedClipIds: List<String> = emptyList(),
     val tool: EditorTool = EditorTool.SELECT,
@@ -40,7 +44,14 @@ data class EditorUiState(
     val selectedClipId: String? get() = selectedClipIds.singleOrNull()
     val selectedClips: List<TimelineClip>
         get() = document.clips.filter { it.id in selectedClipIds }
+
+    /** Lane height (dp) for [trackId], falling back to the default. */
+    fun trackHeight(trackId: String): Float = trackHeights[trackId] ?: DEFAULT_TRACK_HEIGHT
 }
+
+const val DEFAULT_TRACK_HEIGHT = 64f
+const val MIN_TRACK_HEIGHT = 44f
+const val MAX_TRACK_HEIGHT = 240f
 
 /**
  * Owns all editor state. Content mutations go through [mutateDocument] so undo/redo
@@ -442,7 +453,13 @@ class EditorViewModel : ViewModel() {
                 if (clip.id != clipId) return@map clip
                 val rel = (_uiState.value.currentTimeMs - clip.startTimeMs).coerceIn(0, clip.durationMs)
                 val default = if (property == KeyframeProperty.VOLUME) clip.filters.volume else 1f
-                val kf = Keyframe(id = newId(), timeMs = rel, value = default, property = property)
+                // Auto-ease (default) gives a smooth in/out; off = linear.
+                val easing = if (_uiState.value.autoEase) {
+                    com.hereliesaz.guillotine.model.CubicBezier()
+                } else {
+                    com.hereliesaz.guillotine.model.CubicBezier(0f, 0f, 1f, 1f)
+                }
+                val kf = Keyframe(id = newId(), timeMs = rel, value = default, property = property, easing = easing)
                 clip.copy(keyframes = (clip.keyframes + kf).sortedBy { it.timeMs })
             })
         }
@@ -546,6 +563,24 @@ class EditorViewModel : ViewModel() {
     fun setPlaying(playing: Boolean) = _uiState.update { it.copy(isPlaying = playing) }
     fun setPlaybackRate(rate: Float) = _uiState.update { it.copy(playbackRate = rate) }
     fun setZoom(pxPerSec: Float) = _uiState.update { it.copy(pixelsPerSecond = pxPerSec.coerceIn(10f, 500f)) }
+
+    /**
+     * Vertical pinch: scale lane height. Affects the track(s) of the current selection so
+     * tracks size independently; with nothing selected it scales every track together.
+     */
+    fun scaleTrackHeight(factor: Float) {
+        _uiState.update { st ->
+            val selectedTracks = st.selectedClips.map { it.trackId }.distinct()
+            val targets = selectedTracks.ifEmpty { st.document.videoTracks + st.document.audioTracks }
+            val updated = st.trackHeights.toMutableMap()
+            targets.forEach { id ->
+                updated[id] = (st.trackHeight(id) * factor).coerceIn(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT)
+            }
+            st.copy(trackHeights = updated)
+        }
+    }
+
+    fun toggleAutoEase() = _uiState.update { it.copy(autoEase = !it.autoEase) }
     fun setTool(tool: EditorTool) = _uiState.update { it.copy(tool = tool) }
 
     fun selectClip(id: String?, additive: Boolean = false) {

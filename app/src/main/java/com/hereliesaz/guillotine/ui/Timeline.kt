@@ -7,7 +7,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeOff
@@ -77,7 +77,6 @@ import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
 import kotlin.math.roundToInt
 
-private val TRACK_HEIGHT = 64.dp
 private val HEADER_WIDTH = 56.dp
 private val RULER_HEIGHT = 24.dp
 
@@ -121,8 +120,28 @@ private fun TimelineLanes(
     // in/out changes how much of the timeline (how many frames) is on screen.
     val zoomModifier = Modifier
         .pointerInput(Unit) {
-            detectTransformGestures { _, _, zoom, _ ->
-                if (zoom != 1f) vm.setZoom(vm.uiState.value.pixelsPerSecond * zoom)
+            // Anisotropic pinch: horizontal finger spread changes width (pixels/second),
+            // vertical spread changes track height. Tracked per-axis from the two pointers.
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val pts = event.changes.filter { it.pressed }
+                    if (pts.size >= 2) {
+                        val a = pts[0]
+                        val b = pts[1]
+                        val curH = kotlin.math.abs(a.position.x - b.position.x)
+                        val curV = kotlin.math.abs(a.position.y - b.position.y)
+                        val prevH = kotlin.math.abs(a.previousPosition.x - b.previousPosition.x)
+                        val prevV = kotlin.math.abs(a.previousPosition.y - b.previousPosition.y)
+                        if (prevH > 8f && curH > 8f && curH != prevH) {
+                            vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH))
+                        }
+                        if (prevV > 8f && curV > 8f && curV != prevV) {
+                            vm.scaleTrackHeight(curV / prevV)
+                        }
+                        pts.forEach { it.consume() }
+                    }
+                }
             }
         }
         .pointerInput(Unit) {
@@ -137,14 +156,19 @@ private fun TimelineLanes(
             }
         }
 
+    // Vertical scroll shared by the header column and the lanes, so they move together
+    // while the ruler stays frozen at the top.
+    val vScroll = rememberScrollState()
     Row(modifier.fillMaxSize().then(zoomModifier)) {
-        // Fixed track-header column.
+        // Track-header column: ruler spacer fixed, header list scrolls with the lanes.
         Column(Modifier.width(HEADER_WIDTH).fillMaxHeight().background(Neutral900)) {
             Box(Modifier.height(RULER_HEIGHT).fillMaxWidth())
-            state.document.videoTracks.forEach { TrackHeader(vm, state, it, ClipType.VIDEO, onImportToTrack, onCreateOnTrack) }
-            state.document.audioTracks.forEach { TrackHeader(vm, state, it, ClipType.AUDIO, onImportToTrack, onCreateOnTrack) }
+            Column(Modifier.weight(1f).verticalScroll(vScroll)) {
+                state.document.videoTracks.forEach { TrackHeader(vm, state, it, ClipType.VIDEO, onImportToTrack, onCreateOnTrack) }
+                state.document.audioTracks.forEach { TrackHeader(vm, state, it, ClipType.AUDIO, onImportToTrack, onCreateOnTrack) }
+            }
         }
-        // Scrollable content.
+        // Horizontally-scrollable content; ruler fixed at top, lanes scroll vertically.
         Box(
             Modifier
                 .fillMaxSize()
@@ -161,14 +185,16 @@ private fun TimelineLanes(
         ) {
             Column(Modifier.fillMaxSize()) {
                 Ruler(totalMs, pps, contentWidth)
-                state.document.videoTracks.forEach { trackId ->
-                    Lane(vm, state, trackId, pps) { msToDp(it) }
-                }
-                state.document.audioTracks.forEach { trackId ->
-                    Lane(vm, state, trackId, pps) { msToDp(it) }
+                Column(Modifier.weight(1f).verticalScroll(vScroll)) {
+                    state.document.videoTracks.forEach { trackId ->
+                        Lane(vm, state, trackId, pps) { msToDp(it) }
+                    }
+                    state.document.audioTracks.forEach { trackId ->
+                        Lane(vm, state, trackId, pps) { msToDp(it) }
+                    }
                 }
             }
-            // Playhead overlay spanning the lanes.
+            // Playhead overlay spanning the visible lanes.
             Box(
                 Modifier
                     .offset(x = msToDp(state.currentTimeMs))
@@ -198,7 +224,7 @@ private fun TrackHeader(
     val ts = state.document.trackSettingsFor(trackId)
     Box(
         Modifier
-            .height(TRACK_HEIGHT)
+            .height(state.trackHeight(trackId).dp)
             .fillMaxWidth()
             .background(Neutral900)
             .clickable { open = true },
@@ -315,7 +341,7 @@ private fun Lane(
     Box(
         Modifier
             .fillMaxWidth()
-            .height(TRACK_HEIGHT)
+            .height(state.trackHeight(trackId).dp)
             .background(Neutral850)
             .border(0.5.dp, Neutral800),
     ) {
@@ -342,7 +368,7 @@ private fun ClipView(
     var trimStartPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimEndPx by remember(clip.id) { mutableFloatStateOf(0f) }
     val baseLeftPx = with(density) { msToDp(clip.startTimeMs).toPx() }
-    val trackHeightPx = with(density) { TRACK_HEIGHT.toPx() }
+    val trackHeightPx = with(density) { state.trackHeight(clip.trackId).dp.toPx() }
     val sameTypeTracks = when (clip.type) {
         // Text clips live on video tracks, like any overlay/image clip.
         ClipType.VIDEO, ClipType.TEXT -> state.document.videoTracks
@@ -451,17 +477,39 @@ private fun ClipView(
                 }
             }
         }
-        // Keyframe diamonds.
+        // Keyframe envelopes: each property's keyframes plotted by value (higher on the
+        // clip = higher value, e.g. more opacity), connected into a curve.
         if (clip.keyframes.isNotEmpty()) {
             Canvas(Modifier.fillMaxSize()) {
-                clip.keyframes.forEach { kf ->
-                    val x = kf.timeMs / 1000f * pps
-                    val y = size.height - 6f
-                    val r = 4f
-                    val path = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(x, y - r); lineTo(x + r, y); lineTo(x, y + r); lineTo(x - r, y); close()
+                clip.keyframes.groupBy { it.property }.forEach { (prop, kfs) ->
+                    val lo = 0f
+                    val hi = when (prop) {
+                        KeyframeProperty.OPACITY -> 1f
+                        KeyframeProperty.SCALE -> 3f
+                        KeyframeProperty.VOLUME -> 2f
                     }
-                    drawPath(path, White)
+                    val color = when (prop) {
+                        KeyframeProperty.OPACITY -> White
+                        KeyframeProperty.SCALE -> Red500
+                        KeyframeProperty.VOLUME -> Neutral400
+                    }
+                    val sorted = kfs.sortedBy { it.timeMs }
+                    fun ptOf(kf: com.hereliesaz.guillotine.model.Keyframe): Offset {
+                        val x = kf.timeMs / 1000f * pps
+                        val norm = ((kf.value - lo) / (hi - lo)).coerceIn(0f, 1f)
+                        return Offset(x, size.height * (1f - norm))
+                    }
+                    for (i in 0 until sorted.size - 1) {
+                        drawLine(color.copy(alpha = 0.6f), ptOf(sorted[i]), ptOf(sorted[i + 1]), strokeWidth = 1.5f)
+                    }
+                    sorted.forEach { kf ->
+                        val c = ptOf(kf)
+                        val r = 4f
+                        val path = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(c.x, c.y - r); lineTo(c.x + r, c.y); lineTo(c.x, c.y + r); lineTo(c.x - r, c.y); close()
+                        }
+                        drawPath(path, color)
+                    }
                 }
             }
         }

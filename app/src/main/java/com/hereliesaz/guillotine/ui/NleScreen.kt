@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ZoomIn
@@ -450,6 +451,9 @@ private fun EditorToolStrip(
             }
             IconToolButton(Icons.Filled.Diamond, "Keyframe tool", active = state.tool == EditorTool.KEYFRAME) {
                 vm.setTool(EditorTool.KEYFRAME)
+            }
+            IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
+                vm.toggleAutoEase()
             }
             IconToolButton(Icons.Filled.Add, "Add track") {
                 vm.addTrack(selected.singleOrNull()?.type ?: ClipType.VIDEO)
