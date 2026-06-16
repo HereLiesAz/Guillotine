@@ -116,6 +116,15 @@ data class Crop(
     val h: Float = 100f,
 )
 
+/** Whole-track (timeline) settings keyed by track id. Absent = defaults. */
+@Serializable
+data class TrackSettings(
+    val volume: Float = 1f,      // audio/video
+    val opacity: Float = 1f,     // video/text
+    val muted: Boolean = false,  // audio/video
+    val disabled: Boolean = false, // hide/disable the whole track
+)
+
 @Serializable
 data class GlobalSettings(
     val aspectRatio: AspectRatio = AspectRatio.ORIGINAL,
@@ -131,10 +140,10 @@ data class GlobalSettings(
 data class Document(
     val mediaItems: List<MediaItem> = emptyList(),
     val clips: List<TimelineClip> = emptyList(),
-    /** Track lists in stacking order. Text overlays render above video, video above audio. */
-    val textTracks: List<String> = listOf("T1"),
+    /** Track lists in stacking order (top of panel = top layer). Text is just a clip on a video track. */
     val videoTracks: List<String> = listOf("V1"),
     val audioTracks: List<String> = listOf("A1"),
+    val trackSettings: Map<String, TrackSettings> = emptyMap(),
     val settings: GlobalSettings = GlobalSettings(),
 ) {
     /** End of the last clip on the timeline, in milliseconds. */
@@ -142,4 +151,9 @@ data class Document(
         get() = clips.maxOfOrNull { it.endTimeMs } ?: 0L
 
     fun mediaFor(clip: TimelineClip): MediaItem? = mediaItems.firstOrNull { it.id == clip.mediaId }
+
+    fun trackSettingsFor(trackId: String): TrackSettings = trackSettings[trackId] ?: TrackSettings()
+
+    /** Track ids whose whole track is disabled/hidden. */
+    val disabledTrackIds: Set<String> get() = trackSettings.filterValues { it.disabled }.keys
 }

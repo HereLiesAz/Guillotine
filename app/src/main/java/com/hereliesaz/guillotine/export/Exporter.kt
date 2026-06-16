@@ -113,7 +113,10 @@ object Exporter {
     private fun buildComposition(context: Context, document: Document): Composition? {
         val geometry = VideoEffects.geometry(document.settings)
 
-        val videoClips = document.clips.filter { it.type == ClipType.VIDEO }.sortedBy { it.startTimeMs }
+        val disabled = document.disabledTrackIds
+        val videoClips = document.clips
+            .filter { it.type == ClipType.VIDEO && it.trackId !in disabled }
+            .sortedBy { it.startTimeMs }
         // Background-removed clips composite as a foreground layer over the rest. If nothing is
         // marked for removal, every video clip just forms the base (original behavior).
         val foreground = videoClips.filter { it.filters.removeBackground }
@@ -171,7 +174,7 @@ object Exporter {
 
         val audioItems = mutableListOf<EditedMediaItem>()
         document.clips
-            .filter { it.type == ClipType.AUDIO }
+            .filter { it.type == ClipType.AUDIO && it.trackId !in disabled }
             .sortedBy { it.startTimeMs }
             .forEach { clip ->
                 val media = document.mediaFor(clip) ?: return@forEach

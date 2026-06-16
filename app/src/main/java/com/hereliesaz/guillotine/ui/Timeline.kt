@@ -4,10 +4,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,13 +19,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,7 +63,10 @@ import com.hereliesaz.guillotine.media.MediaPreview
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.TimelineClip
+import com.hereliesaz.guillotine.ui.theme.Neutral300
+import com.hereliesaz.guillotine.ui.theme.Neutral400
 import com.hereliesaz.guillotine.ui.theme.Neutral500
+import com.hereliesaz.guillotine.ui.theme.Neutral600
 import com.hereliesaz.guillotine.ui.theme.Neutral700
 import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral850
@@ -72,14 +86,26 @@ private val RULER_HEIGHT = 24.dp
  * [EditorToolStrip] so they are available in both the compact and wide layouts.
  */
 @Composable
-fun TimelinePanel(vm: EditorViewModel, state: EditorUiState, modifier: Modifier = Modifier) {
+fun TimelinePanel(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    onImportToTrack: (String) -> Unit,
+    onCreateOnTrack: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(modifier = modifier.background(Neutral900)) {
-        TimelineLanes(vm, state, modifier = Modifier.fillMaxSize())
+        TimelineLanes(vm, state, onImportToTrack, onCreateOnTrack, modifier = Modifier.fillMaxSize())
     }
 }
 
 @Composable
-private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: Modifier) {
+private fun TimelineLanes(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    onImportToTrack: (String) -> Unit,
+    onCreateOnTrack: (String) -> Unit,
+    modifier: Modifier,
+) {
     val density = LocalDensity.current
     val pps = state.pixelsPerSecond
     val scroll = rememberScrollState()
@@ -114,9 +140,8 @@ private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: M
         // Fixed track-header column.
         Column(Modifier.width(HEADER_WIDTH).fillMaxHeight().background(Neutral900)) {
             Box(Modifier.height(RULER_HEIGHT).fillMaxWidth())
-            state.document.textTracks.forEach { TrackHeader(it) }
-            state.document.videoTracks.forEach { TrackHeader(it) }
-            state.document.audioTracks.forEach { TrackHeader(it) }
+            state.document.videoTracks.forEach { TrackHeader(vm, state, it, ClipType.VIDEO, onImportToTrack, onCreateOnTrack) }
+            state.document.audioTracks.forEach { TrackHeader(vm, state, it, ClipType.AUDIO, onImportToTrack, onCreateOnTrack) }
         }
         // Scrollable content.
         Box(
@@ -135,9 +160,6 @@ private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: M
         ) {
             Column(Modifier.fillMaxSize()) {
                 Ruler(totalMs, pps, contentWidth)
-                state.document.textTracks.forEach { trackId ->
-                    Lane(vm, state, trackId, pps) { msToDp(it) }
-                }
                 state.document.videoTracks.forEach { trackId ->
                     Lane(vm, state, trackId, pps) { msToDp(it) }
                 }
@@ -157,14 +179,106 @@ private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: M
     }
 }
 
+/**
+ * Track identifier + whole-track controls. Tapping the header opens a popup with mute /
+ * disable, a volume (audio/video) or opacity (video/text) slider, and add-clip
+ * (import/create) actions for that track.
+ */
 @Composable
-private fun TrackHeader(trackId: String) {
+private fun TrackHeader(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    trackId: String,
+    type: ClipType,
+    onImport: (String) -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val ts = state.document.trackSettingsFor(trackId)
     Box(
-        Modifier.height(TRACK_HEIGHT).fillMaxWidth().background(Neutral900),
+        Modifier
+            .height(TRACK_HEIGHT)
+            .fillMaxWidth()
+            .background(Neutral900)
+            .clickable { open = true },
         contentAlignment = Alignment.Center,
     ) {
-        Text(trackId, color = Neutral500, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                trackId,
+                color = if (ts.disabled) Neutral600 else Neutral400,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+            Row {
+                if (ts.muted && type != ClipType.TEXT) {
+                    Icon(Icons.Filled.VolumeOff, "Muted", tint = Red500, modifier = Modifier.size(11.dp))
+                }
+                if (ts.disabled) {
+                    Icon(Icons.Filled.VisibilityOff, "Disabled", tint = Red500, modifier = Modifier.size(11.dp))
+                }
+            }
+        }
+
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Column(Modifier.width(220.dp).padding(horizontal = 12.dp, vertical = 4.dp)) {
+                Text("Track $trackId", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+
+                if (type != ClipType.TEXT) {
+                    TrackToggle("Mute", ts.muted) { vm.toggleTrackMuted(trackId) }
+                }
+                TrackToggle(if (type == ClipType.AUDIO) "Disable track" else "Hide track", ts.disabled) {
+                    vm.toggleTrackDisabled(trackId)
+                }
+
+                if (type == ClipType.AUDIO || type == ClipType.VIDEO) {
+                    TrackSlider("Volume", ts.volume, 0f..2f) { vm.setTrackVolume(trackId, it) }
+                }
+                if (type == ClipType.VIDEO || type == ClipType.TEXT) {
+                    TrackSlider("Opacity", ts.opacity, 0f..1f) { vm.setTrackOpacity(trackId, it) }
+                }
+
+                HorizontalDivider(color = Neutral800, modifier = Modifier.padding(vertical = 6.dp))
+                TrackAction("Import clip…") { open = false; onImport(trackId) }
+                TrackAction(if (type == ClipType.TEXT) "Add text clip" else "Create clip…") {
+                    open = false; onCreate(trackId)
+                }
+            }
+        }
     }
+}
+
+@Composable
+private fun TrackToggle(label: String, on: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, color = Neutral300, fontSize = 12.sp)
+        Text(if (on) "ON" else "OFF", color = if (on) Red500 else Neutral500, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    }
+}
+
+@Composable
+private fun TrackSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
+    Column(Modifier.padding(top = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, color = Neutral400, fontSize = 11.sp)
+            Text("%.2f".format(value), color = Neutral500, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        }
+        Slider(value = value.coerceIn(range.start, range.endInclusive), onValueChange = onChange, valueRange = range)
+    }
+}
+
+@Composable
+private fun TrackAction(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = White,
+        fontSize = 12.sp,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
+    )
 }
 
 @Composable
@@ -229,9 +343,9 @@ private fun ClipView(
     val baseLeftPx = with(density) { msToDp(clip.startTimeMs).toPx() }
     val trackHeightPx = with(density) { TRACK_HEIGHT.toPx() }
     val sameTypeTracks = when (clip.type) {
-        ClipType.VIDEO -> state.document.videoTracks
+        // Text clips live on video tracks, like any overlay/image clip.
+        ClipType.VIDEO, ClipType.TEXT -> state.document.videoTracks
         ClipType.AUDIO -> state.document.audioTracks
-        ClipType.TEXT -> state.document.textTracks
     }
 
     Box(

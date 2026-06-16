@@ -94,10 +94,16 @@ class EditorViewModel : ViewModel() {
 
     // ---- media import ------------------------------------------------------
 
-    /** Add imported media and append matching clip(s) at the end of the timeline. */
-    fun addMedia(items: List<MediaItem>) {
+    /**
+     * Add imported media and append matching clip(s) at the end of the timeline. If
+     * [targetTrack] is a track of the matching type, the clips land there (e.g. importing
+     * from a specific track header); otherwise they go to the default V1/A1 track.
+     */
+    fun addMedia(items: List<MediaItem>, targetTrack: String? = null) {
         if (items.isEmpty()) return
         mutateDocument { doc ->
+            val videoTrack = targetTrack?.takeIf { it in doc.videoTracks } ?: "V1"
+            val audioTrack = targetTrack?.takeIf { it in doc.audioTracks } ?: "A1"
             val newClips = mutableListOf<TimelineClip>()
             var cursor = doc.totalDurationMs
             for (m in items) {
@@ -105,16 +111,16 @@ class EditorViewModel : ViewModel() {
                     MediaKind.VIDEO -> {
                         // One video clip; its audio is governed by the clip's volume
                         // filter (no separate auto audio clip -> no double audio).
-                        newClips += videoClip(m, cursor)
+                        newClips += videoClip(m, cursor, videoTrack)
                         cursor += m.durationMs
                     }
                     MediaKind.AUDIO -> {
-                        newClips += audioClip(m, cursor)
+                        newClips += audioClip(m, cursor, audioTrack)
                         cursor += m.durationMs
                     }
                     MediaKind.IMAGE -> {
                         val dur = if (m.durationMs > 0) m.durationMs else IMAGE_DEFAULT_DURATION_MS
-                        newClips += videoClip(m.copy(durationMs = dur), cursor)
+                        newClips += videoClip(m.copy(durationMs = dur), cursor, videoTrack)
                         cursor += dur
                     }
                 }
@@ -126,21 +132,21 @@ class EditorViewModel : ViewModel() {
         }
     }
 
-    private fun videoClip(m: MediaItem, startMs: Long) = TimelineClip(
+    private fun videoClip(m: MediaItem, startMs: Long, trackId: String = "V1") = TimelineClip(
         id = newId(),
         mediaId = m.id,
         type = ClipType.VIDEO,
-        trackId = "V1",
+        trackId = trackId,
         startTimeMs = startMs,
         trimStartMs = 0,
         durationMs = m.durationMs,
     )
 
-    private fun audioClip(m: MediaItem, startMs: Long) = TimelineClip(
+    private fun audioClip(m: MediaItem, startMs: Long, trackId: String = "A1") = TimelineClip(
         id = newId(),
         mediaId = m.id,
         type = ClipType.AUDIO,
-        trackId = "A1",
+        trackId = trackId,
         startTimeMs = startMs,
         trimStartMs = 0,
         durationMs = m.durationMs,
@@ -283,10 +289,9 @@ class EditorViewModel : ViewModel() {
             val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
             val isVideoTrack = targetTrackId in doc.videoTracks
             val isAudioTrack = targetTrackId in doc.audioTracks
-            val isTextTrack = targetTrackId in doc.textTracks
-            val compatible = (clip.type == ClipType.VIDEO && isVideoTrack) ||
-                (clip.type == ClipType.AUDIO && isAudioTrack) ||
-                (clip.type == ClipType.TEXT && isTextTrack)
+            // Text and video clips both live on video tracks.
+            val compatible = ((clip.type == ClipType.VIDEO || clip.type == ClipType.TEXT) && isVideoTrack) ||
+                (clip.type == ClipType.AUDIO && isAudioTrack)
             if (!compatible) return@mutateDocument doc
             doc.copy(
                 clips = doc.clips.map {
@@ -346,15 +351,46 @@ class EditorViewModel : ViewModel() {
     fun addTrack(type: ClipType) {
         mutateDocument { doc ->
             when (type) {
-                ClipType.VIDEO -> doc.copy(videoTracks = doc.videoTracks + "V${doc.videoTracks.size + 1}")
+                // Text lives on video tracks, so "add track" for a text selection adds a video track.
+                ClipType.VIDEO, ClipType.TEXT -> doc.copy(videoTracks = doc.videoTracks + "V${doc.videoTracks.size + 1}")
                 ClipType.AUDIO -> doc.copy(audioTracks = doc.audioTracks + "A${doc.audioTracks.size + 1}")
-                ClipType.TEXT -> doc.copy(textTracks = doc.textTracks + "T${doc.textTracks.size + 1}")
             }
         }
     }
 
     /** Edit the caption text of a [ClipType.TEXT] clip. */
     fun setClipText(clipId: String, text: String) = updateClip(clipId) { it.copy(text = text) }
+
+    // ---- whole-track settings ----------------------------------------------
+
+    fun updateTrackSettings(trackId: String, transform: (com.hereliesaz.guillotine.model.TrackSettings) -> com.hereliesaz.guillotine.model.TrackSettings) {
+        mutateDocument { doc ->
+            doc.copy(trackSettings = doc.trackSettings + (trackId to transform(doc.trackSettingsFor(trackId))))
+        }
+    }
+
+    fun toggleTrackMuted(trackId: String) = updateTrackSettings(trackId) { it.copy(muted = !it.muted) }
+    fun toggleTrackDisabled(trackId: String) = updateTrackSettings(trackId) { it.copy(disabled = !it.disabled) }
+    fun setTrackVolume(trackId: String, volume: Float) = updateTrackSettings(trackId) { it.copy(volume = volume) }
+    fun setTrackOpacity(trackId: String, opacity: Float) = updateTrackSettings(trackId) { it.copy(opacity = opacity) }
+
+    /** Create an empty caption/text clip on [trackId] at the playhead, ready to edit. */
+    fun addEmptyTextClip(trackId: String) {
+        mutateDocument { doc ->
+            doc.copy(
+                clips = doc.clips + TimelineClip(
+                    id = newId(),
+                    mediaId = "",
+                    type = ClipType.TEXT,
+                    trackId = trackId,
+                    startTimeMs = _uiState.value.currentTimeMs,
+                    trimStartMs = 0,
+                    durationMs = 3_000,
+                    text = "Text",
+                ),
+            )
+        }
+    }
 
     /**
      * Turn a transcript of [sourceClipId]'s media into text/caption clips on the text track
@@ -365,8 +401,9 @@ class EditorViewModel : ViewModel() {
         if (cues.isEmpty()) return
         mutateDocument { doc ->
             val source = doc.clips.firstOrNull { it.id == sourceClipId } ?: return@mutateDocument doc
-            val docWithTrack = if (doc.textTracks.isEmpty()) doc.copy(textTracks = listOf("T1")) else doc
-            val track = docWithTrack.textTracks.first()
+            // Caption clips go on the top video track (above the source), like any overlay clip.
+            val docWithTrack = if (doc.videoTracks.isEmpty()) doc.copy(videoTracks = listOf("V1")) else doc
+            val track = docWithTrack.videoTracks.first()
             val gid = source.groupId ?: newId()
             val clipStartSrc = source.trimStartMs
             val clipEndSrc = source.trimStartMs + source.durationMs

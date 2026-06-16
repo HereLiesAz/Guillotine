@@ -70,28 +70,31 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
         }
     }
 
-    val clips = state.document.clips
     val now = state.currentTimeMs
+    // Disabled/hidden tracks drop out entirely.
+    val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
     // Layer-aware: the topmost track wins for the picture/sound; text clips overlay on top.
     val activeVideo = TimelineMath.topActiveClip(clips, ClipType.VIDEO, now, state.document.videoTracks)
     val activeAudio = TimelineMath.topActiveClip(clips, ClipType.AUDIO, now, state.document.audioTracks)
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
+    val videoTrack = activeVideo?.let { state.document.trackSettingsFor(it.trackId) }
+    val audioTrack = activeAudio?.let { state.document.trackSettingsFor(it.trackId) }
     val videoMedia = activeVideo?.let { state.document.mediaFor(it) }
     val audioMedia = activeAudio?.let { state.document.mediaFor(it) }
 
-    // Keyframed view-layer values for the active video clip.
-    val opacity = activeVideo?.let {
+    // Keyframed view-layer values for the active video clip, scaled by whole-track settings.
+    val opacity = (activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
-    } ?: 1f
+    } ?: 1f) * (videoTrack?.opacity ?: 1f)
     val scale = activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.SCALE, now - it.startTimeMs, 1f)
     } ?: 1f
-    val videoVolume = activeVideo?.let {
+    val videoVolume = if (videoTrack?.muted == true) 0f else (activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
-    } ?: 0f
-    val audioVolume = activeAudio?.let {
+    } ?: 0f) * (videoTrack?.volume ?: 1f)
+    val audioVolume = if (audioTrack?.muted == true) 0f else (activeAudio?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
-    } ?: 0f
+    } ?: 0f) * (audioTrack?.volume ?: 1f)
 
     // ---- video player wiring ----
     LaunchedEffect(videoMedia?.id) {
@@ -176,7 +179,7 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
                 activeText.forEach { t ->
                     Text(
                         t.text,
-                        color = White,
+                        color = White.copy(alpha = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)),
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
                         modifier = Modifier

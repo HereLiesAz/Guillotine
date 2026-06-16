@@ -131,11 +131,23 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf<String?>(null) }
     var exportError by remember { mutableStateOf<String?>(null) }
+    // Which track an import should land on (set by a track header's "Import"; null = default).
+    var importTargetTrack by remember { mutableStateOf<String?>(null) }
 
     val importLauncher = rememberMediaImportLauncher { uris ->
+        val target = importTargetTrack
         scope.launch {
             val items = uris.mapNotNull { withContext(Dispatchers.IO) { MediaImport.probe(context, it) } }
-            vm.addMedia(items)
+            vm.addMedia(items, target)
+        }
+    }
+    val onImportToTrack: (String) -> Unit = { track -> importTargetTrack = track; importLauncher() }
+    val onCreateOnTrack: (String) -> Unit = { track ->
+        val doc = vm.uiState.value.document
+        when {
+            // Text is just a clip on a video track: "create" adds an editable text clip there.
+            track in doc.videoTracks -> vm.addEmptyTextClip(track)
+            else -> { importTargetTrack = track; importLauncher() }
         }
     }
     val saveLauncher = rememberSaveProjectLauncher { uri ->
@@ -206,7 +218,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             state = state,
             onUndo = vm::undo,
             onRedo = vm::redo,
-            onImport = importLauncher,
+            onImport = { importTargetTrack = null; importLauncher() },
             onGenerate = { showGenerate = true },
             onSave = saveLauncher,
             onLoad = openLauncher,
@@ -224,14 +236,14 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 }
             }
             EditorToolStrip(vm, state, onAnalyze, onGenerate = { showGenerate = true })
-            TimelinePanel(vm, state, modifier = Modifier.weight(0.4f).fillMaxWidth())
+            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
             PreviewPlayer(state, Modifier.weight(0.42f).fillMaxWidth())
             TransportControls(vm, state)
             var tab by remember { mutableIntStateOf(0) }
             CompactToolBar(vm, state, tab, { tab = it }, onAnalyze, onGenerate = { showGenerate = true })
             Box(Modifier.weight(0.58f).fillMaxWidth()) {
-                if (tab == 0) TimelinePanel(vm, state, modifier = Modifier.fillMaxSize())
+                if (tab == 0) TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.fillMaxSize())
                 else Inspector(vm, state, onAnalyze, onTranscribe, Modifier.fillMaxSize())
             }
         }
