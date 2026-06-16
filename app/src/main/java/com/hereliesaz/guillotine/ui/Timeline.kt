@@ -431,11 +431,9 @@ private fun ClipView(
                         onDragStart = { dragPx = 0f; dragPy = 0f },
                         onDragEnd = {
                             val deltaMs = (dragPx / pps * 1000f).toLong()
-                            val curIndex = sameTypeTracks.indexOf(clip.trackId)
                             val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
-                            val targetIndex = (curIndex + shift).coerceIn(0, (sameTypeTracks.size - 1).coerceAtLeast(0))
-                            val targetTrack = sameTypeTracks.getOrElse(targetIndex) { clip.trackId }
-                            vm.moveClip(clip.id, targetTrack, clip.startTimeMs + deltaMs)
+                            // Group-aware: moves the whole group together when clip is grouped.
+                            vm.moveClipBy(clip.id, shift, deltaMs)
                             dragPx = 0f; dragPy = 0f
                         },
                         onDragCancel = { dragPx = 0f; dragPy = 0f },

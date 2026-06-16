@@ -296,6 +296,32 @@ class EditorViewModel : ViewModel() {
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
     }
 
+    private fun trackListFor(doc: Document, type: ClipType): List<String> = when (type) {
+        ClipType.VIDEO, ClipType.TEXT -> doc.videoTracks
+        ClipType.AUDIO -> doc.audioTracks
+    }
+
+    /**
+     * Move a clip by a time delta and a track-index shift. If the clip is grouped, every
+     * group member moves by the same delta/shift (each clamped to its own track list), so
+     * grouped clips drag together.
+     */
+    fun moveClipBy(clipId: String, trackShift: Int, deltaMs: Long) {
+        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
+        val groupIds = clip.groupId?.let { g -> document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
+            ?: setOf(clipId)
+        mutateDocument { doc ->
+            doc.copy(clips = doc.clips.map { c ->
+                if (c.id !in groupIds) return@map c
+                val tracks = trackListFor(doc, c.type)
+                val curIdx = tracks.indexOf(c.trackId)
+                val newIdx = (curIdx + trackShift).coerceIn(0, (tracks.size - 1).coerceAtLeast(0))
+                val newTrack = tracks.getOrElse(newIdx) { c.trackId }
+                c.copy(trackId = newTrack, startTimeMs = (c.startTimeMs + deltaMs).coerceAtLeast(0))
+            })
+        }
+    }
+
     /** Move a clip to another track + position, validating track/clip type match. */
     fun moveClip(clipId: String, targetTrackId: String, newStartMs: Long) {
         mutateDocument { doc ->
