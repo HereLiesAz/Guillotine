@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -10,14 +12,6 @@ val versionPropsFile = project.rootProject.file("version.properties")
 val versionProps = Properties().apply {
     if (versionPropsFile.exists()) {
         versionPropsFile.inputStream().use { load(it) }
-    }
-}
-
-// Load local properties
-val localProperties = Properties().apply {
-    val localPropertiesFile = project.rootProject.file("local.properties")
-    if (localPropertiesFile.exists()) {
-        localPropertiesFile.inputStream().use { load(it) }
     }
 }
 
@@ -46,8 +40,8 @@ android {
         applicationId = "com.hereliesaz.guillotine"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = currentVersionCode
+        versionName = currentVersionName
         vectorDrawables { useSupportLibrary = true }
     }
 
