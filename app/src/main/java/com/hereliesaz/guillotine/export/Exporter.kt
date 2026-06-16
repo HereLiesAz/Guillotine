@@ -10,6 +10,10 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
+import androidx.media3.effect.AlphaScale
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.transformer.Composition
@@ -148,8 +152,12 @@ object Exporter {
             val gap = clip.startTimeMs - videoCursor
             if (gap > 0) { videoSeq.addGap(gap * 1000); videoCursor += gap }
             fun effectsFor(): Effects {
+                val ts = document.trackSettingsFor(clip.trackId)
+                val vol = if (ts.muted) 0f else clip.filters.volume * ts.volume
+                val audio: List<AudioProcessor> = if (vol != 1f) listOf(volumeProcessor(vol)) else emptyList()
                 val overlay = if (firstItem) listOfNotNull(matteEffect) else emptyList()
-                return Effects(emptyList(), VideoEffects.build(clip.filters) + geometry + overlay)
+                val alpha = if (ts.opacity < 1f) listOf(AlphaScale(ts.opacity)) else emptyList()
+                return Effects(audio, VideoEffects.build(clip.filters) + geometry + overlay + alpha)
             }
             if (media.kind == MediaKind.IMAGE) {
                 val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
@@ -203,7 +211,15 @@ object Exporter {
                             .build(),
                     )
                     .build()
-                audioSeq.addItem(EditedMediaItem.Builder(mediaItem).setRemoveVideo(true).build())
+                val ts = document.trackSettingsFor(clip.trackId)
+                val vol = if (ts.muted) 0f else clip.filters.volume * ts.volume
+                val audio: List<AudioProcessor> = if (vol != 1f) listOf(volumeProcessor(vol)) else emptyList()
+                audioSeq.addItem(
+                    EditedMediaItem.Builder(mediaItem)
+                        .setRemoveVideo(true)
+                        .setEffects(Effects(audio, emptyList()))
+                        .build(),
+                )
                 addedAudio = true; audioCursor += (endMs - startMs)
             }
         }
@@ -212,6 +228,13 @@ object Exporter {
         if (addedAudio) sequences += audioSeq.build()
         return Composition.Builder(sequences).build()
     }
+
+    /** A channel-mixing processor that scales audio volume by [volume] (0 = silent). */
+    private fun volumeProcessor(volume: Float): ChannelMixingAudioProcessor =
+        ChannelMixingAudioProcessor().apply {
+            putChannelMixingMatrix(ChannelMixingMatrix.create(1, 1).scaleBy(volume))
+            putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(volume))
+        }
 
     /** Copy the encoded file into the gallery via MediaStore (no permission on API 29+). */
     private fun saveToGallery(context: Context, file: File, name: String): Uri {
