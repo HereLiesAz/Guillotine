@@ -8,11 +8,11 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
-    <!-- Launch theme (androidx core-splashscreen): brand glyph on black, then hands
-         off to Theme.Guillotine once the activity is ready. -->
+    <!-- Launch theme (androidx core-splashscreen): the provided app icon on black,
+         then hands off to Theme.Guillotine once the activity is ready. -->
     <style name="Theme.Guillotine.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/black</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/guillotine_icon</item>
         <item name="postSplashScreenTheme">@style/Theme.Guillotine</item>
     </style>
 </resources>
