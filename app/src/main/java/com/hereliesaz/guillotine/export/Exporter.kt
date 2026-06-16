@@ -10,6 +10,8 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.TextureOverlay
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.EditedMediaItem
@@ -18,6 +20,7 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
+import com.google.common.collect.ImmutableList
 import com.hereliesaz.guillotine.media.VideoEffects
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.Document
@@ -51,7 +54,7 @@ object Exporter {
         outputName: String,
         onProgress: (Float) -> Unit,
     ): Uri = withContext(Dispatchers.Main) {
-        val composition = buildComposition(document)
+        val composition = buildComposition(context, document)
         require(composition != null) { "Nothing to export — add a video clip first." }
 
         val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
@@ -107,43 +110,63 @@ object Exporter {
      * (no audio) with video clips (audio) may need Transformer's force-audio-track
      * flag — most projects are all-video or all-image and are unaffected.
      */
-    private fun buildComposition(document: Document): Composition? {
+    private fun buildComposition(context: Context, document: Document): Composition? {
         val geometry = VideoEffects.geometry(document.settings)
 
+        val videoClips = document.clips.filter { it.type == ClipType.VIDEO }.sortedBy { it.startTimeMs }
+        // Background-removed clips composite as a foreground layer over the rest. If nothing is
+        // marked for removal, every video clip just forms the base (original behavior).
+        val foreground = videoClips.filter { it.filters.removeBackground }
+        val background = videoClips.filter { !it.filters.removeBackground }
+        val baseClips = if (background.isNotEmpty()) background else videoClips
+        val overlayClips = if (background.isNotEmpty()) foreground else emptyList()
+
+        // One matte overlay carrying all foreground clips, attached to the first base item.
+        val matteEffect = if (overlayClips.isNotEmpty()) {
+            OverlayEffect(
+                ImmutableList.of<TextureOverlay>(
+                    MatteOverlay(context, overlayClips, { document.mediaFor(it) }, baseClips.first().startTimeMs),
+                ),
+            )
+        } else null
+
         val videoItems = mutableListOf<EditedMediaItem>()
-        document.clips
-            .filter { it.type == ClipType.VIDEO }
-            .sortedBy { it.startTimeMs }
-            .forEach { clip ->
-                val media = document.mediaFor(clip) ?: return@forEach
-                val effects = Effects(emptyList(), VideoEffects.build(clip.filters) + geometry)
-                if (media.kind == MediaKind.IMAGE) {
+        var firstItem = true
+        baseClips.forEach { clip ->
+            val media = document.mediaFor(clip) ?: return@forEach
+            fun effectsFor(): Effects {
+                val overlay = if (firstItem) listOfNotNull(matteEffect) else emptyList()
+                return Effects(emptyList(), VideoEffects.build(clip.filters) + geometry + overlay)
+            }
+            if (media.kind == MediaKind.IMAGE) {
+                val mediaItem = ExoMediaItem.Builder()
+                    .setUri(Uri.parse(media.uri))
+                    .setImageDurationMs(if (clip.durationMs > 0) clip.durationMs else 5_000L)
+                    .build()
+                videoItems += EditedMediaItem.Builder(mediaItem)
+                    .setFrameRate(30)
+                    .setEffects(effectsFor())
+                    .build()
+                firstItem = false
+            } else {
+                for (range in TimelineMath.keptRanges(clip)) {
+                    val startMs = range.first
+                    val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
+                    if (endMs <= startMs) continue
                     val mediaItem = ExoMediaItem.Builder()
                         .setUri(Uri.parse(media.uri))
-                        .setImageDurationMs(if (clip.durationMs > 0) clip.durationMs else 5_000L)
+                        .setClippingConfiguration(
+                            ExoMediaItem.ClippingConfiguration.Builder()
+                                .setStartPositionMs(startMs)
+                                .setEndPositionMs(endMs)
+                                .build(),
+                        )
                         .build()
-                    videoItems += EditedMediaItem.Builder(mediaItem)
-                        .setFrameRate(30)
-                        .setEffects(effects)
-                        .build()
-                } else {
-                    for (range in TimelineMath.keptRanges(clip)) {
-                        val startMs = range.first
-                        val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
-                        if (endMs <= startMs) continue
-                        val mediaItem = ExoMediaItem.Builder()
-                            .setUri(Uri.parse(media.uri))
-                            .setClippingConfiguration(
-                                ExoMediaItem.ClippingConfiguration.Builder()
-                                    .setStartPositionMs(startMs)
-                                    .setEndPositionMs(endMs)
-                                    .build(),
-                            )
-                            .build()
-                        videoItems += EditedMediaItem.Builder(mediaItem).setEffects(effects).build()
-                    }
+                    videoItems += EditedMediaItem.Builder(mediaItem).setEffects(effectsFor()).build()
+                    firstItem = false
                 }
             }
+        }
         if (videoItems.isEmpty()) return null
 
         val audioItems = mutableListOf<EditedMediaItem>()

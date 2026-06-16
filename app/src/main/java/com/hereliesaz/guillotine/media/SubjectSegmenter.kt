@@ -25,22 +25,28 @@ object SubjectSegmenter {
 
     /** Foreground-only bitmap (transparent background) of the frame at [atMs], or null. */
     suspend fun cutout(context: Context, uri: String, kind: MediaKind, atMs: Long): Bitmap? =
-        withContext(Dispatchers.IO) {
-            val frame = grabFrame(context, uri, kind, atMs) ?: return@withContext null
-            val segmenter = Segmentation.getClient(
-                SelfieSegmenterOptions.Builder()
-                    .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
-                    .build(),
-            )
-            try {
-                val mask = Tasks.await(segmenter.process(InputImage.fromBitmap(frame, 0)))
-                applyMask(frame, mask)
-            } catch (_: Exception) {
-                null
-            } finally {
-                segmenter.close()
-            }
+        withContext(Dispatchers.IO) { cutoutBlocking(context, uri, kind, atMs) }
+
+    /**
+     * Blocking variant for use off the main thread (e.g. inside a Media3 overlay's frame
+     * callback). Decodes the frame, runs segmentation, returns the matted foreground or null.
+     */
+    fun cutoutBlocking(context: Context, uri: String, kind: MediaKind, atMs: Long): Bitmap? {
+        val frame = grabFrame(context, uri, kind, atMs) ?: return null
+        val segmenter = Segmentation.getClient(
+            SelfieSegmenterOptions.Builder()
+                .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                .build(),
+        )
+        return try {
+            val mask = Tasks.await(segmenter.process(InputImage.fromBitmap(frame, 0)))
+            applyMask(frame, mask)
+        } catch (_: Exception) {
+            null
+        } finally {
+            segmenter.close()
         }
+    }
 
     private fun grabFrame(context: Context, uri: String, kind: MediaKind, atMs: Long): Bitmap? {
         val parsed = Uri.parse(uri)
