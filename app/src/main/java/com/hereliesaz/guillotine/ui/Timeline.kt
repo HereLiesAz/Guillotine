@@ -1,6 +1,7 @@
 package com.hereliesaz.guillotine.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,10 +32,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
@@ -43,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.media.MediaPreview
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.TimelineClip
@@ -211,6 +217,7 @@ private fun ClipView(
     val selected = clip.id in state.selectedClipIds
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
+    val media = state.document.mediaFor(clip)
     var dragPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var dragPy by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimStartPx by remember(clip.id) { mutableFloatStateOf(0f) }
@@ -268,6 +275,11 @@ private fun ClipView(
                 }
             },
     ) {
+        // On-device preview behind everything: thumbnail for video/image, waveform for audio.
+        media?.let { m ->
+            if (clip.type == ClipType.AUDIO) ClipWaveform(m.uri)
+            else ClipThumbnail(m.uri, m.kind, clip.trimStartMs)
+        }
         // Label.
         Text(
             text = clip.id.take(4),
@@ -345,6 +357,46 @@ private fun ClipView(
                             onDrag = { change, drag -> change.consume(); trimEndPx += drag.x },
                         )
                     },
+            )
+        }
+    }
+}
+
+/** Video/image clip background: a downscaled, dimmed thumbnail (loaded on-device, async). */
+@Composable
+private fun ClipThumbnail(uri: String, kind: com.hereliesaz.guillotine.model.MediaKind, atMs: Long) {
+    val context = LocalContext.current
+    val thumb by produceState<ImageBitmap?>(null, uri, atMs) {
+        value = MediaPreview.thumbnail(context, uri, kind, atMs)
+    }
+    thumb?.let {
+        Image(
+            bitmap = it,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)),
+            contentScale = ContentScale.Crop,
+            alpha = 0.55f,
+        )
+    }
+}
+
+/** Audio clip background: a coarse amplitude waveform (decoded on-device, async). */
+@Composable
+private fun ClipWaveform(uri: String) {
+    val context = LocalContext.current
+    val wave by produceState<FloatArray?>(null, uri) { value = MediaPreview.waveform(context, uri) }
+    val w = wave ?: return
+    Canvas(Modifier.fillMaxSize().padding(horizontal = 2.dp)) {
+        val mid = size.height / 2f
+        val bw = size.width / w.size
+        w.forEachIndexed { i, peak ->
+            val h = (peak * size.height * 0.9f).coerceAtLeast(1f)
+            val x = i * bw + bw / 2f
+            drawLine(
+                color = Neutral500,
+                start = Offset(x, mid - h / 2f),
+                end = Offset(x, mid + h / 2f),
+                strokeWidth = (bw * 0.8f).coerceAtLeast(1f),
             )
         }
     }
