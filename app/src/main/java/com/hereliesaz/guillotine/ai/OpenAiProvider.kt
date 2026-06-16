@@ -18,11 +18,13 @@ import java.net.URL
  * them to a vision model (gpt-4o); audio is transcribed with Whisper and the
  * transcript is classified into keep/remove ranges. Plain HttpURLConnection + org.json.
  */
-class OpenAiProvider(private val apiKey: String) : ClipAnalyzer {
+class OpenAiProvider(
+    private val apiKey: String,
+    private val visionModel: String = "gpt-4o",
+) : ClipAnalyzer {
 
     private val chatUrl = "https://api.openai.com/v1/chat/completions"
     private val audioUrl = "https://api.openai.com/v1/audio/transcriptions"
-    private val visionModel = "gpt-4o"
 
     override suspend fun analyze(
         context: Context,

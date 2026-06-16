@@ -69,6 +69,7 @@ private fun SheetCard(content: @Composable () -> Unit) {
 fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: () -> Unit) {
     var provider by remember { mutableStateOf(current.provider) }
     var keys by remember { mutableStateOf(current.keys) }
+    var models by remember { mutableStateOf(current.models) }
     var fooocusUrl by remember { mutableStateOf(current.fooocusUrl) }
     val uriHandler = LocalUriHandler.current
     Dialog(onDismissRequest = onDismiss) {
@@ -89,10 +90,19 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
                 }
             }
 
-            // Key field + "get a key" link for the selected BYO provider.
+            // Key field + model override + "get a key" link for the selected BYO provider.
             if (provider != AiProviderType.LOCAL) {
                 val meta = provider.meta
                 KeyField("${meta.label} API key", keys[provider].orEmpty()) { keys = keys + (provider to it) }
+                OutlinedTextField(
+                    value = models[provider].orEmpty(),
+                    onValueChange = { models = models + (provider to it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Model — default: ${meta.defaultModel}", color = Neutral500, fontSize = 12.sp) },
+                    textStyle = TextStyle(color = White, fontSize = 12.sp),
+                    singleLine = true,
+                )
+                Text("Override the model id, or leave blank for the default.", color = Neutral500, fontSize = 10.sp)
                 meta.keyUrl?.let { url ->
                     Text(
                         "Get a ${meta.label} API key  ↗",
@@ -125,7 +135,7 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button(
-                    onClick = { onSave(AiSettings(provider, keys, fooocusUrl.trim())) },
+                    onClick = { onSave(AiSettings(provider, keys, models, fooocusUrl.trim())) },
                     colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Color.Black),
                 ) { Text("Save", fontSize = 12.sp, fontWeight = FontWeight.Medium) }
             }

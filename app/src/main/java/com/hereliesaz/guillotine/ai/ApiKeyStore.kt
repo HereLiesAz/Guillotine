@@ -23,10 +23,10 @@ data class ProviderMeta(
     val blurb: String,
     /** Where to obtain a key. null for LOCAL (no key needed). */
     val keyUrl: String? = null,
-    /** Chat-completions endpoint for generic OpenAI-compatible providers (else null). */
+    /** Chat-completions endpoint for generic OpenAI-compatible providers (else null → dedicated client). */
     val openAiCompatUrl: String? = null,
-    /** Vision model id for generic OpenAI-compatible providers (else null). */
-    val openAiCompatModel: String? = null,
+    /** Default (user-editable) model id. null only for LOCAL. */
+    val defaultModel: String? = null,
 )
 
 /**
@@ -43,44 +43,47 @@ val AiProviderType.meta: ProviderMeta
             "Gemini",
             "Google · video-native analysis.",
             keyUrl = "https://aistudio.google.com/app/apikey",
+            defaultModel = "gemini-2.5-flash",
         )
         AiProviderType.OPENAI -> ProviderMeta(
             "OpenAI",
             "GPT-4o frame sampling + Whisper audio.",
             keyUrl = "https://platform.openai.com/api-keys",
+            defaultModel = "gpt-4o",
         )
         AiProviderType.ANTHROPIC -> ProviderMeta(
             "Anthropic",
             "Claude · video frame analysis.",
             keyUrl = "https://console.anthropic.com/settings/keys",
+            defaultModel = "claude-opus-4-8",
         )
         AiProviderType.OPENROUTER -> ProviderMeta(
             "OpenRouter",
             "One key, many vision models (frames).",
             keyUrl = "https://openrouter.ai/keys",
             openAiCompatUrl = "https://openrouter.ai/api/v1/chat/completions",
-            openAiCompatModel = "openai/gpt-4o-mini",
+            defaultModel = "openai/gpt-4o-mini",
         )
         AiProviderType.GROQ -> ProviderMeta(
             "Groq",
             "Fast Llama 4 vision (frames).",
             keyUrl = "https://console.groq.com/keys",
             openAiCompatUrl = "https://api.groq.com/openai/v1/chat/completions",
-            openAiCompatModel = "meta-llama/llama-4-scout-17b-16e-instruct",
+            defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct",
         )
         AiProviderType.XAI -> ProviderMeta(
             "xAI (Grok)",
             "Grok vision (frames).",
             keyUrl = "https://console.x.ai",
             openAiCompatUrl = "https://api.x.ai/v1/chat/completions",
-            openAiCompatModel = "grok-2-vision-1212",
+            defaultModel = "grok-2-vision-1212",
         )
         AiProviderType.MISTRAL -> ProviderMeta(
             "Mistral",
             "Pixtral vision (frames).",
             keyUrl = "https://console.mistral.ai/api-keys",
             openAiCompatUrl = "https://api.mistral.ai/v1/chat/completions",
-            openAiCompatModel = "pixtral-12b-2409",
+            defaultModel = "pixtral-12b-2409",
         )
     }
 
@@ -91,10 +94,15 @@ data class AiSettings(
     val provider: AiProviderType = AiProviderType.LOCAL,
     /** API keys per provider; LOCAL has none. */
     val keys: Map<AiProviderType, String> = emptyMap(),
+    /** Optional per-provider model overrides; blank/absent falls back to [ProviderMeta.defaultModel]. */
+    val models: Map<AiProviderType, String> = emptyMap(),
     /** Optional self-hosted Fooocus-API base URL for image generation (else free Pollinations). */
     val fooocusUrl: String = "",
 ) {
     fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
+    /** The effective model id for [p]: the user's override if set, else the code default. */
+    fun modelFor(p: AiProviderType): String =
+        models[p]?.takeIf { it.isNotBlank() } ?: p.meta.defaultModel.orEmpty()
     fun withKey(p: AiProviderType, key: String): AiSettings = copy(keys = keys + (p to key))
 }
 
@@ -128,6 +136,8 @@ class ApiKeyStore(context: Context) {
             ?: AiProviderType.LOCAL,
         keys = byoProviders.associateWith { prefs.getString(keyPref(it), "").orEmpty() }
             .filterValues { it.isNotEmpty() },
+        models = byoProviders.associateWith { prefs.getString(modelPref(it), "").orEmpty() }
+            .filterValues { it.isNotEmpty() },
         fooocusUrl = prefs.getString(KEY_FOOOCUS, "").orEmpty(),
     )
 
@@ -135,7 +145,10 @@ class ApiKeyStore(context: Context) {
         withContext(Dispatchers.IO) {
             prefs.edit().apply {
                 putString(KEY_PROVIDER, settings.provider.name)
-                byoProviders.forEach { putString(keyPref(it), settings.keyFor(it)) }
+                byoProviders.forEach {
+                    putString(keyPref(it), settings.keyFor(it))
+                    putString(modelPref(it), settings.models[it].orEmpty())
+                }
                 putString(KEY_FOOOCUS, settings.fooocusUrl)
             }.apply()
         }
@@ -146,5 +159,6 @@ class ApiKeyStore(context: Context) {
         const val KEY_PROVIDER = "ai_provider"
         const val KEY_FOOOCUS = "fooocus_url"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
+        fun modelPref(p: AiProviderType) = "model_${p.name}"
     }
 }

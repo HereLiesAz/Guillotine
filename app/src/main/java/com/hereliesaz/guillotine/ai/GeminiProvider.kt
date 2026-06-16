@@ -18,10 +18,12 @@ import java.net.URL
  * BYO-key analyzer using the Gemini REST API (Files API upload + generateContent).
  * No SDK dependency — plain HttpURLConnection + org.json. The key is the user's own.
  */
-class GeminiProvider(private val apiKey: String) : ClipAnalyzer {
+class GeminiProvider(
+    private val apiKey: String,
+    private val model: String = "gemini-2.5-flash",
+) : ClipAnalyzer {
 
     private val base = "https://generativelanguage.googleapis.com"
-    private val model = "gemini-2.5-flash"
 
     override suspend fun analyze(
         context: Context,
