@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-enum class EditorTool { SELECT, SPLIT, KEYFRAME }
+enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP }
 
 /** Default on-timeline duration for still images. */
 private const val IMAGE_DEFAULT_DURATION_MS = 5_000L
@@ -608,6 +608,21 @@ class EditorViewModel : ViewModel() {
     }
 
     fun toggleAutoEase() = _uiState.update { it.copy(autoEase = !it.autoEase) }
+
+    /**
+     * Crop tool: scale/move the selected clip directly on the preview. [zoom] is a pinch
+     * factor; [panXFrac]/[panYFrac] are drag deltas as a fraction of the preview size.
+     */
+    fun transformSelectedClip(zoom: Float, panXFrac: Float, panYFrac: Float) {
+        val id = _uiState.value.selectedClipId ?: return
+        updateClip(id) {
+            it.copy(
+                scale = (it.scale * zoom).coerceIn(0.1f, 6f),
+                offsetX = (it.offsetX + panXFrac).coerceIn(-1.5f, 1.5f),
+                offsetY = (it.offsetY + panYFrac).coerceIn(-1.5f, 1.5f),
+            )
+        }
+    }
     fun setTool(tool: EditorTool) = _uiState.update { it.copy(tool = tool) }
 
     fun selectClip(id: String?, additive: Boolean = false) {

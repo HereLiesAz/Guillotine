@@ -110,6 +110,10 @@ data class TimelineClip(
     val text: String = "",
     /** Typeface for text clips. */
     val font: TextFont = TextFont.SANS,
+    /** Crop-tool transform: scale and normalized offset (fraction of frame) from center. */
+    val scale: Float = 1f,
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
 ) {
     val endTimeMs: Long get() = startTimeMs + durationMs
 }

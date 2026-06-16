@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Link
@@ -231,14 +232,24 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             Row(Modifier.weight(0.6f).fillMaxWidth()) {
                 Inspector(vm, state, onAnalyze, onTranscribe, Modifier.width(340.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight()) {
-                    PreviewPlayer(state, Modifier.weight(1f).fillMaxWidth())
+                    PreviewPlayer(
+                        state,
+                        Modifier.weight(1f).fillMaxWidth(),
+                        cropMode = state.tool == EditorTool.CROP,
+                        onCropTransform = { z, x, y -> vm.transformSelectedClip(z, x, y) },
+                    )
                     TransportControls(vm, state)
                 }
             }
             EditorToolStrip(vm, state, onAnalyze, onGenerate = { showGenerate = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
-            PreviewPlayer(state, Modifier.weight(0.42f).fillMaxWidth())
+            PreviewPlayer(
+                state,
+                Modifier.weight(0.42f).fillMaxWidth(),
+                cropMode = state.tool == EditorTool.CROP,
+                onCropTransform = { z, x, y -> vm.transformSelectedClip(z, x, y) },
+            )
             TransportControls(vm, state)
             var tab by remember { mutableIntStateOf(0) }
             CompactToolBar(vm, state, tab, { tab = it }, onAnalyze, onGenerate = { showGenerate = true })
@@ -448,6 +459,9 @@ private fun EditorToolStrip(
             }
             IconToolButton(Icons.Filled.ContentCut, "Split", active = state.tool == EditorTool.SPLIT) {
                 vm.setTool(EditorTool.SPLIT)
+            }
+            IconToolButton(Icons.Filled.Crop, "Crop / transform", active = state.tool == EditorTool.CROP) {
+                vm.setTool(EditorTool.CROP)
             }
             IconToolButton(Icons.Filled.Diamond, "Keyframe tool", active = state.tool == EditorTool.KEYFRAME) {
                 vm.setTool(EditorTool.KEYFRAME)

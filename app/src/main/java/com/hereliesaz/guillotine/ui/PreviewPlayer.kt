@@ -4,12 +4,12 @@ package com.hereliesaz.guillotine.ui
 
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.Text
@@ -17,14 +17,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -46,6 +52,7 @@ import com.hereliesaz.guillotine.ui.theme.White
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private const val SCRUB_SEEK_TOLERANCE_MS = 60L
 private const val PLAY_DRIFT_TOLERANCE_MS = 300L
@@ -58,8 +65,14 @@ private const val PLAY_DRIFT_TOLERANCE_MS = 300L
  * audio clips — so there is never double audio from a single source).
  */
 @Composable
-fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
+fun PreviewPlayer(
+    state: EditorUiState,
+    modifier: Modifier = Modifier,
+    cropMode: Boolean = false,
+    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float) -> Unit = { _, _, _ -> },
+) {
     val context = LocalContext.current
+    var previewSize by remember { mutableStateOf(IntSize.Zero) }
     val videoPlayer = remember { ExoPlayer.Builder(context).build() }
     val audioPlayer = remember { ExoPlayer.Builder(context).build() }
 
@@ -147,7 +160,25 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
         AspectRatio.ORIGINAL -> Modifier.fillMaxSize()
     }
 
-    Box(modifier = modifier.background(Neutral950), contentAlignment = Alignment.Center) {
+    val cropModifier = if (cropMode) {
+        Modifier.pointerInput(Unit) {
+            detectTransformGestures { _, pan, zoom, _ ->
+                val w = previewSize.width.coerceAtLeast(1)
+                val h = previewSize.height.coerceAtLeast(1)
+                onCropTransform(zoom, pan.x / w, pan.y / h)
+            }
+        }
+    } else {
+        Modifier
+    }
+
+    Box(
+        modifier = modifier
+            .background(Neutral950)
+            .onSizeChanged { previewSize = it }
+            .then(cropModifier),
+        contentAlignment = Alignment.Center,
+    ) {
         if (videoMedia == null) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
         } else {
@@ -164,31 +195,36 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
                     .wrapContentSize()
                     .graphicsLayer {
                         alpha = opacity.coerceIn(0f, 1f)
-                        scaleX = scale.coerceAtLeast(0f)
-                        scaleY = scale.coerceAtLeast(0f)
+                        // Keyframed scale × crop-tool base scale; crop offset translates it.
+                        val s = (scale * (activeVideo?.scale ?: 1f)).coerceAtLeast(0f)
+                        scaleX = s
+                        scaleY = s
+                        translationX = (activeVideo?.offsetX ?: 0f) * size.width
+                        translationY = (activeVideo?.offsetY ?: 0f) * size.height
                     },
             )
         }
-        // Caption/text overlay — text clips on the track above the video, rendered on top.
-        if (activeText.isNotEmpty()) {
-            Column(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                activeText.forEach { t ->
-                    Text(
-                        t.text,
-                        color = White.copy(alpha = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)),
-                        fontSize = 14.sp,
-                        fontFamily = t.font.fontFamily(),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .background(Color.Black.copy(alpha = 0.55f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                    )
-                }
-            }
+        // Caption/text overlay — each text clip positioned/scaled by its crop transform
+        // (offset from center as a fraction of the frame), rendered on top of the video.
+        activeText.forEach { t ->
+            Text(
+                t.text,
+                color = White.copy(alpha = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)),
+                fontSize = 14.sp,
+                fontFamily = t.font.fontFamily(),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset {
+                        IntOffset(
+                            (t.offsetX * previewSize.width).roundToInt(),
+                            (t.offsetY * previewSize.height).roundToInt(),
+                        )
+                    }
+                    .graphicsLayer { scaleX = t.scale; scaleY = t.scale }
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            )
         }
     }
 }
