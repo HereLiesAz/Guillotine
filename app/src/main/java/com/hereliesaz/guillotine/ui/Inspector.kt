@@ -51,7 +51,13 @@ import com.hereliesaz.guillotine.ui.theme.White
 
 /** The left/side inspector. Shows batch, single-clip, or global settings. */
 @Composable
-fun Inspector(vm: EditorViewModel, state: EditorUiState, onAnalyze: () -> Unit, modifier: Modifier = Modifier) {
+fun Inspector(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    onAnalyze: () -> Unit,
+    onTranscribe: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val selected = state.selectedClips
     Column(
         modifier
@@ -62,7 +68,7 @@ fun Inspector(vm: EditorViewModel, state: EditorUiState, onAnalyze: () -> Unit, 
     ) {
         when {
             selected.size > 1 -> BatchSection(vm, state, onAnalyze)
-            selected.size == 1 -> ClipSection(vm, state, onAnalyze)
+            selected.size == 1 -> ClipSection(vm, state, onAnalyze, onTranscribe)
             else -> EmptyHint()
         }
     }
@@ -80,14 +86,39 @@ private fun BatchSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: (
 }
 
 @Composable
-private fun ClipSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: () -> Unit) {
+private fun ClipSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: () -> Unit, onTranscribe: () -> Unit) {
     val clip = state.selectedClips.first()
+
+    // Text/caption clips just edit their text.
+    if (clip.type == ClipType.TEXT) {
+        SectionTitle("Text")
+        OutlinedTextField(
+            value = clip.text,
+            onValueChange = { vm.setClipText(clip.id, it) },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Caption text…", color = Neutral500, fontSize = 12.sp) },
+            textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
+            minLines = 2,
+        )
+        return
+    }
+
     SectionTitle(if (clip.type == ClipType.VIDEO) "Video clip" else "Audio clip")
     Text(clip.id, color = Neutral500, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
 
     PromptField(value = clip.prompt, onChange = { vm.setPromptForSelected(it) })
     AnalyzeButton(state, onAnalyze)
     state.error?.let { ErrorBox(it) }
+
+    // Whisper → generates grouped caption/text clips on the track above this clip.
+    Button(
+        onClick = onTranscribe,
+        enabled = !state.isProcessing,
+        colors = ButtonDefaults.buttonColors(containerColor = Neutral800),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Transcribe → captions", color = White, fontSize = 12.sp)
+    }
 
     // After analysis the clip carries keep/remove ranges (clip-cutting, applied on export).
     // Offer segmentation too: split those ranges into discrete, rearrangeable clips.

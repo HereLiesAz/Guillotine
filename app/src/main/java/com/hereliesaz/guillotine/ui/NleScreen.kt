@@ -84,6 +84,7 @@ import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
+import com.hereliesaz.guillotine.ai.Transcription
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
 import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
@@ -167,6 +168,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         }
     }
 
+    val onTranscribe: () -> Unit = onTranscribe@{
+        val clip = vm.uiState.value.selectedClips.singleOrNull() ?: return@onTranscribe
+        val media = vm.uiState.value.document.mediaFor(clip) ?: return@onTranscribe
+        vm.setProcessing(true, null)
+        scope.launch {
+            try {
+                val cues = Transcription.transcribe(context, settings, Uri.parse(media.uri))
+                vm.addTextClipsFromTranscript(clip.id, cues)
+                vm.setProcessing(false, null)
+            } catch (e: Exception) {
+                vm.setProcessing(false, e.message ?: "Transcription failed")
+            }
+        }
+    }
+
     // Playback clock: advances the timeline and skips 'remove' ranges.
     LaunchedEffectPlayback(vm, state.isPlaying)
 
@@ -201,7 +217,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
         if (widthClass == WindowWidthSizeClass.Expanded) {
             Row(Modifier.weight(0.6f).fillMaxWidth()) {
-                Inspector(vm, state, onAnalyze, Modifier.width(340.dp).fillMaxHeight())
+                Inspector(vm, state, onAnalyze, onTranscribe, Modifier.width(340.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     PreviewPlayer(state, Modifier.weight(1f).fillMaxWidth())
                     TransportControls(vm, state)
@@ -216,7 +232,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             CompactToolBar(vm, state, tab, { tab = it }, onAnalyze, onGenerate = { showGenerate = true })
             Box(Modifier.weight(0.58f).fillMaxWidth()) {
                 if (tab == 0) TimelinePanel(vm, state, modifier = Modifier.fillMaxSize())
-                else Inspector(vm, state, onAnalyze, Modifier.fillMaxSize())
+                else Inspector(vm, state, onAnalyze, onTranscribe, Modifier.fillMaxSize())
             }
         }
     }

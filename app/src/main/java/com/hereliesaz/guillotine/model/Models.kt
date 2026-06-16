@@ -10,9 +10,9 @@ fun newId(): String = UUID.randomUUID().toString()
 @Serializable
 enum class MediaKind { VIDEO, AUDIO, IMAGE }
 
-/** A timeline track carries either picture or sound. */
+/** A timeline track carries picture, sound, or an overlaid text/caption. */
 @Serializable
-enum class ClipType { VIDEO, AUDIO }
+enum class ClipType { VIDEO, AUDIO, TEXT }
 
 @Serializable
 enum class KeyframeProperty { OPACITY, SCALE, VOLUME }
@@ -100,6 +100,8 @@ data class TimelineClip(
     val error: String? = null,
     /** Clips sharing a non-null [groupId] select/move/delete together. */
     val groupId: String? = null,
+    /** Caption/title text for [ClipType.TEXT] clips (empty for video/audio). */
+    val text: String = "",
 ) {
     val endTimeMs: Long get() = startTimeMs + durationMs
 }
@@ -127,6 +129,8 @@ data class GlobalSettings(
 data class Document(
     val mediaItems: List<MediaItem> = emptyList(),
     val clips: List<TimelineClip> = emptyList(),
+    /** Track lists in stacking order. Text overlays render above video, video above audio. */
+    val textTracks: List<String> = listOf("T1"),
     val videoTracks: List<String> = listOf("V1"),
     val audioTracks: List<String> = listOf("A1"),
     val settings: GlobalSettings = GlobalSettings(),

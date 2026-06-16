@@ -4,10 +4,13 @@ package com.hereliesaz.guillotine.ui
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,8 +21,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem as ExoMediaItem
@@ -36,6 +42,7 @@ import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral950
+import com.hereliesaz.guillotine.ui.theme.White
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
@@ -65,8 +72,10 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
 
     val clips = state.document.clips
     val now = state.currentTimeMs
-    val activeVideo = TimelineMath.activeClip(clips, ClipType.VIDEO, now)
-    val activeAudio = TimelineMath.activeClip(clips, ClipType.AUDIO, now)
+    // Layer-aware: the topmost track wins for the picture/sound; text clips overlay on top.
+    val activeVideo = TimelineMath.topActiveClip(clips, ClipType.VIDEO, now, state.document.videoTracks)
+    val activeAudio = TimelineMath.topActiveClip(clips, ClipType.AUDIO, now, state.document.audioTracks)
+    val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val videoMedia = activeVideo?.let { state.document.mediaFor(it) }
     val audioMedia = activeAudio?.let { state.document.mediaFor(it) }
 
@@ -156,6 +165,26 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
                         scaleY = scale.coerceAtLeast(0f)
                     },
             )
+        }
+        // Caption/text overlay — text clips on the track above the video, rendered on top.
+        if (activeText.isNotEmpty()) {
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                activeText.forEach { t ->
+                    Text(
+                        t.text,
+                        color = White,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
+            }
         }
     }
 }

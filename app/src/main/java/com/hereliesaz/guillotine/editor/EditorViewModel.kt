@@ -283,8 +283,10 @@ class EditorViewModel : ViewModel() {
             val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
             val isVideoTrack = targetTrackId in doc.videoTracks
             val isAudioTrack = targetTrackId in doc.audioTracks
+            val isTextTrack = targetTrackId in doc.textTracks
             val compatible = (clip.type == ClipType.VIDEO && isVideoTrack) ||
-                (clip.type == ClipType.AUDIO && isAudioTrack)
+                (clip.type == ClipType.AUDIO && isAudioTrack) ||
+                (clip.type == ClipType.TEXT && isTextTrack)
             if (!compatible) return@mutateDocument doc
             doc.copy(
                 clips = doc.clips.map {
@@ -343,8 +345,51 @@ class EditorViewModel : ViewModel() {
 
     fun addTrack(type: ClipType) {
         mutateDocument { doc ->
-            if (type == ClipType.VIDEO) doc.copy(videoTracks = doc.videoTracks + "V${doc.videoTracks.size + 1}")
-            else doc.copy(audioTracks = doc.audioTracks + "A${doc.audioTracks.size + 1}")
+            when (type) {
+                ClipType.VIDEO -> doc.copy(videoTracks = doc.videoTracks + "V${doc.videoTracks.size + 1}")
+                ClipType.AUDIO -> doc.copy(audioTracks = doc.audioTracks + "A${doc.audioTracks.size + 1}")
+                ClipType.TEXT -> doc.copy(textTracks = doc.textTracks + "T${doc.textTracks.size + 1}")
+            }
+        }
+    }
+
+    /** Edit the caption text of a [ClipType.TEXT] clip. */
+    fun setClipText(clipId: String, text: String) = updateClip(clipId) { it.copy(text = text) }
+
+    /**
+     * Turn a transcript of [sourceClipId]'s media into text/caption clips on the text track
+     * above the video, and group them with the source clip so they select/delete together.
+     * Cue times are source-media ms; only the part inside the clip's trimmed window is used.
+     */
+    fun addTextClipsFromTranscript(sourceClipId: String, cues: List<com.hereliesaz.guillotine.ai.TranscriptCue>) {
+        if (cues.isEmpty()) return
+        mutateDocument { doc ->
+            val source = doc.clips.firstOrNull { it.id == sourceClipId } ?: return@mutateDocument doc
+            val docWithTrack = if (doc.textTracks.isEmpty()) doc.copy(textTracks = listOf("T1")) else doc
+            val track = docWithTrack.textTracks.first()
+            val gid = source.groupId ?: newId()
+            val clipStartSrc = source.trimStartMs
+            val clipEndSrc = source.trimStartMs + source.durationMs
+
+            val textClips = cues.mapNotNull { cue ->
+                val s = cue.startMs.coerceIn(clipStartSrc, clipEndSrc)
+                val e = cue.endMs.coerceIn(clipStartSrc, clipEndSrc)
+                if (e <= s || cue.text.isBlank()) return@mapNotNull null
+                TimelineClip(
+                    id = newId(),
+                    mediaId = "",
+                    type = ClipType.TEXT,
+                    trackId = track,
+                    startTimeMs = source.startTimeMs + (s - clipStartSrc),
+                    trimStartMs = 0,
+                    durationMs = e - s,
+                    text = cue.text.trim(),
+                    groupId = gid,
+                )
+            }
+            if (textClips.isEmpty()) return@mutateDocument doc
+            val withGroup = docWithTrack.clips.map { if (it.id == sourceClipId) it.copy(groupId = gid) else it }
+            docWithTrack.copy(clips = withGroup + textClips)
         }
     }
 

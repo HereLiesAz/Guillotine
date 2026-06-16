@@ -114,6 +114,7 @@ private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: M
         // Fixed track-header column.
         Column(Modifier.width(HEADER_WIDTH).fillMaxHeight().background(Neutral900)) {
             Box(Modifier.height(RULER_HEIGHT).fillMaxWidth())
+            state.document.textTracks.forEach { TrackHeader(it) }
             state.document.videoTracks.forEach { TrackHeader(it) }
             state.document.audioTracks.forEach { TrackHeader(it) }
         }
@@ -134,6 +135,9 @@ private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: M
         ) {
             Column(Modifier.fillMaxSize()) {
                 Ruler(totalMs, pps, contentWidth)
+                state.document.textTracks.forEach { trackId ->
+                    Lane(vm, state, trackId, pps) { msToDp(it) }
+                }
                 state.document.videoTracks.forEach { trackId ->
                     Lane(vm, state, trackId, pps) { msToDp(it) }
                 }
@@ -224,7 +228,11 @@ private fun ClipView(
     var trimEndPx by remember(clip.id) { mutableFloatStateOf(0f) }
     val baseLeftPx = with(density) { msToDp(clip.startTimeMs).toPx() }
     val trackHeightPx = with(density) { TRACK_HEIGHT.toPx() }
-    val sameTypeTracks = if (clip.type == ClipType.VIDEO) state.document.videoTracks else state.document.audioTracks
+    val sameTypeTracks = when (clip.type) {
+        ClipType.VIDEO -> state.document.videoTracks
+        ClipType.AUDIO -> state.document.audioTracks
+        ClipType.TEXT -> state.document.textTracks
+    }
 
     Box(
         Modifier
@@ -279,6 +287,16 @@ private fun ClipView(
         media?.let { m ->
             if (clip.type == ClipType.AUDIO) ClipWaveform(m.uri)
             else ClipThumbnail(m.uri, m.kind, clip.trimStartMs)
+        }
+        // Text clips show their caption text.
+        if (clip.type == ClipType.TEXT) {
+            Text(
+                clip.text.ifBlank { "Text" },
+                color = White,
+                fontSize = 9.sp,
+                maxLines = 2,
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 4.dp),
+            )
         }
         // Label.
         Text(
