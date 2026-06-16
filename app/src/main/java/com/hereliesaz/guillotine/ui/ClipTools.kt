@@ -1,0 +1,346 @@
+package com.hereliesaz.guillotine.ui
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import com.hereliesaz.guillotine.editor.EditorUiState
+import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.media.SubjectSegmenter
+import com.hereliesaz.guillotine.model.ClipFilters
+import com.hereliesaz.guillotine.model.ClipType
+import com.hereliesaz.guillotine.model.KeyframeProperty
+import com.hereliesaz.guillotine.model.TextFont
+import com.hereliesaz.guillotine.model.TimelineClip
+import com.hereliesaz.guillotine.ui.theme.Neutral400
+import com.hereliesaz.guillotine.ui.theme.Neutral500
+import com.hereliesaz.guillotine.ui.theme.Neutral800
+import com.hereliesaz.guillotine.ui.theme.Neutral900
+import com.hereliesaz.guillotine.ui.theme.Red500
+import com.hereliesaz.guillotine.ui.theme.White
+
+/**
+ * Context-sensitive per-clip tool buttons, shown inline in the editor tool strip
+ * (this replaces the old side Inspector panel). Each button opens a small popup
+ * holding the detailed controls for the selected clip. Nothing shows unless exactly
+ * one clip is selected.
+ */
+@Composable
+fun ClipToolButtons(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    onTranscribe: () -> Unit,
+) {
+    val clip = state.selectedClips.singleOrNull() ?: return
+    when (clip.type) {
+        ClipType.TEXT -> TextToolButton(vm, clip)
+        ClipType.VIDEO -> {
+            BackgroundToolButton(vm, state, clip)
+            FiltersToolButton(vm, clip)
+            AudioToolButton(vm, clip)
+            KeyframesToolButton(vm, clip)
+            TranscribeToolButton(state, onTranscribe)
+            if (clip.edits.isNotEmpty()) SplitToolButton(vm, clip)
+        }
+        ClipType.AUDIO -> {
+            AudioToolButton(vm, clip)
+            KeyframesToolButton(vm, clip)
+            TranscribeToolButton(state, onTranscribe)
+            if (clip.edits.isNotEmpty()) SplitToolButton(vm, clip)
+        }
+    }
+}
+
+// ---- individual tool buttons + their popups ----
+
+@Composable
+private fun TextToolButton(vm: EditorViewModel, clip: TimelineClip) {
+    var open by remember { mutableStateOf(false) }
+    IconToolButton(Icons.Filled.TextFields, "Text & font", active = open) { open = !open }
+    if (open) ToolPopup("Text", { open = false }) {
+        OutlinedTextField(
+            value = clip.text,
+            onValueChange = { vm.setClipText(clip.id, it) },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Caption text…", color = Neutral500, fontSize = 12.sp) },
+            textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
+            minLines = 2,
+        )
+        Text("Font", color = Neutral400, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextFont.values().forEach { f ->
+                Chip(label = f.label(), selected = clip.font == f) { vm.setClipFont(clip.id, f) }
+            }
+        }
+        Text("Size & placement: use the crop tool on the preview.", color = Neutral500, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun BackgroundToolButton(vm: EditorViewModel, state: EditorUiState, clip: TimelineClip) {
+    var open by remember { mutableStateOf(false) }
+    IconToolButton(Icons.Filled.Layers, "Background removal", active = clip.filters.removeBackground) { open = !open }
+    if (open) ToolPopup("Background", { open = false }) {
+        val media = state.document.mediaFor(clip)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = clip.filters.removeBackground,
+                onCheckedChange = { c -> vm.updateSelectedFilters { it.copy(removeBackground = c) } },
+            )
+            Text("Remove background (subject only)", color = Neutral400, fontSize = 12.sp)
+        }
+        if (clip.filters.removeBackground && media != null) {
+            CutoutPreview(media.uri, media.kind, clip.trimStartMs)
+            Text(
+                "On-device cutout. Put a clip on a lower track to composite behind it.",
+                color = Neutral500, fontSize = 10.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FiltersToolButton(vm: EditorViewModel, clip: TimelineClip) {
+    var open by remember { mutableStateOf(false) }
+    IconToolButton(Icons.Filled.Tune, "Filters", active = open) { open = !open }
+    if (open) ToolPopup("Filters", { open = false }) {
+        val f = clip.filters
+        FilterSlider(vm, "Brightness", f.brightness, 0f..2f) { v, ff -> ff.copy(brightness = v) }
+        FilterSlider(vm, "Contrast", f.contrast, 0f..2f) { v, ff -> ff.copy(contrast = v) }
+        FilterSlider(vm, "Saturation", f.saturation, 0f..2f) { v, ff -> ff.copy(saturation = v) }
+        FilterSlider(vm, "Sepia", f.sepia, 0f..100f, "%") { v, ff -> ff.copy(sepia = v) }
+        FilterSlider(vm, "Hue", f.hueRotate, 0f..360f, "°") { v, ff -> ff.copy(hueRotate = v) }
+        FilterSlider(vm, "Invert", f.invert, 0f..100f, "%") { v, ff -> ff.copy(invert = v) }
+        FilterSlider(vm, "Grayscale", f.grayscale, 0f..100f, "%") { v, ff -> ff.copy(grayscale = v) }
+        FilterSlider(vm, "Blur", f.blur, 0f..20f, "px") { v, ff -> ff.copy(blur = v) }
+        PresetRow(vm)
+    }
+}
+
+@Composable
+private fun AudioToolButton(vm: EditorViewModel, clip: TimelineClip) {
+    var open by remember { mutableStateOf(false) }
+    IconToolButton(Icons.Filled.VolumeUp, "Audio", active = open) { open = !open }
+    if (open) ToolPopup("Audio", { open = false }) {
+        val f = clip.filters
+        FilterSlider(vm, "Volume", f.volume, 0f..2f) { v, ff -> ff.copy(volume = v) }
+        FilterSlider(vm, "Pan", f.pan, -1f..1f) { v, ff -> ff.copy(pan = v) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = f.normalize, onCheckedChange = { c -> vm.updateSelectedFilters { it.copy(normalize = c) } })
+            Text("Normalize audio", color = Neutral400, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun KeyframesToolButton(vm: EditorViewModel, clip: TimelineClip) {
+    var open by remember { mutableStateOf(false) }
+    IconToolButton(Icons.Filled.Timeline, "Keyframes", active = open) { open = !open }
+    if (open) ToolPopup("Keyframes", { open = false }) {
+        var property by remember { mutableStateOf(KeyframeProperty.OPACITY) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KeyframeProperty.values().forEach { p ->
+                Chip(label = p.name.lowercase().replaceFirstChar { it.uppercase() }, selected = property == p) { property = p }
+            }
+        }
+        Button(
+            onClick = { vm.addKeyframe(clip.id, property) },
+            colors = ButtonDefaults.buttonColors(containerColor = Neutral800),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null, tint = White, modifier = Modifier.size(14.dp))
+            Text("  Add keyframe", color = White, fontSize = 12.sp)
+        }
+
+        val range = when (property) {
+            KeyframeProperty.OPACITY -> 0f..1f
+            KeyframeProperty.SCALE -> 0f..3f
+            KeyframeProperty.VOLUME -> 0f..2f
+        }
+        clip.keyframes.filter { it.property == property }.sortedBy { it.timeMs }.forEach { kf ->
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .border(1.dp, Neutral800, RoundedCornerShape(4.dp))
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("t=${"%.2f".format(kf.timeMs / 1000f)}s", color = Neutral400, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Icon(
+                        Icons.Filled.Close, contentDescription = "Remove keyframe", tint = Neutral500,
+                        modifier = Modifier.size(16.dp).clickable { vm.removeKeyframe(clip.id, kf.id) },
+                    )
+                }
+                Slider(
+                    value = kf.value.coerceIn(range.start, range.endInclusive),
+                    onValueChange = { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } },
+                    valueRange = range,
+                )
+                Text("Easing", color = Neutral500, fontSize = 10.sp)
+                CurveEditor(value = kf.easing, onChange = { e -> vm.updateKeyframe(clip.id, kf.id) { it.copy(easing = e) } })
+            }
+        }
+    }
+}
+
+@Composable
+private fun TranscribeToolButton(state: EditorUiState, onTranscribe: () -> Unit) {
+    IconToolButton(Icons.Filled.Subtitles, "Transcribe → captions", enabled = !state.isProcessing) { onTranscribe() }
+}
+
+@Composable
+private fun SplitToolButton(vm: EditorViewModel, clip: TimelineClip) {
+    IconToolButton(Icons.Filled.CallSplit, "Split into ${clip.edits.size} clips") { vm.segmentSelectedClip() }
+}
+
+// ---- shared popup shell + small building blocks ----
+
+/** A small floating panel anchored under the tool strip, with a title bar and a close affordance. */
+@Composable
+private fun ToolPopup(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    Popup(
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Surface(
+            color = Neutral900,
+            shape = RoundedCornerShape(10.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Neutral800),
+            modifier = Modifier.width(300.dp),
+        ) {
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Icon(
+                        Icons.Filled.Close, contentDescription = "Close", tint = Neutral400,
+                        modifier = Modifier.size(18.dp).clickable(onClick = onDismiss),
+                    )
+                }
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+private fun CutoutPreview(uri: String, kind: com.hereliesaz.guillotine.model.MediaKind, atMs: Long) {
+    val context = LocalContext.current
+    val cut by produceState<ImageBitmap?>(null, uri, atMs) {
+        value = SubjectSegmenter.cutout(context, uri, kind, atMs)?.asImageBitmap()
+    }
+    val bitmap = cut
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = "Foreground cutout",
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            contentScale = ContentScale.Fit,
+        )
+    } else {
+        Text("Generating cutout…", color = Neutral500, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun FilterSlider(
+    vm: EditorViewModel,
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    suffix: String = "",
+    apply: (Float, ClipFilters) -> ClipFilters,
+) {
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, color = Neutral500, fontSize = 10.sp)
+            Text("${"%.2f".format(value)}$suffix", color = Neutral400, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        }
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = { v -> vm.updateSelectedFilters { apply(v, it) } },
+            valueRange = range,
+        )
+    }
+}
+
+@Composable
+private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = if (selected) Color.Black else Neutral400,
+        fontSize = 11.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) White else Color.Transparent)
+            .border(1.dp, if (selected) White else Neutral800, RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun PresetRow(vm: EditorViewModel) {
+    Text("Presets", color = Red500, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Chip("Vintage", false) { vm.updateSelectedFilters { it.copy(sepia = 80f, contrast = 1.2f, brightness = 0.9f, blur = 1f, grayscale = 20f) } }
+        Chip("Noir", false) { vm.updateSelectedFilters { it.copy(grayscale = 100f, contrast = 1.4f, brightness = 1.1f) } }
+        Chip("Reset", false) { vm.updateSelectedFilters { ClipFilters() } }
+    }
+}
