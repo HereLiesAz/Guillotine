@@ -124,14 +124,17 @@ object Exporter {
         val baseClips = if (background.isNotEmpty()) background else videoClips
         val overlayClips = if (background.isNotEmpty()) foreground else emptyList()
 
-        // One matte overlay carrying all foreground clips, attached to the first base item.
-        val matteEffect = if (overlayClips.isNotEmpty()) {
-            OverlayEffect(
-                ImmutableList.of<TextureOverlay>(
-                    MatteOverlay(context, overlayClips, { document.mediaFor(it) }, baseClips.first().startTimeMs),
-                ),
-            )
-        } else null
+        // Overlays baked onto the base video: the background-removal matte, plus a timed
+        // caption overlay per text clip. Attached to the first base item.
+        val baseStartMs = baseClips.firstOrNull()?.startTimeMs ?: 0L
+        val overlays = mutableListOf<TextureOverlay>()
+        if (overlayClips.isNotEmpty()) {
+            overlays += MatteOverlay(context, overlayClips, { document.mediaFor(it) }, baseStartMs)
+        }
+        document.clips
+            .filter { it.type == ClipType.TEXT && it.trackId !in disabled && it.text.isNotBlank() }
+            .forEach { overlays += CaptionOverlay(it, baseStartMs) }
+        val matteEffect = if (overlays.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(overlays)) else null
 
         val videoItems = mutableListOf<EditedMediaItem>()
         var firstItem = true
