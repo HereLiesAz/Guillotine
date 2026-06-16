@@ -82,11 +82,14 @@ private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: M
     val totalMs = state.document.totalDurationMs
     val contentWidth = msToDp(totalMs) + 400.dp
 
-    // Pinch-to-zoom (touch) + Ctrl+scroll zoom (mouse/trackpad).
+    // Pinch-to-zoom (touch) + Ctrl+scroll zoom (mouse/trackpad). These read the LIVE
+    // pixels-per-second from the view model (not the captured `state`, which would be
+    // stale inside the one-shot pointerInput) so the zoom actually accumulates — pinching
+    // in/out changes how much of the timeline (how many frames) is on screen.
     val zoomModifier = Modifier
         .pointerInput(Unit) {
             detectTransformGestures { _, _, zoom, _ ->
-                if (zoom != 1f) vm.setZoom(state.pixelsPerSecond * zoom)
+                if (zoom != 1f) vm.setZoom(vm.uiState.value.pixelsPerSecond * zoom)
             }
         }
         .pointerInput(Unit) {
@@ -95,7 +98,7 @@ private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: M
                     val event = awaitPointerEvent()
                     if (event.type == PointerEventType.Scroll && event.keyboardModifiers.isCtrlPressed) {
                         val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-                        if (dy != 0f) vm.setZoom(state.pixelsPerSecond * if (dy > 0) 0.9f else 1.1f)
+                        if (dy != 0f) vm.setZoom(vm.uiState.value.pixelsPerSecond * if (dy > 0) 0.9f else 1.1f)
                     }
                 }
             }
@@ -231,10 +234,12 @@ private fun ClipView(
                         vm.selectRangeTo(clip.id)
                     },
                     onTap = { offset ->
+                        val relMs = (offset.x / pps * 1000f).toLong()
                         if (state.tool == EditorTool.SPLIT) {
-                            val relMs = (offset.x / pps * 1000f).toLong()
                             vm.splitClip(clip.id, clip.startTimeMs + relMs)
                         } else {
+                            // Move the playhead to the tapped point, and select the clip.
+                            vm.seekTo(clip.startTimeMs + relMs)
                             vm.selectClip(clip.id)
                         }
                     },

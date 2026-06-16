@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,12 +68,14 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -176,7 +180,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             .systemBarsPadding()
             .focusRequester(focusRequester)
             .focusable()
-            .onPreviewKeyEvent { handleKey(it, vm) },
+            // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
+            // at the keys, so typing in the prompt doesn't trigger editor shortcuts. Shortcuts
+            // still fire when the timeline (this Column) holds focus.
+            .onKeyEvent { handleKey(it, vm) },
     ) {
         TopBar(
             state = state,
@@ -391,6 +398,9 @@ private fun EditorToolStrip(
     onGenerate: () -> Unit,
 ) {
     val selected = state.selectedClips
+    // Submitting the prompt: analyze the selected clip(s), or open Generate when nothing
+    // is selected. Used by both the Enter key and the AI button.
+    val submit: () -> Unit = { if (selected.isEmpty()) onGenerate() else onAnalyze() }
     Column(Modifier.fillMaxWidth().background(Neutral900)) {
         Row(
             Modifier
@@ -432,9 +442,26 @@ private fun EditorToolStrip(
         ) {
             OutlinedTextField(
                 value = selected.firstOrNull()?.prompt ?: "",
-                onValueChange = { vm.setPromptForSelected(it) },
+                // Enter submits instead of inserting a newline. Soft keyboards send a '\n'
+                // through onValueChange; hardware Enter is caught by onPreviewKeyEvent below.
+                onValueChange = { v ->
+                    if (v.contains('\n')) {
+                        vm.setPromptForSelected(v.replace("\n", ""))
+                        submit()
+                    } else {
+                        vm.setPromptForSelected(v)
+                    }
+                },
                 enabled = selected.isNotEmpty(),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onPreviewKeyEvent { e ->
+                        if (e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
+                            submit(); true
+                        } else {
+                            false
+                        }
+                    },
                 placeholder = {
                     Text(
                         if (selected.isEmpty()) "Select a clip to prompt…" else "Describe the edit…",
@@ -443,11 +470,11 @@ private fun EditorToolStrip(
                 },
                 textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
                 maxLines = 6,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
             )
             Spacer(Modifier.width(8.dp))
-            ToolbarButton(if (selected.isEmpty()) "AI ▸" else "AI", tint = Red500) {
-                if (selected.isEmpty()) onGenerate() else onAnalyze()
-            }
+            ToolbarButton(if (selected.isEmpty()) "AI ▸" else "AI", tint = Red500, onClick = submit)
         }
     }
 }
@@ -491,7 +518,9 @@ private fun handleKey(e: KeyEvent, vm: EditorViewModel): Boolean {
     val ctrl = e.isCtrlPressed || e.isMetaPressed
     return when {
         e.key == Key.Spacebar -> { vm.togglePlay(); true }
-        e.key == Key.Delete || e.key == Key.Backspace -> { vm.deleteSelected(); true }
+        // Delete removes the selection; Backspace deliberately does NOT (avoids nuking a
+        // clip when the user means to edit text or just backspace).
+        e.key == Key.Delete -> { vm.deleteSelected(); true }
         ctrl && e.key == Key.Z -> { if (e.isShiftPressed) vm.redo() else vm.undo(); true }
         ctrl && e.key == Key.Y -> { vm.redo(); true }
         ctrl && e.isAltPressed && e.key == Key.C -> { vm.copySelectedFilters(); true }
