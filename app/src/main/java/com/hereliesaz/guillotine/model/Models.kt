@@ -78,6 +78,8 @@ data class ClipFilters(
     val hueRotate: Float = 0f,    // degrees
     val invert: Float = 0f,       // 0..100 (%)
     val grayscale: Float = 0f,    // 0..100 (%)
+    /** On-device subject segmentation: keep the foreground, drop the background so a lower layer shows through. */
+    val removeBackground: Boolean = false,
 )
 
 @Serializable

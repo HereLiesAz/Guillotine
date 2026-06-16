@@ -1,5 +1,6 @@
 package com.hereliesaz.guillotine.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -24,12 +26,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,6 +46,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.media.SubjectSegmenter
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.KeyframeProperty
@@ -133,6 +141,24 @@ private fun ClipSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: ()
     }
 
     if (clip.type == ClipType.VIDEO) {
+        Divider()
+        SectionTitle("Background")
+        val media = state.document.mediaFor(clip)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = clip.filters.removeBackground,
+                onCheckedChange = { c -> vm.updateSelectedFilters { it.copy(removeBackground = c) } },
+            )
+            Text("Remove background (subject only)", color = Neutral400, fontSize = 12.sp)
+        }
+        if (clip.filters.removeBackground && media != null) {
+            CutoutPreview(media.uri, media.kind, clip.trimStartMs)
+            Text(
+                "On-device cutout preview. Put a clip on a lower track to composite — export compositing lands next.",
+                color = Neutral500, fontSize = 10.sp,
+            )
+        }
+
         Divider()
         SectionTitle("Filters")
         val f = clip.filters
@@ -260,6 +286,25 @@ private fun AnalyzeButton(state: EditorUiState, onAnalyze: () -> Unit) {
         } else {
             Text("Generate edits", fontSize = 12.sp, fontWeight = FontWeight.Medium)
         }
+    }
+}
+
+@Composable
+private fun CutoutPreview(uri: String, kind: com.hereliesaz.guillotine.model.MediaKind, atMs: Long) {
+    val context = LocalContext.current
+    val cut by produceState<ImageBitmap?>(null, uri, atMs) {
+        value = SubjectSegmenter.cutout(context, uri, kind, atMs)?.asImageBitmap()
+    }
+    val bitmap = cut
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = "Foreground cutout",
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            contentScale = ContentScale.Fit,
+        )
+    } else {
+        Text("Generating cutout…", color = Neutral500, fontSize = 11.sp)
     }
 }
 

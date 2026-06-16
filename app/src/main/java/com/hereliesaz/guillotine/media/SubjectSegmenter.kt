@@ -1,0 +1,83 @@
+package com.hereliesaz.guillotine.media
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.Segmentation
+import com.google.mlkit.vision.segmentation.SegmentationMask
+import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
+import com.hereliesaz.guillotine.model.MediaKind
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.nio.ByteOrder
+
+/**
+ * On-device subject segmentation (ML Kit selfie model, bundled — no key, no network). Produces
+ * a foreground cutout: the subject kept, the background made transparent, so a clip on the
+ * track below shows through. This step only generates/cuts out a representative frame for
+ * confirmation; live-preview and export compositing build on this.
+ */
+object SubjectSegmenter {
+
+    /** Foreground-only bitmap (transparent background) of the frame at [atMs], or null. */
+    suspend fun cutout(context: Context, uri: String, kind: MediaKind, atMs: Long): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val frame = grabFrame(context, uri, kind, atMs) ?: return@withContext null
+            val segmenter = Segmentation.getClient(
+                SelfieSegmenterOptions.Builder()
+                    .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                    .build(),
+            )
+            try {
+                val mask = Tasks.await(segmenter.process(InputImage.fromBitmap(frame, 0)))
+                applyMask(frame, mask)
+            } catch (_: Exception) {
+                null
+            } finally {
+                segmenter.close()
+            }
+        }
+
+    private fun grabFrame(context: Context, uri: String, kind: MediaKind, atMs: Long): Bitmap? {
+        val parsed = Uri.parse(uri)
+        return runCatching {
+            if (kind == MediaKind.IMAGE) {
+                context.contentResolver.openInputStream(parsed)?.use { BitmapFactory.decodeStream(it) }
+            } else {
+                val r = MediaMetadataRetriever()
+                try {
+                    r.setDataSource(context, parsed)
+                    r.getFrameAtTime(atMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                } finally {
+                    r.release()
+                }
+            }
+        }.getOrNull()
+    }
+
+    /** Multiply the frame's alpha by the per-pixel foreground confidence from the mask. */
+    private fun applyMask(frame: Bitmap, mask: SegmentationMask): Bitmap {
+        val mw = mask.width
+        val mh = mask.height
+        val buffer = mask.buffer.order(ByteOrder.nativeOrder()).asFloatBuffer()
+        val src = if (frame.width == mw && frame.height == mh) frame
+        else Bitmap.createScaledBitmap(frame, mw, mh, true)
+
+        val pixels = IntArray(mw * mh)
+        src.getPixels(pixels, 0, mw, 0, 0, mw, mh)
+        buffer.rewind()
+        for (i in pixels.indices) {
+            val conf = if (buffer.hasRemaining()) buffer.get() else 0f
+            val alpha = (conf.coerceIn(0f, 1f) * 255f).toInt()
+            pixels[i] = (alpha shl 24) or (pixels[i] and 0x00FFFFFF)
+        }
+        val out = Bitmap.createBitmap(mw, mh, Bitmap.Config.ARGB_8888)
+        out.setPixels(pixels, 0, mw, 0, 0, mw, mh)
+        if (src !== frame) src.recycle()
+        return out
+    }
+}
