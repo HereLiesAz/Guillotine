@@ -136,24 +136,29 @@ object Exporter {
             .forEach { overlays += CaptionOverlay(it, baseStartMs) }
         val matteEffect = if (overlays.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(overlays)) else null
 
-        val videoItems = mutableListOf<EditedMediaItem>()
+        // Video sequence with clips at their timeline positions: gaps fill the space between
+        // clips. The sequence is zeroed to its first clip (Media3 1.5 can't lead with a gap),
+        // so the earliest clip starts the output; inter-clip spacing is preserved.
+        val videoSeq = EditedMediaItemSequence.Builder()
+        var videoCursor = baseClips.firstOrNull()?.startTimeMs ?: 0L
+        var addedVideo = false
         var firstItem = true
         baseClips.forEach { clip ->
             val media = document.mediaFor(clip) ?: return@forEach
+            val gap = clip.startTimeMs - videoCursor
+            if (gap > 0) { videoSeq.addGap(gap * 1000); videoCursor += gap }
             fun effectsFor(): Effects {
                 val overlay = if (firstItem) listOfNotNull(matteEffect) else emptyList()
                 return Effects(emptyList(), VideoEffects.build(clip.filters) + geometry + overlay)
             }
             if (media.kind == MediaKind.IMAGE) {
+                val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
                 val mediaItem = ExoMediaItem.Builder()
                     .setUri(Uri.parse(media.uri))
-                    .setImageDurationMs(if (clip.durationMs > 0) clip.durationMs else 5_000L)
+                    .setImageDurationMs(dur)
                     .build()
-                videoItems += EditedMediaItem.Builder(mediaItem)
-                    .setFrameRate(30)
-                    .setEffects(effectsFor())
-                    .build()
-                firstItem = false
+                videoSeq.addItem(EditedMediaItem.Builder(mediaItem).setFrameRate(30).setEffects(effectsFor()).build())
+                firstItem = false; addedVideo = true; videoCursor += dur
             } else {
                 for (range in TimelineMath.keptRanges(clip)) {
                     val startMs = range.first
@@ -168,38 +173,43 @@ object Exporter {
                                 .build(),
                         )
                         .build()
-                    videoItems += EditedMediaItem.Builder(mediaItem).setEffects(effectsFor()).build()
-                    firstItem = false
+                    videoSeq.addItem(EditedMediaItem.Builder(mediaItem).setEffects(effectsFor()).build())
+                    firstItem = false; addedVideo = true; videoCursor += (endMs - startMs)
                 }
             }
         }
-        if (videoItems.isEmpty()) return null
+        if (!addedVideo) return null
 
-        val audioItems = mutableListOf<EditedMediaItem>()
-        document.clips
+        val audioClips = document.clips
             .filter { it.type == ClipType.AUDIO && it.trackId !in disabled }
             .sortedBy { it.startTimeMs }
-            .forEach { clip ->
-                val media = document.mediaFor(clip) ?: return@forEach
-                for (range in TimelineMath.keptRanges(clip)) {
-                    val startMs = range.first
-                    val endMs = range.last + 1
-                    if (endMs <= startMs) continue
-                    val mediaItem = ExoMediaItem.Builder()
-                        .setUri(Uri.parse(media.uri))
-                        .setClippingConfiguration(
-                            ExoMediaItem.ClippingConfiguration.Builder()
-                                .setStartPositionMs(startMs)
-                                .setEndPositionMs(endMs)
-                                .build(),
-                        )
-                        .build()
-                    audioItems += EditedMediaItem.Builder(mediaItem).setRemoveVideo(true).build()
-                }
+        val audioSeq = EditedMediaItemSequence.Builder()
+        var audioCursor = audioClips.firstOrNull()?.startTimeMs ?: 0L
+        var addedAudio = false
+        audioClips.forEach { clip ->
+            val media = document.mediaFor(clip) ?: return@forEach
+            val gap = clip.startTimeMs - audioCursor
+            if (gap > 0) { audioSeq.addGap(gap * 1000); audioCursor += gap }
+            for (range in TimelineMath.keptRanges(clip)) {
+                val startMs = range.first
+                val endMs = range.last + 1
+                if (endMs <= startMs) continue
+                val mediaItem = ExoMediaItem.Builder()
+                    .setUri(Uri.parse(media.uri))
+                    .setClippingConfiguration(
+                        ExoMediaItem.ClippingConfiguration.Builder()
+                            .setStartPositionMs(startMs)
+                            .setEndPositionMs(endMs)
+                            .build(),
+                    )
+                    .build()
+                audioSeq.addItem(EditedMediaItem.Builder(mediaItem).setRemoveVideo(true).build())
+                addedAudio = true; audioCursor += (endMs - startMs)
             }
+        }
 
-        val sequences = mutableListOf(EditedMediaItemSequence(videoItems))
-        if (audioItems.isNotEmpty()) sequences += EditedMediaItemSequence(audioItems)
+        val sequences = mutableListOf(videoSeq.build())
+        if (addedAudio) sequences += audioSeq.build()
         return Composition.Builder(sequences).build()
     }
 
