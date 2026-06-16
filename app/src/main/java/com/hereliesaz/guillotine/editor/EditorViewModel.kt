@@ -234,6 +234,49 @@ class EditorViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Segmentation: split the selected clip into discrete clips at every AI/edit segment
+     * boundary, keeping all pieces in place. Each piece becomes an independent clip (its
+     * keyframes partitioned/re-based, edit marks cleared) so the user can rearrange or
+     * delete the unwanted ones — complementing non-destructive clip-cutting (keep/remove
+     * ranges applied at export).
+     */
+    fun segmentSelectedClip() {
+        val clip = _uiState.value.selectedClips.singleOrNull() ?: return
+        if (clip.edits.isEmpty()) return
+        // Boundaries in clip-relative ms, deduped and sorted.
+        val bounds = sortedSetOf(0L, clip.durationMs)
+        clip.edits.forEach { e ->
+            bounds.add((e.startMs - clip.trimStartMs).coerceIn(0, clip.durationMs))
+            bounds.add((e.endMs - clip.trimStartMs).coerceIn(0, clip.durationMs))
+        }
+        val cuts = bounds.toList()
+        if (cuts.size <= 2) return // no internal boundary → nothing to segment
+
+        mutateDocument { doc ->
+            val pieces = mutableListOf<TimelineClip>()
+            for (i in 0 until cuts.size - 1) {
+                val relStart = cuts[i]
+                val relEnd = cuts[i + 1]
+                val dur = relEnd - relStart
+                if (dur < MIN_CLIP_DURATION_MS) continue
+                pieces += clip.copy(
+                    id = newId(),
+                    startTimeMs = clip.startTimeMs + relStart,
+                    trimStartMs = clip.trimStartMs + relStart,
+                    durationMs = dur,
+                    edits = emptyList(),
+                    keyframes = clip.keyframes
+                        .filter { it.timeMs >= relStart && it.timeMs < relEnd }
+                        .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                )
+            }
+            if (pieces.isEmpty()) return@mutateDocument doc
+            doc.copy(clips = doc.clips.flatMap { if (it.id == clip.id) pieces else listOf(it) })
+        }
+        _uiState.update { it.copy(selectedClipIds = emptyList()) }
+    }
+
     /** Move a clip to another track + position, validating track/clip type match. */
     fun moveClip(clipId: String, targetTrackId: String, newStartMs: Long) {
         mutateDocument { doc ->

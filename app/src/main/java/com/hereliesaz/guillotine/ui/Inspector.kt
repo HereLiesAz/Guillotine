@@ -89,6 +89,18 @@ private fun ClipSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: ()
     AnalyzeButton(state, onAnalyze)
     state.error?.let { ErrorBox(it) }
 
+    // After analysis the clip carries keep/remove ranges (clip-cutting, applied on export).
+    // Offer segmentation too: split those ranges into discrete, rearrangeable clips.
+    if (clip.edits.isNotEmpty()) {
+        Button(
+            onClick = { vm.segmentSelectedClip() },
+            colors = ButtonDefaults.buttonColors(containerColor = Neutral800),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Split into ${clip.edits.size} clips", color = White, fontSize = 12.sp)
+        }
+    }
+
     if (clip.type == ClipType.VIDEO) {
         Divider()
         SectionTitle("Filters")
