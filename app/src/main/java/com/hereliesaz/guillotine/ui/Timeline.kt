@@ -45,6 +45,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -125,7 +126,9 @@ private fun TimelineLanes(
             // vertical spread changes track height. Tracked per-axis from the two pointers.
             awaitPointerEventScope {
                 while (true) {
-                    val event = awaitPointerEvent()
+                    // Initial pass: claim two-finger pinch before the nested scroll/clip
+                    // children can consume the drag (that's why vertical zoom didn't work).
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
                     val pts = event.changes.filter { it.pressed }
                     if (pts.size >= 2) {
                         val a = pts[0]
@@ -134,13 +137,14 @@ private fun TimelineLanes(
                         val curV = kotlin.math.abs(a.position.y - b.position.y)
                         val prevH = kotlin.math.abs(a.previousPosition.x - b.previousPosition.x)
                         val prevV = kotlin.math.abs(a.previousPosition.y - b.previousPosition.y)
-                        if (prevH > 8f && curH > 8f && curH != prevH) {
-                            vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH))
+                        var acted = false
+                        if (prevH > 1f && curH > 1f && curH != prevH) {
+                            vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH)); acted = true
                         }
-                        if (prevV > 8f && curV > 8f && curV != prevV) {
-                            vm.scaleTrackHeight(curV / prevV)
+                        if (prevV > 1f && curV > 1f && curV != prevV) {
+                            vm.scaleTrackHeight(curV / prevV); acted = true
                         }
-                        pts.forEach { it.consume() }
+                        if (acted) pts.forEach { it.consume() }
                     }
                 }
             }
