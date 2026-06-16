@@ -83,6 +83,7 @@ import com.hereliesaz.guillotine.R
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
+import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
 import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
@@ -239,9 +240,14 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
     if (showGenerate) {
         GenerateSheet(
-            onGenerate = { url, name ->
+            fooocusUrl = settings.fooocusUrl,
+            onGenerateFree = { url, name ->
                 vm.addMedia(listOf(MediaItem(newId(), url, name, MediaKind.IMAGE, 5_000)))
                 showGenerate = false
+            },
+            onGenerateFooocus = { prompt ->
+                val uri = ImageGen.FooocusApi.generate(context, settings.fooocusUrl, prompt)
+                vm.addMedia(listOf(MediaItem(newId(), uri.toString(), "Fooocus: ${prompt.take(20)}", MediaKind.IMAGE, 5_000)))
             },
             onDismiss = { showGenerate = false },
         )

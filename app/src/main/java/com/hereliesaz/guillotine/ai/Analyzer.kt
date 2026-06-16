@@ -30,16 +30,27 @@ object Analysis {
         prompt: String,
         durationMs: Long,
     ): List<EditSegment> {
+        val key = settings.keyFor(settings.provider)
         if (settings.provider != AiProviderType.LOCAL) {
-            require(settings.keyFor(settings.provider).isNotBlank()) {
-                "Add your ${settings.provider.name.lowercase()} API key in Settings, or use the free Local analyzer."
+            require(key.isNotBlank()) {
+                "Add your ${settings.provider.meta.label} API key in Settings, or use the free Local analyzer."
             }
         }
         return when (settings.provider) {
             AiProviderType.LOCAL -> LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.GEMINI -> GeminiProvider(settings.geminiKey).analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.OPENAI -> OpenAiProvider(settings.openaiKey).analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.ANTHROPIC -> AnthropicProvider(settings.anthropicKey).analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.GEMINI -> GeminiProvider(key).analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.OPENAI -> OpenAiProvider(key).analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.ANTHROPIC -> AnthropicProvider(key).analyze(context, mediaUri, kind, prompt, durationMs)
+            else -> {
+                // OpenRouter / Groq / xAI / Mistral — generic OpenAI-compatible endpoint.
+                val meta = settings.provider.meta
+                OpenAiCompatibleProvider(
+                    apiKey = key,
+                    endpoint = requireNotNull(meta.openAiCompatUrl),
+                    model = requireNotNull(meta.openAiCompatModel),
+                    label = meta.label,
+                ).analyze(context, mediaUri, kind, prompt, durationMs)
+            }
         }
     }
 }

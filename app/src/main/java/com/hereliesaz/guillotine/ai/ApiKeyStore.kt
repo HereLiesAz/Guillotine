@@ -10,21 +10,92 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-/** Which analyzer to use. LOCAL is free and needs no key; the rest need a BYO key. */
-enum class AiProviderType { LOCAL, GEMINI, OPENAI, ANTHROPIC }
+/**
+ * Which analyzer to use. LOCAL is free and needs no key; the rest are bring-your-own.
+ * GEMINI / OPENAI / ANTHROPIC have dedicated clients; the remainder are reached through
+ * a generic OpenAI-compatible client (see [meta]).
+ */
+enum class AiProviderType { LOCAL, GEMINI, OPENAI, ANTHROPIC, OPENROUTER, GROQ, XAI, MISTRAL }
+
+/** Display + routing info for a provider, including where the user gets an API key. */
+data class ProviderMeta(
+    val label: String,
+    val blurb: String,
+    /** Where to obtain a key. null for LOCAL (no key needed). */
+    val keyUrl: String? = null,
+    /** Chat-completions endpoint for generic OpenAI-compatible providers (else null). */
+    val openAiCompatUrl: String? = null,
+    /** Vision model id for generic OpenAI-compatible providers (else null). */
+    val openAiCompatModel: String? = null,
+)
+
+/**
+ * Per-provider metadata. Model ids for the OpenAI-compatible providers are reasonable
+ * current defaults and may need bumping as providers rotate their model line-up.
+ */
+val AiProviderType.meta: ProviderMeta
+    get() = when (this) {
+        AiProviderType.LOCAL -> ProviderMeta(
+            "Local (free, on-device)",
+            "Cuts silences. No key, works offline.",
+        )
+        AiProviderType.GEMINI -> ProviderMeta(
+            "Gemini",
+            "Google · video-native analysis.",
+            keyUrl = "https://aistudio.google.com/app/apikey",
+        )
+        AiProviderType.OPENAI -> ProviderMeta(
+            "OpenAI",
+            "GPT-4o frame sampling + Whisper audio.",
+            keyUrl = "https://platform.openai.com/api-keys",
+        )
+        AiProviderType.ANTHROPIC -> ProviderMeta(
+            "Anthropic",
+            "Claude · video frame analysis.",
+            keyUrl = "https://console.anthropic.com/settings/keys",
+        )
+        AiProviderType.OPENROUTER -> ProviderMeta(
+            "OpenRouter",
+            "One key, many vision models (frames).",
+            keyUrl = "https://openrouter.ai/keys",
+            openAiCompatUrl = "https://openrouter.ai/api/v1/chat/completions",
+            openAiCompatModel = "openai/gpt-4o-mini",
+        )
+        AiProviderType.GROQ -> ProviderMeta(
+            "Groq",
+            "Fast Llama 4 vision (frames).",
+            keyUrl = "https://console.groq.com/keys",
+            openAiCompatUrl = "https://api.groq.com/openai/v1/chat/completions",
+            openAiCompatModel = "meta-llama/llama-4-scout-17b-16e-instruct",
+        )
+        AiProviderType.XAI -> ProviderMeta(
+            "xAI (Grok)",
+            "Grok vision (frames).",
+            keyUrl = "https://console.x.ai",
+            openAiCompatUrl = "https://api.x.ai/v1/chat/completions",
+            openAiCompatModel = "grok-2-vision-1212",
+        )
+        AiProviderType.MISTRAL -> ProviderMeta(
+            "Mistral",
+            "Pixtral vision (frames).",
+            keyUrl = "https://console.mistral.ai/api-keys",
+            openAiCompatUrl = "https://api.mistral.ai/v1/chat/completions",
+            openAiCompatModel = "pixtral-12b-2409",
+        )
+    }
+
+/** All bring-your-own-key providers (everything except the free on-device LOCAL). */
+val byoProviders: List<AiProviderType> = AiProviderType.values().filter { it != AiProviderType.LOCAL }
 
 data class AiSettings(
     val provider: AiProviderType = AiProviderType.LOCAL,
-    val geminiKey: String = "",
-    val openaiKey: String = "",
-    val anthropicKey: String = "",
+    /** API keys per provider; LOCAL has none. */
+    val keys: Map<AiProviderType, String> = emptyMap(),
+    /** Optional self-hosted Fooocus-API base URL for image generation (else free Pollinations). */
+    val fooocusUrl: String = "",
 ) {
-    fun keyFor(p: AiProviderType): String = when (p) {
-        AiProviderType.LOCAL -> ""
-        AiProviderType.GEMINI -> geminiKey
-        AiProviderType.OPENAI -> openaiKey
-        AiProviderType.ANTHROPIC -> anthropicKey
-    }
+    fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
+    fun withKey(p: AiProviderType, key: String): AiSettings = copy(keys = keys + (p to key))
 }
 
 /**
@@ -55,27 +126,25 @@ class ApiKeyStore(context: Context) {
         provider = prefs.getString(KEY_PROVIDER, null)
             ?.let { runCatching { AiProviderType.valueOf(it) }.getOrNull() }
             ?: AiProviderType.LOCAL,
-        geminiKey = prefs.getString(KEY_GEMINI, "").orEmpty(),
-        openaiKey = prefs.getString(KEY_OPENAI, "").orEmpty(),
-        anthropicKey = prefs.getString(KEY_ANTHROPIC, "").orEmpty(),
+        keys = byoProviders.associateWith { prefs.getString(keyPref(it), "").orEmpty() }
+            .filterValues { it.isNotEmpty() },
+        fooocusUrl = prefs.getString(KEY_FOOOCUS, "").orEmpty(),
     )
 
     suspend fun save(settings: AiSettings) {
         withContext(Dispatchers.IO) {
-            prefs.edit()
-                .putString(KEY_PROVIDER, settings.provider.name)
-                .putString(KEY_GEMINI, settings.geminiKey)
-                .putString(KEY_OPENAI, settings.openaiKey)
-                .putString(KEY_ANTHROPIC, settings.anthropicKey)
-                .apply()
+            prefs.edit().apply {
+                putString(KEY_PROVIDER, settings.provider.name)
+                byoProviders.forEach { putString(keyPref(it), settings.keyFor(it)) }
+                putString(KEY_FOOOCUS, settings.fooocusUrl)
+            }.apply()
         }
         _settings.value = settings
     }
 
     private companion object {
         const val KEY_PROVIDER = "ai_provider"
-        const val KEY_GEMINI = "gemini_key"
-        const val KEY_OPENAI = "openai_key"
-        const val KEY_ANTHROPIC = "anthropic_key"
+        const val KEY_FOOOCUS = "fooocus_url"
+        fun keyPref(p: AiProviderType) = "key_${p.name}"
     }
 }
