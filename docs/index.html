@@ -212,6 +212,35 @@
   .foot .links a:hover { color: var(--white); }
   .foot .note { width: 100%; color: var(--n600); font-size: 12.5px; margin-top: 8px; font-family: var(--mono); }
 
+  /* ---------- specs strip ---------- */
+  .specs { border-top: 1px solid var(--n900); border-bottom: 1px solid var(--n900); background: var(--n950); }
+  .specs .wrap { display: grid; grid-template-columns: repeat(6, 1fr); padding: 0; }
+  .stat { padding: 22px 14px; text-align: center; border-right: 1px solid var(--n900); }
+  .stat:last-child { border-right: none; }
+  .stat .v { font-family: var(--display); color: var(--white); font-size: 17px; font-weight: 500; letter-spacing: -0.01em; }
+  .stat .k { font-family: var(--mono); font-size: 10.5px; color: var(--n500); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 6px; }
+  @media (max-width: 760px) { .specs .wrap { grid-template-columns: repeat(3, 1fr); } .stat:nth-child(3) { border-right: none; } .stat:nth-child(1), .stat:nth-child(2), .stat:nth-child(3) { border-bottom: 1px solid var(--n900); } }
+  @media (max-width: 440px) { .specs .wrap { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ---------- shortcuts ---------- */
+  .shortcuts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 40px; }
+  @media (max-width: 640px) { .shortcuts-grid { grid-template-columns: 1fr; } }
+  .sc { display: flex; align-items: center; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--n900); }
+  .sc .act { color: var(--n400); font-size: 14.5px; }
+  .sc .keys { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .sc .plus { color: var(--n600); font-size: 12px; }
+  kbd { font-family: var(--mono); font-size: 12px; color: var(--n300); background: var(--n900); border: 1px solid var(--n800); border-bottom-width: 2px; border-radius: 6px; padding: 3px 8px; line-height: 1; }
+
+  /* ---------- FAQ ---------- */
+  .faq { display: grid; gap: 12px; max-width: 820px; }
+  details.qa { border: 1px solid var(--n850); border-radius: 12px; background: var(--n950); overflow: hidden; transition: border-color .2s; }
+  details.qa[open] { border-color: color-mix(in srgb, var(--red) 35%, var(--n800)); }
+  details.qa summary { list-style: none; cursor: pointer; padding: 18px 20px; color: var(--white); font-weight: 500; font-size: 15.5px; display: flex; align-items: center; gap: 12px; }
+  details.qa summary::-webkit-details-marker { display: none; }
+  details.qa summary::after { content: "+"; margin-left: auto; color: var(--red); font-family: var(--mono); font-size: 20px; line-height: 1; }
+  details.qa[open] summary::after { content: "\2013"; }
+  details.qa .a { padding: 0 20px 18px; color: var(--n400); font-size: 14.5px; }
+
   /* reveal */
   .reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease; }
   .reveal.in { opacity: 1; transform: none; }
@@ -227,6 +256,7 @@
       <a href="#features">Features</a>
       <a href="#ai">AI</a>
       <a href="#how">How it works</a>
+      <a href="#faq">FAQ</a>
       <a class="ghost" href="https://github.com/HereLiesAz/Guillotine" target="_blank" rel="noopener">GitHub</a>
       <a class="btn btn-red nav-cta" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener">Download</a>
     </div>
@@ -257,6 +287,18 @@
       <div class="hero-art">
         <img src="guillotine_header.webp" alt="Guillotine app icon" />
       </div>
+    </div>
+  </section>
+
+  <!-- SPECS STRIP -->
+  <section class="specs">
+    <div class="wrap">
+      <div class="stat"><div class="v">Free</div><div class="k">&amp; open source</div></div>
+      <div class="stat"><div class="v">Android 8.0+</div><div class="k">API 26</div></div>
+      <div class="stat"><div class="v">On-device</div><div class="k">no account</div></div>
+      <div class="stat"><div class="v">mp4</div><div class="k">export to gallery</div></div>
+      <div class="stat"><div class="v">.gilt</div><div class="k">project files</div></div>
+      <div class="stat"><div class="v">Phone · Tablet · CrOS</div><div class="k">adaptive</div></div>
     </div>
   </section>
 
@@ -330,6 +372,21 @@
           <h3>Phone, tablet &amp; Chromebook</h3>
           <p>One adaptive layout that reflows for portrait phones and large screens, with keyboard shortcuts and mouse + Ctrl-scroll zoom. Installs without a touchscreen.</p>
         </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7M9 20v-5h6v5"/></svg></div>
+          <h3>Save &amp; resume</h3>
+          <p>Store the whole project as a portable <code style="font-family:var(--mono);color:var(--red-bright);font-size:13px">.gilt</code> file and pick up exactly where you left off — clips, edits, keyframes and all.</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 015 5v1"/><rect x="3" y="18" width="8" height="3" rx="1"/></svg></div>
+          <h3>Undo, copy &amp; paste</h3>
+          <p>Deep undo/redo history, plus copy-and-paste for whole clips <em>and</em> for the effects on a clip — so a look you dialled in transfers in one move.</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+          <h3>Batch the boring stuff</h3>
+          <p>Select many clips, write one prompt, and run the AI across all of them at once. Group clips to select, move and edit them together.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -368,6 +425,27 @@
     </div>
   </section>
 
+  <!-- SHORTCUTS -->
+  <section class="section">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="kicker">Made for big screens too</div>
+        <h2>Keyboard &amp; mouse, first class.</h2>
+        <p>On a Chromebook, tablet or desktop, Guillotine drives like a proper editor — shortcuts, mouse, and Ctrl-scroll zoom. On touch, long-press a clip to range-select across tracks.</p>
+      </div>
+      <div class="shortcuts-grid reveal">
+        <div class="sc"><span class="act">Play / pause</span><span class="keys"><kbd>Space</kbd></span></div>
+        <div class="sc"><span class="act">Split at playhead</span><span class="keys"><kbd>S</kbd></span></div>
+        <div class="sc"><span class="act">Delete selection</span><span class="keys"><kbd>Del</kbd></span></div>
+        <div class="sc"><span class="act">Zoom timeline</span><span class="keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>scroll</kbd></span></div>
+        <div class="sc"><span class="act">Undo</span><span class="keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>Z</kbd></span></div>
+        <div class="sc"><span class="act">Redo</span><span class="keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>Shift</kbd><span class="plus">+</span><kbd>Z</kbd></span></div>
+        <div class="sc"><span class="act">Copy / paste clip</span><span class="keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>C</kbd> <kbd>V</kbd></span></div>
+        <div class="sc"><span class="act">Copy / paste effects</span><span class="keys"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>Alt</kbd><span class="plus">+</span><kbd>C</kbd> <kbd>V</kbd></span></div>
+      </div>
+    </div>
+  </section>
+
   <!-- HOW IT WORKS -->
   <section class="section" id="how">
     <div class="wrap">
@@ -391,6 +469,42 @@
           <h3>Export</h3>
           <p>Render a real mp4 on-device. It lands in <code>Movies/Guillotine</code> in your gallery, ready to share.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section" id="faq">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="kicker">Questions</div>
+        <h2>The short answers.</h2>
+      </div>
+      <div class="faq reveal">
+        <details class="qa">
+          <summary>Is it really free?</summary>
+          <div class="a">Yes — Guillotine is free and open source. The on-device analyzer needs no key and no account. If you want sharper, video-native AI, you can plug in your own Gemini, OpenAI or Anthropic key.</div>
+        </details>
+        <details class="qa">
+          <summary>Do I need an account or internet connection?</summary>
+          <div class="a">No account, ever. Importing, editing and mp4 export all run on-device and work offline. The only network calls are to a BYO-key AI provider you explicitly choose — and free image generation, if you use it.</div>
+        </details>
+        <details class="qa">
+          <summary>Is my footage uploaded anywhere?</summary>
+          <div class="a">Not by default. Your media stays on your device. If you opt into a BYO-key provider, only what's needed for that analysis is sent to the provider you picked. API keys are stored encrypted on-device.</div>
+        </details>
+        <details class="qa">
+          <summary>Where do my exports go?</summary>
+          <div class="a">Rendering happens on-device with Media3 Transformer and saves a real mp4 to <code style="font-family:var(--mono);color:var(--red-bright);font-size:13px">Movies/Guillotine</code> in your gallery, with progress shown as it renders.</div>
+        </details>
+        <details class="qa">
+          <summary>Does it work on a Chromebook or tablet?</summary>
+          <div class="a">Yes. The layout adapts to large screens, supports keyboard shortcuts and mouse with Ctrl-scroll zoom, and installs without a touchscreen.</div>
+        </details>
+        <details class="qa">
+          <summary>What can I control — formats, quality, aspect ratio?</summary>
+          <div class="a">Import video, audio and images. Choose aspect ratio (16:9, 9:16, 1:1 or Original) and quality (Original, 4K, 1080p, 720p), apply filters and per-clip audio, and animate with keyframes.</div>
+        </details>
       </div>
     </div>
   </section>
