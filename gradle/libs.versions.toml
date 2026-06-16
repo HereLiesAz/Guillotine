@@ -21,6 +21,8 @@ serialization = "1.7.3"
 navigation = "2.8.0"
 security = "1.1.0-alpha06"
 coreSplashscreen = "1.0.1"
+mlkitImageLabeling = "17.0.9"
+mlkitFaceDetection = "16.1.7"
 junit = "4.13.2"
 
 [libraries]
@@ -45,6 +47,8 @@ media3-effect = { group = "androidx.media3", name = "media3-effect", version.ref
 media3-common = { group = "androidx.media3", name = "media3-common", version.ref = "media3" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security" }
+mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", version.ref = "mlkitImageLabeling" }
+mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFaceDetection" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

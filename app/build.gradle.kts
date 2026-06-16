@@ -100,6 +100,10 @@ dependencies {
 
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.security.crypto)
+
+    // On-device, no-key ML for the free vision analyzer (face + object/label detection).
+    implementation(libs.mlkit.image.labeling)
+    implementation(libs.mlkit.face.detection)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 

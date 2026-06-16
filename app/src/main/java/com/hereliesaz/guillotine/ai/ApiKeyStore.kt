@@ -15,7 +15,7 @@ import kotlinx.coroutines.withContext
  * GEMINI / OPENAI / ANTHROPIC have dedicated clients; the remainder are reached through
  * a generic OpenAI-compatible client (see [meta]).
  */
-enum class AiProviderType { LOCAL, GEMINI, OPENAI, ANTHROPIC, OPENROUTER, GROQ, XAI, MISTRAL }
+enum class AiProviderType { LOCAL, MLKIT, GEMINI, OPENAI, ANTHROPIC, OPENROUTER, GROQ, XAI, MISTRAL }
 
 /** Display + routing info for a provider, including where the user gets an API key. */
 data class ProviderMeta(
@@ -38,6 +38,10 @@ val AiProviderType.meta: ProviderMeta
         AiProviderType.LOCAL -> ProviderMeta(
             "Local (free, on-device)",
             "Cuts silences. No key, works offline.",
+        )
+        AiProviderType.MLKIT -> ProviderMeta(
+            "On-device vision (free)",
+            "Faces & objects, no key — keep/remove by what's on screen.",
         )
         AiProviderType.GEMINI -> ProviderMeta(
             "Gemini",
@@ -87,8 +91,8 @@ val AiProviderType.meta: ProviderMeta
         )
     }
 
-/** All bring-your-own-key providers (everything except the free on-device LOCAL). */
-val byoProviders: List<AiProviderType> = AiProviderType.values().filter { it != AiProviderType.LOCAL }
+/** Bring-your-own-key providers — those that actually need a key (have a signup URL). */
+val byoProviders: List<AiProviderType> = AiProviderType.values().filter { it.meta.keyUrl != null }
 
 data class AiSettings(
     val provider: AiProviderType = AiProviderType.LOCAL,

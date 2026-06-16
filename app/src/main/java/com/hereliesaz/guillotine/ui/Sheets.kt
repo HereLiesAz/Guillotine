@@ -91,7 +91,8 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
             }
 
             // Key field + model override + "get a key" link for the selected BYO provider.
-            if (provider != AiProviderType.LOCAL) {
+            // Free providers (LOCAL, on-device vision) need none of these.
+            if (provider.meta.keyUrl != null) {
                 val meta = provider.meta
                 KeyField("${meta.label} API key", keys[provider].orEmpty()) { keys = keys + (provider to it) }
                 OutlinedTextField(

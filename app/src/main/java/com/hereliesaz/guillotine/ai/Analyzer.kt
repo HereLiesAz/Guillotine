@@ -31,14 +31,15 @@ object Analysis {
         durationMs: Long,
     ): List<EditSegment> {
         val key = settings.keyFor(settings.provider)
-        if (settings.provider != AiProviderType.LOCAL) {
+        if (settings.provider.meta.keyUrl != null) {
             require(key.isNotBlank()) {
-                "Add your ${settings.provider.meta.label} API key in Settings, or use the free Local analyzer."
+                "Add your ${settings.provider.meta.label} API key in Settings, or use a free analyzer."
             }
         }
         val model = settings.modelFor(settings.provider)
         return when (settings.provider) {
             AiProviderType.LOCAL -> LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.MLKIT -> MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs)
             AiProviderType.GEMINI -> GeminiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
             AiProviderType.OPENAI -> OpenAiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
             AiProviderType.ANTHROPIC -> AnthropicProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
