@@ -75,7 +75,7 @@ fun PreviewPlayer(
     state: EditorUiState,
     modifier: Modifier = Modifier,
     cropMode: Boolean = false,
-    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float) -> Unit = { _, _, _ -> },
+    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
 ) {
     val context = LocalContext.current
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
@@ -175,10 +175,10 @@ fun PreviewPlayer(
 
     val cropModifier = if (cropMode) {
         Modifier.pointerInput(Unit) {
-            detectTransformGestures { _, pan, zoom, _ ->
+            detectTransformGestures { _, pan, zoom, rotation ->
                 val w = previewSize.width.coerceAtLeast(1)
                 val h = previewSize.height.coerceAtLeast(1)
-                onCropTransform(zoom, pan.x / w, pan.y / h)
+                onCropTransform(zoom, pan.x / w, pan.y / h, rotation)
             }
         }
     } else {
@@ -212,6 +212,7 @@ fun PreviewPlayer(
                         val s = (scale * (activeVideo?.scale ?: 1f)).coerceAtLeast(0f)
                         scaleX = s
                         scaleY = s
+                        rotationZ = activeVideo?.rotation ?: 0f
                         translationX = (activeVideo?.offsetX ?: 0f) * size.width
                         translationY = (activeVideo?.offsetY ?: 0f) * size.height
                     },
@@ -237,6 +238,7 @@ fun PreviewPlayer(
                             val s = overlayClip.scale.coerceAtLeast(0f)
                             scaleX = s
                             scaleY = s
+                            rotationZ = overlayClip.rotation
                             translationX = overlayClip.offsetX * size.width
                             translationY = overlayClip.offsetY * size.height
                         },
@@ -260,7 +262,7 @@ fun PreviewPlayer(
                             (t.offsetY * previewSize.height).roundToInt(),
                         )
                     }
-                    .graphicsLayer { scaleX = t.scale; scaleY = t.scale }
+                    .graphicsLayer { scaleX = t.scale; scaleY = t.scale; rotationZ = t.rotation }
                     .background(Color.Black.copy(alpha = 0.55f))
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             )

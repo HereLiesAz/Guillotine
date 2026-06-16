@@ -613,13 +613,14 @@ class EditorViewModel : ViewModel() {
      * Crop tool: scale/move the selected clip directly on the preview. [zoom] is a pinch
      * factor; [panXFrac]/[panYFrac] are drag deltas as a fraction of the preview size.
      */
-    fun transformSelectedClip(zoom: Float, panXFrac: Float, panYFrac: Float) {
+    fun transformSelectedClip(zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float = 0f) {
         val id = _uiState.value.selectedClipId ?: return
         updateClip(id) {
             it.copy(
                 scale = (it.scale * zoom).coerceIn(0.1f, 6f),
                 offsetX = (it.offsetX + panXFrac).coerceIn(-1.5f, 1.5f),
                 offsetY = (it.offsetY + panYFrac).coerceIn(-1.5f, 1.5f),
+                rotation = it.rotation + rotationDelta,
             )
         }
     }

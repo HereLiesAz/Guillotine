@@ -236,7 +236,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         state,
                         Modifier.weight(1f).fillMaxWidth(),
                         cropMode = state.tool == EditorTool.CROP,
-                        onCropTransform = { z, x, y -> vm.transformSelectedClip(z, x, y) },
+                        onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
                     )
                     TransportControls(vm, state)
                 }
@@ -248,7 +248,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 state,
                 Modifier.weight(0.42f).fillMaxWidth(),
                 cropMode = state.tool == EditorTool.CROP,
-                onCropTransform = { z, x, y -> vm.transformSelectedClip(z, x, y) },
+                onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
             )
             TransportControls(vm, state)
             var tab by remember { mutableIntStateOf(0) }
