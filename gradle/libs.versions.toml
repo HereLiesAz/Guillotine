@@ -1,7 +1,10 @@
 [versions]
 # NOTE: AGP / Kotlin / Compose BOM / compileSdk / Gradle (wrapper) must stay mutually
 # compatible. The wrapper is on Gradle 9.5.1, so AGP must be a Gradle-9-capable release.
-# material3 is pinned to 1.4.x so the Expressive APIs resolve regardless of the BOM mapping.
+# material3 is pinned to 1.5.0-alpha14: the Expressive components (MaterialExpressiveTheme,
+# LoadingIndicator, ToggleButton) are only public there, and alpha14 is the last 1.5.0-alpha
+# that still requires compose-foundation 1.8.x — matching the BOM below and Kotlin 2.0.21.
+# (1.4.0 stable made these APIs internal; alpha15+ jumps to foundation 1.11+.)
 # If the IDE's AGP Upgrade Assistant proposes adjusted versions on first sync, accept them —
 # these are the only knobs that matter for a green build.
 agp = "8.13.0"
@@ -10,7 +13,7 @@ coreKtx = "1.13.1"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2025.06.01"
-material3 = "1.4.0"
+material3 = "1.5.0-alpha14"
 media3 = "1.4.1"
 datastore = "1.1.1"
 coroutines = "1.8.1"
