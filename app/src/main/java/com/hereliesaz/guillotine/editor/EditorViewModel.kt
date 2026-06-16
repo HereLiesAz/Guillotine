@@ -35,6 +35,8 @@ data class EditorUiState(
     val autoEase: Boolean = true,
     val playbackRate: Float = 1f,
     val selectedClipIds: List<String> = emptyList(),
+    /** Currently-selected keyframe (shows ease handles on its segment). */
+    val selectedKeyframeId: String? = null,
     val tool: EditorTool = EditorTool.SELECT,
     val isProcessing: Boolean = false,
     val error: String? = null,
@@ -474,6 +476,31 @@ class EditorViewModel : ViewModel() {
         }
     }
 
+    fun selectKeyframe(id: String?) = _uiState.update { it.copy(selectedKeyframeId = id) }
+
+    /**
+     * Tap a keyframe: select it and toggle its ease (linear ↔ smooth). Tapping again flips
+     * it back. The bezier handles shown while selected allow fine adjustment.
+     */
+    fun tapKeyframe(clipId: String, keyframeId: String) {
+        mutateDocument { doc ->
+            doc.copy(clips = doc.clips.map { c ->
+                if (c.id != clipId) c
+                else c.copy(keyframes = c.keyframes.map { kf ->
+                    if (kf.id != keyframeId) kf else kf.copy(easing = toggledEase(kf.easing))
+                })
+            })
+        }
+        _uiState.update { it.copy(selectedKeyframeId = keyframeId) }
+    }
+
+    private fun toggledEase(e: com.hereliesaz.guillotine.model.CubicBezier): com.hereliesaz.guillotine.model.CubicBezier =
+        if (e.x1 == 0f && e.y1 == 0f && e.x2 == 1f && e.y2 == 1f) {
+            com.hereliesaz.guillotine.model.CubicBezier() // linear -> smooth ease
+        } else {
+            com.hereliesaz.guillotine.model.CubicBezier(0f, 0f, 1f, 1f) // anything -> linear
+        }
+
     fun removeKeyframe(clipId: String, keyframeId: String) {
         mutateDocument { doc ->
             doc.copy(clips = doc.clips.map { clip ->
@@ -630,7 +657,7 @@ class EditorViewModel : ViewModel() {
         _uiState.update { it.copy(selectedClipIds = expandGroups(doc, ids)) }
     }
 
-    fun clearSelection() = _uiState.update { it.copy(selectedClipIds = emptyList()) }
+    fun clearSelection() = _uiState.update { it.copy(selectedClipIds = emptyList(), selectedKeyframeId = null) }
 
     /** Replace the whole document (used by project load); resets history. */
     fun loadDocument(doc: Document) {

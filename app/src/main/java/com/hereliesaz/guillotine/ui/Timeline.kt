@@ -62,6 +62,7 @@ import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.media.MediaPreview
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.EditAction
+import com.hereliesaz.guillotine.model.Keyframe
 import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.ui.theme.Neutral300
@@ -363,6 +364,7 @@ private fun ClipView(
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val media = state.document.mediaFor(clip)
+    val selectedKf = clip.keyframes.firstOrNull { it.id == state.selectedKeyframeId }
     var dragPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var dragPy by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimStartPx by remember(clip.id) { mutableFloatStateOf(0f) }
@@ -386,13 +388,22 @@ private fun ClipView(
             .border(1.dp, if (selected) Red500 else Neutral700, RoundedCornerShape(4.dp))
             // Tap: select, or split when split tool is active. Long-press: range-select
             // from the current selection to this clip (across tracks, all clips between).
-            .pointerInput(clip.id, state.tool, pps) {
+            .pointerInput(clip.id, state.tool, pps, clip.keyframes) {
                 detectTapGestures(
                     onLongPress = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         vm.selectRangeTo(clip.id)
                     },
-                    onTap = { offset ->
+                    onTap = onTap@{ offset ->
+                        // Tap a keyframe diamond: select it + toggle its ease.
+                        val h = size.height.toFloat()
+                        val hitKf = clip.keyframes
+                            .minByOrNull { (keyframePos(it, pps, h) - offset).getDistance() }
+                            ?.takeIf { (keyframePos(it, pps, h) - offset).getDistance() < 24f }
+                        if (hitKf != null) {
+                            vm.tapKeyframe(clip.id, hitKf.id)
+                            return@onTap
+                        }
                         val tappedMs = clip.startTimeMs + (offset.x / pps * 1000f).toLong()
                         when (state.tool) {
                             EditorTool.SPLIT -> vm.splitClip(clip.id, tappedMs)
@@ -404,6 +415,7 @@ private fun ClipView(
                             }
                             else -> {
                                 // Move the playhead to the tapped point, and select the clip.
+                                vm.selectKeyframe(null)
                                 vm.seekTo(tappedMs)
                                 vm.selectClip(clip.id)
                             }
@@ -412,8 +424,9 @@ private fun ClipView(
                 )
             }
             // Drag to move: horizontally on the timeline, vertically across same-type tracks.
-            .pointerInput(clip.id, state.tool, pps, sameTypeTracks) {
-                if (state.tool == EditorTool.SELECT) {
+            // Disabled while a keyframe of this clip is selected (drag then edits the ease).
+            .pointerInput(clip.id, state.tool, pps, sameTypeTracks, state.selectedKeyframeId) {
+                if (state.tool == EditorTool.SELECT && selectedKf == null) {
                     detectDragGestures(
                         onDragStart = { dragPx = 0f; dragPy = 0f },
                         onDragEnd = {
@@ -429,6 +442,38 @@ private fun ClipView(
                         onDrag = { change, drag -> change.consume(); dragPx += drag.x; dragPy += drag.y },
                     )
                 }
+            }
+            // With a keyframe selected, dragging adjusts its nearest bezier ease handle.
+            .pointerInput(clip.id, state.selectedKeyframeId, pps) {
+                val sel = clip.keyframes.firstOrNull { it.id == state.selectedKeyframeId } ?: return@pointerInput
+                val next = nextKeyframe(clip, sel) ?: return@pointerInput
+                val h = size.height.toFloat()
+                var which = 1
+                detectDragGestures(
+                    onDragStart = { start ->
+                        val a = keyframePos(sel, pps, h)
+                        val b = keyframePos(next, pps, h)
+                        val h1 = Offset(a.x + sel.easing.x1 * (b.x - a.x), a.y + sel.easing.y1 * (b.y - a.y))
+                        val h2 = Offset(a.x + sel.easing.x2 * (b.x - a.x), a.y + sel.easing.y2 * (b.y - a.y))
+                        which = if ((start - h1).getDistance() <= (start - h2).getDistance()) 1 else 2
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val a = keyframePos(sel, pps, h)
+                        val b = keyframePos(next, pps, h)
+                        val dx = b.x - a.x
+                        val dy = b.y - a.y
+                        val nx = if (dx != 0f) ((change.position.x - a.x) / dx).coerceIn(0f, 1f) else 0f
+                        val ny = if (dy != 0f) ((change.position.y - a.y) / dy).coerceIn(-0.5f, 1.5f)
+                        else (if (which == 1) sel.easing.y1 else sel.easing.y2)
+                        vm.updateKeyframe(clip.id, sel.id) { kf ->
+                            kf.copy(
+                                easing = if (which == 1) kf.easing.copy(x1 = nx, y1 = ny)
+                                else kf.easing.copy(x2 = nx, y2 = ny),
+                            )
+                        }
+                    },
+                )
             },
     ) {
         // On-device preview behind everything: thumbnail for video/image, waveform for audio.
@@ -511,6 +556,21 @@ private fun ClipView(
                         drawPath(path, color)
                     }
                 }
+                // Bezier ease handles for the selected keyframe (drawn over the envelope).
+                if (selectedKf != null) {
+                    val next = nextKeyframe(clip, selectedKf)
+                    if (next != null) {
+                        val a = keyframePos(selectedKf, pps, size.height)
+                        val b = keyframePos(next, pps, size.height)
+                        val h1 = Offset(a.x + selectedKf.easing.x1 * (b.x - a.x), a.y + selectedKf.easing.y1 * (b.y - a.y))
+                        val h2 = Offset(a.x + selectedKf.easing.x2 * (b.x - a.x), a.y + selectedKf.easing.y2 * (b.y - a.y))
+                        drawLine(Red500, a, h1, strokeWidth = 1.5f)
+                        drawLine(Red500, b, h2, strokeWidth = 1.5f)
+                        drawCircle(White, radius = 5f, center = a)
+                        drawCircle(Red500, radius = 6f, center = h1)
+                        drawCircle(Red500, radius = 6f, center = h2)
+                    }
+                }
             }
         }
 
@@ -548,6 +608,23 @@ private fun ClipView(
             )
         }
     }
+}
+
+/** Canvas position of a keyframe: x by time, y by value (higher value = higher on the clip). */
+private fun keyframePos(kf: Keyframe, pps: Float, heightPx: Float): Offset {
+    val hi = when (kf.property) {
+        KeyframeProperty.OPACITY -> 1f
+        KeyframeProperty.SCALE -> 3f
+        KeyframeProperty.VOLUME -> 2f
+    }
+    val norm = (kf.value / hi).coerceIn(0f, 1f)
+    return Offset(kf.timeMs / 1000f * pps, heightPx * (1f - norm))
+}
+
+/** The next keyframe of the same property (its easing segment runs from [kf] to this). */
+private fun nextKeyframe(clip: TimelineClip, kf: Keyframe): Keyframe? {
+    val sameProp = clip.keyframes.filter { it.property == kf.property }.sortedBy { it.timeMs }
+    return sameProp.getOrNull(sameProp.indexOf(kf) + 1)
 }
 
 /** Video/image clip background: a downscaled, dimmed thumbnail (loaded on-device, async). */
