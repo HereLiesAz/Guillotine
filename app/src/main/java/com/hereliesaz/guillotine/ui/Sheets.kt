@@ -71,6 +71,7 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
     var keys by remember { mutableStateOf(current.keys) }
     var models by remember { mutableStateOf(current.models) }
     var fooocusUrl by remember { mutableStateOf(current.fooocusUrl) }
+    var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
     val uriHandler = LocalUriHandler.current
     Dialog(onDismissRequest = onDismiss) {
         SheetCard {
@@ -134,9 +135,26 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
                 )
             }
 
+            // On-device speech-to-text (optional Vosk model directory).
+            Text("Transcription", color = Neutral400, fontSize = 12.sp)
+            OutlinedTextField(
+                value = speechModelPath,
+                onValueChange = { speechModelPath = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("On-device speech model path (Vosk)", color = Neutral500, fontSize = 12.sp) },
+                textStyle = TextStyle(color = White, fontSize = 12.sp),
+                singleLine = true,
+            )
+            Text("Set a Vosk model folder for offline transcription; blank uses OpenAI Whisper.", color = Neutral500, fontSize = 10.sp)
+            Text(
+                "Download a Vosk model  ↗",
+                color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickableText { uriHandler.openUri("https://alphacephei.com/vosk/models") },
+            )
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button(
-                    onClick = { onSave(AiSettings(provider, keys, models, fooocusUrl.trim())) },
+                    onClick = { onSave(AiSettings(provider, keys, models, fooocusUrl.trim(), speechModelPath.trim())) },
                     colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Color.Black),
                 ) { Text("Save", fontSize = 12.sp, fontWeight = FontWeight.Medium) }
             }

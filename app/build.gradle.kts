@@ -106,6 +106,9 @@ dependencies {
     implementation(libs.mlkit.image.labeling)
     implementation(libs.mlkit.face.detection)
     implementation(libs.mlkit.segmentation.selfie)
+
+    // On-device speech-to-text (BYO model) for transcription/captions.
+    implementation(libs.vosk.android)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 

@@ -21,9 +21,13 @@ data class TranscriptCue(val startMs: Long, val endMs: Long, val text: String)
 object Transcription {
 
     suspend fun transcribe(context: Context, settings: AiSettings, uri: Uri): List<TranscriptCue> {
+        // Prefer on-device Vosk when a model is configured; otherwise cloud Whisper (BYO key).
+        if (settings.speechModelPath.isNotBlank()) {
+            return VoskTranscriber.transcribe(context, settings.speechModelPath, uri.toString())
+        }
         val key = settings.keyFor(AiProviderType.OPENAI)
         require(key.isNotBlank()) {
-            "Transcription needs an OpenAI key (Settings → OpenAI). On-device speech is on the roadmap."
+            "Transcription needs an on-device speech model (Settings) or an OpenAI key."
         }
         return whisper(context, key, uri)
     }

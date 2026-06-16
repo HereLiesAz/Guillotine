@@ -24,6 +24,7 @@ coreSplashscreen = "1.0.1"
 mlkitImageLabeling = "17.0.9"
 mlkitFaceDetection = "16.1.7"
 mlkitSelfieSegmentation = "16.0.0-beta6"
+vosk = "0.3.47"
 junit = "4.13.2"
 
 [libraries]
@@ -51,6 +52,7 @@ androidx-security-crypto = { group = "androidx.security", name = "security-crypt
 mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", version.ref = "mlkitImageLabeling" }
 mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFaceDetection" }
 mlkit-segmentation-selfie = { group = "com.google.mlkit", name = "segmentation-selfie", version.ref = "mlkitSelfieSegmentation" }
+vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

@@ -102,6 +102,8 @@ data class AiSettings(
     val models: Map<AiProviderType, String> = emptyMap(),
     /** Optional self-hosted Fooocus-API base URL for image generation (else free Pollinations). */
     val fooocusUrl: String = "",
+    /** Optional on-device Vosk speech model directory (else cloud Whisper for transcription). */
+    val speechModelPath: String = "",
 ) {
     fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
     /** The effective model id for [p]: the user's override if set, else the code default. */
@@ -143,6 +145,7 @@ class ApiKeyStore(context: Context) {
         models = byoProviders.associateWith { prefs.getString(modelPref(it), "").orEmpty() }
             .filterValues { it.isNotEmpty() },
         fooocusUrl = prefs.getString(KEY_FOOOCUS, "").orEmpty(),
+        speechModelPath = prefs.getString(KEY_SPEECH, "").orEmpty(),
     )
 
     suspend fun save(settings: AiSettings) {
@@ -154,6 +157,7 @@ class ApiKeyStore(context: Context) {
                     putString(modelPref(it), settings.models[it].orEmpty())
                 }
                 putString(KEY_FOOOCUS, settings.fooocusUrl)
+                putString(KEY_SPEECH, settings.speechModelPath)
             }.apply()
         }
         _settings.value = settings
@@ -162,6 +166,7 @@ class ApiKeyStore(context: Context) {
     private companion object {
         const val KEY_PROVIDER = "ai_provider"
         const val KEY_FOOOCUS = "fooocus_url"
+        const val KEY_SPEECH = "speech_model_path"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"
     }
