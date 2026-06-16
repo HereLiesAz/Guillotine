@@ -62,6 +62,7 @@ import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.media.MediaPreview
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.EditAction
+import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.ui.theme.Neutral300
 import com.hereliesaz.guillotine.ui.theme.Neutral400
@@ -366,13 +367,20 @@ private fun ClipView(
                         vm.selectRangeTo(clip.id)
                     },
                     onTap = { offset ->
-                        val relMs = (offset.x / pps * 1000f).toLong()
-                        if (state.tool == EditorTool.SPLIT) {
-                            vm.splitClip(clip.id, clip.startTimeMs + relMs)
-                        } else {
-                            // Move the playhead to the tapped point, and select the clip.
-                            vm.seekTo(clip.startTimeMs + relMs)
-                            vm.selectClip(clip.id)
+                        val tappedMs = clip.startTimeMs + (offset.x / pps * 1000f).toLong()
+                        when (state.tool) {
+                            EditorTool.SPLIT -> vm.splitClip(clip.id, tappedMs)
+                            EditorTool.KEYFRAME -> {
+                                // Keyframe tool: drop a keyframe at the tapped point.
+                                vm.seekTo(tappedMs)
+                                vm.selectClip(clip.id)
+                                vm.addKeyframe(clip.id, KeyframeProperty.OPACITY)
+                            }
+                            else -> {
+                                // Move the playhead to the tapped point, and select the clip.
+                                vm.seekTo(tappedMs)
+                                vm.selectClip(clip.id)
+                            }
                         }
                     },
                 )

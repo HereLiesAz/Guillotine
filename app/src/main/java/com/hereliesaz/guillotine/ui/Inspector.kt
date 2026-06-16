@@ -50,6 +50,7 @@ import com.hereliesaz.guillotine.media.SubjectSegmenter
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.KeyframeProperty
+import com.hereliesaz.guillotine.model.TextFont
 import com.hereliesaz.guillotine.ui.theme.Neutral400
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral800
@@ -97,7 +98,7 @@ private fun BatchSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: (
 private fun ClipSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: () -> Unit, onTranscribe: () -> Unit) {
     val clip = state.selectedClips.first()
 
-    // Text/caption clips just edit their text.
+    // Text/caption clips: edit content + typeface (size/placement is done with the crop tool).
     if (clip.type == ClipType.TEXT) {
         SectionTitle("Text")
         OutlinedTextField(
@@ -108,6 +109,13 @@ private fun ClipSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: ()
             textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
             minLines = 2,
         )
+        Text("Font", color = Neutral400, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextFont.values().forEach { f ->
+                Chip(label = f.label(), selected = clip.font == f) { vm.setClipFont(clip.id, f) }
+            }
+        }
+        Text("Size & placement: use the crop tool on the preview.", color = Neutral500, fontSize = 10.sp)
         return
     }
 

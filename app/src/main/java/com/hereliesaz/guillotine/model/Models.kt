@@ -17,6 +17,10 @@ enum class ClipType { VIDEO, AUDIO, TEXT }
 @Serializable
 enum class KeyframeProperty { OPACITY, SCALE, VOLUME }
 
+/** Typeface for [ClipType.TEXT] clips. Mapped to a Compose FontFamily in the UI layer. */
+@Serializable
+enum class TextFont { SANS, SERIF, MONO, CURSIVE }
+
 @Serializable
 enum class EditAction { KEEP, REMOVE }
 
@@ -104,6 +108,8 @@ data class TimelineClip(
     val groupId: String? = null,
     /** Caption/title text for [ClipType.TEXT] clips (empty for video/audio). */
     val text: String = "",
+    /** Typeface for text clips. */
+    val font: TextFont = TextFont.SANS,
 ) {
     val endTimeMs: Long get() = startTimeMs + durationMs
 }

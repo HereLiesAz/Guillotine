@@ -181,6 +181,7 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
                         t.text,
                         color = White.copy(alpha = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)),
                         fontSize = 14.sp,
+                        fontFamily = t.font.fontFamily(),
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .background(Color.Black.copy(alpha = 0.55f))

@@ -361,6 +361,10 @@ class EditorViewModel : ViewModel() {
     /** Edit the caption text of a [ClipType.TEXT] clip. */
     fun setClipText(clipId: String, text: String) = updateClip(clipId) { it.copy(text = text) }
 
+    /** Set the typeface of a [ClipType.TEXT] clip. */
+    fun setClipFont(clipId: String, font: com.hereliesaz.guillotine.model.TextFont) =
+        updateClip(clipId) { it.copy(font = font) }
+
     // ---- whole-track settings ----------------------------------------------
 
     fun updateTrackSettings(trackId: String, transform: (com.hereliesaz.guillotine.model.TrackSettings) -> com.hereliesaz.guillotine.model.TrackSettings) {

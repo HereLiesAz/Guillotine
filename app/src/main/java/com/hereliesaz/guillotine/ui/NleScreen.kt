@@ -97,7 +97,6 @@ import com.hereliesaz.guillotine.media.rememberMediaImportLauncher
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.MediaItem
-import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.model.newId
@@ -449,8 +448,8 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.ContentCut, "Split", active = state.tool == EditorTool.SPLIT) {
                 vm.setTool(EditorTool.SPLIT)
             }
-            IconToolButton(Icons.Filled.Diamond, "Add keyframe", enabled = selected.size == 1) {
-                selected.firstOrNull()?.let { vm.addKeyframe(it.id, KeyframeProperty.OPACITY) }
+            IconToolButton(Icons.Filled.Diamond, "Keyframe tool", active = state.tool == EditorTool.KEYFRAME) {
+                vm.setTool(EditorTool.KEYFRAME)
             }
             IconToolButton(Icons.Filled.Add, "Add track") {
                 vm.addTrack(selected.singleOrNull()?.type ?: ClipType.VIDEO)
