@@ -30,10 +30,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -202,6 +204,7 @@ private fun ClipView(
 ) {
     val selected = clip.id in state.selectedClipIds
     val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
     var dragPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var dragPy by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimStartPx by remember(clip.id) { mutableFloatStateOf(0f) }
@@ -219,16 +222,23 @@ private fun ClipView(
             .clip(RoundedCornerShape(4.dp))
             .background(if (selected) Red500.copy(alpha = 0.22f) else Neutral800)
             .border(1.dp, if (selected) Red500 else Neutral700, RoundedCornerShape(4.dp))
-            // Tap: select, or split when split tool is active.
+            // Tap: select, or split when split tool is active. Long-press: range-select
+            // from the current selection to this clip (across tracks, all clips between).
             .pointerInput(clip.id, state.tool, pps) {
-                detectTapGestures { offset ->
-                    if (state.tool == EditorTool.SPLIT) {
-                        val relMs = (offset.x / pps * 1000f).toLong()
-                        vm.splitClip(clip.id, clip.startTimeMs + relMs)
-                    } else {
-                        vm.selectClip(clip.id)
-                    }
-                }
+                detectTapGestures(
+                    onLongPress = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        vm.selectRangeTo(clip.id)
+                    },
+                    onTap = { offset ->
+                        if (state.tool == EditorTool.SPLIT) {
+                            val relMs = (offset.x / pps * 1000f).toLong()
+                            vm.splitClip(clip.id, clip.startTimeMs + relMs)
+                        } else {
+                            vm.selectClip(clip.id)
+                        }
+                    },
+                )
             }
             // Drag to move: horizontally on the timeline, vertically across same-type tracks.
             .pointerInput(clip.id, state.tool, pps, sameTypeTracks) {

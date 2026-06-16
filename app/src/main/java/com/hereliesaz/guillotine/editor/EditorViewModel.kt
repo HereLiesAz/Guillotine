@@ -177,6 +177,30 @@ class EditorViewModel : ViewModel() {
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
     }
 
+    /** Bind every selected clip into one group (they then select/delete/edit together). */
+    fun groupSelected() {
+        val ids = _uiState.value.selectedClipIds.toSet()
+        if (ids.size < 2) return
+        val gid = newId()
+        mutateDocument { doc -> doc.copy(clips = doc.clips.map { if (it.id in ids) it.copy(groupId = gid) else it }) }
+    }
+
+    /** Clear grouping on the selected clips. */
+    fun ungroupSelected() {
+        val ids = _uiState.value.selectedClipIds.toSet()
+        if (ids.isEmpty()) return
+        mutateDocument { doc -> doc.copy(clips = doc.clips.map { if (it.id in ids && it.groupId != null) it.copy(groupId = null) else it }) }
+    }
+
+    /** Grow an id set so that selecting any grouped clip pulls in the rest of its group. */
+    private fun expandGroups(doc: Document, ids: Collection<String>): List<String> {
+        val groupIds = doc.clips.filter { it.id in ids }.mapNotNull { it.groupId }.toSet()
+        if (groupIds.isEmpty()) return ids.toList()
+        val expanded = LinkedHashSet(ids)
+        doc.clips.forEach { if (it.groupId != null && it.groupId in groupIds) expanded.add(it.id) }
+        return expanded.toList()
+    }
+
     /**
      * Split [clipId] at the current playhead. Keyframes are partitioned and the
      * second half's keyframe times are re-based; edits are source-absolute and so
@@ -403,8 +427,43 @@ class EditorViewModel : ViewModel() {
                 additive -> st.selectedClipIds + id
                 else -> listOf(id)
             }
-            st.copy(selectedClipIds = next)
+            // Deselecting (additive removal) shouldn't pull the group back in.
+            val resolved = if (additive && id != null && id !in next) next else expandGroups(st.document, next)
+            st.copy(selectedClipIds = resolved)
         }
+    }
+
+    /**
+     * Range-select from the current selection (the anchor) to [targetClipId]: selects
+     * both clips plus every clip that overlaps the covered time span AND sits on a
+     * track between them. Track order follows the timeline layout (video tracks above
+     * audio tracks), so the range can span from one track to another — including every
+     * track in between. With nothing selected yet, this just selects the target.
+     */
+    fun selectRangeTo(targetClipId: String) {
+        val doc = document
+        val target = doc.clips.firstOrNull { it.id == targetClipId } ?: return
+        val anchors = _uiState.value.selectedClips
+        if (anchors.isEmpty()) {
+            selectClip(targetClipId)
+            return
+        }
+        val involved = anchors + target
+        val timeStart = involved.minOf { it.startTimeMs }
+        val timeEnd = involved.maxOf { it.endTimeMs }
+
+        val orderedTracks = doc.videoTracks + doc.audioTracks
+        val indices = involved.mapNotNull { c -> orderedTracks.indexOf(c.trackId).takeIf { i -> i >= 0 } }
+        if (indices.isEmpty()) {
+            selectClip(targetClipId)
+            return
+        }
+        val tracksInRange = orderedTracks.subList(indices.min(), indices.max() + 1).toSet()
+
+        val ids = doc.clips
+            .filter { c -> c.trackId in tracksInRange && c.startTimeMs < timeEnd && c.endTimeMs > timeStart }
+            .map { it.id }
+        _uiState.update { it.copy(selectedClipIds = expandGroups(doc, ids)) }
     }
 
     fun clearSelection() = _uiState.update { it.copy(selectedClipIds = emptyList()) }

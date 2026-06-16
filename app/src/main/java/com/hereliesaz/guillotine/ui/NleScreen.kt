@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PlayArrow
@@ -405,6 +407,15 @@ private fun EditorToolStrip(
             }
             IconToolButton(Icons.Filled.ZoomOut, "Zoom out") { vm.setZoom(state.pixelsPerSecond * 0.8f) }
             IconToolButton(Icons.Filled.ZoomIn, "Zoom in") { vm.setZoom(state.pixelsPerSecond * 1.25f) }
+            // Group / ungroup — only meaningful with a multi-clip selection.
+            if (selected.size > 1) {
+                val grouped = selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null }
+                IconToolButton(
+                    if (grouped) Icons.Filled.LinkOff else Icons.Filled.Link,
+                    if (grouped) "Ungroup" else "Group",
+                    active = grouped,
+                ) { if (grouped) vm.ungroupSelected() else vm.groupSelected() }
+            }
         }
         Row(
             Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),

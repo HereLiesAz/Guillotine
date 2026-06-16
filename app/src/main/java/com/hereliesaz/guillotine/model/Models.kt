@@ -98,6 +98,8 @@ data class TimelineClip(
     val filters: ClipFilters = ClipFilters(),
     val isAnalyzing: Boolean = false,
     val error: String? = null,
+    /** Clips sharing a non-null [groupId] select/move/delete together. */
+    val groupId: String? = null,
 ) {
     val endTimeMs: Long get() = startTimeMs + durationMs
 }
