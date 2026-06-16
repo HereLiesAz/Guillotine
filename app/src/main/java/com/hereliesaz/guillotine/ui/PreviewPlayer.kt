@@ -3,6 +3,7 @@
 package com.hereliesaz.guillotine.ui
 
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -18,14 +19,18 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -39,6 +44,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.hereliesaz.guillotine.editor.EditorUiState
+import com.hereliesaz.guillotine.media.SubjectSegmenter
 import com.hereliesaz.guillotine.media.VideoEffects
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipType
@@ -86,8 +92,15 @@ fun PreviewPlayer(
     val now = state.currentTimeMs
     // Disabled/hidden tracks drop out entirely.
     val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
-    // Layer-aware: the topmost track wins for the picture/sound; text clips overlay on top.
-    val activeVideo = TimelineMath.topActiveClip(clips, ClipType.VIDEO, now, state.document.videoTracks)
+    // Layer-aware compositing: the player shows the topmost non-removed (background) video;
+    // a background-removed clip above it is overlaid as a matted cutout so the background
+    // shows through. With no background, the removed clip just plays normally.
+    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+        .sortedBy { state.document.videoTracks.indexOf(it.trackId).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+    val foregroundClip = activeVideoClips.firstOrNull { it.filters.removeBackground }
+    val backgroundClip = activeVideoClips.firstOrNull { !it.filters.removeBackground }
+    val activeVideo = backgroundClip ?: foregroundClip
+    val overlayClip = if (backgroundClip != null && foregroundClip != null) foregroundClip else null
     val activeAudio = TimelineMath.topActiveClip(clips, ClipType.AUDIO, now, state.document.audioTracks)
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val videoTrack = activeVideo?.let { state.document.trackSettingsFor(it.trackId) }
@@ -203,6 +216,32 @@ fun PreviewPlayer(
                         translationY = (activeVideo?.offsetY ?: 0f) * size.height
                     },
             )
+        }
+        // Background-removed foreground composited over the background video. The matte is
+        // computed on-device per ~150 ms bucket (crisp when paused, frame-coarse while playing).
+        val fgMedia = overlayClip?.let { state.document.mediaFor(it) }
+        if (overlayClip != null && fgMedia != null) {
+            val bucket = now / 150L
+            val cutout by produceState<ImageBitmap?>(null, overlayClip.id, bucket) {
+                val src = TimelineMath.sourceTimeMs(overlayClip, now).coerceAtLeast(0)
+                value = SubjectSegmenter.cutout(context, fgMedia.uri, fgMedia.kind, src)?.asImageBitmap()
+            }
+            cutout?.let { cb ->
+                Image(
+                    bitmap = cb,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = aspectMod
+                        .wrapContentSize()
+                        .graphicsLayer {
+                            val s = overlayClip.scale.coerceAtLeast(0f)
+                            scaleX = s
+                            scaleY = s
+                            translationX = overlayClip.offsetX * size.width
+                            translationY = overlayClip.offsetY * size.height
+                        },
+                )
+            }
         }
         // Caption/text overlay — each text clip positioned/scaled by its crop transform
         // (offset from center as a fraction of the frame), rendered on top of the video.
