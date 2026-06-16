@@ -39,11 +39,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
-import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.KeyframeProperty
-import com.hereliesaz.guillotine.model.Quality
 import com.hereliesaz.guillotine.ui.theme.Neutral400
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral800
@@ -65,7 +63,7 @@ fun Inspector(vm: EditorViewModel, state: EditorUiState, onAnalyze: () -> Unit, 
         when {
             selected.size > 1 -> BatchSection(vm, state, onAnalyze)
             selected.size == 1 -> ClipSection(vm, state, onAnalyze)
-            else -> GlobalSection(vm, state)
+            else -> EmptyHint()
         }
     }
 }
@@ -121,27 +119,13 @@ private fun ClipSection(vm: EditorViewModel, state: EditorUiState, onAnalyze: ()
 }
 
 @Composable
-private fun GlobalSection(vm: EditorViewModel, state: EditorUiState) {
-    SectionTitle("Global settings")
-    val s = state.document.settings
-
-    Text("Aspect ratio", color = Neutral400, fontSize = 12.sp)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AspectRatio.values().forEach { ar ->
-            Chip(label = ar.label(), selected = s.aspectRatio == ar) {
-                vm.setGlobalSettings(s.copy(aspectRatio = ar))
-            }
-        }
-    }
-
-    Text("Quality", color = Neutral400, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Quality.values().forEach { q ->
-            Chip(label = q.label(), selected = s.quality == q) {
-                vm.setGlobalSettings(s.copy(quality = q))
-            }
-        }
-    }
+private fun EmptyHint() {
+    SectionTitle("Nothing selected")
+    Text(
+        "Select a clip to edit it. Project-wide options (aspect ratio, quality) live in the " +
+            "▸ menu under “Project settings”.",
+        color = Neutral500, fontSize = 12.sp,
+    )
 }
 
 @Composable
@@ -303,16 +287,3 @@ private fun PresetRow(vm: EditorViewModel) {
     }
 }
 
-private fun AspectRatio.label() = when (this) {
-    AspectRatio.RATIO_16_9 -> "16:9"
-    AspectRatio.RATIO_9_16 -> "9:16"
-    AspectRatio.RATIO_1_1 -> "1:1"
-    AspectRatio.ORIGINAL -> "Original"
-}
-
-private fun Quality.label() = when (this) {
-    Quality.ORIGINAL -> "Original"
-    Quality.UHD_4K -> "4K"
-    Quality.FHD_1080P -> "1080p"
-    Quality.HD_720P -> "720p"
-}

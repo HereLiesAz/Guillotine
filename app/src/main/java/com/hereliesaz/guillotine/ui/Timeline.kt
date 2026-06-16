@@ -16,19 +16,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.NearMe
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -67,50 +58,15 @@ private val TRACK_HEIGHT = 64.dp
 private val HEADER_WIDTH = 56.dp
 private val RULER_HEIGHT = 24.dp
 
-/** Full timeline panel: toolbar + scrollable multi-track lanes with playhead. */
+/**
+ * Full timeline panel: scrollable multi-track lanes with playhead. The editing
+ * tools (select/split/zoom/etc.) and the AI prompt live in the shared
+ * [EditorToolStrip] so they are available in both the compact and wide layouts.
+ */
 @Composable
-fun TimelinePanel(vm: EditorViewModel, state: EditorUiState, onOpenAi: () -> Unit, modifier: Modifier = Modifier) {
+fun TimelinePanel(vm: EditorViewModel, state: EditorUiState, modifier: Modifier = Modifier) {
     Column(modifier = modifier.background(Neutral900)) {
-        TimelineToolbar(vm, state, onOpenAi)
         TimelineLanes(vm, state, modifier = Modifier.fillMaxSize())
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun TimelineToolbar(vm: EditorViewModel, state: EditorUiState, onOpenAi: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .background(Neutral950)
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "V ${state.document.videoTracks.size}  A ${state.document.audioTracks.size}",
-            color = Neutral500, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-        )
-        Box(Modifier.weight(1f))
-        ToolbarButton("AI", tint = Red500, onClick = onOpenAi)
-        IconToolButton(Icons.Filled.Add, "Add track") {
-            val t = state.selectedClips.singleOrNull()?.type ?: ClipType.VIDEO
-            vm.addTrack(t)
-        }
-        // Expressive M3 toggle buttons for the active tool.
-        ToggleButton(
-            checked = state.tool == EditorTool.SELECT,
-            onCheckedChange = { if (it) vm.setTool(EditorTool.SELECT) },
-            modifier = Modifier.padding(horizontal = 2.dp),
-        ) { Icon(Icons.Filled.NearMe, contentDescription = "Select", modifier = Modifier.size(18.dp)) }
-        ToggleButton(
-            checked = state.tool == EditorTool.SPLIT,
-            onCheckedChange = { if (it) vm.setTool(EditorTool.SPLIT) },
-            modifier = Modifier.padding(horizontal = 2.dp),
-        ) { Icon(Icons.Filled.ContentCut, contentDescription = "Split", modifier = Modifier.size(18.dp)) }
-        IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
-            vm.deleteSelected()
-        }
     }
 }
 

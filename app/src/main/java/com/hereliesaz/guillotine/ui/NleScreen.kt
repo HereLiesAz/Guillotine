@@ -4,6 +4,8 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,17 +19,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
@@ -66,6 +75,7 @@ import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
 import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
+import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.export.Exporter
@@ -74,11 +84,13 @@ import com.hereliesaz.guillotine.media.rememberMediaImportLauncher
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.MediaItem
+import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.model.newId
 import com.hereliesaz.guillotine.ui.theme.Black
 import com.hereliesaz.guillotine.ui.theme.Neutral400
+import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral900
 import com.hereliesaz.guillotine.ui.theme.Neutral950
@@ -99,6 +111,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
 
     var showSettings by remember { mutableStateOf(false) }
+    var showProjectSettings by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
@@ -168,6 +181,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onLoad = openLauncher,
             onExport = { exportDone = null; exportError = null; showExport = true },
             onSettings = { showSettings = true },
+            onProjectSettings = { showProjectSettings = true },
         )
 
         if (widthClass == WindowWidthSizeClass.Expanded) {
@@ -178,14 +192,15 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     TransportControls(vm, state)
                 }
             }
-            TimelinePanel(vm, state, onOpenAi = { showGenerate = true }, modifier = Modifier.weight(0.4f).fillMaxWidth())
+            EditorToolStrip(vm, state, onAnalyze, onGenerate = { showGenerate = true })
+            TimelinePanel(vm, state, modifier = Modifier.weight(0.4f).fillMaxWidth())
         } else {
             PreviewPlayer(state, Modifier.weight(0.42f).fillMaxWidth())
             TransportControls(vm, state)
             var tab by remember { mutableIntStateOf(0) }
-            CompactTabs(tab) { tab = it }
+            CompactToolBar(vm, state, tab, { tab = it }, onAnalyze, onGenerate = { showGenerate = true })
             Box(Modifier.weight(0.58f).fillMaxWidth()) {
-                if (tab == 0) TimelinePanel(vm, state, onOpenAi = { showGenerate = true }, modifier = Modifier.fillMaxSize())
+                if (tab == 0) TimelinePanel(vm, state, modifier = Modifier.fillMaxSize())
                 else Inspector(vm, state, onAnalyze, Modifier.fillMaxSize())
             }
         }
@@ -199,6 +214,13 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 showSettings = false
             },
             onDismiss = { showSettings = false },
+        )
+    }
+    if (showProjectSettings) {
+        ProjectSettingsSheet(
+            current = state.document.settings,
+            onChange = { vm.setGlobalSettings(it) },
+            onDismiss = { showProjectSettings = false },
         )
     }
     if (showGenerate) {
@@ -246,6 +268,7 @@ private fun TopBar(
     onLoad: () -> Unit,
     onExport: () -> Unit,
     onSettings: () -> Unit,
+    onProjectSettings: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Row(
@@ -266,6 +289,7 @@ private fun TopBar(
                 MenuRow("Save project") { menuOpen = false; onSave() }
                 MenuRow("Load project") { menuOpen = false; onLoad() }
                 MenuRow("Export video") { menuOpen = false; onExport() }
+                MenuRow("Project settings") { menuOpen = false; onProjectSettings() }
                 MenuRow("Settings") { menuOpen = false; onSettings() }
             }
         }
@@ -307,21 +331,103 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
     }
 }
 
+/**
+ * Compact (phone) bottom bar: the Timeline/Inspector tab switch stacked on top of
+ * the shared [EditorToolStrip] (tools + AI prompt). The whole bar grows in height as
+ * the multiline prompt wraps.
+ */
 @Composable
-private fun CompactTabs(selected: Int, onSelect: (Int) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Neutral900), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-        listOf("Timeline", "Inspector").forEachIndexed { i, label ->
-            Text(
-                label,
-                color = if (selected == i) White else Neutral400,
-                fontSize = 12.sp,
-                fontWeight = if (selected == i) FontWeight.Medium else FontWeight.Normal,
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { onSelect(i) }
-                    .background(if (selected == i) Neutral800 else Neutral900)
-                    .padding(vertical = 10.dp),
+private fun CompactToolBar(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    selectedTab: Int,
+    onSelectTab: (Int) -> Unit,
+    onAnalyze: () -> Unit,
+    onGenerate: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().background(Neutral900)) {
+        Row(Modifier.fillMaxWidth()) {
+            listOf("Timeline", "Inspector").forEachIndexed { i, label ->
+                Text(
+                    label,
+                    color = if (selectedTab == i) White else Neutral400,
+                    fontSize = 12.sp,
+                    fontWeight = if (selectedTab == i) FontWeight.Medium else FontWeight.Normal,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelectTab(i) }
+                        .background(if (selectedTab == i) Neutral800 else Neutral900)
+                        .padding(vertical = 10.dp),
+                )
+            }
+        }
+        EditorToolStrip(vm, state, onAnalyze, onGenerate)
+    }
+}
+
+/**
+ * Shared editor tool strip used by both layouts: a horizontally-scrollable row of
+ * tools (mirroring the web build — select, split, keyframe, add-track, delete, zoom)
+ * and an AI prompt box. The prompt box grows up to several lines, so the strip's
+ * height expands with multiline input. With a clip selected the box edits that clip's
+ * prompt and the AI button runs the analyzer; with nothing selected AI opens Generate.
+ */
+@Composable
+private fun EditorToolStrip(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    onAnalyze: () -> Unit,
+    onGenerate: () -> Unit,
+) {
+    val selected = state.selectedClips
+    Column(Modifier.fillMaxWidth().background(Neutral900)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
+                vm.setTool(EditorTool.SELECT)
+            }
+            IconToolButton(Icons.Filled.ContentCut, "Split", active = state.tool == EditorTool.SPLIT) {
+                vm.setTool(EditorTool.SPLIT)
+            }
+            IconToolButton(Icons.Filled.Diamond, "Add keyframe", enabled = selected.size == 1) {
+                selected.firstOrNull()?.let { vm.addKeyframe(it.id, KeyframeProperty.OPACITY) }
+            }
+            IconToolButton(Icons.Filled.Add, "Add track") {
+                vm.addTrack(selected.singleOrNull()?.type ?: ClipType.VIDEO)
+            }
+            IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
+                vm.deleteSelected()
+            }
+            IconToolButton(Icons.Filled.ZoomOut, "Zoom out") { vm.setZoom(state.pixelsPerSecond * 0.8f) }
+            IconToolButton(Icons.Filled.ZoomIn, "Zoom in") { vm.setZoom(state.pixelsPerSecond * 1.25f) }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = selected.firstOrNull()?.prompt ?: "",
+                onValueChange = { vm.setPromptForSelected(it) },
+                enabled = selected.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+                placeholder = {
+                    Text(
+                        if (selected.isEmpty()) "Select a clip to prompt…" else "Describe the edit…",
+                        color = Neutral500, fontSize = 12.sp,
+                    )
+                },
+                textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
+                maxLines = 6,
             )
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton(if (selected.isEmpty()) "AI ▸" else "AI", tint = Red500) {
+                if (selected.isEmpty()) onGenerate() else onAnalyze()
+            }
         }
     }
 }

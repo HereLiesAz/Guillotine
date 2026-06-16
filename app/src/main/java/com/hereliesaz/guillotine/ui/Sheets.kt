@@ -1,12 +1,15 @@
 package com.hereliesaz.guillotine.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -32,6 +35,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
+import com.hereliesaz.guillotine.model.AspectRatio
+import com.hereliesaz.guillotine.model.GlobalSettings
+import com.hereliesaz.guillotine.model.Quality
 import com.hereliesaz.guillotine.ui.theme.Neutral400
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral800
@@ -183,6 +189,72 @@ fun GenerateSheet(onGenerate: (url: String, name: String) -> Unit, onDismiss: ()
             }
         }
     }
+}
+
+/** Project-wide options (formerly the inspector's "Global settings"), now reached from the menu. */
+@Composable
+fun ProjectSettingsSheet(current: GlobalSettings, onChange: (GlobalSettings) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        SheetCard {
+            Text("Project settings", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+
+            Text("Aspect ratio", color = Neutral400, fontSize = 12.sp)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AspectRatio.values().forEach { ar ->
+                    SettingChip(ar.label(), current.aspectRatio == ar) { onChange(current.copy(aspectRatio = ar)) }
+                }
+            }
+
+            Text("Quality", color = Neutral400, fontSize = 12.sp)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Quality.values().forEach { q ->
+                    SettingChip(q.label(), current.quality == q) { onChange(current.copy(quality = q)) }
+                }
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Color.Black),
+                ) { Text("Done", fontSize = 12.sp, fontWeight = FontWeight.Medium) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = if (selected) Color.Black else Neutral400,
+        fontSize = 11.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) White else Color.Transparent)
+            .border(1.dp, if (selected) White else Neutral800, RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
+}
+
+private fun AspectRatio.label() = when (this) {
+    AspectRatio.RATIO_16_9 -> "16:9"
+    AspectRatio.RATIO_9_16 -> "9:16"
+    AspectRatio.RATIO_1_1 -> "1:1"
+    AspectRatio.ORIGINAL -> "Original"
+}
+
+private fun Quality.label() = when (this) {
+    Quality.ORIGINAL -> "Original"
+    Quality.UHD_4K -> "4K"
+    Quality.FHD_1080P -> "1080p"
+    Quality.HD_720P -> "720p"
 }
 
 private fun Modifier.clickableText(onClick: () -> Unit): Modifier = this.clickable(onClick = onClick)
