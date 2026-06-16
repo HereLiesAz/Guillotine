@@ -116,7 +116,15 @@ private fun TimelineLanes(vm: EditorViewModel, state: EditorUiState, modifier: M
             Modifier
                 .fillMaxSize()
                 .horizontalScroll(scroll)
-                .width(contentWidth),
+                .width(contentWidth)
+                // Tap anywhere on the timeline surface (ruler, gaps, below the tracks) to
+                // move the playhead there. Clips sit on top and handle their own taps.
+                .pointerInput(pps) {
+                    detectTapGestures { offset ->
+                        vm.clearSelection()
+                        vm.seekTo((offset.x / pps * 1000f).toLong())
+                    }
+                },
         ) {
             Column(Modifier.fillMaxSize()) {
                 Ruler(totalMs, pps, contentWidth)
@@ -177,19 +185,14 @@ private fun Lane(
     msToDp: (Long) -> androidx.compose.ui.unit.Dp,
 ) {
     val clips = state.document.clips.filter { it.trackId == trackId }
+    // No tap handler here: taps on empty lane area fall through to the timeline surface
+    // handler (in TimelineLanes), which seeks the playhead and clears the selection.
     Box(
         Modifier
             .fillMaxWidth()
             .height(TRACK_HEIGHT)
             .background(Neutral850)
-            .border(0.5.dp, Neutral800)
-            .pointerInput(pps) {
-                detectTapGestures { offset ->
-                    // Tap empty lane: seek + clear selection.
-                    vm.clearSelection()
-                    vm.seekTo((offset.x / pps * 1000f).toLong())
-                }
-            },
+            .border(0.5.dp, Neutral800),
     ) {
         clips.forEach { clip ->
             ClipView(vm, state, clip, pps, msToDp)
