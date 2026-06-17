@@ -560,6 +560,8 @@ class EditorViewModel : ViewModel() {
         _uiState.update { it.copy(isProcessing = processing, error = error) }
     }
 
+    fun clearError() = _uiState.update { it.copy(error = null) }
+
     // ---- global settings ---------------------------------------------------
 
     fun setGlobalSettings(settings: GlobalSettings) {

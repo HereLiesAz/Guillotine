@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCut
@@ -41,8 +42,10 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
@@ -228,6 +231,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         )
 
         val providerLabel = settings.provider.meta.label
+        // Processing/error feedback for AI analysis (formerly shown in the Inspector).
+        AnalysisStatusBar(state, providerLabel) { vm.clearError() }
         if (widthClass == WindowWidthSizeClass.Expanded) {
             Column(Modifier.weight(0.6f).fillMaxWidth()) {
                 PreviewPlayer(
@@ -391,6 +396,37 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
 }
 
 /**
+ * Thin status strip for AI analysis: a spinner + "Analyzing with <provider>…" while a run
+ * is in flight, or the error (dismissable) if one failed. This is the feedback surface that
+ * used to live in the Inspector — without it, running the on-device analyzer from the prompt
+ * looked like it did nothing.
+ */
+@Composable
+private fun AnalysisStatusBar(state: EditorUiState, providerLabel: String, onDismiss: () -> Unit) {
+    val error = state.error
+    when {
+        state.isProcessing -> Row(
+            Modifier.fillMaxWidth().background(Neutral900).padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Red500)
+            Spacer(Modifier.width(8.dp))
+            Text("Analyzing with $providerLabel…", color = Neutral400, fontSize = 12.sp)
+        }
+        error != null -> Row(
+            Modifier.fillMaxWidth().background(Red500.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(error, color = Red500, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Icon(
+                Icons.Filled.Close, "Dismiss", tint = Red500,
+                modifier = Modifier.size(16.dp).clickable(onClick = onDismiss),
+            )
+        }
+    }
+}
+
+/**
  * Shared editor tool strip used by both layouts: a horizontally-scrollable row of
  * tools (mirroring the web build — select, split, keyframe, add-track, delete, zoom)
  * plus context-sensitive per-clip tools (filters, audio, background, text, keyframes,
@@ -488,7 +524,8 @@ private fun EditorToolStrip(
                     },
                 placeholder = {
                     Text(
-                        if (selected.isEmpty()) "Select a clip to prompt…" else "Describe the edit…",
+                        if (selected.isEmpty()) "Select a clip to prompt…"
+                        else "e.g. \"keep shots with a face\" or \"cut clips with a car\"",
                         color = Neutral500, fontSize = 12.sp,
                     )
                 },
