@@ -5,7 +5,7 @@ package com.hereliesaz.guillotine.export
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.media3.effect.BitmapOverlay
-import androidx.media3.effect.OverlaySettings
+import androidx.media3.effect.StaticOverlaySettings
 import com.hereliesaz.guillotine.media.SubjectSegmenter
 import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.TimelineClip
@@ -28,7 +28,7 @@ class MatteOverlay(
 ) : BitmapOverlay() {
 
     private val blank: Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
-    private val settings = OverlaySettings.Builder().build()
+    private val settings = StaticOverlaySettings.Builder().build()
     private var cacheBucket = Long.MIN_VALUE
     private var cached: Bitmap = blank
 
@@ -53,7 +53,7 @@ class MatteOverlay(
         return cached
     }
 
-    override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings = settings
+    override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings = settings
 
     private companion object {
         const val CACHE_MS = 100L

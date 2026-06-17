@@ -35,12 +35,14 @@ val currentVersionName = "$verMajor.$verMinor.$verPatch"
 
 android {
     namespace = "com.hereliesaz.guillotine"
-    compileSdk = 36
+    // compileSdk 37: material3 1.5.0-alpha21 / Compose 1.12.0-alpha03 require compiling against
+    // API 37+. targetSdk stays at 36 (stable runtime behavior); the two are independent.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.hereliesaz.guillotine"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 36 // runtime behavior target stays on stable API 36
         versionCode = currentVersionCode
         versionName = currentVersionName
         vectorDrawables { useSupportLibrary = true }

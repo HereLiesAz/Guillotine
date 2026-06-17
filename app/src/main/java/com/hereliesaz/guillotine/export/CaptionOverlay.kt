@@ -8,7 +8,7 @@ import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.TypefaceSpan
-import androidx.media3.effect.OverlaySettings
+import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TextOverlay
 import com.hereliesaz.guillotine.model.TextFont
 import com.hereliesaz.guillotine.model.TimelineClip
@@ -39,8 +39,8 @@ class CaptionOverlay(
         return if (clip.text.isNotBlank() && t >= clip.startTimeMs && t < clip.endTimeMs) styled else empty
     }
 
-    override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings =
-        OverlaySettings.Builder()
+    override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings =
+        StaticOverlaySettings.Builder()
             .setScale(clip.scale, clip.scale)
             .setRotationDegrees(clip.rotation)
             .setBackgroundFrameAnchor(clip.offsetX.coerceIn(-1f, 1f), (-clip.offsetY).coerceIn(-1f, 1f))

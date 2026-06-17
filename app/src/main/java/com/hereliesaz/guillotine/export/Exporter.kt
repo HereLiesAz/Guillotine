@@ -232,8 +232,8 @@ object Exporter {
     /** A channel-mixing processor that scales audio volume by [volume] (0 = silent). */
     private fun volumeProcessor(volume: Float): ChannelMixingAudioProcessor =
         ChannelMixingAudioProcessor().apply {
-            putChannelMixingMatrix(ChannelMixingMatrix.create(1, 1).scaleBy(volume))
-            putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(volume))
+            putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1).scaleBy(volume))
+            putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2).scaleBy(volume))
         }
 
     /** Copy the encoded file into the gallery via MediaStore (no permission on API 29+). */
