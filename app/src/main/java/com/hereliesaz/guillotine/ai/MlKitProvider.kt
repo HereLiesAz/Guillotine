@@ -40,6 +40,7 @@ class MlKitProvider : ClipAnalyzer {
         kind: MediaKind,
         prompt: String,
         durationMs: Long,
+        onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> = withContext(Dispatchers.IO) {
         if (kind == MediaKind.AUDIO) {
             throw IllegalStateException("On-device vision analyzes video and images. For audio, use the free Local analyzer.")
@@ -67,7 +68,7 @@ class MlKitProvider : ClipAnalyzer {
                 val action = if (match == intent.keepMatches) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, if (match) "match" else "no match"))
             } else {
-                scanVideo(context, mediaUri, durationMs, intent, labeler, faceDetector)
+                scanVideo(context, mediaUri, durationMs, intent, labeler, faceDetector, onProgress)
             }
         } finally {
             labeler.close()
@@ -83,6 +84,7 @@ class MlKitProvider : ClipAnalyzer {
         intent: Intent,
         labeler: com.google.mlkit.vision.label.ImageLabeler,
         faceDetector: com.google.mlkit.vision.face.FaceDetector?,
+        onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> {
         val retriever = MediaMetadataRetriever()
         val matched = mutableListOf<LongRange>()
@@ -103,18 +105,26 @@ class MlKitProvider : ClipAnalyzer {
             // Each match claims ±BLOCK frames, but at least half a step so consecutive matches stay contiguous.
             val halfMs = max((BLOCK_FRAMES * frameMs).toLong(), stepMs / 2 + 1)
 
+            val totalChecks = (dur / stepMs).coerceAtMost(MAX_CHECKS.toLong())
             var t = 0L
             var checks = 0
+            var matchCount = 0
             while (t <= dur && checks < MAX_CHECKS) {
                 val bmp = retriever.getFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (bmp != null) {
                     if (qualifies(bmp, intent, labeler, faceDetector)) {
                         matched += (t - halfMs).coerceAtLeast(0L)..(t + halfMs).coerceAtMost(dur)
+                        matchCount++
                     }
                     bmp.recycle()
                 }
-                t += stepMs
                 checks++
+                onProgress(AnalysisProgress(
+                    "Scanning frame $checks/$totalChecks\u2026",
+                    (checks.toFloat() / totalChecks.coerceAtLeast(1)).coerceIn(0f, 1f),
+                    matchCount,
+                ))
+                t += stepMs
             }
         } catch (_: Exception) {
             // best effort — build a cover from whatever we collected

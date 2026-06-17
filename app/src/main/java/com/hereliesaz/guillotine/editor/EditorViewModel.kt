@@ -41,6 +41,7 @@ data class EditorUiState(
     val promptHistory: List<String> = emptyList(),
     val tool: EditorTool = EditorTool.SELECT,
     val isProcessing: Boolean = false,
+    val analysisProgress: com.hereliesaz.guillotine.ai.AnalysisProgress? = null,
     val error: String? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
@@ -584,6 +585,10 @@ class EditorViewModel : ViewModel() {
 
     fun setProcessing(processing: Boolean, error: String? = null) {
         _uiState.update { it.copy(isProcessing = processing, error = error) }
+    }
+
+    fun setAnalysisProgress(progress: com.hereliesaz.guillotine.ai.AnalysisProgress?) {
+        _uiState.update { it.copy(analysisProgress = progress) }
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }

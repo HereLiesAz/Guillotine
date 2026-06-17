@@ -35,12 +35,15 @@ class AnthropicProvider(
         kind: MediaKind,
         prompt: String,
         durationMs: Long,
+        onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> = withContext(Dispatchers.IO) {
         if (kind == MediaKind.AUDIO) {
             throw IllegalStateException("Anthropic can't analyze audio. Use Gemini, OpenAI, or the free Local analyzer for audio clips.")
         }
+        onProgress(AnalysisProgress("Sampling frames\u2026"))
         val frames = FrameSampler.sample(context, mediaUri, kind, durationMs)
         if (frames.isEmpty()) throw IllegalStateException("Could not read frames for Anthropic analysis.")
+        onProgress(AnalysisProgress("Analyzing\u2026"))
 
         val durSec = durationMs / 1000.0
         val content = JSONArray()

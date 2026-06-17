@@ -138,6 +138,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
 
     var showSettings by remember { mutableStateOf(false) }
+    var showAiComparison by remember { mutableStateOf(false) }
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
@@ -212,17 +213,22 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         }
         vm.setProcessing(true, null)
         vm.setAnalyzing(targets.map { it.id }, true)
+        vm.setAnalysisProgress(com.hereliesaz.guillotine.ai.AnalysisProgress("Starting\u2026"))
         scope.launch {
             try {
                 for (clip in targets) {
                     val media = vm.uiState.value.document.mediaFor(clip) ?: continue
-                    val edits = Analysis.run(context, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs)
+                    val edits = Analysis.run(
+                        context, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
+                    ) { progress -> vm.setAnalysisProgress(progress) }
                     vm.applyEdits(clip.id, edits)
                 }
                 vm.setProcessing(false, null)
             } catch (e: Exception) {
                 vm.setAnalyzing(targets.map { it.id }, false)
                 vm.setProcessing(false, e.message ?: "Analysis failed")
+            } finally {
+                vm.setAnalysisProgress(null)
             }
         }
     }
@@ -270,6 +276,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         azMenuItem(id = "export", text = "Export video", onClick = { exportDone = null; exportError = null; showExport = true })
         azMenuItem(id = "projectSettings", text = "Project settings", onClick = { showProjectSettings = true })
         azMenuItem(id = "settings", text = "Settings", onClick = { showSettings = true })
+        azMenuItem(id = "aiComparison", text = "Compare AI providers", onClick = { showAiComparison = true })
 
         onscreen {
             Column(
@@ -385,6 +392,17 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onDismiss = { if (!exporting) showExport = false },
         )
     }
+    if (showAiComparison) {
+        AiComparisonSheet(onDismiss = { showAiComparison = false })
+    }
+
+    // Embedded MCP server: external AI tools interact with the editor over HTTP on port 6274.
+    val mcpServer = remember { com.hereliesaz.guillotine.mcp.McpServer() }
+    DisposableEffect(Unit) {
+        val tools = com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings }
+        runCatching { mcpServer.startServer(tools) }
+        onDispose { runCatching { mcpServer.stop() } }
+    }
 }
 
 /**
@@ -487,14 +505,41 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
 @Composable
 private fun AnalysisStatusBar(state: EditorUiState, providerLabel: String, onDismiss: () -> Unit) {
     val error = state.error
+    val progress = state.analysisProgress
     when {
         state.isProcessing -> Row(
             Modifier.fillMaxWidth().background(Neutral900).padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Red500)
+            if (progress?.fraction != null) {
+                CircularProgressIndicator(
+                    progress = { progress.fraction },
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                    color = Red500,
+                )
+            } else {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Red500)
+            }
             Spacer(Modifier.width(8.dp))
-            Text("Analyzing with $providerLabel…", color = Neutral400, fontSize = 12.sp)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    progress?.stage ?: "Analyzing with $providerLabel\u2026",
+                    color = Neutral400, fontSize = 12.sp,
+                )
+                if (progress != null && progress.segmentsFound > 0) {
+                    Text(
+                        "${progress.segmentsFound} segments found",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                }
+            }
+            if (progress?.fraction != null) {
+                Text(
+                    "${(progress.fraction * 100).toInt()}%",
+                    color = Neutral500, fontSize = 11.sp,
+                )
+            }
         }
         error != null -> Row(
             Modifier.fillMaxWidth().background(Red500.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 6.dp),

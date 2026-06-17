@@ -32,9 +32,18 @@ class OpenAiProvider(
         kind: MediaKind,
         prompt: String,
         durationMs: Long,
+        onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> = withContext(Dispatchers.IO) {
-        if (kind == MediaKind.AUDIO) analyzeAudio(context, mediaUri, prompt, durationMs)
-        else analyzeFrames(context, mediaUri, kind, prompt, durationMs)
+        if (kind == MediaKind.AUDIO) {
+            onProgress(AnalysisProgress("Transcribing audio\u2026"))
+            val transcript = transcribe(context, mediaUri)
+            onProgress(AnalysisProgress("Analyzing transcript\u2026"))
+            analyzeAudioWithTranscript(context, transcript, prompt, durationMs)
+        } else {
+            onProgress(AnalysisProgress("Sampling frames\u2026"))
+            val result = analyzeFrames(context, mediaUri, kind, prompt, durationMs)
+            result
+        }
     }
 
     private fun analyzeFrames(context: Context, uri: Uri, kind: MediaKind, prompt: String, durationMs: Long): List<EditSegment> {
@@ -66,8 +75,7 @@ class OpenAiProvider(
         return SegmentJson.parse(chat(body))
     }
 
-    private fun analyzeAudio(context: Context, uri: Uri, prompt: String, durationMs: Long): List<EditSegment> {
-        val transcript = transcribe(context, uri)
+    private fun analyzeAudioWithTranscript(context: Context, transcript: String, prompt: String, durationMs: Long): List<EditSegment> {
         val durSec = durationMs / 1000.0
         val body = JSONObject().apply {
             put("model", visionModel)

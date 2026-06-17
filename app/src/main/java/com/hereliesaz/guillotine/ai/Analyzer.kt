@@ -13,6 +13,7 @@ interface ClipAnalyzer {
         kind: MediaKind,
         prompt: String,
         durationMs: Long,
+        onProgress: (AnalysisProgress) -> Unit = {},
     ): List<EditSegment>
 }
 
@@ -29,6 +30,7 @@ object Analysis {
         kind: MediaKind,
         prompt: String,
         durationMs: Long,
+        onProgress: (AnalysisProgress) -> Unit = {},
     ): List<EditSegment> {
         val key = settings.keyFor(settings.provider)
         if (settings.provider.meta.keyUrl != null) {
@@ -38,11 +40,11 @@ object Analysis {
         }
         val model = settings.modelFor(settings.provider)
         return when (settings.provider) {
-            AiProviderType.LOCAL -> LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.MLKIT -> MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.GEMINI -> GeminiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.OPENAI -> OpenAiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.ANTHROPIC -> AnthropicProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.LOCAL -> LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+            AiProviderType.MLKIT -> MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+            AiProviderType.GEMINI -> GeminiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+            AiProviderType.OPENAI -> OpenAiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+            AiProviderType.ANTHROPIC -> AnthropicProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
             else -> {
                 // OpenRouter / Groq / xAI / Mistral — generic OpenAI-compatible endpoint.
                 val meta = settings.provider.meta
@@ -51,7 +53,7 @@ object Analysis {
                     endpoint = requireNotNull(meta.openAiCompatUrl),
                     model = model,
                     label = meta.label,
-                ).analyze(context, mediaUri, kind, prompt, durationMs)
+                ).analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
             }
         }
     }

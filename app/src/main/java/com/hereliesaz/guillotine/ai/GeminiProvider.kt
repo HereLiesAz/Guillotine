@@ -33,7 +33,9 @@ class GeminiProvider(
         kind: MediaKind,
         prompt: String,
         durationMs: Long,
+        onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> = withContext(Dispatchers.IO) {
+        onProgress(AnalysisProgress("Uploading\u2026", 0f))
         val mime = context.contentResolver.getType(mediaUri) ?: defaultMime(kind)
         val size = context.contentResolver.openAssetFileDescriptor(mediaUri, "r")
             ?.use { it.length }
@@ -41,9 +43,10 @@ class GeminiProvider(
 
         val uploadUrl = startResumable(size, mime)
         var file = context.contentResolver.openInputStream(mediaUri)?.use { stream ->
-            streamUpload(uploadUrl, stream, size)
+            streamUpload(uploadUrl, stream, size, onProgress)
         } ?: throw IllegalStateException("Could not read media.")
 
+        onProgress(AnalysisProgress("Processing\u2026"))
         var tries = 60
         while (file.state == "PROCESSING" && tries-- > 0) {
             delay(2000)
@@ -51,6 +54,7 @@ class GeminiProvider(
         }
         if (file.state != "ACTIVE") throw IllegalStateException("Gemini failed to process the media.")
 
+        onProgress(AnalysisProgress("Generating\u2026"))
         val text = generate(prompt, kind, file.uri, mime)
         parseSegments(text)
     }
@@ -74,7 +78,7 @@ class GeminiProvider(
     }
 
     /** Streams the file to the Gemini upload URL in 2 MB chunks to avoid OOM. */
-    private fun streamUpload(uploadUrl: String, input: InputStream, totalSize: Long): GeminiFile {
+    private fun streamUpload(uploadUrl: String, input: InputStream, totalSize: Long, onProgress: (AnalysisProgress) -> Unit): GeminiFile {
         val buf = ByteArray(chunkSize)
         var offset = 0L
         while (offset < totalSize) {
@@ -105,6 +109,7 @@ class GeminiProvider(
             }
             conn.disconnect()
             offset += filled
+            onProgress(AnalysisProgress("Uploading\u2026", (offset.toFloat() / totalSize).coerceIn(0f, 1f)))
         }
         throw IllegalStateException("Upload ended without finalization.")
     }

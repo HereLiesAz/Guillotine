@@ -34,12 +34,15 @@ class OpenAiCompatibleProvider(
         kind: MediaKind,
         prompt: String,
         durationMs: Long,
+        onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> = withContext(Dispatchers.IO) {
         require(kind != MediaKind.AUDIO) {
             "$label analyzes video and images. For audio, use OpenAI, Gemini, or the free Local analyzer."
         }
+        onProgress(AnalysisProgress("Sampling frames\u2026"))
         val frames = FrameSampler.sample(context, mediaUri, kind, durationMs)
         if (frames.isEmpty()) throw IllegalStateException("Could not read frames for $label analysis.")
+        onProgress(AnalysisProgress("Analyzing\u2026"))
 
         val durSec = durationMs / 1000.0
         val content = JSONArray()

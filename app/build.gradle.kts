@@ -126,6 +126,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
+    // Embedded MCP server — external AI tools interact with the editor over HTTP.
+    implementation(libs.nanohttpd)
+
     testImplementation(libs.junit)
 
     debugImplementation(libs.androidx.ui.tooling)

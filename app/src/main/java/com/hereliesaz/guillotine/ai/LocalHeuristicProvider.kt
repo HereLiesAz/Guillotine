@@ -31,24 +31,25 @@ object LocalHeuristicProvider : ClipAnalyzer {
         kind: MediaKind,
         prompt: String,
         durationMs: Long,
+        onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> = withContext(Dispatchers.Default) {
         val keepWhole = listOf(EditSegment(0, durationMs, EditAction.KEEP, "Kept (local heuristic)"))
         if (kind == MediaKind.IMAGE) return@withContext keepWhole
 
-        val rms = runCatching { computeWindowRms(context, mediaUri) }.getOrNull()
+        onProgress(AnalysisProgress("Decoding audio\u2026"))
+        val rms = runCatching { computeWindowRms(context, mediaUri, onProgress) }.getOrNull()
             ?: return@withContext keepWhole
         if (rms.isEmpty()) return@withContext keepWhole
 
         val peak = rms.max().coerceAtLeast(1e-6f)
         val threshold = peak * SILENCE_FRACTION
-        // Classify each window as audible/silent.
         val audible = BooleanArray(rms.size) { rms[it] >= threshold }
 
-        // Build remove ranges from runs of silence longer than MIN_REMOVE_MS,
-        // shrunk by PAD_MS on each side to avoid clipping speech onsets.
+        onProgress(AnalysisProgress("Detecting silences\u2026", 0f))
         val segments = mutableListOf<EditSegment>()
         var i = 0
         var cursor = 0L
+        var silenceCount = 0
         while (i < audible.size) {
             if (audible[i]) { i++; continue }
             val startW = i
@@ -61,6 +62,12 @@ object LocalHeuristicProvider : ClipAnalyzer {
                 if (s > cursor) segments += EditSegment(cursor, s, EditAction.KEEP, "Audible")
                 segments += EditSegment(s, e, EditAction.REMOVE, "Silence")
                 cursor = e
+                silenceCount++
+                onProgress(AnalysisProgress(
+                    "Detecting silences\u2026",
+                    (i.toFloat() / audible.size).coerceIn(0f, 1f),
+                    silenceCount,
+                ))
             }
         }
         if (cursor < durationMs) segments += EditSegment(cursor, durationMs, EditAction.KEEP, "Audible")
@@ -68,7 +75,7 @@ object LocalHeuristicProvider : ClipAnalyzer {
     }
 
     /** Decode the first audio track to PCM16 and return per-window RMS values. */
-    private fun computeWindowRms(context: Context, uri: Uri): List<Float> {
+    private fun computeWindowRms(context: Context, uri: Uri, onProgress: (AnalysisProgress) -> Unit): List<Float> {
         val extractor = MediaExtractor()
         extractor.setDataSource(context, uri, null)
         var trackIndex = -1
@@ -127,6 +134,9 @@ object LocalHeuristicProvider : ClipAnalyzer {
                             if (sampleCount >= windowSamples) {
                                 rmsList += sqrt(sumSquares / sampleCount).toFloat()
                                 sumSquares = 0.0; sampleCount = 0
+                                if (rmsList.size % 100 == 0) {
+                                    onProgress(AnalysisProgress("Decoding audio\u2026 ${rmsList.size} windows"))
+                                }
                             }
                         }
                     }
