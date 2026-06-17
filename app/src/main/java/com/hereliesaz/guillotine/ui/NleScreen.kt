@@ -165,7 +165,11 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
     val onAnalyze: () -> Unit = onAnalyze@{
         val targets = vm.uiState.value.selectedClips.filter { it.prompt.isNotBlank() }
-        if (targets.isEmpty()) return@onAnalyze
+        if (targets.isEmpty()) {
+            // A clip is selected but no prompt was typed — guide the user instead of no-op.
+            vm.setProcessing(false, "Type what to keep or cut first — e.g. \"keep shots with a face\".")
+            return@onAnalyze
+        }
         vm.setProcessing(true, null)
         vm.setAnalyzing(targets.map { it.id }, true)
         scope.launch {
