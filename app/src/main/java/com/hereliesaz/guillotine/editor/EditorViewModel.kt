@@ -564,9 +564,14 @@ class EditorViewModel : ViewModel() {
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
-    /** Remember the most recent non-blank prompt (for the inline hint / empty-submit default). */
+    /**
+     * Remember the most recent non-blank prompt (for the inline hint / empty-submit default).
+     * Stored on the live UI state AND on the document so it persists with the saved project.
+     * Updated outside [mutateDocument] so it never adds an undo step.
+     */
     fun rememberPrompt(prompt: String) {
-        if (prompt.isNotBlank()) _uiState.update { it.copy(lastPrompt = prompt) }
+        if (prompt.isBlank()) return
+        _uiState.update { it.copy(lastPrompt = prompt, document = it.document.copy(lastPrompt = prompt)) }
     }
 
     // ---- global settings ---------------------------------------------------
@@ -720,7 +725,15 @@ class EditorViewModel : ViewModel() {
     fun loadDocument(doc: Document) {
         past.clear(); future.clear()
         _uiState.update {
-            it.copy(document = doc, currentTimeMs = 0, isPlaying = false, selectedClipIds = emptyList(), canUndo = false, canRedo = false)
+            it.copy(
+                document = doc,
+                currentTimeMs = 0,
+                isPlaying = false,
+                selectedClipIds = emptyList(),
+                lastPrompt = doc.lastPrompt, // restore the project's remembered prompt
+                canUndo = false,
+                canRedo = false,
+            )
         }
     }
 }
