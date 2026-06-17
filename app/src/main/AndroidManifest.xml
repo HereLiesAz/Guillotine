@@ -4,6 +4,9 @@
     <!-- AI providers (BYO key) are called directly over the network. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- AdMob advertising identifier (app-open ad). -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+
     <!-- Run on Chromebooks / large screens without a touchscreen or hard keyboard. -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.freeform_window_management" android:required="false" />
@@ -17,6 +20,11 @@
         android:resizeableActivity="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.Guillotine">
+
+        <!-- AdMob application id. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-7304740804770627~9735202017" />
 
         <activity
             android:name=".MainActivity"

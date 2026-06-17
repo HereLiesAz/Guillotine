@@ -30,6 +30,7 @@ mlkitFaceDetection = "16.1.7"
 mlkitSelfieSegmentation = "16.0.0-beta6"
 vosk = "0.3.47"
 aznavrail = "10.1"
+playServicesAds = "24.9.0"
 junit = "4.13.2"
 
 [libraries]
@@ -59,6 +60,8 @@ mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", ve
 mlkit-segmentation-selfie = { group = "com.google.mlkit", name = "segmentation-selfie", version.ref = "mlkitSelfieSegmentation" }
 vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
 aznavrail = { group = "com.github.HereLiesAz", name = "AzNavRail", version.ref = "aznavrail" }
+play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
+androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycle" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

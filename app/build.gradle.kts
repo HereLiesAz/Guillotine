@@ -100,6 +100,10 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.aznavrail)
 
+    // AdMob (app-open ad) + process lifecycle for foreground detection.
+    implementation(libs.play.services.ads)
+    implementation(libs.androidx.lifecycle.process)
+
     // Jetpack Media3: playback (ExoPlayer) + on-device editing/export (Transformer).
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)

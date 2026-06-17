@@ -88,13 +88,15 @@
     <p class="eff">Effective date: 2026-06-17</p>
 
     <p class="lead">Guillotine is an on-device, non-linear video editor for Android, tablets, and
-    Chromebooks. In short: <strong>Guillotine has no servers of its own, no account system, no
-    analytics, and no advertising.</strong> Your media and projects stay on your device unless
-    <em>you</em> choose to use a third-party AI service.</p>
+    Chromebooks. In short: <strong>Guillotine has no servers of its own, no account system, and no
+    first-party analytics.</strong> Your media and projects stay on your device unless <em>you</em>
+    choose to use a third-party AI service. The app does show ads via <strong>Google AdMob</strong>
+    (see “Advertising” below) and uses your device’s advertising identifier for that purpose.</p>
 
     <h2>The short version</h2>
     <ul>
       <li>We (the developer) do <strong>not</strong> collect, store, or receive your data on any server we control.</li>
+      <li>We <strong>do</strong> show ads through <strong>Google AdMob</strong>, which collects your device’s advertising ID and related data to serve and measure ads — the one third-party SDK in the app.</li>
       <li>Editing, playback, thumbnails, waveforms, on-device vision (ML Kit), and on-device speech recognition (Vosk) all run <strong>locally on your device</strong>.</li>
       <li>The app only sends data over the network when <strong>you</strong> trigger an action that uses a third-party service you configured (an AI provider, image generation, or crash reporting).</li>
       <li>API keys you enter are <strong>encrypted on your device</strong> and are sent only to the matching provider, only in requests you initiate.</li>
@@ -147,16 +149,27 @@
     credential used to file issues lives in your relay’s server-side secret and is <strong>never</strong>
     included in the app.</p>
 
+    <h2>Advertising (Google AdMob)</h2>
+    <p>Guillotine displays ads served by <strong>Google AdMob</strong> (currently an “app-open” ad
+    shown when you bring the app to the foreground). To serve and measure these ads, the Google
+    Mobile Ads SDK collects your device’s <strong>advertising identifier (AD_ID)</strong> and related
+    technical/usage data. This data is processed by Google, not by us, and is governed by
+    <a href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener">how Google uses information from apps that use its services</a>
+    and <a href="https://support.google.com/admob/answer/6128543" target="_blank" rel="noopener">Google AdMob privacy</a>.
+    Where required by law (e.g., the EEA/UK), a consent prompt governs whether personalized ads are
+    shown; you can also reset or limit ad personalization in <em>Settings → Google → Ads</em>.</p>
+
     <h2>Permissions</h2>
     <ul>
-      <li><strong>Internet</strong> — to call the AI providers and crash relay you configure. With no keys or relay set, the app makes no network requests for your content.</li>
+      <li><strong>Internet</strong> — to call the AI providers, the ad service, and the crash relay you configure.</li>
+      <li><strong>Advertising ID</strong> (<code>com.google.android.gms.permission.AD_ID</code>) — used by Google AdMob to serve ads.</li>
       <li><strong>Storage access (Storage Access Framework)</strong> — only the specific media files you pick are accessible to the app; it does not scan your library.</li>
       <li><strong>Media output (MediaStore)</strong> — to save exported videos to your Movies folder.</li>
     </ul>
     <p>The app does not request location, contacts, the microphone, or the camera; it only works with media you explicitly import.</p>
 
-    <h2>Analytics, ads, and tracking</h2>
-    <div class="callout">None. Guillotine contains no analytics SDKs, no advertising, and no third-party trackers, and it does not build a profile of you.</div>
+    <h2>Analytics and tracking</h2>
+    <div class="callout">Guillotine contains <strong>no first-party analytics</strong> and no trackers we operate, and we do not build a profile of you. The only third-party SDK is <strong>Google AdMob</strong> (see “Advertising” above); any profiling for ads is performed by Google under its policies, not by us.</div>
 
     <h2>Children’s privacy</h2>
     <p>Guillotine is a general-purpose creative tool and is not directed at children under 13. It does not knowingly collect personal information from children.</p>
