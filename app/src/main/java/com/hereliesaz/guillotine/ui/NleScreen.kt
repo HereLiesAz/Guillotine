@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +24,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
@@ -51,7 +52,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -87,6 +87,7 @@ import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.guillotine.ai.Transcription
+import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
 import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
@@ -228,20 +229,18 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onProjectSettings = { showProjectSettings = true },
         )
 
+        val providerLabel = settings.provider.meta.label
         if (widthClass == WindowWidthSizeClass.Expanded) {
-            Row(Modifier.weight(0.6f).fillMaxWidth()) {
-                Inspector(vm, state, onAnalyze, onTranscribe, Modifier.width(340.dp).fillMaxHeight())
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    PreviewPlayer(
-                        state,
-                        Modifier.weight(1f).fillMaxWidth(),
-                        cropMode = state.tool == EditorTool.CROP,
-                        onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-                    )
-                    TransportControls(vm, state)
-                }
+            Column(Modifier.weight(0.6f).fillMaxWidth()) {
+                PreviewPlayer(
+                    state,
+                    Modifier.weight(1f).fillMaxWidth(),
+                    cropMode = state.tool == EditorTool.CROP,
+                    onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                )
+                TransportControls(vm, state)
             }
-            EditorToolStrip(vm, state, onAnalyze, onGenerate = { showGenerate = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
             PreviewPlayer(
@@ -251,12 +250,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
             )
             TransportControls(vm, state)
-            var tab by remember { mutableIntStateOf(0) }
-            CompactToolBar(vm, state, tab, { tab = it }, onAnalyze, onGenerate = { showGenerate = true })
-            Box(Modifier.weight(0.58f).fillMaxWidth()) {
-                if (tab == 0) TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.fillMaxSize())
-                else Inspector(vm, state, onAnalyze, onTranscribe, Modifier.fillMaxSize())
-            }
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
     }
 
@@ -376,8 +371,11 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
             color = Neutral400, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
         )
         Spacer(Modifier.weight(1f))
+        val frameMs = 33L // ~1 frame at 30fps
         IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
+        IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
         IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+        IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
         IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
         Spacer(Modifier.weight(1f))
         val rates = listOf(0.5f, 1f, 1.5f, 2f)
@@ -395,51 +393,23 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
 }
 
 /**
- * Compact (phone) bottom bar: the Timeline/Inspector tab switch stacked on top of
- * the shared [EditorToolStrip] (tools + AI prompt). The whole bar grows in height as
- * the multiline prompt wraps.
- */
-@Composable
-private fun CompactToolBar(
-    vm: EditorViewModel,
-    state: EditorUiState,
-    selectedTab: Int,
-    onSelectTab: (Int) -> Unit,
-    onAnalyze: () -> Unit,
-    onGenerate: () -> Unit,
-) {
-    Column(Modifier.fillMaxWidth().background(Neutral900)) {
-        Row(Modifier.fillMaxWidth()) {
-            listOf("Timeline", "Inspector").forEachIndexed { i, label ->
-                Text(
-                    label,
-                    color = if (selectedTab == i) White else Neutral400,
-                    fontSize = 12.sp,
-                    fontWeight = if (selectedTab == i) FontWeight.Medium else FontWeight.Normal,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onSelectTab(i) }
-                        .background(if (selectedTab == i) Neutral800 else Neutral900)
-                        .padding(vertical = 10.dp),
-                )
-            }
-        }
-        EditorToolStrip(vm, state, onAnalyze, onGenerate)
-    }
-}
-
-/**
  * Shared editor tool strip used by both layouts: a horizontally-scrollable row of
  * tools (mirroring the web build — select, split, keyframe, add-track, delete, zoom)
- * and an AI prompt box. The prompt box grows up to several lines, so the strip's
- * height expands with multiline input. With a clip selected the box edits that clip's
- * prompt and the AI button runs the analyzer; with nothing selected AI opens Generate.
+ * plus context-sensitive per-clip tools (filters, audio, background, text, keyframes,
+ * transcribe, split — these replaced the old Inspector), and an AI prompt box. The
+ * prompt box grows up to several lines, so the strip's height expands with multiline
+ * input. With a clip selected the box edits that clip's prompt and the AI button runs
+ * the analyzer; with nothing selected AI opens Generate. The provider chip shows which
+ * engine the AI button will use (on-device or BYO key) and opens Settings on tap.
  */
 @Composable
 private fun EditorToolStrip(
     vm: EditorViewModel,
     state: EditorUiState,
     onAnalyze: () -> Unit,
+    onTranscribe: () -> Unit,
+    providerLabel: String,
+    onOpenSettings: () -> Unit,
     onGenerate: () -> Unit,
 ) {
     val selected = state.selectedClips
@@ -486,6 +456,12 @@ private fun EditorToolStrip(
                     active = grouped,
                 ) { if (grouped) vm.ungroupSelected() else vm.groupSelected() }
             }
+            // Context-sensitive per-clip tools (filters, audio, background, text,
+            // keyframes, transcribe, split) — formerly the Inspector panel.
+            if (selected.size == 1) {
+                Box(Modifier.width(1.dp).height(20.dp).background(Neutral800))
+                ClipToolButtons(vm, state, onTranscribe)
+            }
         }
         Row(
             Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
@@ -525,7 +501,16 @@ private fun EditorToolStrip(
                 keyboardActions = KeyboardActions(onSend = { submit() }),
             )
             Spacer(Modifier.width(8.dp))
-            ToolbarButton(if (selected.isEmpty()) "AI ▸" else "AI", tint = Red500, onClick = submit)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                ToolbarButton(if (selected.isEmpty()) "AI ▸" else "AI", tint = Red500, onClick = submit)
+                // Shows which engine the AI button uses; tap to change it in Settings.
+                Text(
+                    providerLabel,
+                    color = Neutral500,
+                    fontSize = 9.sp,
+                    modifier = Modifier.clickable(onClick = onOpenSettings).padding(horizontal = 4.dp),
+                )
+            }
         }
     }
 }

@@ -7,7 +7,7 @@
 # (1.4.0 stable made these APIs internal; alpha15+ jumps to foundation 1.11+.)
 # If the IDE's AGP Upgrade Assistant proposes adjusted versions on first sync, accept them —
 # these are the only knobs that matter for a green build.
-agp = "8.13.0"
+agp = "9.2.1"
 kotlin = "2.0.21"
 coreKtx = "1.13.1"
 lifecycle = "2.8.7"
