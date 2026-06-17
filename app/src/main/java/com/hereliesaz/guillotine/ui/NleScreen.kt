@@ -89,6 +89,10 @@ import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
+import androidx.navigation.compose.rememberNavController
+import com.hereliesaz.aznavrail.AzHostActivityLayout
+import com.hereliesaz.aznavrail.model.AzDropdownAlignment
+import com.hereliesaz.aznavrail.model.AzDropdownSource
 import com.hereliesaz.guillotine.GuillotineApplication
 import com.hereliesaz.guillotine.ads.BannerAd
 import com.hereliesaz.guillotine.ai.Transcription
@@ -245,60 +249,74 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffectFocus(focusRequester)
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(Black)
-            .systemBarsPadding()
-            .focusRequester(focusRequester)
-            .focusable()
-            // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
-            // at the keys, so typing in the prompt doesn't trigger editor shortcuts. Shortcuts
-            // still fire when the timeline (this Column) holds focus.
-            .onKeyEvent { handleKey(it, vm) },
-    ) {
-        TopBar(
-            state = state,
-            onUndo = vm::undo,
-            onRedo = vm::redo,
-            onImport = { importTargetTrack = null; importLauncher() },
-            onGenerate = { showGenerate = true },
-            onSave = { showNameDialog = true },
-            onLoad = openLauncher,
-            onExport = { exportDone = null; exportError = null; showExport = true },
-            onSettings = { showSettings = true },
-            onProjectSettings = { showProjectSettings = true },
+    val navController = rememberNavController()
+    val providerLabel = settings.provider.meta.label
+
+    // The whole editor lives inside AzNavRail's drop-down menu shell: the app icon at the top is
+    // the menu trigger (replacing the old hamburger), and the editor gets the full screen.
+    AzHostActivityLayout(navController = navController, modifier = modifier.fillMaxSize()) {
+        azConfig(
+            dropdownMenu = true,
+            dropdownSource = AzDropdownSource.MENU,
+            dropdownAlignment = AzDropdownAlignment.TOP_START,
         )
+        azTheme(activeColor = Red500, headerIconSize = 40.dp)
 
-        val providerLabel = settings.provider.meta.label
-        // Processing/error feedback for AI analysis (formerly shown in the Inspector).
-        AnalysisStatusBar(state, providerLabel) { vm.clearError() }
-        if (widthClass == WindowWidthSizeClass.Expanded) {
-            Column(Modifier.weight(0.6f).fillMaxWidth()) {
-                PreviewPlayer(
-                    state,
-                    Modifier.weight(1f).fillMaxWidth(),
-                    cropMode = state.tool == EditorTool.CROP,
-                    onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-                )
-                TransportControls(vm, state)
+        // The menu items that used to live in the top-bar hamburger.
+        azMenuItem(id = "import", text = "Import media", onClick = { importTargetTrack = null; importLauncher() })
+        azMenuItem(id = "generate", text = "Generate image", onClick = { showGenerate = true })
+        azMenuItem(id = "name", text = "Name project", onClick = { showNameDialog = true })
+        azMenuItem(id = "open", text = "Open project file…", onClick = { openLauncher() })
+        azMenuItem(id = "export", text = "Export video", onClick = { exportDone = null; exportError = null; showExport = true })
+        azMenuItem(id = "projectSettings", text = "Project settings", onClick = { showProjectSettings = true })
+        azMenuItem(id = "settings", text = "Settings", onClick = { showSettings = true })
+
+        onscreen {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .background(Black)
+                    .systemBarsPadding()
+                    .focusRequester(focusRequester)
+                    .focusable()
+                    // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
+                    // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
+                    .onKeyEvent { handleKey(it, vm) },
+            ) {
+                // Slim top bar: project name (where it was) + undo/redo. The app-icon menu
+                // trigger floats over the top-left, so the name is inset to clear it.
+                TopBar(state = state, onUndo = vm::undo, onRedo = vm::redo)
+
+                // Processing/error feedback for AI analysis (formerly shown in the Inspector).
+                AnalysisStatusBar(state, providerLabel) { vm.clearError() }
+                if (widthClass == WindowWidthSizeClass.Expanded) {
+                    Column(Modifier.weight(0.6f).fillMaxWidth()) {
+                        PreviewPlayer(
+                            state,
+                            Modifier.weight(1f).fillMaxWidth(),
+                            cropMode = state.tool == EditorTool.CROP,
+                            onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                        )
+                        TransportControls(vm, state)
+                    }
+                    EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+                    TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
+                } else {
+                    PreviewPlayer(
+                        state,
+                        Modifier.weight(0.42f).fillMaxWidth(),
+                        cropMode = state.tool == EditorTool.CROP,
+                        onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                    )
+                    TransportControls(vm, state)
+                    EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+                    TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
+                }
+
+                // Bottom banner ad (renders only after ad consent is resolved).
+                BannerAd(Modifier.fillMaxWidth())
             }
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
-            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
-        } else {
-            PreviewPlayer(
-                state,
-                Modifier.weight(0.42f).fillMaxWidth(),
-                cropMode = state.tool == EditorTool.CROP,
-                onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-            )
-            TransportControls(vm, state)
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
-            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
-
-        // Bottom banner ad (renders only after ad consent is resolved).
-        BannerAd(Modifier.fillMaxWidth())
     }
 
     if (showSettings) {
@@ -369,30 +387,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Slim top bar shown inside the editor: the project name (kept where it always was) and
+ * undo/redo. The menu now lives in AzNavRail's app-icon drop-down, whose trigger floats over
+ * the top-left, so the name is inset to clear it.
+ */
 @Composable
 private fun TopBar(
     state: EditorUiState,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
-    onImport: () -> Unit,
-    onGenerate: () -> Unit,
-    onSave: () -> Unit,
-    onLoad: () -> Unit,
-    onExport: () -> Unit,
-    onSettings: () -> Unit,
-    onProjectSettings: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(start = 56.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Image(
-            painter = painterResource(R.drawable.guillotine_icon),
-            contentDescription = "Guillotine",
-            modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)),
-        )
-        Spacer(Modifier.width(8.dp))
         Text(
             state.document.name.ifBlank { "Untitled project" },
             color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -400,18 +409,6 @@ private fun TopBar(
         Spacer(Modifier.weight(1f))
         IconToolButton(Icons.Filled.Undo, "Undo", enabled = state.canUndo, onClick = onUndo)
         IconToolButton(Icons.Filled.Redo, "Redo", enabled = state.canRedo, onClick = onRedo)
-        Box {
-            IconToolButton(Icons.Filled.Menu, "Menu", onClick = { menuOpen = true })
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                MenuRow("Import media") { menuOpen = false; onImport() }
-                MenuRow("Generate image (free)") { menuOpen = false; onGenerate() }
-                MenuRow("Name project") { menuOpen = false; onSave() }
-                MenuRow("Open project file…") { menuOpen = false; onLoad() }
-                MenuRow("Export video") { menuOpen = false; onExport() }
-                MenuRow("Project settings") { menuOpen = false; onProjectSettings() }
-                MenuRow("Settings") { menuOpen = false; onSettings() }
-            }
-        }
     }
 }
 
@@ -447,10 +444,6 @@ private fun NameProjectDialog(current: String, onConfirm: (String) -> Unit, onDi
     )
 }
 
-@Composable
-private fun MenuRow(label: String, onClick: () -> Unit) {
-    DropdownMenuItem(text = { Text(label, color = White, fontSize = 13.sp) }, onClick = onClick)
-}
 
 @Composable
 private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
