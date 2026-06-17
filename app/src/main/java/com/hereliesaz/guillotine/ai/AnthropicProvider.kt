@@ -21,10 +21,12 @@ import java.net.URL
  * Note: current Claude models reject assistant prefills, so we ask for JSON in the
  * prompt and parse the text response rather than prefilling.
  */
-class AnthropicProvider(private val apiKey: String) : ClipAnalyzer {
+class AnthropicProvider(
+    private val apiKey: String,
+    private val model: String = "claude-opus-4-8",
+) : ClipAnalyzer {
 
     private val url = "https://api.anthropic.com/v1/messages"
-    private val model = "claude-opus-4-8"
     private val version = "2023-06-01"
 
     override suspend fun analyze(

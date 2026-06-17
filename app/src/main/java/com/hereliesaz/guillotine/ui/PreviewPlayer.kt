@@ -3,23 +3,40 @@
 package com.hereliesaz.guillotine.ui
 
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem as ExoMediaItem
@@ -27,6 +44,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.hereliesaz.guillotine.editor.EditorUiState
+import com.hereliesaz.guillotine.media.SubjectSegmenter
 import com.hereliesaz.guillotine.media.VideoEffects
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipType
@@ -36,9 +54,11 @@ import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral950
+import com.hereliesaz.guillotine.ui.theme.White
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private const val SCRUB_SEEK_TOLERANCE_MS = 60L
 private const val PLAY_DRIFT_TOLERANCE_MS = 300L
@@ -51,8 +71,14 @@ private const val PLAY_DRIFT_TOLERANCE_MS = 300L
  * audio clips — so there is never double audio from a single source).
  */
 @Composable
-fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
+fun PreviewPlayer(
+    state: EditorUiState,
+    modifier: Modifier = Modifier,
+    cropMode: Boolean = false,
+    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
+) {
     val context = LocalContext.current
+    var previewSize by remember { mutableStateOf(IntSize.Zero) }
     val videoPlayer = remember { ExoPlayer.Builder(context).build() }
     val audioPlayer = remember { ExoPlayer.Builder(context).build() }
 
@@ -63,26 +89,42 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
         }
     }
 
-    val clips = state.document.clips
     val now = state.currentTimeMs
-    val activeVideo = TimelineMath.activeClip(clips, ClipType.VIDEO, now)
-    val activeAudio = TimelineMath.activeClip(clips, ClipType.AUDIO, now)
+    // Disabled/hidden tracks drop out entirely.
+    val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
+    // Layer-aware compositing: the player shows the topmost non-removed (background) video;
+    // a background-removed clip above it is overlaid as a matted cutout so the background
+    // shows through. With no background, the removed clip just plays normally.
+    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+        .sortedBy { state.document.videoTracks.indexOf(it.trackId).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+    val foregroundClip = activeVideoClips.firstOrNull { it.filters.removeBackground }
+    val backgroundClip = activeVideoClips.firstOrNull { !it.filters.removeBackground }
+    val activeVideo = backgroundClip ?: foregroundClip
+    val overlayClip = if (backgroundClip != null && foregroundClip != null) foregroundClip else null
+    // Exclude linked shadow clips: their sound is the video's own audio, already played by the
+    // video player — playing them here too would double it.
+    val activeAudio = TimelineMath.topActiveClip(
+        clips.filter { it.linkedClipId == null }, ClipType.AUDIO, now, state.document.audioTracks,
+    )
+    val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
+    val videoTrack = activeVideo?.let { state.document.trackSettingsFor(it.trackId) }
+    val audioTrack = activeAudio?.let { state.document.trackSettingsFor(it.trackId) }
     val videoMedia = activeVideo?.let { state.document.mediaFor(it) }
     val audioMedia = activeAudio?.let { state.document.mediaFor(it) }
 
-    // Keyframed view-layer values for the active video clip.
-    val opacity = activeVideo?.let {
+    // Keyframed view-layer values for the active video clip, scaled by whole-track settings.
+    val opacity = (activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
-    } ?: 1f
+    } ?: 1f) * (videoTrack?.opacity ?: 1f)
     val scale = activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.SCALE, now - it.startTimeMs, 1f)
     } ?: 1f
-    val videoVolume = activeVideo?.let {
+    val videoVolume = if (videoTrack?.muted == true) 0f else (activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
-    } ?: 0f
-    val audioVolume = activeAudio?.let {
+    } ?: 0f) * (videoTrack?.volume ?: 1f)
+    val audioVolume = if (audioTrack?.muted == true) 0f else (activeAudio?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
-    } ?: 0f
+    } ?: 0f) * (audioTrack?.volume ?: 1f)
 
     // ---- video player wiring ----
     LaunchedEffect(videoMedia?.id) {
@@ -135,7 +177,25 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
         AspectRatio.ORIGINAL -> Modifier.fillMaxSize()
     }
 
-    Box(modifier = modifier.background(Neutral950), contentAlignment = Alignment.Center) {
+    val cropModifier = if (cropMode) {
+        Modifier.pointerInput(Unit) {
+            detectTransformGestures { _, pan, zoom, rotation ->
+                val w = previewSize.width.coerceAtLeast(1)
+                val h = previewSize.height.coerceAtLeast(1)
+                onCropTransform(zoom, pan.x / w, pan.y / h, rotation)
+            }
+        }
+    } else {
+        Modifier
+    }
+
+    Box(
+        modifier = modifier
+            .background(Neutral950)
+            .onSizeChanged { previewSize = it }
+            .then(cropModifier),
+        contentAlignment = Alignment.Center,
+    ) {
         if (videoMedia == null) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
         } else {
@@ -152,9 +212,63 @@ fun PreviewPlayer(state: EditorUiState, modifier: Modifier = Modifier) {
                     .wrapContentSize()
                     .graphicsLayer {
                         alpha = opacity.coerceIn(0f, 1f)
-                        scaleX = scale.coerceAtLeast(0f)
-                        scaleY = scale.coerceAtLeast(0f)
+                        // Keyframed scale × crop-tool base scale; crop offset translates it.
+                        val s = (scale * (activeVideo?.scale ?: 1f)).coerceAtLeast(0f)
+                        scaleX = s
+                        scaleY = s
+                        rotationZ = activeVideo?.rotation ?: 0f
+                        translationX = (activeVideo?.offsetX ?: 0f) * size.width
+                        translationY = (activeVideo?.offsetY ?: 0f) * size.height
                     },
+            )
+        }
+        // Background-removed foreground composited over the background video. The matte is
+        // computed on-device per ~150 ms bucket (crisp when paused, frame-coarse while playing).
+        val fgMedia = overlayClip?.let { state.document.mediaFor(it) }
+        if (overlayClip != null && fgMedia != null) {
+            val bucket = now / 150L
+            val cutout by produceState<ImageBitmap?>(null, overlayClip.id, bucket) {
+                val src = TimelineMath.sourceTimeMs(overlayClip, now).coerceAtLeast(0)
+                value = SubjectSegmenter.cutout(context, fgMedia.uri, fgMedia.kind, src)?.asImageBitmap()
+            }
+            cutout?.let { cb ->
+                Image(
+                    bitmap = cb,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = aspectMod
+                        .wrapContentSize()
+                        .graphicsLayer {
+                            val s = overlayClip.scale.coerceAtLeast(0f)
+                            scaleX = s
+                            scaleY = s
+                            rotationZ = overlayClip.rotation
+                            translationX = overlayClip.offsetX * size.width
+                            translationY = overlayClip.offsetY * size.height
+                        },
+                )
+            }
+        }
+        // Caption/text overlay — each text clip positioned/scaled by its crop transform
+        // (offset from center as a fraction of the frame), rendered on top of the video.
+        activeText.forEach { t ->
+            Text(
+                t.text,
+                color = White.copy(alpha = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)),
+                fontSize = 14.sp,
+                fontFamily = t.font.fontFamily(),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset {
+                        IntOffset(
+                            (t.offsetX * previewSize.width).roundToInt(),
+                            (t.offsetY * previewSize.height).roundToInt(),
+                        )
+                    }
+                    .graphicsLayer { scaleX = t.scale; scaleY = t.scale; rotationZ = t.rotation }
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
             )
         }
     }

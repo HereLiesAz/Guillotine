@@ -1,0 +1,117 @@
+package com.hereliesaz.guillotine.crash
+
+import android.content.Context
+import android.os.Build
+import java.io.BufferedReader
+import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
+
+/**
+ * Plain (non-secret) config for crash reporting: the URL of the user's relay endpoint.
+ * Kept in ordinary prefs so the crash handler can read it cheaply and early, before any
+ * encrypted store or Compose is up.
+ */
+object CrashConfig {
+    private const val PREFS = "guillotine_crash"
+    private const val KEY_RELAY = "relay_url"
+
+    fun relayUrl(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_RELAY, "").orEmpty()
+
+    fun setRelayUrl(context: Context, url: String) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_RELAY, url.trim()).apply()
+}
+
+/**
+ * Captures uncaught exceptions to a file and, on the next launch, POSTs the report to the
+ * user's relay (a small server that holds a GitHub token and opens an issue). We don't send
+ * during the crash itself — the process is dying and a network call would be unreliable — so
+ * the trace + recent logcat are persisted synchronously, then flushed next time the app runs.
+ */
+object CrashReporter {
+
+    private const val PENDING_FILE = "pending_crash.txt"
+
+    fun install(context: Context) {
+        val appContext = context.applicationContext
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching { writeReport(appContext, thread, throwable) }
+            // Let the platform finish crashing (show the dialog / restart as usual).
+            previous?.uncaughtException(thread, throwable)
+        }
+    }
+
+    /** If a crash was captured previously and a relay is configured, send it (best-effort). */
+    fun flushPending(context: Context) {
+        val appContext = context.applicationContext
+        val file = File(appContext.filesDir, PENDING_FILE)
+        if (!file.exists()) return
+        val relay = CrashConfig.relayUrl(appContext)
+        if (relay.isBlank()) return // hold the report until a relay is set
+        thread(isDaemon = true) {
+            val report = runCatching { file.readText() }.getOrNull() ?: return@thread
+            val title = report.lineSequence().firstOrNull { it.startsWith("FINGERPRINT: ") }
+                ?.removePrefix("FINGERPRINT: ")?.take(200) ?: "App crash"
+            val ok = runCatching { post(relay, title, report) }.getOrDefault(false)
+            if (ok) file.delete()
+        }
+    }
+
+    private fun writeReport(context: Context, thread: Thread, throwable: Throwable) {
+        val sw = StringWriter()
+        throwable.printStackTrace(PrintWriter(sw))
+        val trace = sw.toString()
+        val top = throwable.stackTrace.firstOrNull()?.let { " @ ${it.className}.${it.methodName}(${it.fileName}:${it.lineNumber})" } ?: ""
+        val fingerprint = "${throwable.javaClass.simpleName}: ${throwable.message?.take(120).orEmpty()}$top"
+
+        val report = buildString {
+            appendLine("FINGERPRINT: $fingerprint")
+            appendLine("App: ${context.packageName} ${appVersion(context)}")
+            appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE}, API ${Build.VERSION.SDK_INT})")
+            appendLine("Thread: ${thread.name}")
+            appendLine()
+            appendLine("---- Stack trace ----")
+            appendLine(trace)
+            appendLine("---- Recent logcat ----")
+            appendLine(readLogcat())
+        }
+        File(context.filesDir, PENDING_FILE).writeText(report)
+    }
+
+    private fun appVersion(context: Context): String = runCatching {
+        val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+        "${pi.versionName} (${pi.longVersionCodeCompat()})"
+    }.getOrDefault("?")
+
+    private fun android.content.pm.PackageInfo.longVersionCodeCompat(): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) longVersionCode else @Suppress("DEPRECATION") versionCode.toLong()
+
+    /** An app can read its OWN process logs via logcat without special permission. */
+    private fun readLogcat(): String = runCatching {
+        val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "400"))
+        process.inputStream.bufferedReader().use(BufferedReader::readText).takeLast(20_000)
+    }.getOrDefault("(logcat unavailable)")
+
+    private fun post(relayUrl: String, title: String, body: String): Boolean {
+        val conn = (URL(relayUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Content-Type", "application/json")
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            doOutput = true
+        }
+        val payload = org.json.JSONObject().apply {
+            put("title", title)
+            put("body", body)
+        }
+        conn.outputStream.use { it.write(payload.toString().toByteArray()) }
+        val ok = conn.responseCode in 200..299
+        conn.disconnect()
+        return ok
+    }
+}

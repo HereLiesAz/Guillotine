@@ -44,6 +44,7 @@ object MediaImport {
         }
 
         var durationMs = 0L
+        var hasAudio = false
         if (kind != MediaKind.IMAGE) {
             val retriever = MediaMetadataRetriever()
             try {
@@ -53,7 +54,7 @@ object MediaImport {
                     ?.toLongOrNull() ?: 0L
                 // Refine kind from actual streams when mime was ambiguous.
                 val hasVideo = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
-                val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes"
+                hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes"
                 if (!hasVideo && hasAudio) kind = MediaKind.AUDIO
                 else if (hasVideo) kind = MediaKind.VIDEO
             } catch (_: Exception) {
@@ -69,6 +70,8 @@ object MediaImport {
             name = name,
             kind = kind,
             durationMs = durationMs,
+            // Only a VIDEO file's audio is split to its own track; a pure AUDIO file already is audio.
+            hasAudio = hasAudio && kind == MediaKind.VIDEO,
         )
     }
 

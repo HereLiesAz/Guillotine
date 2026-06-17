@@ -1,0 +1,8 @@
+name = "guillotine-crash-relay"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+GH_REPO = "HereLiesAz/Guillotine"
+
+# GH_TOKEN is a secret — set it with:  wrangler secret put GH_TOKEN

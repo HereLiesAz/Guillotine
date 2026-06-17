@@ -10,12 +10,16 @@ fun newId(): String = UUID.randomUUID().toString()
 @Serializable
 enum class MediaKind { VIDEO, AUDIO, IMAGE }
 
-/** A timeline track carries either picture or sound. */
+/** A timeline track carries picture, sound, or an overlaid text/caption. */
 @Serializable
-enum class ClipType { VIDEO, AUDIO }
+enum class ClipType { VIDEO, AUDIO, TEXT }
 
 @Serializable
 enum class KeyframeProperty { OPACITY, SCALE, VOLUME }
+
+/** Typeface for [ClipType.TEXT] clips. Mapped to a Compose FontFamily in the UI layer. */
+@Serializable
+enum class TextFont { SANS, SERIF, MONO, CURSIVE }
 
 @Serializable
 enum class EditAction { KEEP, REMOVE }
@@ -34,6 +38,8 @@ data class MediaItem(
     val name: String,
     val kind: MediaKind,
     val durationMs: Long,
+    /** True if a VIDEO file also carries an audio stream (→ auto-add a paired audio clip). */
+    val hasAudio: Boolean = false,
 )
 
 /** Cubic-bezier easing control points (P1, P2); endpoints are fixed at (0,0)/(1,1). */
@@ -78,6 +84,8 @@ data class ClipFilters(
     val hueRotate: Float = 0f,    // degrees
     val invert: Float = 0f,       // 0..100 (%)
     val grayscale: Float = 0f,    // 0..100 (%)
+    /** On-device subject segmentation: keep the foreground, drop the background so a lower layer shows through. */
+    val removeBackground: Boolean = false,
 )
 
 @Serializable
@@ -98,6 +106,23 @@ data class TimelineClip(
     val filters: ClipFilters = ClipFilters(),
     val isAnalyzing: Boolean = false,
     val error: String? = null,
+    /** Clips sharing a non-null [groupId] select/move/delete together. */
+    val groupId: String? = null,
+    /**
+     * For the AUDIO clip auto-created from a video import: the id of the VIDEO clip it shadows.
+     * Such a clip is a visual waveform of the video's own audio (which plays/exports from the
+     * video clip itself) — it is NOT a second playback, so it is skipped in preview/export.
+     */
+    val linkedClipId: String? = null,
+    /** Caption/title text for [ClipType.TEXT] clips (empty for video/audio). */
+    val text: String = "",
+    /** Typeface for text clips. */
+    val font: TextFont = TextFont.SANS,
+    /** Crop-tool transform: scale, normalized offset (fraction of frame) from center, rotation°. */
+    val scale: Float = 1f,
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
+    val rotation: Float = 0f,
 ) {
     val endTimeMs: Long get() = startTimeMs + durationMs
 }
@@ -108,6 +133,15 @@ data class Crop(
     val y: Float = 0f,
     val w: Float = 100f,
     val h: Float = 100f,
+)
+
+/** Whole-track (timeline) settings keyed by track id. Absent = defaults. */
+@Serializable
+data class TrackSettings(
+    val volume: Float = 1f,      // audio/video
+    val opacity: Float = 1f,     // video/text
+    val muted: Boolean = false,  // audio/video
+    val disabled: Boolean = false, // hide/disable the whole track
 )
 
 @Serializable
@@ -123,15 +157,26 @@ data class GlobalSettings(
  */
 @Serializable
 data class Document(
+    /** User-facing project name (set via Save → Name; the project itself is always autosaved). */
+    val name: String = "",
     val mediaItems: List<MediaItem> = emptyList(),
     val clips: List<TimelineClip> = emptyList(),
+    /** Track lists in stacking order (top of panel = top layer). Text is just a clip on a video track. */
     val videoTracks: List<String> = listOf("V1"),
     val audioTracks: List<String> = listOf("A1"),
+    val trackSettings: Map<String, TrackSettings> = emptyMap(),
     val settings: GlobalSettings = GlobalSettings(),
+    /** Recent AI prompts used in this project (most-recent first); inline hint + history dropdown. */
+    val promptHistory: List<String> = emptyList(),
 ) {
     /** End of the last clip on the timeline, in milliseconds. */
     val totalDurationMs: Long
         get() = clips.maxOfOrNull { it.endTimeMs } ?: 0L
 
     fun mediaFor(clip: TimelineClip): MediaItem? = mediaItems.firstOrNull { it.id == clip.mediaId }
+
+    fun trackSettingsFor(trackId: String): TrackSettings = trackSettings[trackId] ?: TrackSettings()
+
+    /** Track ids whose whole track is disabled/hidden. */
+    val disabledTrackIds: Set<String> get() = trackSettings.filterValues { it.disabled }.keys
 }

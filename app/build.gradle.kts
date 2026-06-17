@@ -35,12 +35,14 @@ val currentVersionName = "$verMajor.$verMinor.$verPatch"
 
 android {
     namespace = "com.hereliesaz.guillotine"
+    // compileSdk 37: material3 1.5.0-alpha21 / Compose 1.12.0-alpha03 require compiling against
+    // API 37+. targetSdk stays at 36 (stable runtime behavior); the two are independent.
     compileSdk = 37
 
     defaultConfig {
         applicationId = "com.hereliesaz.guillotine"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 36 // runtime behavior target stays on stable API 36
         versionCode = currentVersionCode
         versionName = currentVersionName
         vectorDrawables { useSupportLibrary = true }
@@ -72,13 +74,23 @@ android {
     }
 }
 
+// KGP 2.x: the old android.kotlinOptions DSL is deprecated; set the JVM target here.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
 
-    implementation(platform(libs.androidx.compose.bom))
+    // No Compose BOM: material3 1.5.0-alpha needs Compose 1.12.0-alpha03, which no stable BOM
+    // ships, so the Compose UI artifacts are pinned via the version catalog (composeUi) instead.
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
@@ -95,8 +107,20 @@ dependencies {
     implementation(libs.media3.common)
 
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.security.crypto)
+
+    // On-device, no-key ML for the free vision analyzer (face + object/label detection)
+    // and subject segmentation / background removal (bundled selfie model, offline).
+    implementation(libs.mlkit.image.labeling)
+    implementation(libs.mlkit.face.detection)
+    implementation(libs.mlkit.segmentation.selfie)
+
+    // On-device speech-to-text (BYO model) for transcription/captions.
+    implementation(libs.vosk.android)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

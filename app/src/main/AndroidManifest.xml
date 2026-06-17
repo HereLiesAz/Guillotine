@@ -23,7 +23,7 @@
             android:exported="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|density"
             android:resizeableActivity="true"
-            android:theme="@style/Theme.Guillotine">
+            android:theme="@style/Theme.Guillotine.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

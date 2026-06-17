@@ -11,15 +11,8 @@
 *.aab
 *.keystore
 !debug.keystore
+*.log
 
 # Android module build outputs
 app/build/
 build/
-
-# ---- Legacy web app (superseded by the native Android app) ----
-node_modules/
-dist/
-coverage/
-*.log
-.env*
-!.env.example

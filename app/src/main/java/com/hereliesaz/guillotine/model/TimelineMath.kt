@@ -75,6 +75,23 @@ object TimelineMath {
         clips.lastOrNull { it.type == type && timelineMs >= it.startTimeMs && timelineMs < it.endTimeMs }
 
     /**
+     * Layer-aware variant: among clips of [type] active at [timelineMs], returns the one
+     * on the topmost track (earliest in [trackOrder], which is top-of-panel = top layer).
+     */
+    fun topActiveClip(
+        clips: List<TimelineClip>,
+        type: ClipType,
+        timelineMs: Long,
+        trackOrder: List<String>,
+    ): TimelineClip? = clips
+        .filter { it.type == type && timelineMs >= it.startTimeMs && timelineMs < it.endTimeMs }
+        .minByOrNull { trackOrder.indexOf(it.trackId).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+
+    /** All clips of [type] active at [timelineMs] (e.g. overlapping text/caption clips). */
+    fun activeClips(clips: List<TimelineClip>, type: ClipType, timelineMs: Long): List<TimelineClip> =
+        clips.filter { it.type == type && timelineMs >= it.startTimeMs && timelineMs < it.endTimeMs }
+
+    /**
      * True if the given source-media time falls inside a 'remove' segment of the
      * clip. Used to skip removed ranges during preview/export.
      */

@@ -8,17 +8,25 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import androidx.media3.common.Effects
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
+import androidx.media3.effect.AlphaScale
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.TextureOverlay
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.Effects
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
+import com.google.common.collect.ImmutableList
 import com.hereliesaz.guillotine.media.VideoEffects
+import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.Document
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineMath
@@ -50,7 +58,7 @@ object Exporter {
         outputName: String,
         onProgress: (Float) -> Unit,
     ): Uri = withContext(Dispatchers.Main) {
-        val composition = buildComposition(document)
+        val composition = buildComposition(context, document)
         require(composition != null) { "Nothing to export — add a video clip first." }
 
         val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
@@ -95,20 +103,105 @@ object Exporter {
         uri
     }
 
-    /** Build a single video sequence from the kept ranges of all video clips. */
-    private fun buildComposition(document: Document): Composition? {
-        val videoClips = document.clips
-            .filter { it.type == com.hereliesaz.guillotine.model.ClipType.VIDEO }
-            .sortedBy { it.startTimeMs }
+    /**
+     * Build the export composition: a video sequence (kept ranges of video clips +
+     * image clips), plus a separate audio sequence for standalone audio-track clips
+     * so added music/voice is mixed in. Project crop + aspect are applied to every
+     * video clip via [VideoEffects.geometry].
+     *
+     * Known limits (verify on device): per-clip volume and keyframed opacity/scale
+     * are not yet baked into the export; a single video sequence mixing image clips
+     * (no audio) with video clips (audio) may need Transformer's force-audio-track
+     * flag — most projects are all-video or all-image and are unaffected.
+     */
+    private fun buildComposition(context: Context, document: Document): Composition? {
+        val geometry = VideoEffects.geometry(document.settings)
 
-        val items = mutableListOf<EditedMediaItem>()
-        for (clip in videoClips) {
-            val media = document.mediaFor(clip) ?: continue
-            if (media.kind == MediaKind.IMAGE) continue // images are a follow-up
-            val effects = Effects(emptyList(), VideoEffects.build(clip.filters))
+        val disabled = document.disabledTrackIds
+        val videoClips = document.clips
+            .filter { it.type == ClipType.VIDEO && it.trackId !in disabled }
+            .sortedBy { it.startTimeMs }
+        // Background-removed clips composite as a foreground layer over the rest. If nothing is
+        // marked for removal, every video clip just forms the base (original behavior).
+        val foreground = videoClips.filter { it.filters.removeBackground }
+        val background = videoClips.filter { !it.filters.removeBackground }
+        val baseClips = if (background.isNotEmpty()) background else videoClips
+        val overlayClips = if (background.isNotEmpty()) foreground else emptyList()
+
+        // Overlays baked onto the base video: the background-removal matte, plus a timed
+        // caption overlay per text clip. Attached to the first base item.
+        val baseStartMs = baseClips.firstOrNull()?.startTimeMs ?: 0L
+        val overlays = mutableListOf<TextureOverlay>()
+        if (overlayClips.isNotEmpty()) {
+            overlays += MatteOverlay(context, overlayClips, { document.mediaFor(it) }, baseStartMs)
+        }
+        document.clips
+            .filter { it.type == ClipType.TEXT && it.trackId !in disabled && it.text.isNotBlank() }
+            .forEach { overlays += CaptionOverlay(it, baseStartMs) }
+        val matteEffect = if (overlays.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(overlays)) else null
+
+        // Video sequence with clips at their timeline positions: gaps fill the space between
+        // clips. The sequence is zeroed to its first clip (Media3 1.5 can't lead with a gap),
+        // so the earliest clip starts the output; inter-clip spacing is preserved.
+        val videoSeq = EditedMediaItemSequence.Builder()
+        var videoCursor = baseClips.firstOrNull()?.startTimeMs ?: 0L
+        var addedVideo = false
+        var firstItem = true
+        baseClips.forEach { clip ->
+            val media = document.mediaFor(clip) ?: return@forEach
+            val gap = clip.startTimeMs - videoCursor
+            if (gap > 0) { videoSeq.addGap(gap * 1000); videoCursor += gap }
+            fun effectsFor(): Effects {
+                val ts = document.trackSettingsFor(clip.trackId)
+                val vol = if (ts.muted) 0f else clip.filters.volume * ts.volume
+                val audio: List<AudioProcessor> = if (vol != 1f) listOf(volumeProcessor(vol)) else emptyList()
+                val overlay = if (firstItem) listOfNotNull(matteEffect) else emptyList()
+                val alpha = if (ts.opacity < 1f) listOf(AlphaScale(ts.opacity)) else emptyList()
+                return Effects(audio, VideoEffects.build(clip.filters) + geometry + overlay + alpha)
+            }
+            if (media.kind == MediaKind.IMAGE) {
+                val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
+                val mediaItem = ExoMediaItem.Builder()
+                    .setUri(Uri.parse(media.uri))
+                    .setImageDurationMs(dur)
+                    .build()
+                videoSeq.addItem(EditedMediaItem.Builder(mediaItem).setFrameRate(30).setEffects(effectsFor()).build())
+                firstItem = false; addedVideo = true; videoCursor += dur
+            } else {
+                for (range in TimelineMath.keptRanges(clip)) {
+                    val startMs = range.first
+                    val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
+                    if (endMs <= startMs) continue
+                    val mediaItem = ExoMediaItem.Builder()
+                        .setUri(Uri.parse(media.uri))
+                        .setClippingConfiguration(
+                            ExoMediaItem.ClippingConfiguration.Builder()
+                                .setStartPositionMs(startMs)
+                                .setEndPositionMs(endMs)
+                                .build(),
+                        )
+                        .build()
+                    videoSeq.addItem(EditedMediaItem.Builder(mediaItem).setEffects(effectsFor()).build())
+                    firstItem = false; addedVideo = true; videoCursor += (endMs - startMs)
+                }
+            }
+        }
+        if (!addedVideo) return null
+
+        val audioClips = document.clips
+            // Skip linked shadow clips — that audio is rendered by their video clip already.
+            .filter { it.type == ClipType.AUDIO && it.linkedClipId == null && it.trackId !in disabled }
+            .sortedBy { it.startTimeMs }
+        val audioSeq = EditedMediaItemSequence.Builder()
+        var audioCursor = audioClips.firstOrNull()?.startTimeMs ?: 0L
+        var addedAudio = false
+        audioClips.forEach { clip ->
+            val media = document.mediaFor(clip) ?: return@forEach
+            val gap = clip.startTimeMs - audioCursor
+            if (gap > 0) { audioSeq.addGap(gap * 1000); audioCursor += gap }
             for (range in TimelineMath.keptRanges(clip)) {
                 val startMs = range.first
-                val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
+                val endMs = range.last + 1
                 if (endMs <= startMs) continue
                 val mediaItem = ExoMediaItem.Builder()
                     .setUri(Uri.parse(media.uri))
@@ -119,12 +212,30 @@ object Exporter {
                             .build(),
                     )
                     .build()
-                items += EditedMediaItem.Builder(mediaItem).setEffects(effects).build()
+                val ts = document.trackSettingsFor(clip.trackId)
+                val vol = if (ts.muted) 0f else clip.filters.volume * ts.volume
+                val audio: List<AudioProcessor> = if (vol != 1f) listOf(volumeProcessor(vol)) else emptyList()
+                audioSeq.addItem(
+                    EditedMediaItem.Builder(mediaItem)
+                        .setRemoveVideo(true)
+                        .setEffects(Effects(audio, emptyList()))
+                        .build(),
+                )
+                addedAudio = true; audioCursor += (endMs - startMs)
             }
         }
-        if (items.isEmpty()) return null
-        return Composition.Builder(EditedMediaItemSequence(items)).build()
+
+        val sequences = mutableListOf(videoSeq.build())
+        if (addedAudio) sequences += audioSeq.build()
+        return Composition.Builder(sequences).build()
     }
+
+    /** A channel-mixing processor that scales audio volume by [volume] (0 = silent). */
+    private fun volumeProcessor(volume: Float): ChannelMixingAudioProcessor =
+        ChannelMixingAudioProcessor().apply {
+            putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1, 1).scaleBy(volume))
+            putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2, 2).scaleBy(volume))
+        }
 
     /** Copy the encoded file into the gallery via MediaStore (no permission on API 29+). */
     private fun saveToGallery(context: Context, file: File, name: String): Uri {

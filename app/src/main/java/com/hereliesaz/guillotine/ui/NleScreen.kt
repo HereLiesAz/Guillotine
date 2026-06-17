@@ -1,40 +1,59 @@
 package com.hereliesaz.guillotine.ui
 
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Diamond
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -42,8 +61,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -52,20 +73,28 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hereliesaz.guillotine.R
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
+import com.hereliesaz.guillotine.ai.ImageGen
+import com.hereliesaz.guillotine.ai.Transcription
+import com.hereliesaz.guillotine.ai.meta
+import com.hereliesaz.guillotine.data.ProjectAutosave
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
-import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
+import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.export.Exporter
@@ -79,12 +108,16 @@ import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.model.newId
 import com.hereliesaz.guillotine.ui.theme.Black
 import com.hereliesaz.guillotine.ui.theme.Neutral400
+import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral900
 import com.hereliesaz.guillotine.ui.theme.Neutral950
 import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -99,32 +132,78 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
 
     var showSettings by remember { mutableStateOf(false) }
+    var showProjectSettings by remember { mutableStateOf(false) }
+    var showNameDialog by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf<String?>(null) }
     var exportError by remember { mutableStateOf<String?>(null) }
+    // Which track an import should land on (set by a track header's "Import"; null = default).
+    var importTargetTrack by remember { mutableStateOf<String?>(null) }
 
     val importLauncher = rememberMediaImportLauncher { uris ->
+        val target = importTargetTrack
         scope.launch {
             val items = uris.mapNotNull { withContext(Dispatchers.IO) { MediaImport.probe(context, it) } }
-            vm.addMedia(items)
+            vm.addMedia(items, target)
         }
     }
-    val saveLauncher = rememberSaveProjectLauncher { uri ->
-        scope.launch { withContext(Dispatchers.IO) { runCatching { ProjectStore.save(context, uri, vm.uiState.value.document) } } }
+    val onImportToTrack: (String) -> Unit = { track -> importTargetTrack = track; importLauncher() }
+    val onCreateOnTrack: (String) -> Unit = { track ->
+        val doc = vm.uiState.value.document
+        when {
+            // Text is just a clip on a video track: "create" adds an editable text clip there.
+            track in doc.videoTracks -> vm.addEmptyTextClip(track)
+            else -> { importTargetTrack = track; importLauncher() }
+        }
     }
+    // The project is auto-saved internally; "Save" only names it. Load imports a .gilt copy.
     val openLauncher = rememberOpenProjectLauncher { uri ->
         scope.launch {
-            withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
-                ?.let { vm.loadDocument(it) }
+            val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
+            if (doc != null) vm.loadDocument(doc)
         }
+    }
+
+    // Auto-save / restore: load the autosaved project on launch (fresh editor only), then
+    // continuously persist the document to internal storage on every change (debounced via
+    // collectLatest — a new edit cancels the pending write). The user never has to save.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (vm.uiState.value.document.clips.isEmpty()) {
+            val doc = withContext(Dispatchers.IO) { ProjectAutosave.load(context) }
+            if (doc != null) vm.loadDocument(doc)
+        }
+        vm.uiState
+            .map { it.document }
+            .distinctUntilChanged()
+            .collectLatest { doc ->
+                kotlinx.coroutines.delay(800)
+                withContext(Dispatchers.IO) { runCatching { ProjectAutosave.save(context, doc) } }
+            }
+    }
+
+    // Flush the autosave immediately on pause (app backgrounded), so the debounce window
+    // above can never drop the last edit before the process is stopped.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                runCatching { ProjectAutosave.save(context, vm.uiState.value.document) }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val onAnalyze: () -> Unit = onAnalyze@{
         val targets = vm.uiState.value.selectedClips.filter { it.prompt.isNotBlank() }
-        if (targets.isEmpty()) return@onAnalyze
+        if (targets.isEmpty()) {
+            // A clip is selected but no prompt was typed — guide the user instead of no-op.
+            vm.setProcessing(false, "Type what to keep or cut first — e.g. \"keep shots with a face\".")
+            return@onAnalyze
+        }
         vm.setProcessing(true, null)
         vm.setAnalyzing(targets.map { it.id }, true)
         scope.launch {
@@ -138,6 +217,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             } catch (e: Exception) {
                 vm.setAnalyzing(targets.map { it.id }, false)
                 vm.setProcessing(false, e.message ?: "Analysis failed")
+            }
+        }
+    }
+
+    val onTranscribe: () -> Unit = onTranscribe@{
+        val clip = vm.uiState.value.selectedClips.singleOrNull() ?: return@onTranscribe
+        val media = vm.uiState.value.document.mediaFor(clip) ?: return@onTranscribe
+        vm.setProcessing(true, null)
+        scope.launch {
+            try {
+                val cues = Transcription.transcribe(context, settings, Uri.parse(media.uri))
+                vm.addTextClipsFromTranscript(clip.id, cues)
+                vm.setProcessing(false, null)
+            } catch (e: Exception) {
+                vm.setProcessing(false, e.message ?: "Transcription failed")
             }
         }
     }
@@ -156,38 +250,49 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             .systemBarsPadding()
             .focusRequester(focusRequester)
             .focusable()
-            .onPreviewKeyEvent { handleKey(it, vm) },
+            // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
+            // at the keys, so typing in the prompt doesn't trigger editor shortcuts. Shortcuts
+            // still fire when the timeline (this Column) holds focus.
+            .onKeyEvent { handleKey(it, vm) },
     ) {
         TopBar(
             state = state,
             onUndo = vm::undo,
             onRedo = vm::redo,
-            onImport = importLauncher,
+            onImport = { importTargetTrack = null; importLauncher() },
             onGenerate = { showGenerate = true },
-            onSave = saveLauncher,
+            onSave = { showNameDialog = true },
             onLoad = openLauncher,
             onExport = { exportDone = null; exportError = null; showExport = true },
             onSettings = { showSettings = true },
+            onProjectSettings = { showProjectSettings = true },
         )
 
+        val providerLabel = settings.provider.meta.label
+        // Processing/error feedback for AI analysis (formerly shown in the Inspector).
+        AnalysisStatusBar(state, providerLabel) { vm.clearError() }
         if (widthClass == WindowWidthSizeClass.Expanded) {
-            Row(Modifier.weight(0.6f).fillMaxWidth()) {
-                Inspector(vm, state, onAnalyze, Modifier.width(340.dp).fillMaxHeight())
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    PreviewPlayer(state, Modifier.weight(1f).fillMaxWidth())
-                    TransportControls(vm, state)
-                }
+            Column(Modifier.weight(0.6f).fillMaxWidth()) {
+                PreviewPlayer(
+                    state,
+                    Modifier.weight(1f).fillMaxWidth(),
+                    cropMode = state.tool == EditorTool.CROP,
+                    onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                )
+                TransportControls(vm, state)
             }
-            TimelinePanel(vm, state, onOpenAi = { showGenerate = true }, modifier = Modifier.weight(0.4f).fillMaxWidth())
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
-            PreviewPlayer(state, Modifier.weight(0.42f).fillMaxWidth())
+            PreviewPlayer(
+                state,
+                Modifier.weight(0.42f).fillMaxWidth(),
+                cropMode = state.tool == EditorTool.CROP,
+                onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+            )
             TransportControls(vm, state)
-            var tab by remember { mutableIntStateOf(0) }
-            CompactTabs(tab) { tab = it }
-            Box(Modifier.weight(0.58f).fillMaxWidth()) {
-                if (tab == 0) TimelinePanel(vm, state, onOpenAi = { showGenerate = true }, modifier = Modifier.fillMaxSize())
-                else Inspector(vm, state, onAnalyze, Modifier.fillMaxSize())
-            }
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
     }
 
@@ -201,11 +306,31 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onDismiss = { showSettings = false },
         )
     }
+    if (showProjectSettings) {
+        ProjectSettingsSheet(
+            current = state.document.settings,
+            onChange = { vm.setGlobalSettings(it) },
+            onDismiss = { showProjectSettings = false },
+        )
+    }
+    if (showNameDialog) {
+        NameProjectDialog(
+            current = state.document.name,
+            onConfirm = { vm.setProjectName(it); showNameDialog = false },
+            onDismiss = { showNameDialog = false },
+        )
+    }
     if (showGenerate) {
         GenerateSheet(
-            onGenerate = { url, name ->
+            leonardoKey = settings.leonardoKey,
+            leonardoModel = settings.leonardoModel,
+            onGenerateFree = { url, name ->
                 vm.addMedia(listOf(MediaItem(newId(), url, name, MediaKind.IMAGE, 5_000)))
                 showGenerate = false
+            },
+            onGenerateLeonardo = { prompt, modelId ->
+                val uri = ImageGen.Leonardo.generate(context, settings.leonardoKey, modelId, prompt)
+                vm.addMedia(listOf(MediaItem(newId(), uri.toString(), "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000)))
             },
             onDismiss = { showGenerate = false },
         )
@@ -246,15 +371,23 @@ private fun TopBar(
     onLoad: () -> Unit,
     onExport: () -> Unit,
     onSettings: () -> Unit,
+    onProjectSettings: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.ContentCut, null, tint = Red500, modifier = Modifier.height(18.dp))
+        Image(
+            painter = painterResource(R.drawable.guillotine_icon),
+            contentDescription = "Guillotine",
+            modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)),
+        )
         Spacer(Modifier.width(8.dp))
-        Text("Guillotine", color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Text(
+            state.document.name.ifBlank { "Untitled project" },
+            color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+        )
         Spacer(Modifier.weight(1f))
         IconToolButton(Icons.Filled.Undo, "Undo", enabled = state.canUndo, onClick = onUndo)
         IconToolButton(Icons.Filled.Redo, "Redo", enabled = state.canRedo, onClick = onRedo)
@@ -263,13 +396,46 @@ private fun TopBar(
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 MenuRow("Import media") { menuOpen = false; onImport() }
                 MenuRow("Generate image (free)") { menuOpen = false; onGenerate() }
-                MenuRow("Save project") { menuOpen = false; onSave() }
-                MenuRow("Load project") { menuOpen = false; onLoad() }
+                MenuRow("Name project") { menuOpen = false; onSave() }
+                MenuRow("Open project file…") { menuOpen = false; onLoad() }
                 MenuRow("Export video") { menuOpen = false; onExport() }
+                MenuRow("Project settings") { menuOpen = false; onProjectSettings() }
                 MenuRow("Settings") { menuOpen = false; onSettings() }
             }
         }
     }
+}
+
+/** Simple dialog to name the (always-autosaved) project. */
+@Composable
+private fun NameProjectDialog(current: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf(current) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Name project", color = White) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.replace("\n", "") },
+                singleLine = true,
+                placeholder = { Text("Untitled project", color = Neutral500, fontSize = 13.sp) },
+                textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 14.sp),
+            )
+        },
+        confirmButton = {
+            Text(
+                "Save", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickable { onConfirm(name) }.padding(12.dp),
+            )
+        },
+        dismissButton = {
+            Text(
+                "Cancel", color = Neutral400, fontSize = 14.sp,
+                modifier = Modifier.clickable(onClick = onDismiss).padding(12.dp),
+            )
+        },
+        containerColor = Neutral900,
+    )
 }
 
 @Composable
@@ -289,8 +455,11 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
             color = Neutral400, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
         )
         Spacer(Modifier.weight(1f))
+        val frameMs = 33L // ~1 frame at 30fps
         IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
+        IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
         IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+        IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
         IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
         Spacer(Modifier.weight(1f))
         val rates = listOf(0.5f, 1f, 1.5f, 2f)
@@ -307,21 +476,193 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
     }
 }
 
+/**
+ * Thin status strip for AI analysis: a spinner + "Analyzing with <provider>…" while a run
+ * is in flight, or the error (dismissable) if one failed. This is the feedback surface that
+ * used to live in the Inspector — without it, running the on-device analyzer from the prompt
+ * looked like it did nothing.
+ */
 @Composable
-private fun CompactTabs(selected: Int, onSelect: (Int) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Neutral900), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-        listOf("Timeline", "Inspector").forEachIndexed { i, label ->
-            Text(
-                label,
-                color = if (selected == i) White else Neutral400,
-                fontSize = 12.sp,
-                fontWeight = if (selected == i) FontWeight.Medium else FontWeight.Normal,
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { onSelect(i) }
-                    .background(if (selected == i) Neutral800 else Neutral900)
-                    .padding(vertical = 10.dp),
+private fun AnalysisStatusBar(state: EditorUiState, providerLabel: String, onDismiss: () -> Unit) {
+    val error = state.error
+    when {
+        state.isProcessing -> Row(
+            Modifier.fillMaxWidth().background(Neutral900).padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Red500)
+            Spacer(Modifier.width(8.dp))
+            Text("Analyzing with $providerLabel…", color = Neutral400, fontSize = 12.sp)
+        }
+        error != null -> Row(
+            Modifier.fillMaxWidth().background(Red500.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(error, color = Red500, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Icon(
+                Icons.Filled.Close, "Dismiss", tint = Red500,
+                modifier = Modifier.size(16.dp).clickable(onClick = onDismiss),
             )
+        }
+    }
+}
+
+/**
+ * Shared editor tool strip used by both layouts: a horizontally-scrollable row of
+ * tools (mirroring the web build — select, split, keyframe, add-track, delete, zoom)
+ * plus context-sensitive per-clip tools (filters, audio, background, text, keyframes,
+ * transcribe, split — these replaced the old Inspector), and an AI prompt box. The
+ * prompt box grows up to several lines, so the strip's height expands with multiline
+ * input. With a clip selected the box edits that clip's prompt and the AI button runs
+ * the analyzer; with nothing selected AI opens Generate. The provider chip shows which
+ * engine the AI button will use (on-device or BYO key) and opens Settings on tap.
+ */
+@Composable
+private fun EditorToolStrip(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    onAnalyze: () -> Unit,
+    onTranscribe: () -> Unit,
+    providerLabel: String,
+    onOpenSettings: () -> Unit,
+    onGenerate: () -> Unit,
+) {
+    val selected = state.selectedClips
+    // Submitting the prompt: analyze the selected clip(s), or open Generate when nothing
+    // is selected. Used by both the Enter key and the AI button. If the field is empty we
+    // fall back to the user's last prompt (also shown as the inline hint), so pressing
+    // Enter/AI on an empty field re-runs the previous instruction.
+    val submit: () -> Unit = submit@{
+        if (selected.isEmpty()) { onGenerate(); return@submit }
+        val current = selected.firstOrNull()?.prompt.orEmpty()
+        val effective = current.ifBlank { state.lastPrompt }
+        if (current.isBlank() && effective.isNotBlank()) vm.setPromptForSelected(effective)
+        vm.rememberPrompt(effective)
+        onAnalyze()
+    }
+    // Whether the prompt field has focus — drives the recent-prompts history dropdown.
+    var promptFocused by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().background(Neutral900)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
+                vm.setTool(EditorTool.SELECT)
+            }
+            IconToolButton(Icons.Filled.ContentCut, "Split", active = state.tool == EditorTool.SPLIT) {
+                vm.setTool(EditorTool.SPLIT)
+            }
+            IconToolButton(Icons.Filled.Crop, "Crop / transform", active = state.tool == EditorTool.CROP) {
+                vm.setTool(EditorTool.CROP)
+            }
+            IconToolButton(Icons.Filled.Diamond, "Keyframe tool", active = state.tool == EditorTool.KEYFRAME) {
+                vm.setTool(EditorTool.KEYFRAME)
+            }
+            IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
+                vm.toggleAutoEase()
+            }
+            IconToolButton(Icons.Filled.Add, "Add track") {
+                vm.addTrack(selected.singleOrNull()?.type ?: ClipType.VIDEO)
+            }
+            IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
+                vm.deleteSelected()
+            }
+            // Zoom is pinch-only (horizontal = width, vertical = track height); no toolbar buttons.
+            // Group / ungroup — only meaningful with a multi-clip selection.
+            if (selected.size > 1) {
+                val grouped = selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null }
+                IconToolButton(
+                    if (grouped) Icons.Filled.LinkOff else Icons.Filled.Link,
+                    if (grouped) "Ungroup" else "Group",
+                    active = grouped,
+                ) { if (grouped) vm.ungroupSelected() else vm.groupSelected() }
+            }
+            // Context-sensitive per-clip tools (filters, audio, background, text,
+            // keyframes, transcribe, split) — formerly the Inspector panel. Shown for a
+            // single clip, or a single group (e.g. a linked video+audio pair) so its parts
+            // can be edited without ungrouping.
+            val oneUnit = selected.size == 1 ||
+                (selected.size > 1 && selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null })
+            if (oneUnit) {
+                Box(Modifier.width(1.dp).height(20.dp).background(Neutral800))
+                ClipToolButtons(vm, state, onTranscribe)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f)) {
+                val currentPrompt = selected.firstOrNull()?.prompt ?: ""
+                OutlinedTextField(
+                    value = currentPrompt,
+                    // Enter submits instead of inserting a newline. Soft keyboards send a '\n'
+                    // through onValueChange; hardware Enter is caught by onPreviewKeyEvent below.
+                    onValueChange = { v ->
+                        if (v.contains('\n')) {
+                            vm.setPromptForSelected(v.replace("\n", ""))
+                            submit()
+                        } else {
+                            vm.setPromptForSelected(v)
+                        }
+                    },
+                    enabled = selected.isNotEmpty(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { promptFocused = it.isFocused }
+                        .onPreviewKeyEvent { e ->
+                            if (e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
+                                submit(); true
+                            } else {
+                                false
+                            }
+                        },
+                    placeholder = {
+                        // Inline hint = the user's last prompt (re-used on empty submit), or an
+                        // example before they've entered anything.
+                        val hint = state.lastPrompt.ifBlank {
+                            "e.g. \"keep shots with a face\" or \"cut clips with a car\""
+                        }
+                        Text(
+                            if (selected.isEmpty()) "Select a clip to prompt…" else hint,
+                            color = Neutral500, fontSize = 12.sp,
+                        )
+                    },
+                    textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
+                    maxLines = 6,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { submit() }),
+                )
+                // Recent-prompts history: appears when the empty field is focused. Tapping one
+                // fills the field (tap-to-reuse). focusable=false keeps the keyboard up.
+                DropdownMenu(
+                    expanded = promptFocused && currentPrompt.isBlank() && state.promptHistory.isNotEmpty(),
+                    onDismissRequest = { promptFocused = false },
+                    properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                ) {
+                    state.promptHistory.forEach { p ->
+                        DropdownMenuItem(
+                            text = { Text(p, color = White, fontSize = 12.sp, maxLines = 1) },
+                            onClick = { vm.setPromptForSelected(p); promptFocused = false },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                ToolbarButton(if (selected.isEmpty()) "AI ▸" else "AI", tint = Red500, onClick = submit)
+                // Shows which engine the AI button uses; tap to change it in Settings.
+                Text(
+                    providerLabel,
+                    color = Neutral500,
+                    fontSize = 9.sp,
+                    modifier = Modifier.clickable(onClick = onOpenSettings).padding(horizontal = 4.dp),
+                )
+            }
         }
     }
 }
@@ -365,7 +706,9 @@ private fun handleKey(e: KeyEvent, vm: EditorViewModel): Boolean {
     val ctrl = e.isCtrlPressed || e.isMetaPressed
     return when {
         e.key == Key.Spacebar -> { vm.togglePlay(); true }
-        e.key == Key.Delete || e.key == Key.Backspace -> { vm.deleteSelected(); true }
+        // Delete removes the selection; Backspace deliberately does NOT (avoids nuking a
+        // clip when the user means to edit text or just backspace).
+        e.key == Key.Delete -> { vm.deleteSelected(); true }
         ctrl && e.key == Key.Z -> { if (e.isShiftPressed) vm.redo() else vm.undo(); true }
         ctrl && e.key == Key.Y -> { vm.redo(); true }
         ctrl && e.isAltPressed && e.key == Key.C -> { vm.copySelectedFilters(); true }

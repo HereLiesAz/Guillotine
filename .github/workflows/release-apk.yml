@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -105,7 +105,9 @@ jobs:
             exit 1
           fi
 
-          TARGET_NAME="GraffitiXR-${VERSION_NAME}-release.apk"
+          APP_NAME=$(grep 'rootProject.name' settings.gradle.kts | sed -E "s/.*=.*[\"'](.*)[\"']/\1/")
+          [ -z "$APP_NAME" ] && APP_NAME="Guillotine"
+          TARGET_NAME="${APP_NAME}-${VERSION_NAME}-release.apk"
           mv "$APK_ORIGINAL" "$TARGET_NAME"
 
           git config user.name "github-actions[bot]"

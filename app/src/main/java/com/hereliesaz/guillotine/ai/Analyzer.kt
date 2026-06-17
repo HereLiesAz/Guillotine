@@ -30,16 +30,29 @@ object Analysis {
         prompt: String,
         durationMs: Long,
     ): List<EditSegment> {
-        if (settings.provider != AiProviderType.LOCAL) {
-            require(settings.keyFor(settings.provider).isNotBlank()) {
-                "Add your ${settings.provider.name.lowercase()} API key in Settings, or use the free Local analyzer."
+        val key = settings.keyFor(settings.provider)
+        if (settings.provider.meta.keyUrl != null) {
+            require(key.isNotBlank()) {
+                "Add your ${settings.provider.meta.label} API key in Settings, or use a free analyzer."
             }
         }
+        val model = settings.modelFor(settings.provider)
         return when (settings.provider) {
             AiProviderType.LOCAL -> LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.GEMINI -> GeminiProvider(settings.geminiKey).analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.OPENAI -> OpenAiProvider(settings.openaiKey).analyze(context, mediaUri, kind, prompt, durationMs)
-            AiProviderType.ANTHROPIC -> AnthropicProvider(settings.anthropicKey).analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.MLKIT -> MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.GEMINI -> GeminiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.OPENAI -> OpenAiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
+            AiProviderType.ANTHROPIC -> AnthropicProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs)
+            else -> {
+                // OpenRouter / Groq / xAI / Mistral — generic OpenAI-compatible endpoint.
+                val meta = settings.provider.meta
+                OpenAiCompatibleProvider(
+                    apiKey = key,
+                    endpoint = requireNotNull(meta.openAiCompatUrl),
+                    model = model,
+                    label = meta.label,
+                ).analyze(context, mediaUri, kind, prompt, durationMs)
+            }
         }
     }
 }
