@@ -17,8 +17,8 @@ jobs:
       pull-requests: write
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/labeler@v6
+    - uses: actions/checkout@v6
+    - uses: actions/labeler@v4
       with:
         repo-token: "${{ secrets.GH_TOKEN }}"
         sync-labels: false
