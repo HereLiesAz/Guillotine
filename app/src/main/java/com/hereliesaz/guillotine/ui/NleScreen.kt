@@ -41,8 +41,6 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Undo
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
@@ -445,8 +443,7 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
                 vm.deleteSelected()
             }
-            IconToolButton(Icons.Filled.ZoomOut, "Zoom out") { vm.setZoom(state.pixelsPerSecond * 0.8f) }
-            IconToolButton(Icons.Filled.ZoomIn, "Zoom in") { vm.setZoom(state.pixelsPerSecond * 1.25f) }
+            // Zoom is pinch-only (horizontal = width, vertical = track height); no toolbar buttons.
             // Group / ungroup — only meaningful with a multi-clip selection.
             if (selected.size > 1) {
                 val grouped = selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null }

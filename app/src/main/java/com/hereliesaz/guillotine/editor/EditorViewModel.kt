@@ -108,7 +108,9 @@ class EditorViewModel : ViewModel() {
     // ---- media import ------------------------------------------------------
 
     /**
-     * Add imported media and append matching clip(s) at the end of the timeline. If
+     * Add imported media as matching clip(s). A single clip lands at the playhead (where the
+     * cursor is); when several are added at once they're laid end-to-end from the end of the
+     * timeline (batch import keeps its own order rather than stacking on the cursor). If
      * [targetTrack] is a track of the matching type, the clips land there (e.g. importing
      * from a specific track header); otherwise they go to the default V1/A1 track.
      */
@@ -118,7 +120,8 @@ class EditorViewModel : ViewModel() {
             val videoTrack = targetTrack?.takeIf { it in doc.videoTracks } ?: "V1"
             val audioTrack = targetTrack?.takeIf { it in doc.audioTracks } ?: "A1"
             val newClips = mutableListOf<TimelineClip>()
-            var cursor = doc.totalDurationMs
+            // One clip → at the cursor; multiple → appended sequentially at the end.
+            var cursor = if (items.size == 1) _uiState.value.currentTimeMs else doc.totalDurationMs
             for (m in items) {
                 when (m.kind) {
                     MediaKind.VIDEO -> {
@@ -597,7 +600,10 @@ class EditorViewModel : ViewModel() {
     // ---- transient view state ----------------------------------------------
 
     fun seekTo(ms: Long) {
-        val clamped = ms.coerceIn(0, document.totalDurationMs)
+        // On an empty timeline totalDurationMs is 0; still allow scrubbing the (visible) ruler
+        // so the cursor can be placed where the next clip should land. Clamp to clips otherwise.
+        val total = document.totalDurationMs
+        val clamped = if (total > 0) ms.coerceIn(0, total) else ms.coerceAtLeast(0)
         _uiState.update { it.copy(currentTimeMs = clamped) }
     }
 

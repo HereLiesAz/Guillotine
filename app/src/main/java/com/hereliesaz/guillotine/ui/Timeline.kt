@@ -122,8 +122,9 @@ private fun TimelineLanes(
     // in/out changes how much of the timeline (how many frames) is on screen.
     val zoomModifier = Modifier
         .pointerInput(Unit) {
-            // Anisotropic pinch: horizontal finger spread changes width (pixels/second),
-            // vertical spread changes track height. Tracked per-axis from the two pointers.
+            // Single-axis pinch: one gesture changes EITHER width (pixels/second) OR track
+            // height, never both. We pick whichever axis the fingers moved more this event,
+            // so a mostly-horizontal pinch zooms width and a mostly-vertical one zooms height.
             awaitPointerEventScope {
                 while (true) {
                     // Initial pass: claim two-finger pinch before the nested scroll/clip
@@ -137,12 +138,17 @@ private fun TimelineLanes(
                         val curV = kotlin.math.abs(a.position.y - b.position.y)
                         val prevH = kotlin.math.abs(a.previousPosition.x - b.previousPosition.x)
                         val prevV = kotlin.math.abs(a.previousPosition.y - b.previousPosition.y)
+                        val dH = kotlin.math.abs(curH - prevH)
+                        val dV = kotlin.math.abs(curV - prevV)
                         var acted = false
-                        if (prevH > 1f && curH > 1f && curH != prevH) {
-                            vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH)); acted = true
-                        }
-                        if (prevV > 1f && curV > 1f && curV != prevV) {
-                            vm.scaleTrackHeight(curV / prevV); acted = true
+                        if (dH >= dV) {
+                            if (prevH > 1f && curH > 1f && curH != prevH) {
+                                vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH)); acted = true
+                            }
+                        } else {
+                            if (prevV > 1f && curV > 1f && curV != prevV) {
+                                vm.scaleTrackHeight(curV / prevV); acted = true
+                            }
                         }
                         if (acted) pts.forEach { it.consume() }
                     }
