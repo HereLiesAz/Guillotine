@@ -16,3 +16,10 @@
 # Android module build outputs
 app/build/
 build/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
