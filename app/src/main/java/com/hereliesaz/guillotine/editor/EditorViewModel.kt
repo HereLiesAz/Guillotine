@@ -568,6 +568,10 @@ class EditorViewModel : ViewModel() {
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
+    /** Set the project name (autosaved with the document; not an undo step). */
+    fun setProjectName(name: String) =
+        _uiState.update { it.copy(document = it.document.copy(name = name.trim())) }
+
     /**
      * Record a submitted prompt at the head of the project's prompt history (deduped,
      * capped at [MAX_PROMPT_HISTORY]). Stored on the live UI state AND the document so it

@@ -93,7 +93,6 @@ import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.data.ProjectAutosave
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
-import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
 import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
@@ -133,6 +132,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
     var showSettings by remember { mutableStateOf(false) }
     var showProjectSettings by remember { mutableStateOf(false) }
+    var showNameDialog by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
@@ -158,11 +158,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             else -> { importTargetTrack = track; importLauncher() }
         }
     }
-    // Explicit Save/Load now export/import a copy to a user-chosen location; the working
-    // project is auto-saved internally (below), so saving is optional.
-    val saveLauncher = rememberSaveProjectLauncher { uri ->
-        scope.launch { withContext(Dispatchers.IO) { runCatching { ProjectStore.save(context, uri, vm.uiState.value.document) } } }
-    }
+    // The project is auto-saved internally; "Save" only names it. Load imports a .gilt copy.
     val openLauncher = rememberOpenProjectLauncher { uri ->
         scope.launch {
             val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
@@ -251,7 +247,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onRedo = vm::redo,
             onImport = { importTargetTrack = null; importLauncher() },
             onGenerate = { showGenerate = true },
-            onSave = saveLauncher,
+            onSave = { showNameDialog = true },
             onLoad = openLauncher,
             onExport = { exportDone = null; exportError = null; showExport = true },
             onSettings = { showSettings = true },
@@ -301,6 +297,13 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             current = state.document.settings,
             onChange = { vm.setGlobalSettings(it) },
             onDismiss = { showProjectSettings = false },
+        )
+    }
+    if (showNameDialog) {
+        NameProjectDialog(
+            current = state.document.name,
+            onConfirm = { vm.setProjectName(it); showNameDialog = false },
+            onDismiss = { showNameDialog = false },
         )
     }
     if (showGenerate) {
@@ -366,7 +369,10 @@ private fun TopBar(
             modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)),
         )
         Spacer(Modifier.width(8.dp))
-        Text("Guillotine", color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Text(
+            state.document.name.ifBlank { "Untitled project" },
+            color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+        )
         Spacer(Modifier.weight(1f))
         IconToolButton(Icons.Filled.Undo, "Undo", enabled = state.canUndo, onClick = onUndo)
         IconToolButton(Icons.Filled.Redo, "Redo", enabled = state.canRedo, onClick = onRedo)
@@ -375,14 +381,46 @@ private fun TopBar(
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 MenuRow("Import media") { menuOpen = false; onImport() }
                 MenuRow("Generate image (free)") { menuOpen = false; onGenerate() }
-                MenuRow("Save project") { menuOpen = false; onSave() }
-                MenuRow("Load project") { menuOpen = false; onLoad() }
+                MenuRow("Name project") { menuOpen = false; onSave() }
+                MenuRow("Open project file…") { menuOpen = false; onLoad() }
                 MenuRow("Export video") { menuOpen = false; onExport() }
                 MenuRow("Project settings") { menuOpen = false; onProjectSettings() }
                 MenuRow("Settings") { menuOpen = false; onSettings() }
             }
         }
     }
+}
+
+/** Simple dialog to name the (always-autosaved) project. */
+@Composable
+private fun NameProjectDialog(current: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf(current) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Name project", color = White) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.replace("\n", "") },
+                singleLine = true,
+                placeholder = { Text("Untitled project", color = Neutral500, fontSize = 13.sp) },
+                textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 14.sp),
+            )
+        },
+        confirmButton = {
+            Text(
+                "Save", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickable { onConfirm(name) }.padding(12.dp),
+            )
+        },
+        dismissButton = {
+            Text(
+                "Cancel", color = Neutral400, fontSize = 14.sp,
+                modifier = Modifier.clickable(onClick = onDismiss).padding(12.dp),
+            )
+        },
+        containerColor = Neutral900,
+    )
 }
 
 @Composable

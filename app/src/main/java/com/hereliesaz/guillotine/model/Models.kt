@@ -149,6 +149,8 @@ data class GlobalSettings(
  */
 @Serializable
 data class Document(
+    /** User-facing project name (set via Save → Name; the project itself is always autosaved). */
+    val name: String = "",
     val mediaItems: List<MediaItem> = emptyList(),
     val clips: List<TimelineClip> = emptyList(),
     /** Track lists in stacking order (top of panel = top layer). Text is just a clip on a video track. */
