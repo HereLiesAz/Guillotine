@@ -98,6 +98,7 @@ dependencies {
     implementation(libs.androidx.material3.window.size)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.aznavrail)
 
     // Jetpack Media3: playback (ExoPlayer) + on-device editing/export (Transformer).
     implementation(libs.media3.exoplayer)
