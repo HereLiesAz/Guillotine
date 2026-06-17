@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -24,6 +25,7 @@ class GeminiProvider(
 ) : ClipAnalyzer {
 
     private val base = "https://generativelanguage.googleapis.com"
+    private val chunkSize = 2 * 1024 * 1024 // 2 MB – multiple of 256 KB as required
 
     override suspend fun analyze(
         context: Context,
@@ -33,11 +35,15 @@ class GeminiProvider(
         durationMs: Long,
     ): List<EditSegment> = withContext(Dispatchers.IO) {
         val mime = context.contentResolver.getType(mediaUri) ?: defaultMime(kind)
-        val bytes = context.contentResolver.openInputStream(mediaUri)?.use { it.readBytes() }
-            ?: throw IllegalStateException("Could not read media.")
+        val size = context.contentResolver.openAssetFileDescriptor(mediaUri, "r")
+            ?.use { it.length }
+            ?: throw IllegalStateException("Could not determine media size.")
 
-        val uploadUrl = startResumable(bytes.size, mime)
-        var file = finalizeUpload(uploadUrl, bytes)
+        val uploadUrl = startResumable(size, mime)
+        var file = context.contentResolver.openInputStream(mediaUri)?.use { stream ->
+            streamUpload(uploadUrl, stream, size)
+        } ?: throw IllegalStateException("Could not read media.")
+
         var tries = 60
         while (file.state == "PROCESSING" && tries-- > 0) {
             delay(2000)
@@ -51,7 +57,7 @@ class GeminiProvider(
 
     private data class GeminiFile(val name: String, val uri: String, val state: String)
 
-    private fun startResumable(size: Int, mime: String): String {
+    private fun startResumable(size: Long, mime: String): String {
         val conn = open("$base/upload/v1beta/files?key=$apiKey", "POST")
         conn.setRequestProperty("X-Goog-Upload-Protocol", "resumable")
         conn.setRequestProperty("X-Goog-Upload-Command", "start")
@@ -67,18 +73,40 @@ class GeminiProvider(
         return url
     }
 
-    private fun finalizeUpload(uploadUrl: String, bytes: ByteArray): GeminiFile {
-        val conn = open(uploadUrl, "POST")
-        conn.setRequestProperty("Content-Length", bytes.size.toString())
-        conn.setRequestProperty("X-Goog-Upload-Offset", "0")
-        conn.setRequestProperty("X-Goog-Upload-Command", "upload, finalize")
-        conn.doOutput = true
-        conn.outputStream.use { it.write(bytes) }
-        if (conn.responseCode !in 200..299) error("upload", conn)
-        val json = JSONObject(readBody(conn))
-        conn.disconnect()
-        val f = json.getJSONObject("file")
-        return GeminiFile(f.getString("name"), f.optString("uri"), f.optString("state", "PROCESSING"))
+    /** Streams the file to the Gemini upload URL in 2 MB chunks to avoid OOM. */
+    private fun streamUpload(uploadUrl: String, input: InputStream, totalSize: Long): GeminiFile {
+        val buf = ByteArray(chunkSize)
+        var offset = 0L
+        while (offset < totalSize) {
+            val toRead = minOf(totalSize - offset, chunkSize.toLong()).toInt()
+            var filled = 0
+            while (filled < toRead) {
+                val n = input.read(buf, filled, toRead - filled)
+                if (n == -1) break
+                filled += n
+            }
+            val isLast = offset + filled >= totalSize
+            val conn = open(uploadUrl, "POST")
+            conn.setRequestProperty("Content-Length", filled.toString())
+            conn.setRequestProperty("X-Goog-Upload-Offset", offset.toString())
+            conn.setRequestProperty(
+                "X-Goog-Upload-Command",
+                if (isLast) "upload, finalize" else "upload",
+            )
+            conn.doOutput = true
+            conn.setFixedLengthStreamingMode(filled)
+            conn.outputStream.use { it.write(buf, 0, filled) }
+            if (conn.responseCode !in 200..299) error("upload chunk", conn)
+            if (isLast) {
+                val json = JSONObject(readBody(conn))
+                conn.disconnect()
+                val f = json.getJSONObject("file")
+                return GeminiFile(f.getString("name"), f.optString("uri"), f.optString("state", "PROCESSING"))
+            }
+            conn.disconnect()
+            offset += filled
+        }
+        throw IllegalStateException("Upload ended without finalization.")
     }
 
     private fun getFile(name: String): GeminiFile {

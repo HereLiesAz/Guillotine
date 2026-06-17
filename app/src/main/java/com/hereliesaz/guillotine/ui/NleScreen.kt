@@ -547,7 +547,6 @@ private fun EditorToolStrip(
     Column(Modifier.fillMaxWidth().background(Neutral900)) {
         Row(
             Modifier
-                .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -102,12 +102,11 @@ class OpenAiProvider(
 
     /** Whisper transcription → "start-end: text" lines. */
     private fun transcribe(context: Context, uri: Uri): String {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: throw IllegalStateException("Could not read audio for OpenAI transcription.")
         val boundary = "----guillotine${System.nanoTime()}"
         val conn = open(audioUrl)
         conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         conn.doOutput = true
+        conn.setChunkedStreamingMode(2 * 1024 * 1024) // 2 MB chunks to avoid OOM
         DataOutputStream(conn.outputStream).use { out ->
             fun field(name: String, value: String) {
                 out.writeBytes("--$boundary\r\n")
@@ -119,7 +118,11 @@ class OpenAiProvider(
             out.writeBytes("--$boundary\r\n")
             out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"audio.mp4\"\r\n")
             out.writeBytes("Content-Type: application/octet-stream\r\n\r\n")
-            out.write(bytes)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val buf = ByteArray(2 * 1024 * 1024)
+                var n: Int
+                while (input.read(buf).also { n = it } != -1) out.write(buf, 0, n)
+            } ?: throw IllegalStateException("Could not read audio for OpenAI transcription.")
             out.writeBytes("\r\n--$boundary--\r\n")
         }
         if (conn.responseCode !in 200..299) fail("transcription", conn)

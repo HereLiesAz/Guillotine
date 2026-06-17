@@ -448,7 +448,7 @@ fun ProjectSettingsSheet(current: GlobalSettings, onChange: (GlobalSettings) -> 
 
             Text("Aspect ratio", color = Neutral400, fontSize = 12.sp)
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 AspectRatio.values().forEach { ar ->
@@ -458,7 +458,7 @@ fun ProjectSettingsSheet(current: GlobalSettings, onChange: (GlobalSettings) -> 
 
             Text("Quality", color = Neutral400, fontSize = 12.sp)
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Quality.values().forEach { q ->
