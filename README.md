@@ -40,16 +40,6 @@ on-device fallback** so the app is usable with zero configuration.
 - **Adaptive UI:** phone / tablet / Chromebook layouts, keyboard shortcuts, mouse + Ctrl-scroll
   zoom; Material 3 Expressive, dark with a red accent.
 
-## Building
-
-See [BUILDING.md](BUILDING.md). Short version: open the repo in **Android Studio** (copied out of
-any cloud-synced folder), let it sync, and run on a device/emulator (Android 8.0 / API 26+).
-
-Unit tests for the timeline math run without a device: `gradlew test`.
-
-> First-sync note: the AGP / Kotlin / Compose BOM / Gradle versions in
-> `gradle/libs.versions.toml` are set for offline authoring. If Android Studio's AGP Upgrade
-> Assistant proposes adjusted versions, accept them — that's the source of truth for a green build.
 
 ## License
 
