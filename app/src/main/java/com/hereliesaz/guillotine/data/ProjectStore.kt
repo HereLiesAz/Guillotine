@@ -7,6 +7,28 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import com.hereliesaz.guillotine.model.Document
 import kotlinx.serialization.json.Json
+import java.io.File
+
+/**
+ * The always-on current project: the editor document is continuously written to a file in
+ * app-internal storage so work is never lost and is restored automatically on next launch —
+ * the user never has to explicitly save. Explicit Save/Load (SAF) is for exporting/importing
+ * a copy to a user-chosen location.
+ */
+object ProjectAutosave {
+    private const val FILE = "current_project.gilt"
+
+    fun save(context: Context, document: Document) {
+        File(context.filesDir, FILE).writeText(ProjectStore.serialize(document))
+    }
+
+    /** The autosaved current project, or null if none exists yet / it can't be read. */
+    fun load(context: Context): Document? {
+        val f = File(context.filesDir, FILE)
+        if (!f.exists()) return null
+        return runCatching { ProjectStore.deserialize(f.readText()) }.getOrNull()
+    }
+}
 
 /** Saves/loads the editor [Document] as JSON (".gilt" project files) via SAF. */
 object ProjectStore {

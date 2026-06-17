@@ -37,8 +37,8 @@ data class EditorUiState(
     val selectedClipIds: List<String> = emptyList(),
     /** Currently-selected keyframe (shows ease handles on its segment). */
     val selectedKeyframeId: String? = null,
-    /** The last prompt the user submitted; used as the inline hint and the empty-submit default. */
-    val lastPrompt: String = "",
+    /** Recent prompts (most-recent first): inline hint, history dropdown, empty-submit default. */
+    val promptHistory: List<String> = emptyList(),
     val tool: EditorTool = EditorTool.SELECT,
     val isProcessing: Boolean = false,
     val error: String? = null,
@@ -49,6 +49,9 @@ data class EditorUiState(
     val selectedClips: List<TimelineClip>
         get() = document.clips.filter { it.id in selectedClipIds }
 
+    /** Most recent prompt (the inline hint / empty-submit default). */
+    val lastPrompt: String get() = promptHistory.firstOrNull().orEmpty()
+
     /** Lane height (dp) for [trackId], falling back to the default. */
     fun trackHeight(trackId: String): Float = trackHeights[trackId] ?: DEFAULT_TRACK_HEIGHT
 }
@@ -56,6 +59,7 @@ data class EditorUiState(
 const val DEFAULT_TRACK_HEIGHT = 64f
 const val MIN_TRACK_HEIGHT = 44f
 const val MAX_TRACK_HEIGHT = 240f
+private const val MAX_PROMPT_HISTORY = 7
 
 /**
  * Owns all editor state. Content mutations go through [mutateDocument] so undo/redo
@@ -565,13 +569,17 @@ class EditorViewModel : ViewModel() {
     fun clearError() = _uiState.update { it.copy(error = null) }
 
     /**
-     * Remember the most recent non-blank prompt (for the inline hint / empty-submit default).
-     * Stored on the live UI state AND on the document so it persists with the saved project.
-     * Updated outside [mutateDocument] so it never adds an undo step.
+     * Record a submitted prompt at the head of the project's prompt history (deduped,
+     * capped at [MAX_PROMPT_HISTORY]). Stored on the live UI state AND the document so it
+     * persists with the saved project. Updated outside [mutateDocument] (no undo step).
      */
     fun rememberPrompt(prompt: String) {
-        if (prompt.isBlank()) return
-        _uiState.update { it.copy(lastPrompt = prompt, document = it.document.copy(lastPrompt = prompt)) }
+        val p = prompt.trim()
+        if (p.isBlank()) return
+        _uiState.update { st ->
+            val hist = (listOf(p) + st.promptHistory.filter { it != p }).take(MAX_PROMPT_HISTORY)
+            st.copy(promptHistory = hist, document = st.document.copy(promptHistory = hist))
+        }
     }
 
     // ---- global settings ---------------------------------------------------
@@ -730,7 +738,7 @@ class EditorViewModel : ViewModel() {
                 currentTimeMs = 0,
                 isPlaying = false,
                 selectedClipIds = emptyList(),
-                lastPrompt = doc.lastPrompt, // restore the project's remembered prompt
+                promptHistory = doc.promptHistory, // restore the project's prompt history
                 canUndo = false,
                 canRedo = false,
             )

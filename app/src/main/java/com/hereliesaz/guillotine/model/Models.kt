@@ -156,8 +156,8 @@ data class Document(
     val audioTracks: List<String> = listOf("A1"),
     val trackSettings: Map<String, TrackSettings> = emptyMap(),
     val settings: GlobalSettings = GlobalSettings(),
-    /** The last AI prompt used in this project; persists as the inline hint / empty-submit default. */
-    val lastPrompt: String = "",
+    /** Recent AI prompts used in this project (most-recent first); inline hint + history dropdown. */
+    val promptHistory: List<String> = emptyList(),
 ) {
     /** End of the last clip on the timeline, in milliseconds. */
     val totalDurationMs: Long

@@ -63,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -89,6 +90,7 @@ import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.guillotine.ai.Transcription
 import com.hereliesaz.guillotine.ai.meta
+import com.hereliesaz.guillotine.data.ProjectAutosave
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
 import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
@@ -113,6 +115,9 @@ import com.hereliesaz.guillotine.ui.theme.Neutral950
 import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -153,14 +158,33 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             else -> { importTargetTrack = track; importLauncher() }
         }
     }
+    // Explicit Save/Load now export/import a copy to a user-chosen location; the working
+    // project is auto-saved internally (below), so saving is optional.
     val saveLauncher = rememberSaveProjectLauncher { uri ->
         scope.launch { withContext(Dispatchers.IO) { runCatching { ProjectStore.save(context, uri, vm.uiState.value.document) } } }
     }
     val openLauncher = rememberOpenProjectLauncher { uri ->
         scope.launch {
-            withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
-                ?.let { vm.loadDocument(it) }
+            val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
+            if (doc != null) vm.loadDocument(doc)
         }
+    }
+
+    // Auto-save / restore: load the autosaved project on launch (fresh editor only), then
+    // continuously persist the document to internal storage on every change (debounced via
+    // collectLatest — a new edit cancels the pending write). The user never has to save.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (vm.uiState.value.document.clips.isEmpty()) {
+            val doc = withContext(Dispatchers.IO) { ProjectAutosave.load(context) }
+            if (doc != null) vm.loadDocument(doc)
+        }
+        vm.uiState
+            .map { it.document }
+            .distinctUntilChanged()
+            .collectLatest { doc ->
+                kotlinx.coroutines.delay(800)
+                withContext(Dispatchers.IO) { runCatching { ProjectAutosave.save(context, doc) } }
+            }
     }
 
     val onAnalyze: () -> Unit = onAnalyze@{
@@ -463,6 +487,8 @@ private fun EditorToolStrip(
         vm.rememberPrompt(effective)
         onAnalyze()
     }
+    // Whether the prompt field has focus — drives the recent-prompts history dropdown.
+    var promptFocused by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().background(Neutral900)) {
         Row(
             Modifier
@@ -513,44 +539,62 @@ private fun EditorToolStrip(
             Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
-                value = selected.firstOrNull()?.prompt ?: "",
-                // Enter submits instead of inserting a newline. Soft keyboards send a '\n'
-                // through onValueChange; hardware Enter is caught by onPreviewKeyEvent below.
-                onValueChange = { v ->
-                    if (v.contains('\n')) {
-                        vm.setPromptForSelected(v.replace("\n", ""))
-                        submit()
-                    } else {
-                        vm.setPromptForSelected(v)
-                    }
-                },
-                enabled = selected.isNotEmpty(),
-                modifier = Modifier
-                    .weight(1f)
-                    .onPreviewKeyEvent { e ->
-                        if (e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
-                            submit(); true
+            Box(Modifier.weight(1f)) {
+                val currentPrompt = selected.firstOrNull()?.prompt ?: ""
+                OutlinedTextField(
+                    value = currentPrompt,
+                    // Enter submits instead of inserting a newline. Soft keyboards send a '\n'
+                    // through onValueChange; hardware Enter is caught by onPreviewKeyEvent below.
+                    onValueChange = { v ->
+                        if (v.contains('\n')) {
+                            vm.setPromptForSelected(v.replace("\n", ""))
+                            submit()
                         } else {
-                            false
+                            vm.setPromptForSelected(v)
                         }
                     },
-                placeholder = {
-                    // Inline hint = the user's last prompt (re-used on empty submit), or an
-                    // example before they've entered anything.
-                    val hint = state.lastPrompt.ifBlank {
-                        "e.g. \"keep shots with a face\" or \"cut clips with a car\""
+                    enabled = selected.isNotEmpty(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { promptFocused = it.isFocused }
+                        .onPreviewKeyEvent { e ->
+                            if (e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
+                                submit(); true
+                            } else {
+                                false
+                            }
+                        },
+                    placeholder = {
+                        // Inline hint = the user's last prompt (re-used on empty submit), or an
+                        // example before they've entered anything.
+                        val hint = state.lastPrompt.ifBlank {
+                            "e.g. \"keep shots with a face\" or \"cut clips with a car\""
+                        }
+                        Text(
+                            if (selected.isEmpty()) "Select a clip to prompt…" else hint,
+                            color = Neutral500, fontSize = 12.sp,
+                        )
+                    },
+                    textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
+                    maxLines = 6,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { submit() }),
+                )
+                // Recent-prompts history: appears when the empty field is focused. Tapping one
+                // fills the field (tap-to-reuse). focusable=false keeps the keyboard up.
+                DropdownMenu(
+                    expanded = promptFocused && currentPrompt.isBlank() && state.promptHistory.isNotEmpty(),
+                    onDismissRequest = { promptFocused = false },
+                    properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                ) {
+                    state.promptHistory.forEach { p ->
+                        DropdownMenuItem(
+                            text = { Text(p, color = White, fontSize = 12.sp, maxLines = 1) },
+                            onClick = { vm.setPromptForSelected(p); promptFocused = false },
+                        )
                     }
-                    Text(
-                        if (selected.isEmpty()) "Select a clip to prompt…" else hint,
-                        color = Neutral500, fontSize = 12.sp,
-                    )
-                },
-                textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
-                maxLines = 6,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { submit() }),
-            )
+                }
+            }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 ToolbarButton(if (selected.isEmpty()) "AI ▸" else "AI", tint = Red500, onClick = submit)
