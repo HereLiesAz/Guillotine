@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -180,11 +181,16 @@ private fun TimelineLanes(
             }
         }
         // Horizontally-scrollable content; ruler fixed at top, lanes scroll vertically.
+        // Wrapped in BoxWithConstraints so the surface always fills the viewport width — even
+        // with no clips (contentWidth would otherwise be ~400dp), so tap-to-seek and the pinch
+        // gestures cover the whole visible timeline regardless of whether any clip is present.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+        val surfaceWidth = maxOf(contentWidth, maxWidth)
         Box(
             Modifier
                 .fillMaxSize()
                 .horizontalScroll(scroll)
-                .width(contentWidth)
+                .width(surfaceWidth)
                 // Tap anywhere on the timeline surface (ruler, gaps, below the tracks) to
                 // move the playhead there. Clips sit on top and handle their own taps.
                 .pointerInput(pps) {
@@ -213,6 +219,7 @@ private fun TimelineLanes(
                     .fillMaxHeight()
                     .background(Red500),
             )
+        }
         }
     }
 }
