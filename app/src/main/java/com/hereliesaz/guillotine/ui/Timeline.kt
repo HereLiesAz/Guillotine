@@ -188,6 +188,10 @@ private fun TimelineLanes(
         // gestures cover the whole visible timeline regardless of whether any clip is present.
         BoxWithConstraints(Modifier.fillMaxSize()) {
         val surfaceWidth = maxOf(contentWidth, maxWidth)
+        // Report the visible lanes width so the view model can cap zoom-out at "whole project
+        // fits in 2/3 of the timeline".
+        val viewportPx = with(density) { maxWidth.toPx() }
+        androidx.compose.runtime.LaunchedEffect(viewportPx) { vm.setTimelineViewportPx(viewportPx) }
         Box(
             Modifier
                 .fillMaxSize()

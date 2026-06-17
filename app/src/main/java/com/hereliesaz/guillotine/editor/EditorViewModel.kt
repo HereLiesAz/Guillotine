@@ -667,7 +667,19 @@ class EditorViewModel : ViewModel() {
     fun togglePlay() = _uiState.update { it.copy(isPlaying = !it.isPlaying && it.document.totalDurationMs > 0) }
     fun setPlaying(playing: Boolean) = _uiState.update { it.copy(isPlaying = playing) }
     fun setPlaybackRate(rate: Float) = _uiState.update { it.copy(playbackRate = rate) }
-    fun setZoom(pxPerSec: Float) = _uiState.update { it.copy(pixelsPerSecond = pxPerSec.coerceIn(10f, 500f)) }
+    /** Visible width (px) of the timeline lanes area; feeds the dynamic zoom-out limit. */
+    private var timelineViewportPx = 0f
+    fun setTimelineViewportPx(px: Float) { timelineViewportPx = px }
+
+    fun setZoom(pxPerSec: Float) {
+        val maxPps = 500f
+        val totalSec = document.totalDurationMs / 1000f
+        // Zoom-out limit: the whole project fits within 2/3 of the visible timeline width.
+        val minPps = if (totalSec > 0f && timelineViewportPx > 0f) {
+            ((timelineViewportPx * 2f / 3f) / totalSec).coerceIn(0.1f, maxPps)
+        } else 2f
+        _uiState.update { it.copy(pixelsPerSecond = pxPerSec.coerceIn(minPps, maxPps)) }
+    }
 
     /**
      * Vertical pinch: scale lane height. Affects the track(s) of the current selection so
