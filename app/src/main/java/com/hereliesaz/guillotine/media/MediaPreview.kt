@@ -27,7 +27,10 @@ import kotlin.math.max
 object MediaPreview {
 
     private val thumbs = LruCache<String, ImageBitmap>(96)
-    private val waves = LruCache<String, FloatArray>(64)
+    private val waves = LruCache<String, Waveform>(64)
+
+    /** Per-channel peak envelopes (0..1). Mono sources have [left] == [right] (same values). */
+    data class Waveform(val left: FloatArray, val right: FloatArray)
 
     /** A downscaled frame ([MediaKind.IMAGE] decodes the image itself) at [atMs] of the source. */
     suspend fun thumbnail(
@@ -47,8 +50,8 @@ object MediaPreview {
         img
     }
 
-    /** [buckets] peak-amplitude values in 0..1 across the clip's audio track, or null. */
-    suspend fun waveform(context: Context, uri: String, buckets: Int = 240): FloatArray? =
+    /** Stereo (L/R) peak envelopes of [buckets] each across the clip's audio track, or null. */
+    suspend fun waveform(context: Context, uri: String, buckets: Int = 240): Waveform? =
         withContext(Dispatchers.IO) {
             waves.get(uri)?.let { return@withContext it }
             val result = runCatching { decodeWaveform(context, Uri.parse(uri), buckets) }.getOrNull()
@@ -90,7 +93,7 @@ object MediaPreview {
 
     // ---- waveform ----------------------------------------------------------
 
-    private fun decodeWaveform(context: Context, uri: Uri, buckets: Int): FloatArray? {
+    private fun decodeWaveform(context: Context, uri: Uri, buckets: Int): Waveform? {
         val extractor = MediaExtractor()
         extractor.setDataSource(context, uri, null)
         try {
@@ -105,13 +108,17 @@ object MediaPreview {
             if (trackIndex < 0 || format == null) return null
             val totalUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
             if (totalUs <= 0L) return null
+            val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
+                format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1) else 1
             extractor.selectTrack(trackIndex)
 
             val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             codec.configure(format, null, null, 0)
             codec.start()
 
-            val peaks = FloatArray(buckets)
+            // Interleaved PCM is L,R,L,R… for stereo; track left/right envelopes separately.
+            val leftPeaks = FloatArray(buckets)
+            val rightPeaks = FloatArray(buckets)
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var outputDone = false
@@ -143,15 +150,21 @@ object MediaPreview {
                                 val shorts = out.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
                                 val bucket = ((info.presentationTimeUs.toDouble() / totalUs) * buckets)
                                     .toInt().coerceIn(0, buckets - 1)
-                                var peak = peaks[bucket]
+                                var lPeak = leftPeaks[bucket]
+                                var rPeak = rightPeaks[bucket]
                                 val n = shorts.remaining()
+                                // Stride by whole frames (×4 for speed); read L at i, R at i+1.
+                                val step = channels * 4
                                 var i = 0
-                                while (i < n) { // stride for speed; we only need the envelope
-                                    val s = abs(shorts.get(i).toInt()) / 32768f
-                                    if (s > peak) peak = s
-                                    i += 8
+                                while (i + channels - 1 < n) {
+                                    val l = abs(shorts.get(i).toInt()) / 32768f
+                                    if (l > lPeak) lPeak = l
+                                    val r = if (channels > 1) abs(shorts.get(i + 1).toInt()) / 32768f else l
+                                    if (r > rPeak) rPeak = r
+                                    i += step
                                 }
-                                peaks[bucket] = peak
+                                leftPeaks[bucket] = lPeak
+                                rightPeaks[bucket] = rPeak
                             }
                         }
                         codec.releaseOutputBuffer(outIndex, false)
@@ -161,14 +174,19 @@ object MediaPreview {
                 runCatching { codec.stop() }
                 codec.release()
             }
-            // Fill any empty buckets from the previous one so the line is continuous.
-            var last = 0f
-            for (i in peaks.indices) {
-                if (peaks[i] == 0f) peaks[i] = last else last = peaks[i]
-            }
-            return peaks
+            // Fill any empty buckets from the previous one so each line is continuous.
+            fillGaps(leftPeaks)
+            fillGaps(rightPeaks)
+            return Waveform(leftPeaks, rightPeaks)
         } finally {
             extractor.release()
+        }
+    }
+
+    private fun fillGaps(peaks: FloatArray) {
+        var last = 0f
+        for (i in peaks.indices) {
+            if (peaks[i] == 0f) peaks[i] = last else last = peaks[i]
         }
     }
 }

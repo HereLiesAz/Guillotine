@@ -693,24 +693,28 @@ private fun ClipThumbnail(uri: String, kind: com.hereliesaz.guillotine.model.Med
     }
 }
 
-/** Audio clip background: a coarse amplitude waveform (decoded on-device, async). */
+/** Audio clip background: stereo amplitude waveforms (L on top, R on bottom; decoded on-device). */
 @Composable
 private fun ClipWaveform(uri: String) {
     val context = LocalContext.current
-    val wave by produceState<FloatArray?>(null, uri) { value = MediaPreview.waveform(context, uri) }
+    val wave by produceState<MediaPreview.Waveform?>(null, uri) { value = MediaPreview.waveform(context, uri) }
     val w = wave ?: return
     Canvas(Modifier.fillMaxSize().padding(horizontal = 2.dp)) {
-        val mid = size.height / 2f
-        val bw = size.width / w.size
-        w.forEachIndexed { i, peak ->
-            val h = (peak * size.height * 0.9f).coerceAtLeast(1f)
+        val n = minOf(w.left.size, w.right.size)
+        if (n == 0) return@Canvas
+        val topMid = size.height * 0.25f      // left channel centered in the top half
+        val botMid = size.height * 0.75f      // right channel centered in the bottom half
+        val maxH = size.height * 0.5f         // per-channel peak-to-peak fits its half
+        val bw = size.width / n
+        val sw = (bw * 0.8f).coerceAtLeast(1f)
+        for (i in 0 until n) {
             val x = i * bw + bw / 2f
-            drawLine(
-                color = Neutral500,
-                start = Offset(x, mid - h / 2f),
-                end = Offset(x, mid + h / 2f),
-                strokeWidth = (bw * 0.8f).coerceAtLeast(1f),
-            )
+            val lh = (w.left[i] * maxH).coerceAtLeast(1f)
+            val rh = (w.right[i] * maxH).coerceAtLeast(1f)
+            drawLine(Neutral500, Offset(x, topMid - lh / 2f), Offset(x, topMid + lh / 2f), strokeWidth = sw)
+            drawLine(Neutral500, Offset(x, botMid - rh / 2f), Offset(x, botMid + rh / 2f), strokeWidth = sw)
         }
+        // Thin divider between the two channels.
+        drawLine(Neutral700, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 0.5f)
     }
 }
