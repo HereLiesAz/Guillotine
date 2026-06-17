@@ -452,8 +452,17 @@ private fun EditorToolStrip(
 ) {
     val selected = state.selectedClips
     // Submitting the prompt: analyze the selected clip(s), or open Generate when nothing
-    // is selected. Used by both the Enter key and the AI button.
-    val submit: () -> Unit = { if (selected.isEmpty()) onGenerate() else onAnalyze() }
+    // is selected. Used by both the Enter key and the AI button. If the field is empty we
+    // fall back to the user's last prompt (also shown as the inline hint), so pressing
+    // Enter/AI on an empty field re-runs the previous instruction.
+    val submit: () -> Unit = submit@{
+        if (selected.isEmpty()) { onGenerate(); return@submit }
+        val current = selected.firstOrNull()?.prompt.orEmpty()
+        val effective = current.ifBlank { state.lastPrompt }
+        if (current.isBlank() && effective.isNotBlank()) vm.setPromptForSelected(effective)
+        vm.rememberPrompt(effective)
+        onAnalyze()
+    }
     Column(Modifier.fillMaxWidth().background(Neutral900)) {
         Row(
             Modifier
@@ -527,9 +536,13 @@ private fun EditorToolStrip(
                         }
                     },
                 placeholder = {
+                    // Inline hint = the user's last prompt (re-used on empty submit), or an
+                    // example before they've entered anything.
+                    val hint = state.lastPrompt.ifBlank {
+                        "e.g. \"keep shots with a face\" or \"cut clips with a car\""
+                    }
                     Text(
-                        if (selected.isEmpty()) "Select a clip to prompt…"
-                        else "e.g. \"keep shots with a face\" or \"cut clips with a car\"",
+                        if (selected.isEmpty()) "Select a clip to prompt…" else hint,
                         color = Neutral500, fontSize = 12.sp,
                     )
                 },

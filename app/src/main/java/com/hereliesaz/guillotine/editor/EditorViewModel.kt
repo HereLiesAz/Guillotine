@@ -37,6 +37,8 @@ data class EditorUiState(
     val selectedClipIds: List<String> = emptyList(),
     /** Currently-selected keyframe (shows ease handles on its segment). */
     val selectedKeyframeId: String? = null,
+    /** The last prompt the user submitted; used as the inline hint and the empty-submit default. */
+    val lastPrompt: String = "",
     val tool: EditorTool = EditorTool.SELECT,
     val isProcessing: Boolean = false,
     val error: String? = null,
@@ -561,6 +563,11 @@ class EditorViewModel : ViewModel() {
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
+
+    /** Remember the most recent non-blank prompt (for the inline hint / empty-submit default). */
+    fun rememberPrompt(prompt: String) {
+        if (prompt.isNotBlank()) _uiState.update { it.copy(lastPrompt = prompt) }
+    }
 
     // ---- global settings ---------------------------------------------------
 
