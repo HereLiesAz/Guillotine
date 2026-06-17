@@ -115,9 +115,10 @@ fun PreviewPlayer(
     val scale = activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.SCALE, now - it.startTimeMs, 1f)
     } ?: 1f
-    val videoVolume = if (videoTrack?.muted == true) 0f else (activeVideo?.let {
-        TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
-    } ?: 0f) * (videoTrack?.volume ?: 1f)
+    val videoVolume = if (videoTrack?.muted == true || activeVideo?.audioExtracted == true) 0f
+        else (activeVideo?.let {
+            TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
+        } ?: 0f) * (videoTrack?.volume ?: 1f)
     val audioVolume = if (audioTrack?.muted == true) 0f else (activeAudio?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
     } ?: 0f) * (audioTrack?.volume ?: 1f)

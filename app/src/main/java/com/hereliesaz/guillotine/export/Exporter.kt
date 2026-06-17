@@ -181,7 +181,14 @@ object Exporter {
                                 .build(),
                         )
                         .build()
-                    videoSeq.addItem(EditedMediaItem.Builder(mediaItem).setEffects(effectsFor()).build())
+                    // Audio split to a paired audio clip → drop the picture's embedded audio
+                    // here so it isn't rendered twice.
+                    videoSeq.addItem(
+                        EditedMediaItem.Builder(mediaItem)
+                            .setRemoveAudio(clip.audioExtracted)
+                            .setEffects(effectsFor())
+                            .build(),
+                    )
                     firstItem = false; addedVideo = true; videoCursor += (endMs - startMs)
                 }
             }

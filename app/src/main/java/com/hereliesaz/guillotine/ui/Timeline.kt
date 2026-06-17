@@ -82,6 +82,8 @@ import kotlin.math.roundToInt
 
 private val HEADER_WIDTH = 56.dp
 private val RULER_HEIGHT = 24.dp
+/** Snap radius (px) when dragging a clip to the playhead / other clip edges / timeline start. */
+private const val SNAP_PX = 12f
 
 /**
  * Full timeline panel: scrollable multi-track lanes with playhead. The editing
@@ -447,7 +449,10 @@ private fun ClipView(
                     detectDragGestures(
                         onDragStart = { dragPx = 0f; dragPy = 0f },
                         onDragEnd = {
-                            val deltaMs = (dragPx / pps * 1000f).toLong()
+                            // Snap the dropped position to the playhead, the timeline start, or
+                            // any other clip's start/end (incl. other tracks) within SNAP_PX.
+                            val rawDeltaMs = (dragPx / pps * 1000f).toLong()
+                            val deltaMs = snappedDeltaMs(state, clip, rawDeltaMs, pps)
                             val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
                             // Group-aware: moves the whole group together when clip is grouped.
                             vm.moveClipBy(clip.id, shift, deltaMs)
@@ -623,6 +628,34 @@ private fun ClipView(
             )
         }
     }
+}
+
+/**
+ * Snap a dragged clip's delta so its start OR end lands on a magnet: the timeline start (0),
+ * the playback cursor, or any other clip's start/end (on any track). Group members are
+ * excluded (they move with the clip). Returns the adjusted delta, or the raw delta if nothing
+ * is within [SNAP_PX].
+ */
+private fun snappedDeltaMs(state: EditorUiState, clip: TimelineClip, rawDeltaMs: Long, pps: Float): Long {
+    val thresholdMs = (SNAP_PX / pps * 1000f).toLong().coerceAtLeast(1L)
+    val groupMembers = clip.groupId
+        ?.let { g -> state.document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
+        ?: setOf(clip.id)
+    val targets = sortedSetOf(0L, state.currentTimeMs)
+    state.document.clips.forEach { c ->
+        if (c.id !in groupMembers) { targets.add(c.startTimeMs); targets.add(c.endTimeMs) }
+    }
+    val newStart = (clip.startTimeMs + rawDeltaMs).coerceAtLeast(0)
+    val newEnd = newStart + clip.durationMs
+    var best = newStart
+    var bestDist = Long.MAX_VALUE
+    targets.forEach { t ->
+        val dStart = kotlin.math.abs(newStart - t)
+        if (dStart <= thresholdMs && dStart < bestDist) { best = t; bestDist = dStart }
+        val dEnd = kotlin.math.abs(newEnd - t)
+        if (dEnd <= thresholdMs && dEnd < bestDist) { best = (t - clip.durationMs).coerceAtLeast(0); bestDist = dEnd }
+    }
+    return best - clip.startTimeMs
 }
 
 /** Canvas position of a keyframe: x by time, y by value (higher value = higher on the clip). */

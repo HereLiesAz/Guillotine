@@ -131,9 +131,18 @@ class EditorViewModel : ViewModel() {
             for (m in items) {
                 when (m.kind) {
                     MediaKind.VIDEO -> {
-                        // One video clip; its audio is governed by the clip's volume
-                        // filter (no separate auto audio clip -> no double audio).
-                        newClips += videoClip(m, cursor, videoTrack)
+                        if (m.hasAudio) {
+                            // Split A/V like a standard NLE: picture-only video clip on the
+                            // video track + a linked audio clip (same source) on the audio
+                            // track, grouped so they move/trim/delete together. The audio clip
+                            // is the sole sound source (video is muted in preview/export).
+                            val gid = newId()
+                            newClips += videoClip(m, cursor, videoTrack)
+                                .copy(audioExtracted = true, groupId = gid)
+                            newClips += audioClip(m, cursor, audioTrack).copy(groupId = gid)
+                        } else {
+                            newClips += videoClip(m, cursor, videoTrack)
+                        }
                         cursor += m.durationMs
                     }
                     MediaKind.AUDIO -> {

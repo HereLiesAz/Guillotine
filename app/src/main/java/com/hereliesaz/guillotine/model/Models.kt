@@ -38,6 +38,8 @@ data class MediaItem(
     val name: String,
     val kind: MediaKind,
     val durationMs: Long,
+    /** True if a VIDEO file also carries an audio stream (→ auto-add a paired audio clip). */
+    val hasAudio: Boolean = false,
 )
 
 /** Cubic-bezier easing control points (P1, P2); endpoints are fixed at (0,0)/(1,1). */
@@ -106,6 +108,11 @@ data class TimelineClip(
     val error: String? = null,
     /** Clips sharing a non-null [groupId] select/move/delete together. */
     val groupId: String? = null,
+    /**
+     * VIDEO clip whose audio has been split out to a paired audio clip: the picture's own
+     * sound is muted in preview and removed in export, so the audio clip is the only source.
+     */
+    val audioExtracted: Boolean = false,
     /** Caption/title text for [ClipType.TEXT] clips (empty for video/audio). */
     val text: String = "",
     /** Typeface for text clips. */
