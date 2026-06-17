@@ -101,7 +101,11 @@ fun PreviewPlayer(
     val backgroundClip = activeVideoClips.firstOrNull { !it.filters.removeBackground }
     val activeVideo = backgroundClip ?: foregroundClip
     val overlayClip = if (backgroundClip != null && foregroundClip != null) foregroundClip else null
-    val activeAudio = TimelineMath.topActiveClip(clips, ClipType.AUDIO, now, state.document.audioTracks)
+    // Exclude linked shadow clips: their sound is the video's own audio, already played by the
+    // video player — playing them here too would double it.
+    val activeAudio = TimelineMath.topActiveClip(
+        clips.filter { it.linkedClipId == null }, ClipType.AUDIO, now, state.document.audioTracks,
+    )
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val videoTrack = activeVideo?.let { state.document.trackSettingsFor(it.trackId) }
     val audioTrack = activeAudio?.let { state.document.trackSettingsFor(it.trackId) }
@@ -115,10 +119,9 @@ fun PreviewPlayer(
     val scale = activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.SCALE, now - it.startTimeMs, 1f)
     } ?: 1f
-    val videoVolume = if (videoTrack?.muted == true || activeVideo?.audioExtracted == true) 0f
-        else (activeVideo?.let {
-            TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
-        } ?: 0f) * (videoTrack?.volume ?: 1f)
+    val videoVolume = if (videoTrack?.muted == true) 0f else (activeVideo?.let {
+        TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
+    } ?: 0f) * (videoTrack?.volume ?: 1f)
     val audioVolume = if (audioTrack?.muted == true) 0f else (activeAudio?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
     } ?: 0f) * (audioTrack?.volume ?: 1f)

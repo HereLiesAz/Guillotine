@@ -80,23 +80,27 @@ fun ClipToolButtons(
     state: EditorUiState,
     onTranscribe: () -> Unit,
 ) {
-    val clip = state.selectedClips.singleOrNull() ?: return
-    when (clip.type) {
-        ClipType.TEXT -> TextToolButton(vm, clip)
-        ClipType.VIDEO -> {
-            BackgroundToolButton(vm, state, clip)
-            FiltersToolButton(vm, clip)
-            AudioToolButton(vm, clip)
-            KeyframesToolButton(vm, clip)
-            TranscribeToolButton(state, onTranscribe)
-            if (clip.edits.isNotEmpty()) SplitToolButton(vm, clip)
-        }
-        ClipType.AUDIO -> {
-            AudioToolButton(vm, clip)
-            KeyframesToolButton(vm, clip)
-            TranscribeToolButton(state, onTranscribe)
-            if (clip.edits.isNotEmpty()) SplitToolButton(vm, clip)
-        }
+    val sel = state.selectedClips
+    if (sel.isEmpty()) return
+    // Pick a representative clip per type, so a grouped video+audio pair shows both the
+    // picture tools and the audio tool without needing to ungroup.
+    val video = sel.firstOrNull { it.type == ClipType.VIDEO }
+    val text = sel.firstOrNull { it.type == ClipType.TEXT }
+    // Audio editing targets an independent audio clip; if the only audio is a video's linked
+    // shadow, route to the video clip (which actually carries that sound).
+    val audioTarget = sel.firstOrNull { it.type == ClipType.AUDIO && it.linkedClipId == null } ?: video
+    val processable = video ?: sel.firstOrNull { it.type == ClipType.AUDIO }
+
+    if (text != null) TextToolButton(vm, text)
+    if (video != null) {
+        BackgroundToolButton(vm, state, video)
+        FiltersToolButton(vm, video)
+    }
+    if (audioTarget != null) AudioToolButton(vm, audioTarget)
+    (video ?: processable ?: text)?.let { KeyframesToolButton(vm, it) }
+    if (processable != null) {
+        TranscribeToolButton(state, onTranscribe)
+        if (processable.edits.isNotEmpty()) SplitToolButton(vm, processable)
     }
 }
 
@@ -134,7 +138,7 @@ private fun BackgroundToolButton(vm: EditorViewModel, state: EditorUiState, clip
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
                 checked = clip.filters.removeBackground,
-                onCheckedChange = { c -> vm.updateSelectedFilters { it.copy(removeBackground = c) } },
+                onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(removeBackground = c) } },
             )
             Text("Remove background (subject only)", color = Neutral400, fontSize = 12.sp)
         }
@@ -154,15 +158,15 @@ private fun FiltersToolButton(vm: EditorViewModel, clip: TimelineClip) {
     IconToolButton(Icons.Filled.Tune, "Filters", active = open) { open = !open }
     if (open) ToolPopup("Filters", { open = false }) {
         val f = clip.filters
-        FilterSlider(vm, "Brightness", f.brightness, 0f..2f) { v, ff -> ff.copy(brightness = v) }
-        FilterSlider(vm, "Contrast", f.contrast, 0f..2f) { v, ff -> ff.copy(contrast = v) }
-        FilterSlider(vm, "Saturation", f.saturation, 0f..2f) { v, ff -> ff.copy(saturation = v) }
-        FilterSlider(vm, "Sepia", f.sepia, 0f..100f, "%") { v, ff -> ff.copy(sepia = v) }
-        FilterSlider(vm, "Hue", f.hueRotate, 0f..360f, "°") { v, ff -> ff.copy(hueRotate = v) }
-        FilterSlider(vm, "Invert", f.invert, 0f..100f, "%") { v, ff -> ff.copy(invert = v) }
-        FilterSlider(vm, "Grayscale", f.grayscale, 0f..100f, "%") { v, ff -> ff.copy(grayscale = v) }
-        FilterSlider(vm, "Blur", f.blur, 0f..20f, "px") { v, ff -> ff.copy(blur = v) }
-        PresetRow(vm)
+        FilterSlider(vm, clip.id, "Brightness", f.brightness, 0f..2f) { v, ff -> ff.copy(brightness = v) }
+        FilterSlider(vm, clip.id, "Contrast", f.contrast, 0f..2f) { v, ff -> ff.copy(contrast = v) }
+        FilterSlider(vm, clip.id, "Saturation", f.saturation, 0f..2f) { v, ff -> ff.copy(saturation = v) }
+        FilterSlider(vm, clip.id, "Sepia", f.sepia, 0f..100f, "%") { v, ff -> ff.copy(sepia = v) }
+        FilterSlider(vm, clip.id, "Hue", f.hueRotate, 0f..360f, "°") { v, ff -> ff.copy(hueRotate = v) }
+        FilterSlider(vm, clip.id, "Invert", f.invert, 0f..100f, "%") { v, ff -> ff.copy(invert = v) }
+        FilterSlider(vm, clip.id, "Grayscale", f.grayscale, 0f..100f, "%") { v, ff -> ff.copy(grayscale = v) }
+        FilterSlider(vm, clip.id, "Blur", f.blur, 0f..20f, "px") { v, ff -> ff.copy(blur = v) }
+        PresetRow(vm, clip.id)
     }
 }
 
@@ -172,10 +176,10 @@ private fun AudioToolButton(vm: EditorViewModel, clip: TimelineClip) {
     IconToolButton(Icons.Filled.VolumeUp, "Audio", active = open) { open = !open }
     if (open) ToolPopup("Audio", { open = false }) {
         val f = clip.filters
-        FilterSlider(vm, "Volume", f.volume, 0f..2f) { v, ff -> ff.copy(volume = v) }
-        FilterSlider(vm, "Pan", f.pan, -1f..1f) { v, ff -> ff.copy(pan = v) }
+        FilterSlider(vm, clip.id, "Volume", f.volume, 0f..2f) { v, ff -> ff.copy(volume = v) }
+        FilterSlider(vm, clip.id, "Pan", f.pan, -1f..1f) { v, ff -> ff.copy(pan = v) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = f.normalize, onCheckedChange = { c -> vm.updateSelectedFilters { it.copy(normalize = c) } })
+            Checkbox(checked = f.normalize, onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(normalize = c) } })
             Text("Normalize audio", color = Neutral400, fontSize = 12.sp)
         }
     }
@@ -242,7 +246,7 @@ private fun TranscribeToolButton(state: EditorUiState, onTranscribe: () -> Unit)
 
 @Composable
 private fun SplitToolButton(vm: EditorViewModel, clip: TimelineClip) {
-    IconToolButton(Icons.Filled.CallSplit, "Split into ${clip.edits.size} clips") { vm.segmentSelectedClip() }
+    IconToolButton(Icons.Filled.CallSplit, "Split into ${clip.edits.size} clips") { vm.segmentClip(clip.id) }
 }
 
 // ---- shared popup shell + small building blocks ----
@@ -301,6 +305,7 @@ private fun CutoutPreview(uri: String, kind: com.hereliesaz.guillotine.model.Med
 @Composable
 private fun FilterSlider(
     vm: EditorViewModel,
+    clipId: String,
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
@@ -314,7 +319,7 @@ private fun FilterSlider(
         }
         Slider(
             value = value.coerceIn(range.start, range.endInclusive),
-            onValueChange = { v -> vm.updateSelectedFilters { apply(v, it) } },
+            onValueChange = { v -> vm.updateClipFilters(clipId) { apply(v, it) } },
             valueRange = range,
         )
     }
@@ -336,11 +341,11 @@ private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun PresetRow(vm: EditorViewModel) {
+private fun PresetRow(vm: EditorViewModel, clipId: String) {
     Text("Presets", color = Red500, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Chip("Vintage", false) { vm.updateSelectedFilters { it.copy(sepia = 80f, contrast = 1.2f, brightness = 0.9f, blur = 1f, grayscale = 20f) } }
-        Chip("Noir", false) { vm.updateSelectedFilters { it.copy(grayscale = 100f, contrast = 1.4f, brightness = 1.1f) } }
-        Chip("Reset", false) { vm.updateSelectedFilters { ClipFilters() } }
+        Chip("Vintage", false) { vm.updateClipFilters(clipId) { it.copy(sepia = 80f, contrast = 1.2f, brightness = 0.9f, blur = 1f, grayscale = 20f) } }
+        Chip("Noir", false) { vm.updateClipFilters(clipId) { it.copy(grayscale = 100f, contrast = 1.4f, brightness = 1.1f) } }
+        Chip("Reset", false) { vm.updateClipFilters(clipId) { ClipFilters() } }
     }
 }

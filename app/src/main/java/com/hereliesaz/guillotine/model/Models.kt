@@ -109,10 +109,11 @@ data class TimelineClip(
     /** Clips sharing a non-null [groupId] select/move/delete together. */
     val groupId: String? = null,
     /**
-     * VIDEO clip whose audio has been split out to a paired audio clip: the picture's own
-     * sound is muted in preview and removed in export, so the audio clip is the only source.
+     * For the AUDIO clip auto-created from a video import: the id of the VIDEO clip it shadows.
+     * Such a clip is a visual waveform of the video's own audio (which plays/exports from the
+     * video clip itself) — it is NOT a second playback, so it is skipped in preview/export.
      */
-    val audioExtracted: Boolean = false,
+    val linkedClipId: String? = null,
     /** Caption/title text for [ClipType.TEXT] clips (empty for video/audio). */
     val text: String = "",
     /** Typeface for text clips. */

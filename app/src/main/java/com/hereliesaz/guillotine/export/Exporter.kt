@@ -181,14 +181,7 @@ object Exporter {
                                 .build(),
                         )
                         .build()
-                    // Audio split to a paired audio clip → drop the picture's embedded audio
-                    // here so it isn't rendered twice.
-                    videoSeq.addItem(
-                        EditedMediaItem.Builder(mediaItem)
-                            .setRemoveAudio(clip.audioExtracted)
-                            .setEffects(effectsFor())
-                            .build(),
-                    )
+                    videoSeq.addItem(EditedMediaItem.Builder(mediaItem).setEffects(effectsFor()).build())
                     firstItem = false; addedVideo = true; videoCursor += (endMs - startMs)
                 }
             }
@@ -196,7 +189,8 @@ object Exporter {
         if (!addedVideo) return null
 
         val audioClips = document.clips
-            .filter { it.type == ClipType.AUDIO && it.trackId !in disabled }
+            // Skip linked shadow clips — that audio is rendered by their video clip already.
+            .filter { it.type == ClipType.AUDIO && it.linkedClipId == null && it.trackId !in disabled }
             .sortedBy { it.startTimeMs }
         val audioSeq = EditedMediaItemSequence.Builder()
         var audioCursor = audioClips.firstOrNull()?.startTimeMs ?: 0L

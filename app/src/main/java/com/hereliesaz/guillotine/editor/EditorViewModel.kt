@@ -132,14 +132,15 @@ class EditorViewModel : ViewModel() {
                 when (m.kind) {
                     MediaKind.VIDEO -> {
                         if (m.hasAudio) {
-                            // Split A/V like a standard NLE: picture-only video clip on the
-                            // video track + a linked audio clip (same source) on the audio
-                            // track, grouped so they move/trim/delete together. The audio clip
-                            // is the sole sound source (video is muted in preview/export).
+                            // Show the video's audio on the audio track as a linked shadow clip,
+                            // grouped with the picture so they move/trim/delete together. The
+                            // video clip still plays/exports its own audio; the shadow is a
+                            // waveform view (skipped in preview/export to avoid doubling).
                             val gid = newId()
-                            newClips += videoClip(m, cursor, videoTrack)
-                                .copy(audioExtracted = true, groupId = gid)
-                            newClips += audioClip(m, cursor, audioTrack).copy(groupId = gid)
+                            val video = videoClip(m, cursor, videoTrack).copy(groupId = gid)
+                            newClips += video
+                            newClips += audioClip(m, cursor, audioTrack)
+                                .copy(groupId = gid, linkedClipId = video.id)
                         } else {
                             newClips += videoClip(m, cursor, videoTrack)
                         }
@@ -190,6 +191,10 @@ class EditorViewModel : ViewModel() {
             doc.copy(clips = doc.clips.map { if (it.id == id) transform(it) else it })
         }
     }
+
+    /** Filter edit targeting one specific clip (used by the per-clip tool popups on a group). */
+    fun updateClipFilters(clipId: String, transform: (ClipFilters) -> ClipFilters) =
+        updateClip(clipId) { it.copy(filters = transform(it.filters)) }
 
     fun updateSelectedFilters(transform: (ClipFilters) -> ClipFilters) {
         val ids = _uiState.value.selectedClipIds.toSet()
@@ -279,7 +284,13 @@ class EditorViewModel : ViewModel() {
      * ranges applied at export).
      */
     fun segmentSelectedClip() {
-        val clip = _uiState.value.selectedClips.singleOrNull() ?: return
+        val clip = _uiState.value.selectedClips.firstOrNull { it.edits.isNotEmpty() } ?: return
+        segmentClip(clip.id)
+    }
+
+    /** Segment a specific clip (used by the per-clip tool popups, incl. on a grouped selection). */
+    fun segmentClip(clipId: String) {
+        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
         if (clip.edits.isEmpty()) return
         // Boundaries in clip-relative ms, deduped and sorted.
         val bounds = sortedSetOf(0L, clip.durationMs)

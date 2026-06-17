@@ -581,8 +581,12 @@ private fun EditorToolStrip(
                 ) { if (grouped) vm.ungroupSelected() else vm.groupSelected() }
             }
             // Context-sensitive per-clip tools (filters, audio, background, text,
-            // keyframes, transcribe, split) — formerly the Inspector panel.
-            if (selected.size == 1) {
+            // keyframes, transcribe, split) — formerly the Inspector panel. Shown for a
+            // single clip, or a single group (e.g. a linked video+audio pair) so its parts
+            // can be edited without ungrouping.
+            val oneUnit = selected.size == 1 ||
+                (selected.size > 1 && selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null })
+            if (oneUnit) {
                 Box(Modifier.width(1.dp).height(20.dp).background(Neutral800))
                 ClipToolButtons(vm, state, onTranscribe)
             }
