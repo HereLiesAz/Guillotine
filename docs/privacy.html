@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Privacy Policy — Guillotine</title>
+<meta name="description" content="Privacy policy for Guillotine: on-device by default, no first-party servers, analytics, or ads. Bring-your-own AI keys, opt-in crash reporting." />
+<meta name="theme-color" content="#000000" />
+<link rel="icon" type="image/webp" href="guillotine_icon.webp" />
+<link rel="apple-touch-icon" href="guillotine_icon.webp" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --red: #EF4444;
+    --black: #000000;
+    --n950: #0A0A0A;
+    --n900: #171717;
+    --n800: #262626;
+    --n700: #404040;
+    --n500: #737373;
+    --n400: #A3A3A3;
+    --n300: #D4D4D4;
+    --white: #FFFFFF;
+    --display: "Space Grotesk", system-ui, sans-serif;
+    --body: "Inter", system-ui, -apple-system, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --maxw: 820px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--black);
+    color: var(--n300);
+    font-family: var(--body);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--red); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  header.bar {
+    border-bottom: 1px solid var(--n800);
+    background: rgba(10,10,10,0.8);
+    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .bar .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--white); font-family: var(--display); font-weight: 700; }
+  .brand img { width: 26px; height: 26px; border-radius: 6px; }
+
+  main { padding: 48px 0 80px; }
+  h1 { font-family: var(--display); font-weight: 700; color: var(--white); font-size: clamp(28px, 5vw, 40px); line-height: 1.15; }
+  .eff { color: var(--n500); font-family: var(--mono); font-size: 13px; margin-top: 8px; }
+  h2 { font-family: var(--display); font-weight: 700; color: var(--white); font-size: 22px; margin: 40px 0 12px; }
+  p { margin: 12px 0; }
+  ul { margin: 12px 0 12px 22px; }
+  li { margin: 6px 0; }
+  strong { color: var(--n300); font-weight: 600; }
+  code, pre {
+    font-family: var(--mono); font-size: 13px;
+    background: var(--n900); border: 1px solid var(--n800); border-radius: 6px;
+  }
+  code { padding: 1px 6px; color: var(--n300); }
+  pre { padding: 14px; overflow-x: auto; margin: 12px 0; }
+  .lead { color: var(--n400); font-size: 17px; }
+  .callout { background: var(--n950); border: 1px solid var(--n800); border-left: 3px solid var(--red); border-radius: 10px; padding: 16px 18px; margin: 18px 0; }
+
+  footer { border-top: 1px solid var(--n800); padding: 28px 0; color: var(--n500); font-size: 13px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+  footer a { color: var(--n400); }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="guillotine_icon.webp" alt="" /> Guillotine</a>
+    <a href="index.html">← Home</a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <h1>Privacy Policy</h1>
+    <p class="eff">Effective date: 2026-06-17</p>
+
+    <p class="lead">Guillotine is an on-device, non-linear video editor for Android, tablets, and
+    Chromebooks. In short: <strong>Guillotine has no servers of its own, no account system, no
+    analytics, and no advertising.</strong> Your media and projects stay on your device unless
+    <em>you</em> choose to use a third-party AI service.</p>
+
+    <h2>The short version</h2>
+    <ul>
+      <li>We (the developer) do <strong>not</strong> collect, store, or receive your data on any server we control.</li>
+      <li>Editing, playback, thumbnails, waveforms, on-device vision (ML Kit), and on-device speech recognition (Vosk) all run <strong>locally on your device</strong>.</li>
+      <li>The app only sends data over the network when <strong>you</strong> trigger an action that uses a third-party service you configured (an AI provider, image generation, or crash reporting).</li>
+      <li>API keys you enter are <strong>encrypted on your device</strong> and are sent only to the matching provider, only in requests you initiate.</li>
+    </ul>
+
+    <h2>Information stored on your device</h2>
+    <p>The app stores the following <strong>locally</strong> (in app-private storage), not on any server we run:</p>
+    <ul>
+      <li><strong>Projects</strong> — your timeline, edits, keyframes, text, and settings, auto-saved so work is not lost and restored on next launch.</li>
+      <li><strong>Media references</strong> — links (URIs) to the video/audio/image files you import. The app keeps read access to those files; it does not copy or upload them.</li>
+      <li><strong>Settings</strong> — including AI provider choice, selected models, prompt history, and a crash-relay URL (if you set one).</li>
+      <li><strong>API keys</strong> — encrypted at rest using Android’s Jetpack Security (<code>EncryptedSharedPreferences</code>, backed by the Android Keystore).</li>
+    </ul>
+    <p>Uninstalling the app removes this local data.</p>
+
+    <h2>Third-party AI services (only when you use them)</h2>
+    <p>Guillotine lets you use external AI services by bringing your own API key. <strong>When, and
+    only when, you run one of these actions, the relevant content is sent directly from your device
+    to the provider you selected</strong> — it does not pass through any server we operate:</p>
+    <ul>
+      <li><strong>Analysis / editing suggestions</strong> — your selected clip’s media (or sampled frames) and your prompt are sent to the provider you chose: Google Gemini, OpenAI, Anthropic, OpenRouter, Groq, xAI, or Mistral.</li>
+      <li><strong>Image generation</strong> — your text prompt is sent to <strong>Leonardo.ai</strong> (with your key) or, for the free no-key option, to <strong>Pollinations.ai</strong>.</li>
+      <li><strong>Transcription / captions</strong> — handled <strong>on-device</strong> with Vosk if you configure a local speech model; otherwise audio is sent to OpenAI Whisper using your key.</li>
+    </ul>
+    <p>Your use of these services is governed by <strong>their</strong> privacy policies and terms.
+    Free, no-key on-device options (ML Kit vision, Vosk speech, the local heuristic analyzer) never
+    transmit your media off the device. Representative provider policies:
+    <a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener">Google Gemini</a>,
+    <a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener">OpenAI</a>,
+    <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener">Anthropic</a>,
+    <a href="https://openrouter.ai/privacy" target="_blank" rel="noopener">OpenRouter</a>,
+    <a href="https://groq.com/privacy-policy/" target="_blank" rel="noopener">Groq</a>,
+    <a href="https://x.ai/legal/privacy-policy" target="_blank" rel="noopener">xAI</a>,
+    <a href="https://mistral.ai/terms/" target="_blank" rel="noopener">Mistral</a>,
+    <a href="https://leonardo.ai/privacy-policy/" target="_blank" rel="noopener">Leonardo.ai</a>,
+    <a href="https://pollinations.ai/" target="_blank" rel="noopener">Pollinations.ai</a>.</p>
+
+    <h2>Crash reporting (optional, off by default)</h2>
+    <p>Crash reporting is <strong>disabled unless you enter a crash-relay URL</strong> in Settings. If
+    you enable it, then after a crash the app captures a report and sends it — on the next launch — to
+    <strong>the relay endpoint you configured</strong> (which you host), which files it as an issue in
+    your project’s issue tracker. A report contains:</p>
+    <ul>
+      <li>the exception type and stack trace,</li>
+      <li>device model, Android version, and app version,</li>
+      <li>a short slice of the app’s own recent log output (logcat).</li>
+    </ul>
+    <p>These technical logs could incidentally include text relevant to the crash. Reports go only to
+    the endpoint <strong>you</strong> set up; if you never set a relay URL, nothing is sent. The
+    credential used to file issues lives in your relay’s server-side secret and is <strong>never</strong>
+    included in the app.</p>
+
+    <h2>Permissions</h2>
+    <ul>
+      <li><strong>Internet</strong> — to call the AI providers and crash relay you configure. With no keys or relay set, the app makes no network requests for your content.</li>
+      <li><strong>Storage access (Storage Access Framework)</strong> — only the specific media files you pick are accessible to the app; it does not scan your library.</li>
+      <li><strong>Media output (MediaStore)</strong> — to save exported videos to your Movies folder.</li>
+    </ul>
+    <p>The app does not request location, contacts, the microphone, or the camera; it only works with media you explicitly import.</p>
+
+    <h2>Analytics, ads, and tracking</h2>
+    <div class="callout">None. Guillotine contains no analytics SDKs, no advertising, and no third-party trackers, and it does not build a profile of you.</div>
+
+    <h2>Children’s privacy</h2>
+    <p>Guillotine is a general-purpose creative tool and is not directed at children under 13. It does not knowingly collect personal information from children.</p>
+
+    <h2>Data retention and deletion</h2>
+    <ul>
+      <li>Local data persists until you delete a project, clear the app’s storage, or uninstall.</li>
+      <li>To stop using a third-party provider, remove its API key in Settings.</li>
+      <li>To stop crash reporting, clear the crash-relay URL in Settings.</li>
+      <li>Content already sent to a third-party provider is subject to that provider’s retention policy.</li>
+    </ul>
+
+    <h2>Changes to this policy</h2>
+    <p>If this policy changes, the “Effective date” above will be updated and the revised version will be published in the app’s repository.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about this policy: open an issue at
+    <a href="https://github.com/HereLiesAz/Guillotine/issues" target="_blank" rel="noopener">github.com/HereLiesAz/Guillotine/issues</a>
+    or email <a href="mailto:hereliesaz@gmail.com">hereliesaz@gmail.com</a>.</p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="index.html" style="font-size:15px"><img src="guillotine_icon.webp" alt="" style="width:22px;height:22px;border-radius:6px" /> Guillotine</a>
+    <span>On-device by default. No analytics, no ads.</span>
+  </div>
+</footer>
+
+</body>
+</html>
