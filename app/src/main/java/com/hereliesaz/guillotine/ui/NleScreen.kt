@@ -91,8 +91,6 @@ import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
 import androidx.navigation.compose.rememberNavController
 import com.hereliesaz.aznavrail.AzHostActivityLayout
-import com.hereliesaz.aznavrail.model.AzDropdownAlignment
-import com.hereliesaz.aznavrail.model.AzDropdownSource
 import com.hereliesaz.guillotine.GuillotineApplication
 import com.hereliesaz.guillotine.ads.BannerAd
 import com.hereliesaz.guillotine.ai.Transcription
@@ -260,23 +258,11 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
     // The whole editor lives inside AzNavRail's drop-down menu shell: the app icon at the top is
     // the menu trigger (replacing the old hamburger), and the editor gets the full screen.
-    AzHostActivityLayout(navController = navController, modifier = modifier.fillMaxSize()) {
-        azConfig(
-            dropdownMenu = true,
-            dropdownSource = AzDropdownSource.MENU,
-            dropdownAlignment = AzDropdownAlignment.TOP_START,
-        )
-        azTheme(activeColor = Red500, headerIconSize = 40.dp)
+    var menuExpanded by remember { mutableStateOf(false) }
 
-        // The menu items that used to live in the top-bar hamburger.
-        azMenuItem(id = "import", text = "Import media", onClick = { importTargetTrack = null; importLauncher() })
-        azMenuItem(id = "generate", text = "Generate image", onClick = { showGenerate = true })
-        azMenuItem(id = "name", text = "Name project", onClick = { showNameDialog = true })
-        azMenuItem(id = "open", text = "Open project file…", onClick = { openLauncher() })
-        azMenuItem(id = "export", text = "Export video", onClick = { exportDone = null; exportError = null; showExport = true })
-        azMenuItem(id = "projectSettings", text = "Project settings", onClick = { showProjectSettings = true })
-        azMenuItem(id = "settings", text = "Settings", onClick = { showSettings = true })
-        azMenuItem(id = "aiComparison", text = "Compare AI providers", onClick = { showAiComparison = true })
+    AzHostActivityLayout(navController = navController, modifier = modifier.fillMaxSize()) {
+        azConfig(dropdownMenu = false)
+        azTheme(activeColor = Red500)
 
         onscreen {
             Column(
@@ -292,7 +278,23 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             ) {
                 // Slim top bar: project name (where it was) + undo/redo. The app-icon menu
                 // trigger floats over the top-left, so the name is inset to clear it.
-                TopBar(state = state, onUndo = vm::undo, onRedo = vm::redo)
+                TopBar(
+                    state = state,
+                    menuExpanded = menuExpanded,
+                    onMenuToggle = { menuExpanded = !menuExpanded },
+                    onDismissMenu = { menuExpanded = false },
+                    onUndo = vm::undo,
+                    onRedo = vm::redo,
+                ) {
+                    DropdownMenuItem(text = { Text("Import media") }, onClick = { menuExpanded = false; importTargetTrack = null; importLauncher() })
+                    DropdownMenuItem(text = { Text("Generate image") }, onClick = { menuExpanded = false; showGenerate = true })
+                    DropdownMenuItem(text = { Text("Name project") }, onClick = { menuExpanded = false; showNameDialog = true })
+                    DropdownMenuItem(text = { Text("Open project file\u2026") }, onClick = { menuExpanded = false; openLauncher() })
+                    DropdownMenuItem(text = { Text("Export video") }, onClick = { menuExpanded = false; exportDone = null; exportError = null; showExport = true })
+                    DropdownMenuItem(text = { Text("Project settings") }, onClick = { menuExpanded = false; showProjectSettings = true })
+                    DropdownMenuItem(text = { Text("Settings") }, onClick = { menuExpanded = false; showSettings = true })
+                    DropdownMenuItem(text = { Text("Compare AI providers") }, onClick = { menuExpanded = false; showAiComparison = true })
+                }
 
                 // Processing/error feedback for AI analysis (formerly shown in the Inspector).
                 AnalysisStatusBar(state, providerLabel) { vm.clearError() }
@@ -413,13 +415,25 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 @Composable
 private fun TopBar(
     state: EditorUiState,
+    menuExpanded: Boolean,
+    onMenuToggle: () -> Unit,
+    onDismissMenu: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
+    menuContent: @Composable (androidx.compose.foundation.layout.ColumnScope.() -> Unit),
 ) {
     Row(
-        Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(start = 56.dp, end = 8.dp),
+        Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Box {
+            IconToolButton(Icons.Filled.Menu, "Menu", onClick = onMenuToggle)
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = onDismissMenu,
+                content = menuContent,
+            )
+        }
         Text(
             state.document.name.ifBlank { "Untitled project" },
             color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
