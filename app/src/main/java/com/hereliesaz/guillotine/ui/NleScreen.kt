@@ -89,6 +89,8 @@ import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
+import com.hereliesaz.guillotine.GuillotineApplication
+import com.hereliesaz.guillotine.ads.BannerAd
 import com.hereliesaz.guillotine.ai.Transcription
 import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.data.ProjectAutosave
@@ -294,6 +296,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
+
+        // Bottom banner ad (renders only after ad consent is resolved).
+        BannerAd(Modifier.fillMaxWidth())
     }
 
     if (showSettings) {
@@ -343,6 +348,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             doneMessage = exportDone,
             errorMessage = exportError,
             onStart = { name ->
+                // Show the "render" interstitial as the export begins; rendering continues underneath.
+                (context as? android.app.Activity)?.let { act ->
+                    (context.applicationContext as? GuillotineApplication)?.interstitialAdManager?.show(act)
+                }
                 exporting = true; exportError = null; exportProgress = 0f
                 scope.launch {
                     try {

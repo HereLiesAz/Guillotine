@@ -80,8 +80,8 @@ to file issues lives in your relay’s server‑side secret and is **never** inc
 
 ## Advertising (Google AdMob)
 
-Guillotine displays ads served by **Google AdMob** (currently an “app‑open” ad shown when you
-bring the app to the foreground). To serve and measure these ads, the Google Mobile Ads SDK
+Guillotine displays ads served by **Google AdMob** — an app‑open ad on launch, a bottom banner,
+and an interstitial shown when you start an export. To serve and measure these ads, the Google Mobile Ads SDK
 collects your device’s **advertising identifier (AD_ID)** and related technical/usage data, as
 described in Google’s policies. This data is processed by Google, not by us, and is governed by:
 

@@ -10,7 +10,6 @@ import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.appopen.AppOpenAd
 
 /** App-open ad unit. */
@@ -36,11 +35,14 @@ class AppOpenAdManager(private val application: Application) :
     private var loadTimeMs = 0L
     private var currentActivity: Activity? = null
 
-    /** Call once from Application.onCreate. */
-    fun initialize() {
-        MobileAds.initialize(application) {}
+    /** Track activity/foreground early (Application.onCreate). Does not request ads yet. */
+    fun register() {
         application.registerActivityLifecycleCallbacks(this)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+    }
+
+    /** Begin requesting ads — call after consent is resolved and MobileAds is initialized. */
+    fun startLoading() {
         loadAd()
     }
 
@@ -48,7 +50,7 @@ class AppOpenAdManager(private val application: Application) :
         appOpenAd != null && (System.currentTimeMillis() - loadTimeMs) < AD_TIMEOUT_MS
 
     private fun loadAd() {
-        if (isLoadingAd || isAdAvailable()) return
+        if (!AdsState.ready.value || isLoadingAd || isAdAvailable()) return
         isLoadingAd = true
         AppOpenAd.load(
             application,
