@@ -95,7 +95,8 @@ val AiProviderType.meta: ProviderMeta
 val byoProviders: List<AiProviderType> = AiProviderType.values().filter { it.meta.keyUrl != null }
 
 data class AiSettings(
-    val provider: AiProviderType = AiProviderType.LOCAL,
+    // ML Kit is the default: on-device, no key required, real vision (face/label) analysis.
+    val provider: AiProviderType = AiProviderType.MLKIT,
     /** API keys per provider; LOCAL has none. */
     val keys: Map<AiProviderType, String> = emptyMap(),
     /** Optional per-provider model overrides; blank/absent falls back to [ProviderMeta.defaultModel]. */
@@ -115,8 +116,8 @@ data class AiSettings(
 /**
  * Persists the chosen provider and the user's own API keys, **encrypted on-device**
  * via Jetpack Security ([EncryptedSharedPreferences] + a Keystore-backed master key).
- * No key is ever required (LOCAL is the default), and keys never leave the device
- * except in the direct provider request the user initiated.
+ * No key is ever required (on-device ML Kit is the default), and keys never leave the
+ * device except in the direct provider request the user initiated.
  */
 class ApiKeyStore(context: Context) {
 
@@ -139,7 +140,7 @@ class ApiKeyStore(context: Context) {
     private fun read(): AiSettings = AiSettings(
         provider = prefs.getString(KEY_PROVIDER, null)
             ?.let { runCatching { AiProviderType.valueOf(it) }.getOrNull() }
-            ?: AiProviderType.LOCAL,
+            ?: AiProviderType.MLKIT,
         keys = byoProviders.associateWith { prefs.getString(keyPref(it), "").orEmpty() }
             .filterValues { it.isNotEmpty() },
         models = byoProviders.associateWith { prefs.getString(modelPref(it), "").orEmpty() }
