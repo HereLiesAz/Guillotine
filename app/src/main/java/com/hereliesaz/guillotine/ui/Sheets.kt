@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LoadingIndicator
@@ -46,6 +49,7 @@ import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.GlobalSettings
 import com.hereliesaz.guillotine.model.Quality
 import com.hereliesaz.guillotine.ui.theme.Neutral400
+import com.hereliesaz.guillotine.ui.theme.Neutral700
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral900
@@ -70,7 +74,8 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
     var provider by remember { mutableStateOf(current.provider) }
     var keys by remember { mutableStateOf(current.keys) }
     var models by remember { mutableStateOf(current.models) }
-    var fooocusUrl by remember { mutableStateOf(current.fooocusUrl) }
+    var leonardoKey by remember { mutableStateOf(current.leonardoKey) }
+    var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
     val uriHandler = LocalUriHandler.current
     Dialog(onDismissRequest = onDismiss) {
@@ -116,24 +121,17 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
                 }
             }
 
-            // Image generation (optional self-hosted Fooocus-API endpoint).
-            Text("Image generation", color = Neutral400, fontSize = 12.sp)
-            OutlinedTextField(
-                value = fooocusUrl,
-                onValueChange = { fooocusUrl = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Fooocus-API URL (e.g. http://192.168.0.10:8888)", color = Neutral500, fontSize = 12.sp) },
-                textStyle = TextStyle(color = White, fontSize = 12.sp),
-                singleLine = true,
+            // Image generation — free Pollinations by default, or Leonardo.ai with your key.
+            Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
+            KeyField("Leonardo API key", leonardoKey) { leonardoKey = it }
+            Text("Default model", color = Neutral500, fontSize = 10.sp)
+            LeonardoModelDropdown(leonardoModel) { leonardoModel = it }
+            Text("Leave the key blank to generate with free Pollinations.ai.", color = Neutral500, fontSize = 10.sp)
+            Text(
+                "Get a Leonardo API key  ↗",
+                color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickableText { uriHandler.openUri("https://app.leonardo.ai/api-access") },
             )
-            Text("Optional. Leave blank to generate with free Pollinations.ai.", color = Neutral500, fontSize = 10.sp)
-            fooocusUrl.takeIf { it.isBlank() }?.let {
-                Text(
-                    "Set up Fooocus-API  ↗",
-                    color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickableText { uriHandler.openUri("https://github.com/mrhan1993/Fooocus-API") },
-                )
-            }
 
             // On-device speech-to-text (optional Vosk model directory).
             Text("Transcription", color = Neutral400, fontSize = 12.sp)
@@ -154,7 +152,18 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button(
-                    onClick = { onSave(AiSettings(provider, keys, models, fooocusUrl.trim(), speechModelPath.trim())) },
+                    onClick = {
+                        onSave(
+                            AiSettings(
+                                provider = provider,
+                                keys = keys,
+                                models = models,
+                                leonardoKey = leonardoKey.trim(),
+                                leonardoModel = leonardoModel,
+                                speechModelPath = speechModelPath.trim(),
+                            ),
+                        )
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Color.Black),
                 ) { Text("Save", fontSize = 12.sp, fontWeight = FontWeight.Medium) }
             }
@@ -243,14 +252,16 @@ fun ExportSheet(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun GenerateSheet(
-    fooocusUrl: String,
+    leonardoKey: String,
+    leonardoModel: String,
     onGenerateFree: (url: String, name: String) -> Unit,
-    onGenerateFooocus: suspend (prompt: String) -> Unit,
+    onGenerateLeonardo: suspend (prompt: String, modelId: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var prompt by remember { mutableStateOf("") }
-    val fooocusAvailable = fooocusUrl.isNotBlank()
-    var useFooocus by remember { mutableStateOf(fooocusAvailable) }
+    val leonardoAvailable = leonardoKey.isNotBlank()
+    var useLeonardo by remember { mutableStateOf(leonardoAvailable) }
+    var model by remember { mutableStateOf(leonardoModel.ifBlank { ImageGen.LeonardoDefaultModel }) }
     var generating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -260,7 +271,7 @@ fun GenerateSheet(
             Text("Generate image", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             if (generating) {
                 LoadingIndicator()
-                Text("Generating with Fooocus… this can take a while.", color = Neutral400, fontSize = 12.sp)
+                Text("Generating with Leonardo… this can take a little while.", color = Neutral400, fontSize = 12.sp)
             } else {
                 OutlinedTextField(
                     value = prompt,
@@ -270,12 +281,16 @@ fun GenerateSheet(
                     textStyle = TextStyle(color = White, fontSize = 12.sp),
                     minLines = 2,
                 )
-                if (fooocusAvailable) {
-                    BackendRow("Free (Pollinations.ai, no key)", !useFooocus) { useFooocus = false }
-                    BackendRow("Fooocus-API (your server)", useFooocus) { useFooocus = true }
+                if (leonardoAvailable) {
+                    BackendRow("Free (Pollinations.ai, no key)", !useLeonardo) { useLeonardo = false }
+                    BackendRow("Leonardo.ai (your key)", useLeonardo) { useLeonardo = true }
+                    if (useLeonardo) {
+                        Text("Model", color = Neutral500, fontSize = 10.sp)
+                        LeonardoModelDropdown(model) { model = it }
+                    }
                 } else {
                     Text(
-                        "Pollinations.ai — no key required. Add a Fooocus-API URL in Settings for self-hosted generation.",
+                        "Pollinations.ai — no key required. Add a Leonardo API key in Settings to pick from Leonardo's models.",
                         color = Neutral500, fontSize = 11.sp,
                     )
                 }
@@ -286,11 +301,11 @@ fun GenerateSheet(
                         enabled = prompt.isNotBlank(),
                         onClick = {
                             error = null
-                            if (useFooocus) {
+                            if (useLeonardo) {
                                 generating = true
                                 scope.launch {
                                     try {
-                                        onGenerateFooocus(prompt.trim())
+                                        onGenerateLeonardo(prompt.trim(), model)
                                         onDismiss()
                                     } catch (e: Exception) {
                                         error = e.message ?: "Generation failed"
@@ -304,6 +319,33 @@ fun GenerateSheet(
                         colors = ButtonDefaults.buttonColors(containerColor = Red500),
                     ) { Text("Generate", fontSize = 12.sp, color = White) }
                 }
+            }
+        }
+    }
+}
+
+/** Dropdown to pick a Leonardo platform model (see [ImageGen.LeonardoModels]). */
+@Composable
+private fun LeonardoModelDropdown(selectedId: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val name = ImageGen.LeonardoModels.firstOrNull { it.id == selectedId }?.name ?: "Select a model"
+    Box {
+        Text(
+            "$name  ▾",
+            color = White, fontSize = 12.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .border(1.dp, Neutral700, RoundedCornerShape(6.dp))
+                .clickableText { open = true }
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            ImageGen.LeonardoModels.forEach { m ->
+                DropdownMenuItem(
+                    text = { Text(m.name, color = White, fontSize = 12.sp) },
+                    onClick = { onSelect(m.id); open = false },
+                )
             }
         }
     }

@@ -101,8 +101,10 @@ data class AiSettings(
     val keys: Map<AiProviderType, String> = emptyMap(),
     /** Optional per-provider model overrides; blank/absent falls back to [ProviderMeta.defaultModel]. */
     val models: Map<AiProviderType, String> = emptyMap(),
-    /** Optional self-hosted Fooocus-API base URL for image generation (else free Pollinations). */
-    val fooocusUrl: String = "",
+    /** Optional Leonardo.ai API key for cloud image generation (else free Pollinations). */
+    val leonardoKey: String = "",
+    /** Selected Leonardo platform model id (see ImageGen.LeonardoModels). */
+    val leonardoModel: String = com.hereliesaz.guillotine.ai.ImageGen.LeonardoDefaultModel,
     /** Optional on-device Vosk speech model directory (else cloud Whisper for transcription). */
     val speechModelPath: String = "",
 ) {
@@ -145,7 +147,9 @@ class ApiKeyStore(context: Context) {
             .filterValues { it.isNotEmpty() },
         models = byoProviders.associateWith { prefs.getString(modelPref(it), "").orEmpty() }
             .filterValues { it.isNotEmpty() },
-        fooocusUrl = prefs.getString(KEY_FOOOCUS, "").orEmpty(),
+        leonardoKey = prefs.getString(KEY_LEONARDO_KEY, "").orEmpty(),
+        leonardoModel = prefs.getString(KEY_LEONARDO_MODEL, "")
+            ?.takeIf { it.isNotBlank() } ?: ImageGen.LeonardoDefaultModel,
         speechModelPath = prefs.getString(KEY_SPEECH, "").orEmpty(),
     )
 
@@ -157,7 +161,8 @@ class ApiKeyStore(context: Context) {
                     putString(keyPref(it), settings.keyFor(it))
                     putString(modelPref(it), settings.models[it].orEmpty())
                 }
-                putString(KEY_FOOOCUS, settings.fooocusUrl)
+                putString(KEY_LEONARDO_KEY, settings.leonardoKey)
+                putString(KEY_LEONARDO_MODEL, settings.leonardoModel)
                 putString(KEY_SPEECH, settings.speechModelPath)
             }.apply()
         }
@@ -166,7 +171,8 @@ class ApiKeyStore(context: Context) {
 
     private companion object {
         const val KEY_PROVIDER = "ai_provider"
-        const val KEY_FOOOCUS = "fooocus_url"
+        const val KEY_LEONARDO_KEY = "leonardo_key"
+        const val KEY_LEONARDO_MODEL = "leonardo_model"
         const val KEY_SPEECH = "speech_model_path"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"

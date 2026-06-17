@@ -322,14 +322,15 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
     if (showGenerate) {
         GenerateSheet(
-            fooocusUrl = settings.fooocusUrl,
+            leonardoKey = settings.leonardoKey,
+            leonardoModel = settings.leonardoModel,
             onGenerateFree = { url, name ->
                 vm.addMedia(listOf(MediaItem(newId(), url, name, MediaKind.IMAGE, 5_000)))
                 showGenerate = false
             },
-            onGenerateFooocus = { prompt ->
-                val uri = ImageGen.FooocusApi.generate(context, settings.fooocusUrl, prompt)
-                vm.addMedia(listOf(MediaItem(newId(), uri.toString(), "Fooocus: ${prompt.take(20)}", MediaKind.IMAGE, 5_000)))
+            onGenerateLeonardo = { prompt, modelId ->
+                val uri = ImageGen.Leonardo.generate(context, settings.leonardoKey, modelId, prompt)
+                vm.addMedia(listOf(MediaItem(newId(), uri.toString(), "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000)))
             },
             onDismiss = { showGenerate = false },
         )
