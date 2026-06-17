@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +79,8 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
+    var crashRelayUrl by remember { mutableStateOf(com.hereliesaz.guillotine.crash.CrashConfig.relayUrl(context)) }
     Dialog(onDismissRequest = onDismiss) {
         SheetCard {
             Text("Settings", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -150,9 +153,22 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
                 modifier = Modifier.clickableText { uriHandler.openUri("https://alphacephei.com/vosk/models") },
             )
 
+            // Crash reporting — POSTs captured crashes to a relay that opens a GitHub issue.
+            Text("Crash reporting", color = Neutral400, fontSize = 12.sp)
+            OutlinedTextField(
+                value = crashRelayUrl,
+                onValueChange = { crashRelayUrl = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Crash relay URL (your deployed endpoint)", color = Neutral500, fontSize = 12.sp) },
+                textStyle = TextStyle(color = White, fontSize = 12.sp),
+                singleLine = true,
+            )
+            Text("Set the URL of your crash-relay (see tools/crash-relay) to auto-file issues.", color = Neutral500, fontSize = 10.sp)
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button(
                     onClick = {
+                        com.hereliesaz.guillotine.crash.CrashConfig.setRelayUrl(context, crashRelayUrl)
                         onSave(
                             AiSettings(
                                 provider = provider,
