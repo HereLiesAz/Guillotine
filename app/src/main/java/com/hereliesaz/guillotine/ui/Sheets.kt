@@ -44,6 +44,7 @@ import androidx.compose.ui.window.Dialog
 import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.ImageGen
+import com.hereliesaz.guillotine.ai.ModelCatalog
 import com.hereliesaz.guillotine.ai.meta
 import kotlinx.coroutines.launch
 import com.hereliesaz.guillotine.model.AspectRatio
@@ -104,15 +105,14 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
             if (provider.meta.keyUrl != null) {
                 val meta = provider.meta
                 KeyField("${meta.label} API key", keys[provider].orEmpty()) { keys = keys + (provider to it) }
-                OutlinedTextField(
-                    value = models[provider].orEmpty(),
-                    onValueChange = { models = models + (provider to it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Model — default: ${meta.defaultModel}", color = Neutral500, fontSize = 12.sp) },
-                    textStyle = TextStyle(color = White, fontSize = 12.sp),
-                    singleLine = true,
+                Text("Model", color = Neutral500, fontSize = 10.sp)
+                LiveModelDropdown(
+                    current = models[provider].orEmpty(),
+                    defaultHint = "Default: ${meta.defaultModel}",
+                    load = { ModelCatalog.analyzerModels(provider, keys[provider].orEmpty()) },
+                    onSelect = { models = models + (provider to it) },
                 )
-                Text("Override the model id, or leave blank for the default.", color = Neutral500, fontSize = 10.sp)
+                Text("Pick from the provider's live list, or Default.", color = Neutral500, fontSize = 10.sp)
                 meta.keyUrl?.let { url ->
                     Text(
                         "Get a ${meta.label} API key  ↗",
@@ -128,7 +128,7 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
             Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
             KeyField("Leonardo API key", leonardoKey) { leonardoKey = it }
             Text("Default model", color = Neutral500, fontSize = 10.sp)
-            LeonardoModelDropdown(leonardoModel) { leonardoModel = it }
+            LeonardoModelDropdown(leonardoKey, leonardoModel) { leonardoModel = it }
             Text("Leave the key blank to generate with free Pollinations.ai.", color = Neutral500, fontSize = 10.sp)
             Text(
                 "Get a Leonardo API key  ↗",
@@ -302,7 +302,7 @@ fun GenerateSheet(
                     BackendRow("Leonardo.ai (your key)", useLeonardo) { useLeonardo = true }
                     if (useLeonardo) {
                         Text("Model", color = Neutral500, fontSize = 10.sp)
-                        LeonardoModelDropdown(model) { model = it }
+                        LeonardoModelDropdown(leonardoKey, model) { model = it }
                     }
                 } else {
                     Text(
@@ -340,24 +340,30 @@ fun GenerateSheet(
     }
 }
 
-/** Dropdown to pick a Leonardo platform model (see [ImageGen.LeonardoModels]). */
+/**
+ * Picks a Leonardo platform model. Fetches Leonardo's live model list on first open (when a
+ * key is present); falls back to the curated [ImageGen.LeonardoModels] if that's unavailable.
+ */
 @Composable
-private fun LeonardoModelDropdown(selectedId: String, onSelect: (String) -> Unit) {
+private fun LeonardoModelDropdown(apiKey: String, selectedId: String, onSelect: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val name = ImageGen.LeonardoModels.firstOrNull { it.id == selectedId }?.name ?: "Select a model"
+    var live by remember { mutableStateOf<List<ImageGen.LeonardoModel>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val models = live?.takeIf { it.isNotEmpty() } ?: ImageGen.LeonardoModels
+    val name = models.firstOrNull { it.id == selectedId }?.name
+        ?: ImageGen.LeonardoModels.firstOrNull { it.id == selectedId }?.name ?: "Select a model"
     Box {
-        Text(
-            "$name  ▾",
-            color = White, fontSize = 12.sp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .border(1.dp, Neutral700, RoundedCornerShape(6.dp))
-                .clickableText { open = true }
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-        )
+        DropdownAnchor(name) {
+            open = true
+            if (live == null && !loading && apiKey.isNotBlank()) {
+                loading = true
+                scope.launch { live = ModelCatalog.leonardoModels(apiKey); loading = false }
+            }
+        }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            ImageGen.LeonardoModels.forEach { m ->
+            if (loading) MenuLabel("Loading…")
+            models.forEach { m ->
                 DropdownMenuItem(
                     text = { Text(m.name, color = White, fontSize = 12.sp) },
                     onClick = { onSelect(m.id); open = false },
@@ -365,6 +371,64 @@ private fun LeonardoModelDropdown(selectedId: String, onSelect: (String) -> Unit
             }
         }
     }
+}
+
+/**
+ * Picks a model from a source's live list, loaded on first open. Shows [current] (or
+ * [defaultHint]); offers "Default" (clears the override) plus each fetched id.
+ */
+@Composable
+private fun LiveModelDropdown(
+    current: String,
+    defaultHint: String,
+    load: suspend () -> List<String>,
+    onSelect: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    var items by remember { mutableStateOf<List<String>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    Box {
+        DropdownAnchor(current.ifBlank { defaultHint }) {
+            open = true
+            if (items == null && !loading) {
+                loading = true
+                scope.launch { items = load(); loading = false }
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            when {
+                loading -> MenuLabel("Loading…")
+                items.isNullOrEmpty() -> MenuLabel("No models — check your key")
+                else -> {
+                    DropdownMenuItem(text = { Text("Default", color = White, fontSize = 12.sp) }, onClick = { onSelect(""); open = false })
+                    items!!.forEach { id ->
+                        DropdownMenuItem(text = { Text(id, color = White, fontSize = 12.sp) }, onClick = { onSelect(id); open = false })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Bordered, full-width row that shows a value and a ▾, opening a dropdown on tap. */
+@Composable
+private fun DropdownAnchor(label: String, onClick: () -> Unit) {
+    Text(
+        "$label  ▾",
+        color = White, fontSize = 12.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .border(1.dp, Neutral700, RoundedCornerShape(6.dp))
+            .clickableText(onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+    )
+}
+
+@Composable
+private fun MenuLabel(text: String) {
+    Text(text, color = Neutral500, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
 }
 
 @Composable
