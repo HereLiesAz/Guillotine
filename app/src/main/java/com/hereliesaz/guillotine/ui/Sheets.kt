@@ -166,6 +166,38 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
             )
             Text("Set the URL of your crash-relay (see tools/crash-relay) to auto-file issues.", color = Neutral500, fontSize = 10.sp)
 
+            // MCP access — the bearer token external AI/ML tools must send to drive the editor.
+            val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+            var mcpToken by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpAuth.token(context)) }
+            Text("MCP access token (external AI tools)", color = Neutral400, fontSize = 12.sp)
+            OutlinedTextField(
+                value = mcpToken,
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = TextStyle(color = White, fontSize = 12.sp),
+                singleLine = true,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    "Copy", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickableText {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(mcpToken))
+                    },
+                )
+                Text(
+                    "Regenerate", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickableText {
+                        mcpToken = com.hereliesaz.guillotine.mcp.McpAuth.regenerate(context)
+                    },
+                )
+            }
+            Text(
+                "Send as 'Authorization: Bearer <token>' when POSTing to /mcp on port 6274. " +
+                    "Regenerate to revoke tools that have the old token.",
+                color = Neutral500, fontSize = 10.sp,
+            )
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button(
                     onClick = {

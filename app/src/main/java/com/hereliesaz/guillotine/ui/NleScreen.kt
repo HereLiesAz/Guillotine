@@ -384,7 +384,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val mcpServer = remember { com.hereliesaz.guillotine.mcp.McpServer() }
     DisposableEffect(Unit) {
         val tools = com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings }
-        runCatching { mcpServer.startServer(tools) }
+        // /mcp requires this bearer token; the supplier reads the (cached) live token so a
+        // regenerate from Settings takes effect without restarting the server.
+        runCatching { mcpServer.startServer(tools) { com.hereliesaz.guillotine.mcp.McpAuth.token(context) } }
         onDispose { runCatching { mcpServer.stop() } }
     }
 }
