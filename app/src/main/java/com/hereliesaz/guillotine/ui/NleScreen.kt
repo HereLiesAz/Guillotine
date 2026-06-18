@@ -1,7 +1,6 @@
 package com.hereliesaz.guillotine.ui
 
 import android.net.Uri
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -76,20 +74,18 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.hereliesaz.guillotine.R
+import androidx.navigation.compose.rememberNavController
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
-import com.hereliesaz.aznavrail.AzDropdownMenu
-import com.hereliesaz.aznavrail.model.AzDropdownAlignment
+import com.hereliesaz.aznavrail.AzHostActivityLayout
 import com.hereliesaz.guillotine.GuillotineApplication
 import com.hereliesaz.guillotine.ads.BannerAd
 import com.hereliesaz.guillotine.ai.Transcription
@@ -253,66 +249,69 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     LaunchedEffectFocus(focusRequester)
 
     val providerLabel = settings.provider.meta.label
+    val navController = rememberNavController()
 
-    // The menu is a standalone, inline AzDropdownMenu (10.3) in the TopBar — its trigger icon
-    // sits right next to the project name. There is no AzNavRail host wrapper here, so nothing
-    // reserves horizontal space on the left edge.
-    //
-    // Insets: exactly the pre-AzNavRail scheme — background drawn full-bleed, then systemBarsPadding
-    // keeps content clear of the status/navigation bars. No extra insets beyond what was here before.
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(Black)
-            .systemBarsPadding()
-            .focusRequester(focusRequester)
-            .focusable()
-            // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
-            // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
-            .onKeyEvent { handleKey(it, vm) },
-    ) {
-        TopBar(
-            state = state,
-            onUndo = vm::undo,
-            onRedo = vm::redo,
-            onImport = { importTargetTrack = null; importLauncher() },
-            onGenerate = { showGenerate = true },
-            onNameProject = { showNameDialog = true },
-            onOpenProject = { openLauncher() },
-            onExport = { exportDone = null; exportError = null; showExport = true },
-            onProjectSettings = { showProjectSettings = true },
-            onSettings = { showSettings = true },
-            onAiComparison = { showAiComparison = true },
-        )
+    // The app menu is the AzNavRail menu drawer: tapping the header slides out a drawer of
+    // azMenuItem actions. azConfig(displayAppName = true) shows the app name in the header instead
+    // of the launcher graphic. AzHostActivityLayout enforces safe zones for the onscreen content.
+    AzHostActivityLayout(navController = navController, modifier = modifier.fillMaxSize()) {
+        azConfig(displayAppName = true)
+        azTheme(activeColor = Red500)
 
-        // Processing/error feedback for AI analysis (formerly shown in the Inspector).
-        AnalysisStatusBar(state, providerLabel) { vm.clearError() }
-        if (widthClass == WindowWidthSizeClass.Expanded) {
-            Column(Modifier.weight(0.6f).fillMaxWidth()) {
-                PreviewPlayer(
-                    state,
-                    Modifier.weight(1f).fillMaxWidth(),
-                    cropMode = state.tool == EditorTool.CROP,
-                    onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-                )
-                TransportControls(vm, state)
+        // Menu-drawer-only actions (no rail items) — these live in the expandable drawer.
+        azMenuItem(id = "import", text = "Import media", onClick = { importTargetTrack = null; importLauncher() })
+        azMenuItem(id = "generate", text = "Generate image", onClick = { showGenerate = true })
+        azMenuItem(id = "name", text = "Name project", onClick = { showNameDialog = true })
+        azMenuItem(id = "open", text = "Open project file…", onClick = { openLauncher() })
+        azMenuItem(id = "export", text = "Export video", onClick = { exportDone = null; exportError = null; showExport = true })
+        azDivider()
+        azMenuItem(id = "project-settings", text = "Project settings", onClick = { showProjectSettings = true })
+        azMenuItem(id = "settings", text = "Settings", onClick = { showSettings = true })
+        azMenuItem(id = "ai-compare", text = "Compare AI providers", onClick = { showAiComparison = true })
+
+        onscreen {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .background(Black)
+                    .focusRequester(focusRequester)
+                    .focusable()
+                    // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
+                    // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
+                    .onKeyEvent { handleKey(it, vm) },
+            ) {
+                TopBar(state = state, onUndo = vm::undo, onRedo = vm::redo)
+
+                // Processing/error feedback for AI analysis (formerly shown in the Inspector).
+                AnalysisStatusBar(state, providerLabel) { vm.clearError() }
+                if (widthClass == WindowWidthSizeClass.Expanded) {
+                    Column(Modifier.weight(0.6f).fillMaxWidth()) {
+                        PreviewPlayer(
+                            state,
+                            Modifier.weight(1f).fillMaxWidth(),
+                            cropMode = state.tool == EditorTool.CROP,
+                            onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                        )
+                        TransportControls(vm, state)
+                    }
+                    EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+                    TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
+                } else {
+                    PreviewPlayer(
+                        state,
+                        Modifier.weight(0.42f).fillMaxWidth(),
+                        cropMode = state.tool == EditorTool.CROP,
+                        onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                    )
+                    TransportControls(vm, state)
+                    EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+                    TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
+                }
+
+                // Bottom banner ad (renders only after ad consent is resolved).
+                BannerAd(Modifier.fillMaxWidth())
             }
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
-            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
-        } else {
-            PreviewPlayer(
-                state,
-                Modifier.weight(0.42f).fillMaxWidth(),
-                cropMode = state.tool == EditorTool.CROP,
-                onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-            )
-            TransportControls(vm, state)
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
-            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
-
-        // Bottom banner ad (renders only after ad consent is resolved).
-        BannerAd(Modifier.fillMaxWidth())
     }
 
     if (showSettings) {
@@ -394,41 +393,17 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
 }
 
-/** Slim top bar: AzDropdownMenu trigger icon + project name + undo/redo. */
+/** Slim top bar: project name + undo/redo. The app menu lives in the AzNavRail drawer (the header). */
 @Composable
 private fun TopBar(
     state: EditorUiState,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
-    onImport: () -> Unit,
-    onGenerate: () -> Unit,
-    onNameProject: () -> Unit,
-    onOpenProject: () -> Unit,
-    onExport: () -> Unit,
-    onProjectSettings: () -> Unit,
-    onSettings: () -> Unit,
-    onAiComparison: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(end = 8.dp),
+        Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AzDropdownMenu(
-            icon = painterResource(R.drawable.ic_launcher_foreground),
-            contentDescription = "Menu",
-            iconSize = 40.dp,
-            alignment = AzDropdownAlignment.BOTTOM_START,
-        ) {
-            azItem("Import media") { dismiss(); onImport() }
-            azItem("Generate image") { dismiss(); onGenerate() }
-            azItem("Name project") { dismiss(); onNameProject() }
-            azItem("Open project file\u2026") { dismiss(); onOpenProject() }
-            azItem("Export video") { dismiss(); onExport() }
-            azDivider()
-            azItem("Project settings") { dismiss(); onProjectSettings() }
-            azItem("Settings") { dismiss(); onSettings() }
-            azItem("Compare AI providers") { dismiss(); onAiComparison() }
-        }
         Text(
             state.document.name.ifBlank { "Untitled project" },
             color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
