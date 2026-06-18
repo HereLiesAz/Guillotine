@@ -47,8 +47,11 @@ import kotlin.coroutines.resumeWithException
  * of every video clip (so AI 'remove' segments are physically cut), applies the
  * shared [VideoEffects], encodes mp4, and saves it to the gallery (Movies/Guillotine).
  *
- * v1 scope: exports the video track (clips carry their own audio). Separate audio
- * tracks, keyframed transforms, blur/sepia, and image clips are follow-ups.
+ * Applies per-clip color filters (incl. sepia + Gaussian blur), the Crop-tool transform
+ * (scale/rotation/offset), audio volume/pan, and peak-normalization. Image clips and a
+ * separate audio sequence are supported. Still TODO: baking time-varying (keyframed)
+ * opacity/scale/volume into the encode, and keeping caption/matte overlays in sync across
+ * AI 'remove' cuts (see buildComposition).
  */
 object Exporter {
 
@@ -58,7 +61,10 @@ object Exporter {
         outputName: String,
         onProgress: (Float) -> Unit,
     ): Uri = withContext(Dispatchers.Main) {
-        val composition = buildComposition(context, document)
+        // Peak-normalization gains for clips with "Normalize audio" — computed off the main thread
+        // (reuses the cached waveform decoder) before the Transformer is built on Main.
+        val normalizeGains = withContext(Dispatchers.IO) { computeNormalizeGains(context, document) }
+        val composition = buildComposition(context, document, normalizeGains)
         require(composition != null) { "Nothing to export — add a video clip first." }
 
         val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
@@ -98,8 +104,13 @@ object Exporter {
         }
 
         onProgress(1f)
-        val uri = saveToGallery(context, outFile, outputName)
-        outFile.delete()
+        // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
+        // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.
+        val uri = withContext(Dispatchers.IO) {
+            val u = saveToGallery(context, outFile, outputName)
+            outFile.delete()
+            u
+        }
         uri
     }
 
@@ -109,12 +120,18 @@ object Exporter {
      * so added music/voice is mixed in. Project crop + aspect are applied to every
      * video clip via [VideoEffects.geometry].
      *
-     * Known limits (verify on device): per-clip volume and keyframed opacity/scale
-     * are not yet baked into the export; a single video sequence mixing image clips
-     * (no audio) with video clips (audio) may need Transformer's force-audio-track
-     * flag — most projects are all-video or all-image and are unaffected.
+     * Known limits (verify on device): keyframed (time-varying) opacity/scale/volume are not
+     * yet baked in — only the clip's static transform/volume is. Caption/matte overlays are
+     * attached to the first base item and timed linearly, so they can drift once AI 'remove'
+     * ranges are physically cut. A single video sequence mixing image clips (no audio) with
+     * video clips (audio) may need Transformer's force-audio-track flag — most projects are
+     * all-video or all-image and are unaffected.
      */
-    private fun buildComposition(context: Context, document: Document): Composition? {
+    private fun buildComposition(
+        context: Context,
+        document: Document,
+        normalizeGains: Map<String, Float>,
+    ): Composition? {
         val geometry = VideoEffects.geometry(document.settings)
 
         val disabled = document.disabledTrackIds
@@ -153,11 +170,14 @@ object Exporter {
             if (gap > 0) { videoSeq.addGap(gap * 1000); videoCursor += gap }
             fun effectsFor(): Effects {
                 val ts = document.trackSettingsFor(clip.trackId)
-                val vol = if (ts.muted) 0f else clip.filters.volume * ts.volume
-                val audio: List<AudioProcessor> = if (vol != 1f) listOf(volumeProcessor(vol)) else emptyList()
+                val vol = (if (ts.muted) 0f else clip.filters.volume * ts.volume) *
+                    (normalizeGains[clip.id] ?: 1f)
+                val audio = audioProcessors(vol, clip.filters.pan)
                 val overlay = if (firstItem) listOfNotNull(matteEffect) else emptyList()
                 val alpha = if (ts.opacity < 1f) listOf(AlphaScale(ts.opacity)) else emptyList()
-                return Effects(audio, VideoEffects.build(clip.filters) + geometry + overlay + alpha)
+                // Per-clip Crop-tool transform (scale/rotation/offset) so export matches the preview.
+                val transform = VideoEffects.transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY)
+                return Effects(audio, VideoEffects.build(clip.filters) + transform + geometry + overlay + alpha)
             }
             if (media.kind == MediaKind.IMAGE) {
                 val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
@@ -213,8 +233,9 @@ object Exporter {
                     )
                     .build()
                 val ts = document.trackSettingsFor(clip.trackId)
-                val vol = if (ts.muted) 0f else clip.filters.volume * ts.volume
-                val audio: List<AudioProcessor> = if (vol != 1f) listOf(volumeProcessor(vol)) else emptyList()
+                val vol = (if (ts.muted) 0f else clip.filters.volume * ts.volume) *
+                    (normalizeGains[clip.id] ?: 1f)
+                val audio = audioProcessors(vol, clip.filters.pan)
                 audioSeq.addItem(
                     EditedMediaItem.Builder(mediaItem)
                         .setRemoveVideo(true)
@@ -230,12 +251,43 @@ object Exporter {
         return Composition.Builder(sequences).build()
     }
 
-    /** A channel-mixing processor that scales audio volume by [volume] (0 = silent). */
-    private fun volumeProcessor(volume: Float): ChannelMixingAudioProcessor =
-        ChannelMixingAudioProcessor().apply {
-            putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1, 1).scaleBy(volume))
-            putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2, 2).scaleBy(volume))
+    /**
+     * Audio processors applying [volume] gain and stereo [pan] (-1 left … 0 center … +1 right).
+     * With no pan it's a simple gain on the existing channel layout; with pan it folds the gain
+     * into per-side gains and (for mono sources) upmixes to stereo so the balance is audible.
+     */
+    private fun audioProcessors(volume: Float, pan: Float): List<AudioProcessor> {
+        if (pan == 0f) {
+            if (volume == 1f) return emptyList()
+            return listOf(ChannelMixingAudioProcessor().apply {
+                putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1, 1).scaleBy(volume))
+                putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2, 2).scaleBy(volume))
+            })
         }
+        val left = (if (pan <= 0f) 1f else 1f - pan) * volume
+        val right = (if (pan >= 0f) 1f else 1f + pan) * volume
+        return listOf(ChannelMixingAudioProcessor().apply {
+            // Coefficients are row-major: index = inputChannel * outputChannelCount + outputChannel.
+            putChannelMixingMatrix(ChannelMixingMatrix(1, 2, floatArrayOf(left, right)))
+            putChannelMixingMatrix(ChannelMixingMatrix(2, 2, floatArrayOf(left, 0f, 0f, right)))
+        })
+    }
+
+    /**
+     * Peak-normalization gain per clip that has "Normalize audio" enabled: scans the clip's audio
+     * (via the cached waveform decoder) for its loudest sample and returns the gain that lifts that
+     * peak to ~0.97 full-scale, clamped to a sane range. Keyed by clip id.
+     */
+    private suspend fun computeNormalizeGains(context: Context, document: Document): Map<String, Float> {
+        val gains = HashMap<String, Float>()
+        document.clips.filter { it.filters.normalize }.forEach { clip ->
+            val media = document.mediaFor(clip) ?: return@forEach
+            val wf = com.hereliesaz.guillotine.media.MediaPreview.waveform(context, media.uri) ?: return@forEach
+            val peak = maxOf(wf.left.maxOrNull() ?: 0f, wf.right.maxOrNull() ?: 0f)
+            if (peak > 0.001f) gains[clip.id] = (0.97f / peak).coerceIn(0.1f, 8f)
+        }
+        return gains
+    }
 
     /** Copy the encoded file into the gallery via MediaStore (no permission on API 29+). */
     private fun saveToGallery(context: Context, file: File, name: String): Uri {

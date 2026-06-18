@@ -34,8 +34,6 @@ object Transcription {
 
     private suspend fun whisper(context: Context, apiKey: String, uri: Uri): List<TranscriptCue> =
         withContext(Dispatchers.IO) {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: throw IllegalStateException("Could not read media for transcription.")
             val boundary = "----guillotine${System.nanoTime()}"
             val conn = (URL("https://api.openai.com/v1/audio/transcriptions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -44,6 +42,7 @@ object Transcription {
                 connectTimeout = 30_000
                 readTimeout = 180_000
                 doOutput = true
+                setChunkedStreamingMode(2 * 1024 * 1024) // stream in 2 MB chunks to avoid OOM
             }
             DataOutputStream(conn.outputStream).use { out ->
                 fun field(name: String, value: String) {
@@ -56,7 +55,12 @@ object Transcription {
                 out.writeBytes("--$boundary\r\n")
                 out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"audio.mp4\"\r\n")
                 out.writeBytes("Content-Type: application/octet-stream\r\n\r\n")
-                out.write(bytes)
+                // Stream the source straight through rather than buffering the whole file in memory.
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    val buf = ByteArray(2 * 1024 * 1024)
+                    var n: Int
+                    while (input.read(buf).also { n = it } != -1) out.write(buf, 0, n)
+                } ?: throw IllegalStateException("Could not read media for transcription.")
                 out.writeBytes("\r\n--$boundary--\r\n")
             }
             val ok = conn.responseCode in 200..299

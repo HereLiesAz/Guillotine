@@ -52,7 +52,7 @@ object SubjectSegmenter {
         val parsed = Uri.parse(uri)
         return runCatching {
             if (kind == MediaKind.IMAGE) {
-                context.contentResolver.openInputStream(parsed)?.use { BitmapFactory.decodeStream(it) }
+                decodeSampledImage(context, parsed)
             } else {
                 val r = MediaMetadataRetriever()
                 try {
@@ -64,6 +64,23 @@ object SubjectSegmenter {
             }
         }.getOrNull()
     }
+
+    /**
+     * Decode an image clip's frame, subsampled so a huge source photo can't OOM (and so ML Kit
+     * isn't handed a needlessly large bitmap). Caps the longest edge near [MAX_EDGE_PX].
+     */
+    private fun decodeSampledImage(context: Context, uri: Uri): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        while (longest / sample > MAX_EDGE_PX) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+    }
+
+    private const val MAX_EDGE_PX = 1920
 
     /** Multiply the frame's alpha by the per-pixel foreground confidence from the mask. */
     private fun applyMask(frame: Bitmap, mask: SegmentationMask): Bitmap {

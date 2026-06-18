@@ -6,8 +6,12 @@ import org.json.JSONObject
 /**
  * Embedded MCP server on port [port]. External AI tools/assistants connect via HTTP
  * POST to /mcp with JSON-RPC 2.0 bodies. GET /health is a simple liveness check.
+ *
+ * Bound to loopback (127.0.0.1) only: the server exposes unauthenticated read/write control
+ * of the editor, so it must not be reachable from other devices on the network. Tools on a
+ * dev machine reach it via `adb forward tcp:6274 tcp:6274`.
  */
-class McpServer(port: Int = 6274) : NanoHTTPD(port) {
+class McpServer(port: Int = 6274) : NanoHTTPD("127.0.0.1", port) {
 
     private var tools: McpTools? = null
 

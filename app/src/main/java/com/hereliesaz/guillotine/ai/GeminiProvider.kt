@@ -2,7 +2,6 @@ package com.hereliesaz.guillotine.ai
 
 import android.content.Context
 import android.net.Uri
-import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.EditSegment
 import com.hereliesaz.guillotine.model.MediaKind
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +55,10 @@ class GeminiProvider(
 
         onProgress(AnalysisProgress("Generating\u2026"))
         val text = generate(prompt, kind, file.uri, mime)
-        parseSegments(text)
+        // Route through the shared parser so Gemini gets the same zero-length guard and
+        // code-fence tolerance as every other provider (was a near-duplicate that silently
+        // kept end<=start segments).
+        SegmentJson.parse(text)
     }
 
     private data class GeminiFile(val name: String, val uri: String, val state: String)
@@ -151,19 +153,6 @@ class GeminiProvider(
             .getJSONArray("parts")
             .getJSONObject(0)
             .getString("text")
-    }
-
-    private fun parseSegments(text: String): List<EditSegment> {
-        val arr = JSONArray(text)
-        val out = mutableListOf<EditSegment>()
-        for (i in 0 until arr.length()) {
-            val o = arr.getJSONObject(i)
-            val start = (o.optDouble("start", 0.0) * 1000).toLong()
-            val end = (o.optDouble("end", 0.0) * 1000).toLong()
-            val action = if (o.optString("action", "keep").equals("remove", true)) EditAction.REMOVE else EditAction.KEEP
-            out += EditSegment(start, end, action, o.optString("reason", ""))
-        }
-        return out
     }
 
     private fun segmentSchema() = JSONObject().apply {

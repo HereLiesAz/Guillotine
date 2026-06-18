@@ -33,19 +33,24 @@ object VoskTranscriber {
         val model = Model(modelPath)
         return try {
             val rec = Recognizer(model, TARGET_RATE.toFloat())
-            rec.setWords(true)
-            val cues = mutableListOf<TranscriptCue>()
-            var i = 0
-            val chunk = 4000
-            while (i < mono.size) {
-                val len = min(chunk, mono.size - i)
-                val buf = if (i == 0 && len == mono.size) mono else mono.copyOfRange(i, i + len)
-                if (rec.acceptWaveForm(buf, len)) parseResult(rec.result)?.let { cues += it }
-                i += len
+            // Nested try/finally so the recognizer is closed even if a chunk throws — the
+            // outer finally only closes the model.
+            try {
+                rec.setWords(true)
+                val cues = mutableListOf<TranscriptCue>()
+                var i = 0
+                val chunk = 4000
+                while (i < mono.size) {
+                    val len = min(chunk, mono.size - i)
+                    val buf = if (i == 0 && len == mono.size) mono else mono.copyOfRange(i, i + len)
+                    if (rec.acceptWaveForm(buf, len)) parseResult(rec.result)?.let { cues += it }
+                    i += len
+                }
+                parseResult(rec.finalResult)?.let { cues += it }
+                cues
+            } finally {
+                rec.close()
             }
-            parseResult(rec.finalResult)?.let { cues += it }
-            rec.close()
-            cues
         } finally {
             model.close()
         }
