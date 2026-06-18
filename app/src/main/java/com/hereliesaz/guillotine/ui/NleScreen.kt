@@ -19,7 +19,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -256,12 +260,15 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
     // The menu is a standalone, inline AzDropdownMenu (10.3) in the TopBar — its trigger icon
     // sits right next to the project name. There is no AzNavRail host wrapper here: the rail
-    // would otherwise reserve horizontal space on the left edge and render a vestigial app-icon
-    // header (noMenu only removes the drawer, not the rail). systemBarsPadding handles safe zones.
+    // would otherwise reserve horizontal space on the left edge.
+    //
+    // Edge-to-edge: inset only the TOP and BOTTOM for the status/navigation bars. We deliberately
+    // do NOT pad left/right (systemBarsPadding would, on cutouts/rounded corners/landscape),
+    // so every surface — TopBar, preview, timeline, banner — spans the full screen width.
     Column(
         modifier
             .fillMaxSize()
-            .systemBarsPadding()
+            .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Vertical))
             .background(Black)
             .focusRequester(focusRequester)
             .focusable()
