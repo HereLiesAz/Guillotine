@@ -88,9 +88,7 @@ import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
-import androidx.navigation.compose.rememberNavController
 import com.hereliesaz.aznavrail.AzDropdownMenu
-import com.hereliesaz.aznavrail.AzHostActivityLayout
 import com.hereliesaz.aznavrail.model.AzDropdownAlignment
 import com.hereliesaz.guillotine.GuillotineApplication
 import com.hereliesaz.guillotine.ads.BannerAd
@@ -254,70 +252,65 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffectFocus(focusRequester)
 
-    val navController = rememberNavController()
     val providerLabel = settings.provider.meta.label
 
-    // AzHostActivityLayout manages safe zones. The AzDropdownMenu (10.3) is a standalone composable
-    // placed inline in the TopBar, so the trigger icon sits right next to the project name.
-    AzHostActivityLayout(navController = navController, modifier = modifier.fillMaxSize()) {
-        azConfig(noMenu = true)
-        azTheme(activeColor = Red500)
+    // The menu is a standalone, inline AzDropdownMenu (10.3) in the TopBar — its trigger icon
+    // sits right next to the project name. There is no AzNavRail host wrapper here: the rail
+    // would otherwise reserve horizontal space on the left edge and render a vestigial app-icon
+    // header (noMenu only removes the drawer, not the rail). systemBarsPadding handles safe zones.
+    Column(
+        modifier
+            .fillMaxSize()
+            .systemBarsPadding()
+            .background(Black)
+            .focusRequester(focusRequester)
+            .focusable()
+            // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
+            // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
+            .onKeyEvent { handleKey(it, vm) },
+    ) {
+        TopBar(
+            state = state,
+            onUndo = vm::undo,
+            onRedo = vm::redo,
+            onImport = { importTargetTrack = null; importLauncher() },
+            onGenerate = { showGenerate = true },
+            onNameProject = { showNameDialog = true },
+            onOpenProject = { openLauncher() },
+            onExport = { exportDone = null; exportError = null; showExport = true },
+            onProjectSettings = { showProjectSettings = true },
+            onSettings = { showSettings = true },
+            onAiComparison = { showAiComparison = true },
+        )
 
-        onscreen {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .background(Black)
-                    .focusRequester(focusRequester)
-                    .focusable()
-                    // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
-                    // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
-                    .onKeyEvent { handleKey(it, vm) },
-            ) {
-                TopBar(
-                    state = state,
-                    onUndo = vm::undo,
-                    onRedo = vm::redo,
-                    onImport = { importTargetTrack = null; importLauncher() },
-                    onGenerate = { showGenerate = true },
-                    onNameProject = { showNameDialog = true },
-                    onOpenProject = { openLauncher() },
-                    onExport = { exportDone = null; exportError = null; showExport = true },
-                    onProjectSettings = { showProjectSettings = true },
-                    onSettings = { showSettings = true },
-                    onAiComparison = { showAiComparison = true },
+        // Processing/error feedback for AI analysis (formerly shown in the Inspector).
+        AnalysisStatusBar(state, providerLabel) { vm.clearError() }
+        if (widthClass == WindowWidthSizeClass.Expanded) {
+            Column(Modifier.weight(0.6f).fillMaxWidth()) {
+                PreviewPlayer(
+                    state,
+                    Modifier.weight(1f).fillMaxWidth(),
+                    cropMode = state.tool == EditorTool.CROP,
+                    onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
                 )
-
-                // Processing/error feedback for AI analysis (formerly shown in the Inspector).
-                AnalysisStatusBar(state, providerLabel) { vm.clearError() }
-                if (widthClass == WindowWidthSizeClass.Expanded) {
-                    Column(Modifier.weight(0.6f).fillMaxWidth()) {
-                        PreviewPlayer(
-                            state,
-                            Modifier.weight(1f).fillMaxWidth(),
-                            cropMode = state.tool == EditorTool.CROP,
-                            onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-                        )
-                        TransportControls(vm, state)
-                    }
-                    EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
-                    TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
-                } else {
-                    PreviewPlayer(
-                        state,
-                        Modifier.weight(0.42f).fillMaxWidth(),
-                        cropMode = state.tool == EditorTool.CROP,
-                        onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-                    )
-                    TransportControls(vm, state)
-                    EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
-                    TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
-                }
-
-                // Bottom banner ad (renders only after ad consent is resolved).
-                BannerAd(Modifier.fillMaxWidth())
+                TransportControls(vm, state)
             }
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
+        } else {
+            PreviewPlayer(
+                state,
+                Modifier.weight(0.42f).fillMaxWidth(),
+                cropMode = state.tool == EditorTool.CROP,
+                onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+            )
+            TransportControls(vm, state)
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
+
+        // Bottom banner ad (renders only after ad consent is resolved).
+        BannerAd(Modifier.fillMaxWidth())
     }
 
     if (showSettings) {
