@@ -1,7 +1,6 @@
 package com.hereliesaz.guillotine.ui
 
 import android.net.Uri
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -60,7 +58,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -387,7 +384,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val mcpServer = remember { com.hereliesaz.guillotine.mcp.McpServer() }
     DisposableEffect(Unit) {
         val tools = com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings }
-        runCatching { mcpServer.startServer(tools) }
+        // /mcp requires this bearer token; the supplier reads the (cached) live token so a
+        // regenerate from Settings takes effect without restarting the server.
+        runCatching { mcpServer.startServer(tools) { com.hereliesaz.guillotine.mcp.McpAuth.token(context) } }
         onDispose { runCatching { mcpServer.stop() } }
     }
 }

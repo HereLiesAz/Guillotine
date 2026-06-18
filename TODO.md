@@ -2,6 +2,26 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Export fidelity — remaining gaps (need on-device verification)
+These were deliberately left after the effects pass because they depend on Media3's
+`presentationTimeUs` semantics for sequenced + clipped items, which can't be verified without a
+device — implementing them blind risks regressing currently-working behavior.
+- **Keyframed (time-varying) opacity/scale/volume** are not baked into the export — only each
+  clip's static transform/volume is. Needs time-varying `RgbMatrix`/`MatrixTransformation` (and a
+  time-varying audio gain) with the keyframe→output-time mapping verified on device.
+- **Caption/matte overlays** are attached to the first base item and timed linearly, so they can
+  drift / disappear once AI 'remove' ranges are physically cut. Needs a cut-aware output-time→
+  timeline-time map and per-item overlay attachment (`Exporter.buildComposition`,
+  `CaptionOverlay`, `MatteOverlay`).
+- **Preview parity for audio**: pan and peak-normalize are applied on export only. The preview
+  uses a single ExoPlayer volume float, so it doesn't render pan/normalize (would need a custom
+  `AudioProcessor` pipeline on the players).
+- **Perf**: matte segmentation runs synchronously inside the Media3 frame callback
+  (`MatteOverlay`); precompute mattes off-thread. Waveform/codec decode loops have no cooperative
+  cancellation (`MediaPreview`).
+- **TimelineMath test coverage**: `topActiveClip`, `activeClips`, multi-keyframe `valueAt`, and
+  overlapping-remove `keptRanges` are exercised in production but not unit-tested.
+
 ## Windows & Linux desktop builds (Compose Multiplatform)
 Ship native desktop apps reusing the existing Kotlin/Compose code.
 

@@ -46,7 +46,7 @@ object ProjectStore {
     fun save(context: Context, uri: Uri, document: Document) {
         context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
             out.write(serialize(document).toByteArray())
-        }
+        } ?: throw IllegalStateException("Could not open project file for writing.")
     }
 
     fun load(context: Context, uri: Uri): Document {

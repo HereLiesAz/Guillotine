@@ -111,6 +111,7 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
                     defaultHint = "Default: ${meta.defaultModel}",
                     load = { ModelCatalog.analyzerModels(provider, keys[provider].orEmpty()) },
                     onSelect = { models = models + (provider to it) },
+                    resetKey = keys[provider].orEmpty(),
                 )
                 Text("Pick from the provider's live list, or Default.", color = Neutral500, fontSize = 10.sp)
                 meta.keyUrl?.let { url ->
@@ -164,6 +165,38 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
                 singleLine = true,
             )
             Text("Set the URL of your crash-relay (see tools/crash-relay) to auto-file issues.", color = Neutral500, fontSize = 10.sp)
+
+            // MCP access — the bearer token external AI/ML tools must send to drive the editor.
+            val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+            var mcpToken by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpAuth.token(context)) }
+            Text("MCP access token (external AI tools)", color = Neutral400, fontSize = 12.sp)
+            OutlinedTextField(
+                value = mcpToken,
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = TextStyle(color = White, fontSize = 12.sp),
+                singleLine = true,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    "Copy", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickableText {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(mcpToken))
+                    },
+                )
+                Text(
+                    "Regenerate", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickableText {
+                        mcpToken = com.hereliesaz.guillotine.mcp.McpAuth.regenerate(context)
+                    },
+                )
+            }
+            Text(
+                "Send as 'Authorization: Bearer <token>' when POSTing to /mcp on port 6274. " +
+                    "Regenerate to revoke tools that have the old token.",
+                color = Neutral500, fontSize = 10.sp,
+            )
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button(
@@ -347,8 +380,9 @@ fun GenerateSheet(
 @Composable
 private fun LeonardoModelDropdown(apiKey: String, selectedId: String, onSelect: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    var live by remember { mutableStateOf<List<ImageGen.LeonardoModel>?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    // Keyed on apiKey so editing the key in the same dialog re-fetches instead of showing a stale list.
+    var live by remember(apiKey) { mutableStateOf<List<ImageGen.LeonardoModel>?>(null) }
+    var loading by remember(apiKey) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val models = live?.takeIf { it.isNotEmpty() } ?: ImageGen.LeonardoModels
     val name = models.firstOrNull { it.id == selectedId }?.name
@@ -383,10 +417,12 @@ private fun LiveModelDropdown(
     defaultHint: String,
     load: suspend () -> List<String>,
     onSelect: (String) -> Unit,
+    resetKey: Any? = null,
 ) {
     var open by remember { mutableStateOf(false) }
-    var items by remember { mutableStateOf<List<String>?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    // resetKey (the API key) invalidates the cached list when it changes mid-dialog.
+    var items by remember(resetKey) { mutableStateOf<List<String>?>(null) }
+    var loading by remember(resetKey) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Box {
         DropdownAnchor(current.ifBlank { defaultHint }) {

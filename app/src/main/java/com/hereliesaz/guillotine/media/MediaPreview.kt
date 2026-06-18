@@ -40,7 +40,9 @@ object MediaPreview {
         atMs: Long,
         maxPx: Int = 160,
     ): ImageBitmap? = withContext(Dispatchers.IO) {
-        val key = "$uri@$atMs"
+        // maxPx is part of the key: the same frame requested at two sizes must not collide
+        // (otherwise the first-cached, possibly smaller, bitmap is returned for the larger request).
+        val key = "$uri@$atMs@$maxPx"
         thumbs.get(key)?.let { return@withContext it }
         val bmp = runCatching {
             if (kind == MediaKind.IMAGE) decodeImage(context, uri, maxPx) else decodeFrame(context, uri, atMs)

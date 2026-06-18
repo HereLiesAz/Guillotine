@@ -101,5 +101,8 @@ fun BannerAd(modifier: Modifier = Modifier, adUnitId: String = AdsState.BANNER_U
                 loadAd(AdRequest.Builder().build())
             }
         },
+        // Destroy the native AdView when the composable leaves composition — otherwise the
+        // ad view (and its WebView) leaks every time this surface is torn down.
+        onRelease = { it.destroy() },
     )
 }

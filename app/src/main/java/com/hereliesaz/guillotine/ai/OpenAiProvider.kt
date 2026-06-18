@@ -127,7 +127,7 @@ class OpenAiProvider(
             out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"audio.mp4\"\r\n")
             out.writeBytes("Content-Type: application/octet-stream\r\n\r\n")
             context.contentResolver.openInputStream(uri)?.use { input ->
-                val buf = ByteArray(2 * 1024 * 1024)
+                val buf = ByteArray(64 * 1024)
                 var n: Int
                 while (input.read(buf).also { n = it } != -1) out.write(buf, 0, n)
             } ?: throw IllegalStateException("Could not read audio for OpenAI transcription.")

@@ -116,5 +116,9 @@ class AppOpenAdManager(private val application: Application) :
     override fun onActivityPaused(activity: Activity) {}
     override fun onActivityStopped(activity: Activity) {}
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-    override fun onActivityDestroyed(activity: Activity) {}
+    override fun onActivityDestroyed(activity: Activity) {
+        // Drop the reference to a destroyed activity so we never hold (leak) a dead Activity
+        // or try to show an ad over one.
+        if (currentActivity === activity) currentActivity = null
+    }
 }

@@ -98,6 +98,8 @@ object CrashReporter {
     }.getOrDefault("(logcat unavailable)")
 
     private fun post(relayUrl: String, title: String, body: String): Boolean {
+        // The report bundles a stack trace and recent logcat — never send it in the clear.
+        if (!relayUrl.startsWith("https://", ignoreCase = true)) return false
         val conn = (URL(relayUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
@@ -105,13 +107,15 @@ object CrashReporter {
             readTimeout = 30_000
             doOutput = true
         }
-        val payload = org.json.JSONObject().apply {
-            put("title", title)
-            put("body", body)
+        return try {
+            val payload = org.json.JSONObject().apply {
+                put("title", title)
+                put("body", body)
+            }
+            conn.outputStream.use { it.write(payload.toString().toByteArray()) }
+            conn.responseCode in 200..299
+        } finally {
+            conn.disconnect()
         }
-        conn.outputStream.use { it.write(payload.toString().toByteArray()) }
-        val ok = conn.responseCode in 200..299
-        conn.disconnect()
-        return ok
     }
 }
