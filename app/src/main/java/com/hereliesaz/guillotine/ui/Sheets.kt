@@ -199,10 +199,18 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
             )
 
             // Encrypted Cloudflare relay — reach the editor from anywhere without port-forwarding.
-            val relay0 = remember { com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context) }
-            var relayEnabled by remember { mutableStateOf(relay0.enabled) }
-            var relayUrl by remember { mutableStateOf(relay0.workerUrl) }
-            var relayAccessKey by remember { mutableStateOf(relay0.accessKey) }
+            // Loaded off the main thread (EncryptedSharedPreferences touches the KeyStore + disk).
+            var relayEnabled by remember { mutableStateOf(false) }
+            var relayUrl by remember { mutableStateOf("") }
+            var relayAccessKey by remember { mutableStateOf("") }
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                val relay0 = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)
+                }
+                relayEnabled = relay0.enabled
+                relayUrl = relay0.workerUrl
+                relayAccessKey = relay0.accessKey
+            }
             Text("Encrypted cloud relay (optional)", color = Neutral400, fontSize = 12.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 androidx.compose.material3.Checkbox(

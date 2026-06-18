@@ -130,8 +130,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
 
     var showSettings by remember { mutableStateOf(false) }
-    // Cloudflare relay config; re-read whenever Settings closes so changes restart the bridge.
-    var relayConfig by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)) }
+    // Cloudflare relay config; loaded off the main thread (EncryptedSharedPreferences touches the
+    // KeyStore + disk) and re-read whenever Settings closes so changes restart the bridge.
+    var relayConfig by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.RelayConfig()) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        relayConfig = withContext(Dispatchers.IO) { com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context) }
+    }
     var showAiComparison by remember { mutableStateOf(false) }
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -316,12 +320,16 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         SettingsSheet(
             current = settings,
             onSave = { newSettings ->
-                scope.launch { keyStore.save(newSettings) }
-                relayConfig = com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)
+                scope.launch {
+                    keyStore.save(newSettings)
+                    relayConfig = withContext(Dispatchers.IO) { com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context) }
+                }
                 showSettings = false
             },
             onDismiss = {
-                relayConfig = com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)
+                scope.launch {
+                    relayConfig = withContext(Dispatchers.IO) { com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context) }
+                }
                 showSettings = false
             },
         )

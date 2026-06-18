@@ -46,21 +46,32 @@ class McpRelayClient(
     }
 
     fun stop() {
-        running = false
-        runCatching { ws?.close(1000, "client stopping") }
-        ws = null
+        synchronized(this) {
+            running = false
+            runCatching { ws?.close(1000, "client stopping") }
+            ws = null
+        }
+        // OkHttp owns its own dispatcher threads + connection pool; release them so a client
+        // recreated on a config change doesn't leak them.
+        client.dispatcher.executorService.shutdown()
+        client.connectionPool.evictAll()
         scope.cancel()
     }
 
     private fun connect() {
-        if (!running) return
+        synchronized(this) { if (!running) return }
         val room = McpCrypto.roomId(tokenProvider())
         val sep = if (config.workerUrl.contains("?")) "&" else "?"
         val url = "${config.workerUrl}${sep}room=$room&role=device"
         val request = Request.Builder().url(url).apply {
             if (config.accessKey.isNotBlank()) addHeader("X-Relay-Key", config.accessKey)
         }.build()
-        ws = client.newWebSocket(request, listener)
+        // Create outside the lock (network call), then publish under it — if stop() raced in
+        // and cleared `running`, close the new socket immediately instead of leaking it.
+        val newWs = client.newWebSocket(request, listener)
+        synchronized(this) {
+            if (!running) newWs.close(1000, "client stopping") else ws = newWs
+        }
     }
 
     private val listener = object : WebSocketListener() {

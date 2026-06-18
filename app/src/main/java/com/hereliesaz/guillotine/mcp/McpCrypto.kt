@@ -49,8 +49,10 @@ object McpCrypto {
     private fun sha256(s: String): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8))
 
-    // Mask to a byte before formatting — "%02x" on a negative Byte sign-extends to 8 hex digits.
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    // Mask to a byte before formatting ("%02x" on a negative Byte sign-extends to 8 hex digits),
+    // and pin the locale so the hex is identical everywhere (and Lint-clean).
+    private fun ByteArray.toHex(): String =
+        joinToString("") { String.format(java.util.Locale.US, "%02x", it.toInt() and 0xFF) }
     private fun ByteArray.b64(): String = Base64.encodeToString(this, Base64.NO_WRAP)
     private fun String.unb64(): ByteArray = Base64.decode(this, Base64.NO_WRAP)
 }

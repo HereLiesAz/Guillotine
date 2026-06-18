@@ -61,13 +61,21 @@ const pending = new Map(); // rid -> { res, timer }
 let ws = null;
 
 function connect() {
+  if (ws) { try { ws.close(); } catch (_) {} }
   const sep = WORKER_URL.includes("?") ? "&" : "?";
   const url = `${WORKER_URL}${sep}room=${ROOM}&role=tool`;
   const headers = ACCESS_KEY ? { "X-Relay-Key": ACCESS_KEY } : {};
-  ws = new WebSocket(url, { headers });
+  const socket = new WebSocket(url, { headers });
+  ws = socket;
 
-  ws.on("open", () => console.error("Relay connected; device pairing on room", ROOM.slice(0, 8) + "…"));
-  ws.on("message", (data) => {
+  // Guard every handler with `ws === socket` so a stale (replaced/closing) socket can't clobber
+  // the current connection or trigger duplicate reconnects.
+  socket.on("open", () => {
+    if (ws !== socket) return;
+    console.error("Relay connected; device pairing on room", ROOM.slice(0, 8) + "…");
+  });
+  socket.on("message", (data) => {
+    if (ws !== socket) return;
     let frame;
     try { frame = JSON.parse(data.toString()); } catch (_) { return; }
     const entry = pending.get(frame.rid);
@@ -83,8 +91,12 @@ function connect() {
       entry.res.end("relay decrypt failed (token mismatch?)");
     }
   });
-  ws.on("close", () => { ws = null; setTimeout(connect, 2000); });
-  ws.on("error", () => { try { ws.close(); } catch (_) {} });
+  socket.on("close", () => {
+    if (ws === socket) { ws = null; setTimeout(connect, 2000); }
+  });
+  socket.on("error", () => {
+    if (ws === socket) { try { socket.close(); } catch (_) {} }
+  });
 }
 
 const server = http.createServer((req, res) => {
