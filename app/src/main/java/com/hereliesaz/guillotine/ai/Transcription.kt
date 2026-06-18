@@ -57,7 +57,7 @@ object Transcription {
                 out.writeBytes("Content-Type: application/octet-stream\r\n\r\n")
                 // Stream the source straight through rather than buffering the whole file in memory.
                 context.contentResolver.openInputStream(uri)?.use { input ->
-                    val buf = ByteArray(2 * 1024 * 1024)
+                    val buf = ByteArray(64 * 1024)
                     var n: Int
                     while (input.read(buf).also { n = it } != -1) out.write(buf, 0, n)
                 } ?: throw IllegalStateException("Could not read media for transcription.")

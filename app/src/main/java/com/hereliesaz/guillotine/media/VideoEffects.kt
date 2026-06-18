@@ -94,11 +94,10 @@ object VideoEffects {
                 .build()
         }
         if (offsetX != 0f || offsetY != 0f) {
-            val tx = offsetX * 2f
-            val ty = -offsetY * 2f
-            effects += MatrixTransformation { _ ->
-                android.graphics.Matrix().apply { setTranslate(tx, ty) }
-            }
+            // The translation is static for the clip, so build the Matrix once and reuse it —
+            // the lambda is called per frame, so allocating there would churn the GC.
+            val matrix = android.graphics.Matrix().apply { setTranslate(offsetX * 2f, -offsetY * 2f) }
+            effects += MatrixTransformation { _ -> matrix }
         }
         return effects
     }
