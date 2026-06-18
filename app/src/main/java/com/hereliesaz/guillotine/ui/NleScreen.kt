@@ -130,6 +130,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
 
     var showSettings by remember { mutableStateOf(false) }
+    // Cloudflare relay config; re-read whenever Settings closes so changes restart the bridge.
+    var relayConfig by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)) }
     var showAiComparison by remember { mutableStateOf(false) }
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -315,9 +317,13 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             current = settings,
             onSave = { newSettings ->
                 scope.launch { keyStore.save(newSettings) }
+                relayConfig = com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)
                 showSettings = false
             },
-            onDismiss = { showSettings = false },
+            onDismiss = {
+                relayConfig = com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)
+                showSettings = false
+            },
         )
     }
     if (showProjectSettings) {
@@ -388,6 +394,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         // regenerate from Settings takes effect without restarting the server.
         runCatching { mcpServer.startServer(tools) { com.hereliesaz.guillotine.mcp.McpAuth.token(context) } }
         onDispose { runCatching { mcpServer.stop() } }
+    }
+
+    // Optional outbound, end-to-end-encrypted Cloudflare relay. Re-read on Settings close so
+    // toggling it on/off (or editing the Worker URL) restarts the bridge.
+    DisposableEffect(relayConfig) {
+        val client = if (relayConfig.isUsable) {
+            com.hereliesaz.guillotine.mcp.McpRelayClient(
+                com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings },
+                { com.hereliesaz.guillotine.mcp.McpAuth.token(context) },
+                relayConfig,
+            ).also { runCatching { it.start() } }
+        } else {
+            null
+        }
+        onDispose { client?.stop() }
     }
 }
 

@@ -1,0 +1,15 @@
+name = "guillotine-mcp-relay"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# Durable Object that pairs a device with its tool(s) and relays sealed frames.
+[[durable_objects.bindings]]
+name = "RELAY_ROOM"
+class_name = "RelayRoom"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RelayRoom"]
+
+# Optional abuse gate. Set with:  wrangler secret put RELAY_ACCESS_KEY
+# (when set, both the app and the proxy must send it as the X-Relay-Key header).
