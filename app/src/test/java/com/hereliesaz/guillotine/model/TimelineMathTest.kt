@@ -93,9 +93,10 @@ class TimelineMathTest {
             Keyframe("c", 2000, 0f, KeyframeProperty.SCALE, linear),
         )
         val c = clip(0, 0, 2000, kfs = kfs)
-        assertEquals(0.5f, TimelineMath.valueAt(c, KeyframeProperty.SCALE, 500, 9f), 0.03f)   // rising
-        assertEquals(1f, TimelineMath.valueAt(c, KeyframeProperty.SCALE, 1000, 9f), 0.001f)   // middle kf
-        assertEquals(0.5f, TimelineMath.valueAt(c, KeyframeProperty.SCALE, 1500, 9f), 0.03f)  // falling
+        // `linear` is an exact identity curve (x == t), so interpolation is precise — tight delta.
+        assertEquals(0.5f, TimelineMath.valueAt(c, KeyframeProperty.SCALE, 500, 9f), 0.001f)   // rising
+        assertEquals(1f, TimelineMath.valueAt(c, KeyframeProperty.SCALE, 1000, 9f), 0.001f)    // middle kf
+        assertEquals(0.5f, TimelineMath.valueAt(c, KeyframeProperty.SCALE, 1500, 9f), 0.001f)  // falling
     }
 
     @Test fun valueAt_sorts_unordered_keyframes() {
@@ -104,7 +105,7 @@ class TimelineMathTest {
             Keyframe("a", 0, 0f, KeyframeProperty.OPACITY, linear),
         )
         val c = clip(0, 0, 1000, kfs = kfs)
-        assertEquals(0.5f, TimelineMath.valueAt(c, KeyframeProperty.OPACITY, 500, 9f), 0.03f)
+        assertEquals(0.5f, TimelineMath.valueAt(c, KeyframeProperty.OPACITY, 500, 9f), 0.001f)
     }
 
     @Test fun valueAt_ignores_other_properties() {
@@ -154,7 +155,7 @@ class TimelineMathTest {
     @Test fun activeClips_returns_all_overlapping() {
         val a = clip(0, 0, 5000, id = "a")
         val b = clip(1000, 0, 5000, id = "b")
-        assertEquals(2, TimelineMath.activeClips(listOf(a, b), ClipType.VIDEO, 2000).size)
+        assertEquals(listOf("a", "b"), TimelineMath.activeClips(listOf(a, b), ClipType.VIDEO, 2000).map { it.id })
         assertEquals(listOf("a"), TimelineMath.activeClips(listOf(a, b), ClipType.VIDEO, 500).map { it.id })
     }
 
@@ -210,9 +211,15 @@ class TimelineMathTest {
 
     @Test fun keptRanges_remove_outside_trim_is_ignored() {
         // Remove sits entirely before the trimmed window → whole window kept.
-        val c = clip(0, 2000, 3000, edits = listOf(EditSegment(0, 1000, EditAction.REMOVE)))
-        val r = TimelineMath.keptRanges(c)
-        assertEquals(1, r.size)
-        assertEquals(2000L until 5000L, r[0])
+        val cBefore = clip(0, 2000, 3000, edits = listOf(EditSegment(0, 1000, EditAction.REMOVE)))
+        val rBefore = TimelineMath.keptRanges(cBefore)
+        assertEquals(1, rBefore.size)
+        assertEquals(2000L until 5000L, rBefore[0])
+
+        // Remove sits entirely after the trimmed window → whole window kept.
+        val cAfter = clip(0, 0, 3000, edits = listOf(EditSegment(4000, 5000, EditAction.REMOVE)))
+        val rAfter = TimelineMath.keptRanges(cAfter)
+        assertEquals(1, rAfter.size)
+        assertEquals(0L until 3000L, rAfter[0])
     }
 }
