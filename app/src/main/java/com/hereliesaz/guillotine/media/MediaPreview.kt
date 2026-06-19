@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.hereliesaz.guillotine.model.MediaKind
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.nio.ByteOrder
 import kotlin.math.abs
@@ -56,7 +57,8 @@ object MediaPreview {
     suspend fun waveform(context: Context, uri: String, buckets: Int = 240): Waveform? =
         withContext(Dispatchers.IO) {
             waves.get(uri)?.let { return@withContext it }
-            val result = runCatching { decodeWaveform(context, Uri.parse(uri), buckets) }.getOrNull()
+            // Pass the coroutine's liveness in so the decode loop can bail on cancellation.
+            val result = runCatching { decodeWaveform(context, Uri.parse(uri), buckets) { isActive } }.getOrNull()
             result?.let { waves.put(uri, it) }
             result
         }
@@ -95,7 +97,10 @@ object MediaPreview {
 
     // ---- waveform ----------------------------------------------------------
 
-    private fun decodeWaveform(context: Context, uri: Uri, buckets: Int): Waveform? {
+    /** Hard cap so a malformed stream that never signals end-of-stream can't spin forever. */
+    private const val MAX_DECODE_NS = 30_000_000_000L // 30s
+
+    private fun decodeWaveform(context: Context, uri: Uri, buckets: Int, activeCheck: () -> Boolean): Waveform? {
         val extractor = MediaExtractor()
         extractor.setDataSource(context, uri, null)
         try {
@@ -125,8 +130,12 @@ object MediaPreview {
             var inputDone = false
             var outputDone = false
             val timeoutUs = 10_000L
+            val deadlineNs = System.nanoTime() + MAX_DECODE_NS
             try {
                 while (!outputDone) {
+                    // Cooperative cancellation + a hard deadline so a stuck/malformed decode
+                    // can't pin a thread indefinitely.
+                    if (!activeCheck() || System.nanoTime() > deadlineNs) break
                     if (!inputDone) {
                         val inIndex = codec.dequeueInputBuffer(timeoutUs)
                         if (inIndex >= 0) {
@@ -176,6 +185,8 @@ object MediaPreview {
                 runCatching { codec.stop() }
                 codec.release()
             }
+            // Bailed early (cancelled or timed out) — don't cache a half-built envelope.
+            if (!outputDone) return null
             // Fill any empty buckets from the previous one so each line is continuous.
             fillGaps(leftPeaks)
             fillGaps(rightPeaks)
