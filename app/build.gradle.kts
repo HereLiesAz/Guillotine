@@ -132,6 +132,9 @@ dependencies {
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)
+    // Real org.json on the unit-test classpath (the android.jar one is a throwing stub), so the
+    // SegmentJson parser can be tested on the JVM.
+    testImplementation(libs.json)
 
     debugImplementation(libs.androidx.ui.tooling)
 }
