@@ -34,7 +34,9 @@ object CrashConfig {
  */
 object CrashReporter {
 
-    private const val PENDING_FILE = "pending_crash.txt"
+    private const val PENDING_DIR = "pending_crashes"
+    private const val LEGACY_FILE = "pending_crash.txt"
+    private const val MAX_PENDING = 20
 
     fun install(context: Context) {
         val appContext = context.applicationContext
@@ -46,19 +48,30 @@ object CrashReporter {
         }
     }
 
-    /** If a crash was captured previously and a relay is configured, send it (best-effort). */
+    /**
+     * Send any previously-captured crash reports (best-effort) once a relay is configured. Each
+     * crash is its own file, so two crashes before a flush no longer clobber each other. Stops at
+     * the first failure (e.g. offline) so the rest are retried next launch.
+     */
     fun flushPending(context: Context) {
         val appContext = context.applicationContext
-        val file = File(appContext.filesDir, PENDING_FILE)
-        if (!file.exists()) return
         val relay = CrashConfig.relayUrl(appContext)
-        if (relay.isBlank()) return // hold the report until a relay is set
+        if (relay.isBlank()) return // hold reports until a relay is set
+        val dir = File(appContext.filesDir, PENDING_DIR)
+        val legacy = File(appContext.filesDir, LEGACY_FILE)
+        val files = buildList {
+            if (legacy.exists()) add(legacy) // migrate a report written by an older version
+            dir.listFiles()?.sortedBy { it.name }?.let { addAll(it) }
+        }
+        if (files.isEmpty()) return
         thread(isDaemon = true) {
-            val report = runCatching { file.readText() }.getOrNull() ?: return@thread
-            val title = report.lineSequence().firstOrNull { it.startsWith("FINGERPRINT: ") }
-                ?.removePrefix("FINGERPRINT: ")?.take(200) ?: "App crash"
-            val ok = runCatching { post(relay, title, report) }.getOrDefault(false)
-            if (ok) file.delete()
+            for (file in files) {
+                val report = runCatching { file.readText() }.getOrNull() ?: run { file.delete(); continue }
+                val title = report.lineSequence().firstOrNull { it.startsWith("FINGERPRINT: ") }
+                    ?.removePrefix("FINGERPRINT: ")?.take(200) ?: "App crash"
+                val ok = runCatching { post(relay, title, report) }.getOrDefault(false)
+                if (ok) file.delete() else break // keep the rest for next launch
+            }
         }
     }
 
@@ -80,7 +93,13 @@ object CrashReporter {
             appendLine("---- Recent logcat ----")
             appendLine(readLogcat())
         }
-        File(context.filesDir, PENDING_FILE).writeText(report)
+        val dir = File(context.filesDir, PENDING_DIR).apply { mkdirs() }
+        // Cap stored reports so they can't grow without bound if no relay is ever configured.
+        dir.listFiles()?.sortedBy { it.name }?.let { existing ->
+            val over = existing.size - (MAX_PENDING - 1)
+            if (over > 0) existing.take(over).forEach { it.delete() }
+        }
+        File(dir, "crash_${System.currentTimeMillis()}_${System.nanoTime()}.txt").writeText(report)
     }
 
     private fun appVersion(context: Context): String = runCatching {
