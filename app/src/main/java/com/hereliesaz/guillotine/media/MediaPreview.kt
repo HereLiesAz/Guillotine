@@ -12,6 +12,7 @@ import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.hereliesaz.guillotine.model.MediaKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -57,8 +58,17 @@ object MediaPreview {
     suspend fun waveform(context: Context, uri: String, buckets: Int = 240): Waveform? =
         withContext(Dispatchers.IO) {
             waves.get(uri)?.let { return@withContext it }
-            // Pass the coroutine's liveness in so the decode loop can bail on cancellation.
-            val result = runCatching { decodeWaveform(context, Uri.parse(uri), buckets) { isActive } }.getOrNull()
+            // The decode loop calls this; throwing on cancellation lets it propagate properly
+            // (don't swallow CancellationException — only turn real decode failures into null).
+            val result = try {
+                decodeWaveform(context, Uri.parse(uri), buckets) {
+                    if (!isActive) throw CancellationException("waveform decode cancelled")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
             result?.let { waves.put(uri, it) }
             result
         }
@@ -100,7 +110,7 @@ object MediaPreview {
     /** Hard cap so a malformed stream that never signals end-of-stream can't spin forever. */
     private const val MAX_DECODE_NS = 30_000_000_000L // 30s
 
-    private fun decodeWaveform(context: Context, uri: Uri, buckets: Int, activeCheck: () -> Boolean): Waveform? {
+    private fun decodeWaveform(context: Context, uri: Uri, buckets: Int, ensureActive: () -> Unit): Waveform? {
         val extractor = MediaExtractor()
         extractor.setDataSource(context, uri, null)
         try {
@@ -133,9 +143,10 @@ object MediaPreview {
             val deadlineNs = System.nanoTime() + MAX_DECODE_NS
             try {
                 while (!outputDone) {
-                    // Cooperative cancellation + a hard deadline so a stuck/malformed decode
-                    // can't pin a thread indefinitely.
-                    if (!activeCheck() || System.nanoTime() > deadlineNs) break
+                    // Cooperative cancellation (throws) + a hard deadline so a stuck/malformed
+                    // decode can't pin a thread indefinitely.
+                    ensureActive()
+                    if (System.nanoTime() > deadlineNs) break
                     if (!inputDone) {
                         val inIndex = codec.dequeueInputBuffer(timeoutUs)
                         if (inIndex >= 0) {
@@ -185,7 +196,7 @@ object MediaPreview {
                 runCatching { codec.stop() }
                 codec.release()
             }
-            // Bailed early (cancelled or timed out) — don't cache a half-built envelope.
+            // Hit the deadline (cancellation would have thrown) — don't cache a partial envelope.
             if (!outputDone) return null
             // Fill any empty buckets from the previous one so each line is continuous.
             fillGaps(leftPeaks)
