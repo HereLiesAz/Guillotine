@@ -19,8 +19,6 @@ device — implementing them blind risks regressing currently-working behavior.
 - **Perf**: matte segmentation runs synchronously inside the Media3 frame callback
   (`MatteOverlay`); precompute mattes off-thread. Waveform/codec decode loops have no cooperative
   cancellation (`MediaPreview`).
-- **TimelineMath test coverage**: `topActiveClip`, `activeClips`, multi-keyframe `valueAt`, and
-  overlapping-remove `keptRanges` are exercised in production but not unit-tested.
 
 ## Windows & Linux desktop builds (Compose Multiplatform)
 Ship native desktop apps reusing the existing Kotlin/Compose code.
