@@ -17,8 +17,8 @@ device — implementing them blind risks regressing currently-working behavior.
   uses a single ExoPlayer volume float, so it doesn't render pan/normalize (would need a custom
   `AudioProcessor` pipeline on the players).
 - **Perf**: matte segmentation runs synchronously inside the Media3 frame callback
-  (`MatteOverlay`); precompute mattes off-thread. Waveform/codec decode loops have no cooperative
-  cancellation (`MediaPreview`).
+  (`MatteOverlay`); precompute mattes off-thread (needs on-device profiling to confirm it helps
+  rather than just moving the cost).
 
 ## Windows & Linux desktop builds (Compose Multiplatform)
 Ship native desktop apps reusing the existing Kotlin/Compose code.
