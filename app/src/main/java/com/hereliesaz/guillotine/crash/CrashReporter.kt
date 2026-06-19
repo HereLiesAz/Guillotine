@@ -57,14 +57,14 @@ object CrashReporter {
         val appContext = context.applicationContext
         val relay = CrashConfig.relayUrl(appContext)
         if (relay.isBlank()) return // hold reports until a relay is set
-        val dir = File(appContext.filesDir, PENDING_DIR)
-        val legacy = File(appContext.filesDir, LEGACY_FILE)
-        val files = buildList {
-            if (legacy.exists()) add(legacy) // migrate a report written by an older version
-            dir.listFiles()?.sortedBy { it.name }?.let { addAll(it) }
-        }
-        if (files.isEmpty()) return
         thread(isDaemon = true) {
+            // All disk I/O (existence/listing/read) stays off the main thread.
+            val dir = File(appContext.filesDir, PENDING_DIR)
+            val legacy = File(appContext.filesDir, LEGACY_FILE)
+            val files = buildList {
+                if (legacy.exists()) add(legacy) // migrate a report written by an older version
+                dir.listFiles()?.sortedBy { it.name }?.let { addAll(it) }
+            }
             for (file in files) {
                 val report = runCatching { file.readText() }.getOrNull() ?: run { file.delete(); continue }
                 val title = report.lineSequence().firstOrNull { it.startsWith("FINGERPRINT: ") }
