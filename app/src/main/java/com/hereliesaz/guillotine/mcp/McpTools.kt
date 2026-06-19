@@ -51,6 +51,9 @@ class McpTools(
                             })
                             put("reason", JSONObject().put("type", "string"))
                         })
+                        // startMs/endMs/action are mandatory per item (applyEdits throws without
+                        // them); reason is optional. Declaring this lets clients send valid items.
+                        put("required", JSONArray().put("startMs").put("endMs").put("action"))
                     })
                 })
             })
