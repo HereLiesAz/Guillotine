@@ -1,0 +1,9 @@
+{
+  "name": "guillotine-mcp-relay-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tool-side proxy for the Guillotine encrypted MCP relay.",
+  "bin": { "guillotine-mcp-proxy": "proxy.js" },
+  "scripts": { "start": "node proxy.js" },
+  "dependencies": { "ws": "^8.18.0" }
+}

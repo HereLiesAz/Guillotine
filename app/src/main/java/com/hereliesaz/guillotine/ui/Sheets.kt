@@ -198,10 +198,61 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
                 color = Neutral500, fontSize = 10.sp,
             )
 
+            // Encrypted Cloudflare relay — reach the editor from anywhere without port-forwarding.
+            // Loaded off the main thread (EncryptedSharedPreferences touches the KeyStore + disk).
+            var relayEnabled by remember { mutableStateOf(false) }
+            var relayUrl by remember { mutableStateOf("") }
+            var relayAccessKey by remember { mutableStateOf("") }
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                val relay0 = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)
+                }
+                relayEnabled = relay0.enabled
+                relayUrl = relay0.workerUrl
+                relayAccessKey = relay0.accessKey
+            }
+            Text("Encrypted cloud relay (optional)", color = Neutral400, fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Checkbox(
+                    checked = relayEnabled,
+                    onCheckedChange = { relayEnabled = it },
+                )
+                Text("Reach the editor via Cloudflare (no port-forwarding)", color = Neutral400, fontSize = 12.sp)
+            }
+            OutlinedTextField(
+                value = relayUrl,
+                onValueChange = { relayUrl = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Worker URL (wss://…workers.dev/relay)", color = Neutral500, fontSize = 12.sp) },
+                textStyle = TextStyle(color = White, fontSize = 12.sp),
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = relayAccessKey,
+                onValueChange = { relayAccessKey = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Worker access key (optional)", color = Neutral500, fontSize = 12.sp) },
+                textStyle = TextStyle(color = White, fontSize = 12.sp),
+                singleLine = true,
+            )
+            Text(
+                "Deploy tools/mcp-relay, then run the local proxy with the same MCP token. " +
+                    "Traffic is end-to-end encrypted; Cloudflare only relays ciphertext.",
+                color = Neutral500, fontSize = 10.sp,
+            )
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button(
                     onClick = {
                         com.hereliesaz.guillotine.crash.CrashConfig.setRelayUrl(context, crashRelayUrl)
+                        com.hereliesaz.guillotine.mcp.McpRelayConfig.save(
+                            context,
+                            com.hereliesaz.guillotine.mcp.RelayConfig(
+                                enabled = relayEnabled,
+                                workerUrl = relayUrl.trim(),
+                                accessKey = relayAccessKey.trim(),
+                            ),
+                        )
                         onSave(
                             AiSettings(
                                 provider = provider,

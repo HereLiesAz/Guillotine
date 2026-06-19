@@ -128,6 +128,8 @@ dependencies {
 
     // Embedded MCP server — external AI tools interact with the editor over HTTP.
     implementation(libs.nanohttpd)
+    // Outbound WebSocket client for the optional end-to-end-encrypted Cloudflare relay.
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
 
