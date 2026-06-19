@@ -37,6 +37,10 @@ object ProjectStore {
         ignoreUnknownKeys = true
         encodeDefaults = true
         prettyPrint = true
+        // If a future version renames/removes an enum constant (e.g. a Quality/AspectRatio value),
+        // coerce the now-unknown value in an old project to the property's default instead of
+        // throwing — so a saved project never bricks the app after an update.
+        coerceInputValues = true
     }
 
     fun serialize(document: Document): String = json.encodeToString(Document.serializer(), document)
