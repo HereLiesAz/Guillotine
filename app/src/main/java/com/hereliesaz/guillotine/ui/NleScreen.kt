@@ -443,7 +443,9 @@ private fun TopBar(
         // via azConfig (no icon/tint/alignment params anymore). design = MENU gives full-width
         // rows; items auto-close (closeOnClick defaults true - no dismiss() in 10.7).
         AzDropdownMenu {
-            azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp)
+            // showFooter=false: 10.8 adds a MENU footer (defaulting to a link to the AzNavRail
+            // repo) — keep our project menu a clean action list instead.
+            azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp, showFooter = false)
             azItem("Import media") { onImport() }
             azItem("Generate image") { onGenerate() }
             azItem("Name project") { onNameProject() }
