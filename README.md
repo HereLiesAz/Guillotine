@@ -32,10 +32,17 @@ on-device fallback** so the app is usable with zero configuration.
   layer below — in the live preview and baked into the export.
 - **Transcription → captions:** generate timed, grouped caption clips from speech — **on-device**
   (Vosk, BYO model) or cloud (OpenAI Whisper). Captions burn into the export.
-- **Image generation:** free **Pollinations.ai** (no key) or a self-hosted **Fooocus-API**.
+- **Image generation:** free **Pollinations.ai** (no key) or **Leonardo.ai** (BYO key, model
+  selectable).
 - **Real mp4 export** (Media3 Transformer): cuts removed ranges, positions clips on the timeline,
-  applies filters + crop/aspect, composites the segmentation matte and caption overlays, bakes
-  track volume/mute/opacity, and saves to the gallery.
+  applies per-clip filters (brightness/contrast/saturation/hue/sepia/blur/grayscale/invert) and the
+  crop-tool transform (scale/rotate/offset), project crop/aspect, composites the segmentation matte
+  and caption overlays, bakes per-clip + track volume / pan / peak-normalize / mute / opacity, and
+  saves to the gallery.
+- **Automation (MCP):** while open, the app runs a small **token-gated MCP server** so external AI
+  tools can drive the editor (read the timeline, set prompts, run analysis, apply edits). An
+  optional **end-to-end-encrypted Cloudflare relay** (see [`tools/mcp-relay`](tools/mcp-relay))
+  reaches it from anywhere without port-forwarding.
 - **Whole-track controls** from each track header: mute, disable/hide, volume, opacity, add clip.
 - **Adaptive UI:** phone / tablet / Chromebook layouts, keyboard shortcuts, mouse + Ctrl-scroll
   zoom; Material 3 Expressive, dark with a red accent.
