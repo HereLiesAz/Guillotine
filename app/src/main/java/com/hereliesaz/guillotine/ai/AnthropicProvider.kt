@@ -62,7 +62,11 @@ class AnthropicProvider(
 
         val body = JSONObject().apply {
             put("model", model)
-            put("max_tokens", 2048)
+            // A long clip can yield many keep/remove segments; 2048 truncated the JSON and broke
+            // parsing. 4096 doubles the room while staying within the output cap of every Claude
+            // model (incl. Claude 3 Haiku/Opus) — a higher value would 400 on those, and the model
+            // id is user-editable.
+            put("max_tokens", 4096)
             put("messages", JSONArray().put(JSONObject().apply {
                 put("role", "user")
                 put("content", content)
