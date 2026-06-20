@@ -39,6 +39,35 @@ gradlew.bat test                    # run the JVM unit tests (no device needed)
 
 The debug APK lands in `app/build/outputs/apk/debug/`.
 
+## Release build (signed AAB for Google Play)
+
+The Play Store takes an **Android App Bundle** (`.aab`), not an APK. This is a single-module app,
+so one bundle is all you need — Google generates the per-device density/ABI/language splits.
+
+Build one locally (signed):
+```
+gradlew.bat bundleRelease -PversionBuild=<code> ^
+  -Pandroid.injected.signing.store.file=<path-to>.jks ^
+  -Pandroid.injected.signing.store.password=*** ^
+  -Pandroid.injected.signing.key.alias=*** ^
+  -Pandroid.injected.signing.key.password=***
+# -> app/build/outputs/bundle/release/app-release.aab
+```
+or use Android Studio -> **Build -> Generate Signed App Bundle / APK -> Android App Bundle**.
+
+`-PversionBuild=<code>` sets `versionCode` explicitly (CI uses the git commit count so it always
+increases — Play rejects a duplicate or lower `versionCode`). Without it, `versionCode` falls back
+to the auto-incrementing value in `version.properties`.
+
+### CI: build + publish to Play
+
+The **Release AAB to Play** workflow (`.github/workflows/release-aab.yml`, run via *Actions ->
+Run workflow*) builds the signed bundle and can publish it to a Play track. It reuses the signing
+secrets from the APK workflow and needs one more: `PLAY_SERVICE_ACCOUNT_JSON` (a Google Cloud
+service account granted release access in the Play Console). The workflow header documents the
+one-time setup — note that **the very first release for a new app must be uploaded manually** in the
+Play Console before the API can publish subsequent builds.
+
 ## Project layout
 
 ```
