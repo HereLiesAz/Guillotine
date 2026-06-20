@@ -85,7 +85,7 @@
 <main>
   <div class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="eff">Effective date: 2026-06-17</p>
+    <p class="eff">Effective date: 2026-06-20</p>
 
     <p class="lead">Guillotine is an on-device, non-linear video editor for Android, tablets, and
     Chromebooks. In short: <strong>Guillotine has no servers of its own, no account system, and no
@@ -149,6 +149,23 @@
     credential used to file issues lives in your relay’s server-side secret and is <strong>never</strong>
     included in the app.</p>
 
+    <h2>Automation interface (MCP) and optional cloud relay</h2>
+    <p>For power users and AI tooling, Guillotine runs a small <strong>local automation server</strong>
+    (the Model Context Protocol, MCP) while the editor is open. It lets an external AI tool read and
+    edit the <strong>current project</strong> — list clips, set prompts, run analysis, apply edits. It
+    carries your project/editing data, <strong>not</strong> your media files, and:</p>
+    <ul>
+      <li>access requires a <strong>bearer token</strong> shown in Settings — a request without it is rejected;</li>
+      <li>it does not send anything on its own — it only responds to a tool <strong>you</strong> connect.</li>
+    </ul>
+    <p>Optionally, you can enable an <strong>encrypted cloud relay</strong> so a tool can reach the
+    editor without being on the same network. When enabled, the app opens an outbound, encrypted
+    connection to a <strong>Cloudflare Worker that you deploy and configure</strong>. Messages are
+    <strong>end-to-end encrypted</strong> with a key derived from your MCP token, so the relay only
+    ever passes <strong>ciphertext</strong> between your tool and the app and cannot read your editing
+    traffic. This relay is <strong>off by default</strong>; if you never enable it, the app makes no
+    such connection.</p>
+
     <h2>Advertising (Google AdMob)</h2>
     <p>Guillotine displays ads served by <strong>Google AdMob</strong> — an app-open ad on launch, a
     bottom banner, and an interstitial shown when you start an export. To serve and measure these ads, the Google
@@ -161,7 +178,7 @@
 
     <h2>Permissions</h2>
     <ul>
-      <li><strong>Internet</strong> — to call the AI providers, the ad service, and the crash relay you configure.</li>
+      <li><strong>Internet</strong> — to call the AI providers, the ad service, the crash relay you configure, and (if you enable it) the MCP cloud relay you configure.</li>
       <li><strong>Advertising ID</strong> (<code>com.google.android.gms.permission.AD_ID</code>) — used by Google AdMob to serve ads.</li>
       <li><strong>Storage access (Storage Access Framework)</strong> — only the specific media files you pick are accessible to the app; it does not scan your library.</li>
       <li><strong>Media output (MediaStore)</strong> — to save exported videos to your Movies folder.</li>
