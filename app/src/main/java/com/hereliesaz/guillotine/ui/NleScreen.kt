@@ -84,7 +84,7 @@ import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.aznavrail.AzDropdownMenu
-import com.hereliesaz.aznavrail.model.AzDropdownAlignment
+import com.hereliesaz.aznavrail.model.AzDropdownDesign
 import com.hereliesaz.guillotine.GuillotineApplication
 import com.hereliesaz.guillotine.ads.BannerAd
 import com.hereliesaz.guillotine.ai.Transcription
@@ -255,8 +255,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
     val providerLabel = settings.provider.meta.label
 
-    // The menu is a standalone, inline AzDropdownMenu (10.3) in the TopBar — its trigger icon
-    // sits right next to the project name. There is no AzNavRail host wrapper here, so nothing
+    // The menu is a standalone, inline AzDropdownMenu (AzNavRail 10.7) in the TopBar — its trigger
+    // icon sits right next to the project name. There is no AzNavRail host wrapper here, so nothing
     // reserves horizontal space on the left edge.
     //
     // Insets: exactly the pre-AzNavRail scheme — background drawn full-bleed, then systemBarsPadding
@@ -439,23 +439,20 @@ private fun TopBar(
         Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AzDropdownMenu(
-            contentDescription = "Menu",
-            iconTint = Red500,
-            iconSize = 40.dp,
-            // TOP_START: panel anchors to the icon and unfolds DOWNWARD (a drop-down). It reserves
-            // no layout space — it's a Popup over the content, like any standalone AzNavRail widget.
-            alignment = AzDropdownAlignment.TOP_START,
-        ) {
-            azItem("Import media") { dismiss(); onImport() }
-            azItem("Generate image") { dismiss(); onGenerate() }
-            azItem("Name project") { dismiss(); onNameProject() }
-            azItem("Open project file\u2026") { dismiss(); onOpenProject() }
-            azItem("Export video") { dismiss(); onExport() }
+        // AzNavRail 10.7 DSL: the standalone AzDropdownMenu's trigger is the app icon, styled
+        // via azConfig (no icon/tint/alignment params anymore). design = MENU gives full-width
+        // rows; items auto-close (closeOnClick defaults true - no dismiss() in 10.7).
+        AzDropdownMenu {
+            azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp)
+            azItem("Import media") { onImport() }
+            azItem("Generate image") { onGenerate() }
+            azItem("Name project") { onNameProject() }
+            azItem("Open project file\u2026") { onOpenProject() }
+            azItem("Export video") { onExport() }
             azDivider()
-            azItem("Project settings") { dismiss(); onProjectSettings() }
-            azItem("Settings") { dismiss(); onSettings() }
-            azItem("Compare AI providers") { dismiss(); onAiComparison() }
+            azItem("Project settings") { onProjectSettings() }
+            azItem("Settings") { onSettings() }
+            azItem("Compare AI providers") { onAiComparison() }
         }
         Text(
             state.document.name.ifBlank { "Untitled project" },

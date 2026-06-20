@@ -16,11 +16,15 @@ val versionProps = Properties().apply {
     }
 }
 
-var currentVersionCode = versionProps.getProperty("versionBuild", "1").toInt()
+// versionCode: an explicit override wins (CI passes -PversionBuild=<git commit count>), giving a
+// deterministic, monotonically-increasing code required for Play Store uploads. Without it, fall
+// back to the local auto-increment in version.properties (handy for ad-hoc release builds).
+val versionBuildOverride = (project.findProperty("versionBuild") as String?)?.toIntOrNull()
+var currentVersionCode = versionBuildOverride ?: versionProps.getProperty("versionBuild", "1").toInt()
 
-// Automatically increment versionCode for release builds
+// Automatically increment versionCode for release builds (only when not explicitly overridden).
 val isReleaseBuild = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
-if (isReleaseBuild) {
+if (versionBuildOverride == null && isReleaseBuild) {
     currentVersionCode++
     versionProps.setProperty("versionBuild", currentVersionCode.toString())
     versionPropsFile.outputStream().use {
