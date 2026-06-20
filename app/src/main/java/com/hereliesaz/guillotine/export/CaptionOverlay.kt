@@ -17,12 +17,13 @@ import com.hereliesaz.guillotine.model.TimelineClip
  * Burns a text clip's caption into the export as a timed [TextOverlay]: the styled text
  * shows only during the clip's window and is placed/scaled/rotated by its crop transform.
  *
- * Timing is relative to the base video item, so it's accurate for the common single-base
- * composite; long edits with many cut ranges may drift (see Exporter notes).
+ * One instance is attached per base export item; [timelineStartMs] is that item's start on the
+ * original timeline, so `timelineMs = timelineStartMs + presentationTimeUs/1000` stays accurate
+ * even after AI 'remove' ranges are physically cut.
  */
 class CaptionOverlay(
     private val clip: TimelineClip,
-    private val baseStartMs: Long,
+    private val timelineStartMs: Long,
 ) : TextOverlay() {
 
     private val empty = SpannableString("")
@@ -35,7 +36,7 @@ class CaptionOverlay(
     }
 
     override fun getText(presentationTimeUs: Long): SpannableString {
-        val t = baseStartMs + presentationTimeUs / 1000
+        val t = timelineStartMs + presentationTimeUs / 1000
         return if (clip.text.isNotBlank() && t >= clip.startTimeMs && t < clip.endTimeMs) styled else empty
     }
 

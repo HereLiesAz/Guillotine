@@ -17,6 +17,9 @@ import androidx.media3.effect.ScaleAndRotateTransformation
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.GlobalSettings
+import com.hereliesaz.guillotine.model.KeyframeProperty
+import com.hereliesaz.guillotine.model.TimelineClip
+import com.hereliesaz.guillotine.model.TimelineMath
 
 /**
  * Translates a clip's [ClipFilters] into a list of Media3 [Effect]s. The SAME
@@ -100,6 +103,47 @@ object VideoEffects {
             effects += MatrixTransformation { _ -> matrix }
         }
         return effects
+    }
+
+    /**
+     * Time-varying keyframe effects (opacity→alpha, scale) for [clip] baked into the export. The
+     * export item's first frame (presentationTimeUs 0) corresponds to [clipLocalStartMs] from the
+     * clip's start — i.e. for a kept range starting at source `rangeStart`,
+     * `clipLocalStartMs = rangeStart - clip.trimStartMs`. Only emitted when the clip actually has
+     * keyframes for that property, so non-keyframed clips are unaffected.
+     */
+    fun keyframeEffects(clip: TimelineClip, clipLocalStartMs: Long): List<Effect> {
+        val out = mutableListOf<Effect>()
+        if (clip.keyframes.any { it.property == KeyframeProperty.OPACITY }) {
+            out += KeyframeAlpha(clip, clipLocalStartMs)
+        }
+        if (clip.keyframes.any { it.property == KeyframeProperty.SCALE }) {
+            out += KeyframeScale(clip, clipLocalStartMs)
+        }
+        return out
+    }
+
+    /** Animates the frame's alpha from the clip's OPACITY keyframes (1 = opaque). */
+    private class KeyframeAlpha(private val clip: TimelineClip, private val startMs: Long) : RgbMatrix {
+        // Column-major identity; element[15] is the alpha→alpha factor, updated per frame.
+        private val m = floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f)
+        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
+            m[15] = TimelineMath.valueAt(clip, KeyframeProperty.OPACITY, startMs + presentationTimeUs / 1000, 1f)
+                .coerceIn(0f, 1f)
+            return m
+        }
+    }
+
+    /** Animates uniform scale about the frame centre from the clip's SCALE keyframes. */
+    private class KeyframeScale(private val clip: TimelineClip, private val startMs: Long) : MatrixTransformation {
+        private val m = android.graphics.Matrix()
+        override fun getMatrix(presentationTimeUs: Long): android.graphics.Matrix {
+            val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, startMs + presentationTimeUs / 1000, 1f)
+                .coerceAtLeast(0f)
+            m.reset()
+            m.setScale(s, s) // NDC centre is (0,0), so this scales about the frame centre
+            return m
+        }
     }
 
     /** A constant 4x4 RGB matrix that blends the identity toward sepia by [amount] (0..1). */

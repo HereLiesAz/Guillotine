@@ -2,23 +2,20 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
-## Export fidelity — remaining gaps (need on-device verification)
-These were deliberately left after the effects pass because they depend on Media3's
-`presentationTimeUs` semantics for sequenced + clipped items, which can't be verified without a
-device — implementing them blind risks regressing currently-working behavior.
-- **Keyframed (time-varying) opacity/scale/volume** are not baked into the export — only each
-  clip's static transform/volume is. Needs time-varying `RgbMatrix`/`MatrixTransformation` (and a
-  time-varying audio gain) with the keyframe→output-time mapping verified on device.
-- **Caption/matte overlays** are attached to the first base item and timed linearly, so they can
-  drift / disappear once AI 'remove' ranges are physically cut. Needs a cut-aware output-time→
-  timeline-time map and per-item overlay attachment (`Exporter.buildComposition`,
-  `CaptionOverlay`, `MatteOverlay`).
-- **Preview parity for audio**: pan and peak-normalize are applied on export only. The preview
-  uses a single ExoPlayer volume float, so it doesn't render pan/normalize (would need a custom
-  `AudioProcessor` pipeline on the players).
-- **Perf**: matte segmentation runs synchronously inside the Media3 frame callback
-  (`MatteOverlay`); precompute mattes off-thread (needs on-device profiling to confirm it helps
-  rather than just moving the cost).
+## Export fidelity — implemented; verify on device
+The previously-deferred export/preview gaps are now implemented (assume `presentationTimeUs` is
+item-relative/0-based per Media3 item) and need an on-device pass to confirm:
+- **Keyframed opacity/scale** baked into export via time-varying `RgbMatrix`/`MatrixTransformation`,
+  **keyframed volume** via `KeyframeVolumeProcessor` (clip-local time = `rangeStart - trimStart + pts`).
+- **Caption/matte overlays** attached to every base item with that item's timeline start, so they
+  stay in sync across 'remove' cuts.
+- **Preview audio parity**: pan + peak-normalize (with boost) via `LiveAudioProcessor` on the
+  preview ExoPlayers (mono pan is export-only).
+- **Matte precompute**: segmentation runs off-thread up front (`Exporter.precomputeMattes`), not per
+  render frame.
+
+Things to eyeball on device: opacity-via-alpha compositing, scale/translate centering, audio
+gain/pan levels, and overlay timing after cuts.
 
 ## Windows & Linux desktop builds (Compose Multiplatform)
 Ship native desktop apps reusing the existing Kotlin/Compose code.

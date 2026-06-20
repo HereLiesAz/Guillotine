@@ -2,60 +2,36 @@
 
 package com.hereliesaz.guillotine.export
 
-import android.content.Context
 import android.graphics.Bitmap
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.StaticOverlaySettings
-import com.hereliesaz.guillotine.media.SubjectSegmenter
-import com.hereliesaz.guillotine.model.MediaItem
-import com.hereliesaz.guillotine.model.TimelineClip
 
 /**
- * A Media3 [BitmapOverlay] that renders the **background-removed foreground** of the
- * upper-layer clips over the base (lower-layer) video, per frame. For each requested
- * presentation time it finds the active foreground clip, grabs that source frame, runs
- * on-device segmentation, and returns the matted bitmap (transparent where the background
- * was) so the layer below shows through.
+ * Renders the background-removed foreground (matte) over the base video. The mattes are
+ * **precomputed off the render thread** (see [Exporter.precomputeMattes]) into [mattes], keyed by
+ * timeline bucket (`timelineMs / CACHE_MS`), so the encoder isn't stalled running ML segmentation
+ * per frame.
  *
- * Note: this matters per frame on-device, so export is slow; results are bucketed/cached at
- * ~100 ms. Built for the canonical single-background composite — verify on device.
+ * One instance is attached per base export item; [timelineStartMs] is that item's start on the
+ * original timeline, so `timelineMs = timelineStartMs + presentationTimeUs/1000` stays correct even
+ * after AI 'remove' ranges are physically cut.
  */
 class MatteOverlay(
-    private val context: Context,
-    private val foreground: List<TimelineClip>,
-    private val mediaOf: (TimelineClip) -> MediaItem?,
-    private val baseStartMs: Long,
+    private val mattes: Map<Long, Bitmap>,
+    private val timelineStartMs: Long,
 ) : BitmapOverlay() {
 
     private val blank: Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     private val settings = StaticOverlaySettings.Builder().build()
-    private var cacheBucket = Long.MIN_VALUE
-    private var cached: Bitmap = blank
 
     override fun getBitmap(presentationTimeUs: Long): Bitmap {
-        val timelineMs = baseStartMs + presentationTimeUs / 1000
-        val bucket = timelineMs / CACHE_MS
-        if (bucket == cacheBucket) return cached
-        cacheBucket = bucket
-
-        val clip = foreground.lastOrNull { timelineMs >= it.startTimeMs && timelineMs < it.endTimeMs }
-        cached = if (clip == null) {
-            blank
-        } else {
-            val media = mediaOf(clip)
-            if (media == null) {
-                blank
-            } else {
-                val src = clip.trimStartMs + (timelineMs - clip.startTimeMs)
-                SubjectSegmenter.cutoutBlocking(context, media.uri, media.kind, src) ?: blank
-            }
-        }
-        return cached
+        val timelineMs = timelineStartMs + presentationTimeUs / 1000
+        return mattes[timelineMs / CACHE_MS] ?: blank
     }
 
     override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings = settings
 
-    private companion object {
+    companion object {
         const val CACHE_MS = 100L
     }
 }
