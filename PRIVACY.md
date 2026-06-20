@@ -1,6 +1,6 @@
 # Privacy Policy — Guillotine
 
-**Effective date:** 2026-06-17
+**Effective date:** 2026-06-20
 
 Guillotine is an on-device, non-linear video editor for Android, tablets, and Chromebooks.
 This policy explains what the app does and does not do with your data. In short: **Guillotine
@@ -78,6 +78,23 @@ These technical logs could incidentally include text relevant to the crash. Repo
 the endpoint **you** set up; if you never set a relay URL, nothing is sent. The credential used
 to file issues lives in your relay’s server‑side secret and is **never** included in the app.
 
+## Automation interface (MCP) and optional cloud relay
+
+For power users and AI tooling, Guillotine runs a small **local automation server** (the Model
+Context Protocol, MCP) while the editor is open. It lets an external AI tool read and edit the
+**current project** — list clips, set prompts, run analysis, apply edits. It carries your
+project/editing data, **not** your media files, and:
+
+- access requires a **bearer token** shown in Settings — a request without it is rejected;
+- it does not send anything on its own — it only responds to a tool **you** connect.
+
+Optionally, you can enable an **encrypted cloud relay** so a tool can reach the editor without
+being on the same network. When enabled, the app opens an outbound, encrypted connection to a
+**Cloudflare Worker that you deploy and configure**. Messages are **end‑to‑end encrypted** with a
+key derived from your MCP token, so the relay only ever passes **ciphertext** between your tool
+and the app and cannot read your editing traffic. This relay is **off by default**; if you never
+enable it, the app makes no such connection.
+
 ## Advertising (Google AdMob)
 
 Guillotine displays ads served by **Google AdMob** — an app‑open ad on launch, a bottom banner,
@@ -94,7 +111,8 @@ shown. You can also reset or limit ad personalization in your device’s Google 
 
 ## Permissions
 
-- **Internet** — to call the AI providers, the ad service, and the crash relay you configure.
+- **Internet** — to call the AI providers, the ad service, the crash relay you configure, and (if
+  you enable it) the MCP cloud relay you configure.
 - **Advertising ID (`com.google.android.gms.permission.AD_ID`)** — used by Google AdMob to serve ads.
 - **Storage access (Storage Access Framework)** — only the specific media files you pick are
   accessible to the app; it does not scan your library.
