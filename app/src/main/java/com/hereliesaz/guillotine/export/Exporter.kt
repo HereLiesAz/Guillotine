@@ -70,54 +70,58 @@ object Exporter {
         val normalizeGains = withContext(Dispatchers.IO) { computeNormalizeGains(context, document) }
         // Background-removal mattes are segmented off the main thread up front (not per render frame).
         val mattes = withContext(Dispatchers.IO) { precomputeMattes(context, document) }
-        val composition = buildComposition(document, normalizeGains, mattes)
-        require(composition != null) { "Nothing to export — add a video clip first." }
+        try {
+            val composition = buildComposition(document, normalizeGains, mattes)
+            require(composition != null) { "Nothing to export — add a video clip first." }
 
-        val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
+            val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
 
-        coroutineScope {
-            var poller: Job? = null
-            try {
-                suspendCancellableCoroutine { cont ->
-                    val transformer = Transformer.Builder(context)
-                        .setVideoMimeType(MimeTypes.VIDEO_H264)
-                        .addListener(object : Transformer.Listener {
-                            override fun onCompleted(c: Composition, result: ExportResult) {
-                                if (cont.isActive) cont.resume(Unit)
+            coroutineScope {
+                var poller: Job? = null
+                try {
+                    suspendCancellableCoroutine { cont ->
+                        val transformer = Transformer.Builder(context)
+                            .setVideoMimeType(MimeTypes.VIDEO_H264)
+                            .addListener(object : Transformer.Listener {
+                                override fun onCompleted(c: Composition, result: ExportResult) {
+                                    if (cont.isActive) cont.resume(Unit)
+                                }
+
+                                override fun onError(c: Composition, result: ExportResult, e: ExportException) {
+                                    if (cont.isActive) cont.resumeWithException(e)
+                                }
+                            })
+                            .build()
+
+                        poller = launch {
+                            val holder = ProgressHolder()
+                            while (isActive) {
+                                transformer.getProgress(holder)
+                                onProgress((holder.progress / 100f).coerceIn(0f, 1f))
+                                delay(200)
                             }
-
-                            override fun onError(c: Composition, result: ExportResult, e: ExportException) {
-                                if (cont.isActive) cont.resumeWithException(e)
-                            }
-                        })
-                        .build()
-
-                    poller = launch {
-                        val holder = ProgressHolder()
-                        while (isActive) {
-                            transformer.getProgress(holder)
-                            onProgress((holder.progress / 100f).coerceIn(0f, 1f))
-                            delay(200)
                         }
+
+                        cont.invokeOnCancellation { runCatching { transformer.cancel() } }
+                        transformer.start(composition, outFile.absolutePath)
                     }
-
-                    cont.invokeOnCancellation { runCatching { transformer.cancel() } }
-                    transformer.start(composition, outFile.absolutePath)
+                } finally {
+                    poller?.cancel()
                 }
-            } finally {
-                poller?.cancel()
             }
-        }
 
-        onProgress(1f)
-        // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
-        // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.
-        val uri = withContext(Dispatchers.IO) {
-            val u = saveToGallery(context, outFile, outputName)
-            outFile.delete()
-            u
+            onProgress(1f)
+            // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
+            // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.
+            withContext(Dispatchers.IO) {
+                val u = saveToGallery(context, outFile, outputName)
+                outFile.delete()
+                u
+            }
+        } finally {
+            // Free the precomputed matte bitmaps once the encode is done (or it failed/cancelled).
+            mattes.values.forEach { runCatching { it.recycle() } }
         }
-        uri
     }
 
     /**
@@ -320,21 +324,56 @@ object Exporter {
         val foreground = videoClips.filter { it.filters.removeBackground }
         val background = videoClips.filter { !it.filters.removeBackground }
         if (foreground.isEmpty() || background.isEmpty()) return emptyMap()
-        val out = HashMap<Long, Bitmap>()
-        foreground.sortedBy { it.startTimeMs }.forEach { clip ->
-            val media = document.mediaFor(clip) ?: return@forEach
-            var t = clip.startTimeMs
-            while (t < clip.endTimeMs) {
-                val bucket = t / MatteOverlay.CACHE_MS
-                if (!out.containsKey(bucket)) {
-                    val src = clip.trimStartMs + (t - clip.startTimeMs)
-                    SubjectSegmenter.cutoutBlocking(context, media.uri, media.kind, src)?.let { out[bucket] = it }
-                }
-                t += MatteOverlay.CACHE_MS
+
+        val videoTracks = document.videoTracks
+        // Only segment frames that survive into the output: the kept timeline ranges of the base clips.
+        val keptTimelineRanges = background.flatMap { base ->
+            TimelineMath.keptRanges(base).map { r ->
+                val s = base.startTimeMs + (r.first - base.trimStartMs)
+                val e = base.startTimeMs + (r.last + 1 - base.trimStartMs)
+                s until e
             }
+        }
+
+        val out = HashMap<Long, Bitmap>()
+        val minStart = foreground.minOf { it.startTimeMs }
+        val maxEnd = foreground.maxOf { it.endTimeMs }
+        var t = minStart
+        while (t < maxEnd) {
+            val bucket = t / MatteOverlay.CACHE_MS
+            if (!out.containsKey(bucket) && keptTimelineRanges.any { t in it }) {
+                // Topmost foreground track wins, matching the preview's compositing.
+                val topmost = foreground
+                    .filter { t >= it.startTimeMs && t < it.endTimeMs }
+                    .minByOrNull { videoTracks.indexOf(it.trackId).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+                val media = topmost?.let { document.mediaFor(it) }
+                if (topmost != null && media != null) {
+                    val src = topmost.trimStartMs + (t - topmost.startTimeMs)
+                    SubjectSegmenter.cutoutBlocking(context, media.uri, media.kind, src)
+                        ?.let { out[bucket] = boundMatte(it) }
+                }
+            }
+            t += MatteOverlay.CACHE_MS
         }
         return out
     }
+
+    /** Downscale a matte so holding a clip's worth can't OOM (the overlay scales it to frame anyway). */
+    private fun boundMatte(bmp: Bitmap): Bitmap {
+        val longest = maxOf(bmp.width, bmp.height)
+        if (longest <= MATTE_MAX_EDGE) return bmp
+        val scale = MATTE_MAX_EDGE.toFloat() / longest
+        val scaled = Bitmap.createScaledBitmap(
+            bmp,
+            (bmp.width * scale).toInt().coerceAtLeast(1),
+            (bmp.height * scale).toInt().coerceAtLeast(1),
+            true,
+        )
+        if (scaled !== bmp) bmp.recycle()
+        return scaled
+    }
+
+    private const val MATTE_MAX_EDGE = 720
 
     /**
      * Peak-normalization gain per clip that has "Normalize audio" enabled: scans the clip's audio

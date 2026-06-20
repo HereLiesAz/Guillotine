@@ -46,13 +46,17 @@ class LiveAudioProcessor : BaseAudioProcessor() {
         val leftFactor = (if (p <= 0f) 1f else 1f - p) * g
         val rightFactor = (if (p >= 0f) 1f else 1f + p) * g
         val stereo = channelCount >= 2
-        var ch = 0
-        while (inputBuffer.hasRemaining()) {
-            val factor = if (stereo) (if (ch == 0) leftFactor else rightFactor) else g
-            val scaled = (inputBuffer.short * factor).toInt().coerceIn(-32768, 32767)
-            out.putShort(scaled.toShort())
-            ch = (ch + 1) % channelCount.coerceAtLeast(1)
+        // Frame-based loop so a trailing partial frame can't underflow getShort().
+        val bytesPerFrame = 2 * channelCount.coerceAtLeast(1)
+        val frames = bytes / bytesPerFrame
+        for (f in 0 until frames) {
+            for (c in 0 until channelCount) {
+                val factor = if (stereo) (if (c == 0) leftFactor else rightFactor) else g
+                val scaled = (inputBuffer.short * factor).toInt().coerceIn(-32768, 32767)
+                out.putShort(scaled.toShort())
+            }
         }
+        inputBuffer.position(limit)
         out.flip()
     }
 }
