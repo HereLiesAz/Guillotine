@@ -90,7 +90,7 @@ project/editing data, **not** your media files, and:
 
 Optionally, you can enable an **encrypted cloud relay** so a tool can reach the editor without
 being on the same network. When enabled, the app opens an outbound, encrypted connection to a
-**Cloudflare Worker that you deploy and configure**. Messages are **end‑to‑end encrypted** with a
+**Cloudflare Worker that you deploy and configure**. Messages are **end-to-end encrypted** with a
 key derived from your MCP token, so the relay only ever passes **ciphertext** between your tool
 and the app and cannot read your editing traffic. This relay is **off by default**; if you never
 enable it, the app makes no such connection.

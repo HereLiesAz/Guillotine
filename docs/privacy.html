@@ -153,15 +153,18 @@
     <p>For power users and AI tooling, Guillotine runs a small <strong>local automation server</strong>
     (the Model Context Protocol, MCP) while the editor is open. It lets an external AI tool read and
     edit the <strong>current project</strong> — list clips, set prompts, run analysis, apply edits. It
-    carries your project/editing data, <strong>not</strong> your media files; access requires a
-    <strong>bearer token</strong> shown in Settings (a request without it is rejected), and it never
-    sends anything on its own — it only responds to a tool <strong>you</strong> connect.</p>
+    carries your project/editing data, <strong>not</strong> your media files, and:</p>
+    <ul>
+      <li>access requires a <strong>bearer token</strong> shown in Settings — a request without it is rejected;</li>
+      <li>it does not send anything on its own — it only responds to a tool <strong>you</strong> connect.</li>
+    </ul>
     <p>Optionally, you can enable an <strong>encrypted cloud relay</strong> so a tool can reach the
     editor without being on the same network. When enabled, the app opens an outbound, encrypted
     connection to a <strong>Cloudflare Worker that you deploy and configure</strong>. Messages are
     <strong>end-to-end encrypted</strong> with a key derived from your MCP token, so the relay only
-    passes <strong>ciphertext</strong> and cannot read your editing traffic. The relay is
-    <strong>off by default</strong>; if you never enable it, the app makes no such connection.</p>
+    ever passes <strong>ciphertext</strong> between your tool and the app and cannot read your editing
+    traffic. This relay is <strong>off by default</strong>; if you never enable it, the app makes no
+    such connection.</p>
 
     <h2>Advertising (Google AdMob)</h2>
     <p>Guillotine displays ads served by <strong>Google AdMob</strong> — an app-open ad on launch, a
