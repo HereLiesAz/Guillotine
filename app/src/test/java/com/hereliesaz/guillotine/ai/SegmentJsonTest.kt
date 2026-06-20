@@ -50,4 +50,22 @@ class SegmentJsonTest {
     @Test fun object_without_segments_is_empty() {
         assertTrue(SegmentJson.parse("""{"foo":1}""").isEmpty())
     }
+
+    @Test(expected = org.json.JSONException::class)
+    fun throws_on_invalid_json() {
+        // Malformed model output should surface as an error to the caller, not parse to "0 segments".
+        SegmentJson.parse("invalid-json")
+    }
+
+    @Test fun handles_malformed_or_missing_fields_gracefully() {
+        // Null array element is skipped.
+        assertTrue(SegmentJson.parse("[null]").isEmpty())
+        // Missing start/end default to 0 → end <= start → skipped.
+        assertTrue(SegmentJson.parse("[{}]").isEmpty())
+        // Non-numeric start coerces to 0.0; a valid end keeps the segment.
+        val out = SegmentJson.parse("""[{"start":"bad","end":2.0}]""")
+        assertEquals(1, out.size)
+        assertEquals(0L, out[0].startMs)
+        assertEquals(2000L, out[0].endMs)
+    }
 }
