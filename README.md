@@ -42,7 +42,7 @@ on-device fallback** so the app is usable with zero configuration.
 - **Automation (MCP):** while open, the app runs a small **token-gated MCP server** so external AI
   tools can drive the editor (read the timeline, set prompts, run analysis, apply edits). An
   optional **end-to-end-encrypted Cloudflare relay** (see [`tools/mcp-relay`](tools/mcp-relay))
-  reaches it from anywhere without port-forwarding.
+  makes it reachable from anywhere without port-forwarding.
 - **Whole-track controls** from each track header: mute, disable/hide, volume, opacity, add clip.
 - **Adaptive UI:** phone / tablet / Chromebook layouts, keyboard shortcuts, mouse + Ctrl-scroll
   zoom; Material 3 Expressive, dark with a red accent.
