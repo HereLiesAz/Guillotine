@@ -4,6 +4,7 @@ package com.hereliesaz.guillotine.export
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -25,10 +26,14 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import com.google.common.collect.ImmutableList
+import com.hereliesaz.guillotine.media.MediaPreview
+import com.hereliesaz.guillotine.media.SubjectSegmenter
 import com.hereliesaz.guillotine.media.VideoEffects
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.Document
+import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaKind
+import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.TimelineMath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,11 +52,10 @@ import kotlin.coroutines.resumeWithException
  * of every video clip (so AI 'remove' segments are physically cut), applies the
  * shared [VideoEffects], encodes mp4, and saves it to the gallery (Movies/Guillotine).
  *
- * Applies per-clip color filters (incl. sepia + Gaussian blur), the Crop-tool transform
- * (scale/rotation/offset), audio volume/pan, and peak-normalization. Image clips and a
- * separate audio sequence are supported. Still TODO: baking time-varying (keyframed)
- * opacity/scale/volume into the encode, and keeping caption/matte overlays in sync across
- * AI 'remove' cuts (see buildComposition).
+ * Applies per-clip color filters (incl. sepia + Gaussian blur), the Crop-tool transform, keyframed
+ * opacity/scale/volume, audio volume/pan/peak-normalization, track opacity, and the
+ * background-removal matte + caption overlays (kept in sync across 'remove' cuts). Mattes are
+ * pre-segmented off-thread. Image clips and a separate audio sequence are supported.
  */
 object Exporter {
 
@@ -64,73 +68,78 @@ object Exporter {
         // Peak-normalization gains for clips with "Normalize audio" — computed off the main thread
         // (reuses the cached waveform decoder) before the Transformer is built on Main.
         val normalizeGains = withContext(Dispatchers.IO) { computeNormalizeGains(context, document) }
-        val composition = buildComposition(context, document, normalizeGains)
-        require(composition != null) { "Nothing to export — add a video clip first." }
+        // Background-removal mattes are segmented off the main thread up front (not per render frame).
+        val mattes = withContext(Dispatchers.IO) { precomputeMattes(context, document) }
+        try {
+            val composition = buildComposition(document, normalizeGains, mattes)
+            require(composition != null) { "Nothing to export — add a video clip first." }
 
-        val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
+            val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
 
-        coroutineScope {
-            var poller: Job? = null
-            try {
-                suspendCancellableCoroutine { cont ->
-                    val transformer = Transformer.Builder(context)
-                        .setVideoMimeType(MimeTypes.VIDEO_H264)
-                        .addListener(object : Transformer.Listener {
-                            override fun onCompleted(c: Composition, result: ExportResult) {
-                                if (cont.isActive) cont.resume(Unit)
+            coroutineScope {
+                var poller: Job? = null
+                try {
+                    suspendCancellableCoroutine { cont ->
+                        val transformer = Transformer.Builder(context)
+                            .setVideoMimeType(MimeTypes.VIDEO_H264)
+                            .addListener(object : Transformer.Listener {
+                                override fun onCompleted(c: Composition, result: ExportResult) {
+                                    if (cont.isActive) cont.resume(Unit)
+                                }
+
+                                override fun onError(c: Composition, result: ExportResult, e: ExportException) {
+                                    if (cont.isActive) cont.resumeWithException(e)
+                                }
+                            })
+                            .build()
+
+                        poller = launch {
+                            val holder = ProgressHolder()
+                            while (isActive) {
+                                transformer.getProgress(holder)
+                                onProgress((holder.progress / 100f).coerceIn(0f, 1f))
+                                delay(200)
                             }
-
-                            override fun onError(c: Composition, result: ExportResult, e: ExportException) {
-                                if (cont.isActive) cont.resumeWithException(e)
-                            }
-                        })
-                        .build()
-
-                    poller = launch {
-                        val holder = ProgressHolder()
-                        while (isActive) {
-                            transformer.getProgress(holder)
-                            onProgress((holder.progress / 100f).coerceIn(0f, 1f))
-                            delay(200)
                         }
+
+                        cont.invokeOnCancellation { runCatching { transformer.cancel() } }
+                        transformer.start(composition, outFile.absolutePath)
                     }
-
-                    cont.invokeOnCancellation { runCatching { transformer.cancel() } }
-                    transformer.start(composition, outFile.absolutePath)
+                } finally {
+                    poller?.cancel()
                 }
-            } finally {
-                poller?.cancel()
             }
-        }
 
-        onProgress(1f)
-        // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
-        // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.
-        val uri = withContext(Dispatchers.IO) {
-            val u = saveToGallery(context, outFile, outputName)
-            outFile.delete()
-            u
+            onProgress(1f)
+            // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
+            // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.
+            withContext(Dispatchers.IO) {
+                val u = saveToGallery(context, outFile, outputName)
+                outFile.delete()
+                u
+            }
+        } finally {
+            // Free the precomputed matte bitmaps once the encode is done (or it failed/cancelled).
+            mattes.values.forEach { runCatching { it.recycle() } }
         }
-        uri
     }
 
     /**
-     * Build the export composition: a video sequence (kept ranges of video clips +
-     * image clips), plus a separate audio sequence for standalone audio-track clips
-     * so added music/voice is mixed in. Project crop + aspect are applied to every
-     * video clip via [VideoEffects.geometry].
+     * Build the export composition: a video sequence (kept ranges of video clips + image clips),
+     * plus a separate audio sequence for standalone audio-track clips. Project crop + aspect apply
+     * to every video clip via [VideoEffects.geometry]. Per clip/item this bakes in: color filters,
+     * the Crop-tool transform, keyframed opacity/scale (via [VideoEffects.keyframeEffects]),
+     * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
+     * (attached to every base item with that item's timeline start, so they stay in sync across
+     * 'remove' cuts).
      *
-     * Known limits (verify on device): keyframed (time-varying) opacity/scale/volume are not
-     * yet baked in — only the clip's static transform/volume is. Caption/matte overlays are
-     * attached to the first base item and timed linearly, so they can drift once AI 'remove'
-     * ranges are physically cut. A single video sequence mixing image clips (no audio) with
-     * video clips (audio) may need Transformer's force-audio-track flag — most projects are
-     * all-video or all-image and are unaffected.
+     * Known limit (verify on device): mixing image clips (no audio) with video clips (audio) in one
+     * sequence may need Transformer's force-audio-track flag — most projects are all-video/all-image.
      */
     private fun buildComposition(
-        context: Context,
         document: Document,
         normalizeGains: Map<String, Float>,
+        mattes: Map<Long, Bitmap>,
     ): Composition? {
         val geometry = VideoEffects.geometry(document.settings)
 
@@ -143,19 +152,44 @@ object Exporter {
         val foreground = videoClips.filter { it.filters.removeBackground }
         val background = videoClips.filter { !it.filters.removeBackground }
         val baseClips = if (background.isNotEmpty()) background else videoClips
-        val overlayClips = if (background.isNotEmpty()) foreground else emptyList()
+        val hasMatte = background.isNotEmpty() && foreground.isNotEmpty()
 
-        // Overlays baked onto the base video: the background-removal matte, plus a timed
-        // caption overlay per text clip. Attached to the first base item.
-        val baseStartMs = baseClips.firstOrNull()?.startTimeMs ?: 0L
-        val overlays = mutableListOf<TextureOverlay>()
-        if (overlayClips.isNotEmpty()) {
-            overlays += MatteOverlay(context, overlayClips, { document.mediaFor(it) }, baseStartMs)
-        }
-        document.clips
+        val textClips = document.clips
             .filter { it.type == ClipType.TEXT && it.trackId !in disabled && it.text.isNotBlank() }
-            .forEach { overlays += CaptionOverlay(it, baseStartMs) }
-        val matteEffect = if (overlays.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(overlays)) else null
+
+        // Overlays (matte + captions) are attached to EVERY base item with that item's timeline
+        // start, so they stay aligned even after 'remove' ranges are physically cut.
+        fun overlaysFor(timelineStartMs: Long): OverlayEffect? {
+            val list = mutableListOf<TextureOverlay>()
+            if (hasMatte) list += MatteOverlay(mattes, timelineStartMs)
+            textClips.forEach { list += CaptionOverlay(it, timelineStartMs) }
+            return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
+        }
+
+        fun audioFor(clip: TimelineClip, clipLocalStartMs: Long): List<AudioProcessor> {
+            val ts = document.trackSettingsFor(clip.trackId)
+            val norm = normalizeGains[clip.id] ?: 1f
+            return if (clip.keyframes.any { it.property == KeyframeProperty.VOLUME }) {
+                // Time-varying gain (valueAt VOLUME) folding in track volume + normalize, plus pan.
+                val staticMult = (if (ts.muted) 0f else ts.volume) * norm
+                listOf(KeyframeVolumeProcessor(clip, clipLocalStartMs, staticMult)) + panOnly(clip.filters.pan)
+            } else {
+                val vol = (if (ts.muted) 0f else clip.filters.volume * ts.volume) * norm
+                audioProcessors(vol, clip.filters.pan)
+            }
+        }
+
+        fun videoEffectsFor(clip: TimelineClip, clipLocalStartMs: Long, timelineStartMs: Long): Effects {
+            val ts = document.trackSettingsFor(clip.trackId)
+            val alpha = if (ts.opacity < 1f) listOf(AlphaScale(ts.opacity)) else emptyList()
+            val transform = VideoEffects.transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY)
+            val keyframes = VideoEffects.keyframeEffects(clip, clipLocalStartMs)
+            val overlay = listOfNotNull(overlaysFor(timelineStartMs))
+            return Effects(
+                audioFor(clip, clipLocalStartMs),
+                VideoEffects.build(clip.filters) + transform + keyframes + geometry + overlay + alpha,
+            )
+        }
 
         // Video sequence with clips at their timeline positions: gaps fill the space between
         // clips. The sequence is zeroed to its first clip (Media3 1.5 can't lead with a gap),
@@ -163,35 +197,28 @@ object Exporter {
         val videoSeq = EditedMediaItemSequence.Builder()
         var videoCursor = baseClips.firstOrNull()?.startTimeMs ?: 0L
         var addedVideo = false
-        var firstItem = true
         baseClips.forEach { clip ->
             val media = document.mediaFor(clip) ?: return@forEach
             val gap = clip.startTimeMs - videoCursor
             if (gap > 0) { videoSeq.addGap(gap * 1000); videoCursor += gap }
-            fun effectsFor(): Effects {
-                val ts = document.trackSettingsFor(clip.trackId)
-                val vol = (if (ts.muted) 0f else clip.filters.volume * ts.volume) *
-                    (normalizeGains[clip.id] ?: 1f)
-                val audio = audioProcessors(vol, clip.filters.pan)
-                val overlay = if (firstItem) listOfNotNull(matteEffect) else emptyList()
-                val alpha = if (ts.opacity < 1f) listOf(AlphaScale(ts.opacity)) else emptyList()
-                // Per-clip Crop-tool transform (scale/rotation/offset) so export matches the preview.
-                val transform = VideoEffects.transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY)
-                return Effects(audio, VideoEffects.build(clip.filters) + transform + geometry + overlay + alpha)
-            }
             if (media.kind == MediaKind.IMAGE) {
                 val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
                 val mediaItem = ExoMediaItem.Builder()
                     .setUri(Uri.parse(media.uri))
                     .setImageDurationMs(dur)
                     .build()
-                videoSeq.addItem(EditedMediaItem.Builder(mediaItem).setFrameRate(30).setEffects(effectsFor()).build())
-                firstItem = false; addedVideo = true; videoCursor += dur
+                videoSeq.addItem(
+                    EditedMediaItem.Builder(mediaItem).setFrameRate(30)
+                        .setEffects(videoEffectsFor(clip, 0L, clip.startTimeMs)).build(),
+                )
+                addedVideo = true; videoCursor += dur
             } else {
                 for (range in TimelineMath.keptRanges(clip)) {
                     val startMs = range.first
                     val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
                     if (endMs <= startMs) continue
+                    val clipLocalStart = startMs - clip.trimStartMs
+                    val timelineStart = clip.startTimeMs + clipLocalStart
                     val mediaItem = ExoMediaItem.Builder()
                         .setUri(Uri.parse(media.uri))
                         .setClippingConfiguration(
@@ -201,8 +228,11 @@ object Exporter {
                                 .build(),
                         )
                         .build()
-                    videoSeq.addItem(EditedMediaItem.Builder(mediaItem).setEffects(effectsFor()).build())
-                    firstItem = false; addedVideo = true; videoCursor += (endMs - startMs)
+                    videoSeq.addItem(
+                        EditedMediaItem.Builder(mediaItem)
+                            .setEffects(videoEffectsFor(clip, clipLocalStart, timelineStart)).build(),
+                    )
+                    addedVideo = true; videoCursor += (endMs - startMs)
                 }
             }
         }
@@ -223,6 +253,7 @@ object Exporter {
                 val startMs = range.first
                 val endMs = range.last + 1
                 if (endMs <= startMs) continue
+                val clipLocalStart = startMs - clip.trimStartMs
                 val mediaItem = ExoMediaItem.Builder()
                     .setUri(Uri.parse(media.uri))
                     .setClippingConfiguration(
@@ -232,14 +263,10 @@ object Exporter {
                             .build(),
                     )
                     .build()
-                val ts = document.trackSettingsFor(clip.trackId)
-                val vol = (if (ts.muted) 0f else clip.filters.volume * ts.volume) *
-                    (normalizeGains[clip.id] ?: 1f)
-                val audio = audioProcessors(vol, clip.filters.pan)
                 audioSeq.addItem(
                     EditedMediaItem.Builder(mediaItem)
                         .setRemoveVideo(true)
-                        .setEffects(Effects(audio, emptyList()))
+                        .setEffects(Effects(audioFor(clip, clipLocalStart), emptyList()))
                         .build(),
                 )
                 addedAudio = true; audioCursor += (endMs - startMs)
@@ -273,6 +300,81 @@ object Exporter {
         })
     }
 
+    /** Pan-only (no gain) — used alongside [KeyframeVolumeProcessor], which handles the gain. */
+    private fun panOnly(pan: Float): List<AudioProcessor> {
+        if (pan == 0f) return emptyList()
+        val left = if (pan <= 0f) 1f else 1f - pan
+        val right = if (pan >= 0f) 1f else 1f + pan
+        return listOf(ChannelMixingAudioProcessor().apply {
+            putChannelMixingMatrix(ChannelMixingMatrix(1, 2, floatArrayOf(left, right)))
+            putChannelMixingMatrix(ChannelMixingMatrix(2, 2, floatArrayOf(left, 0f, 0f, right)))
+        })
+    }
+
+    /**
+     * Pre-segment background-removal mattes off the main thread, keyed by timeline bucket
+     * (`timelineMs / MatteOverlay.CACHE_MS`), so [MatteOverlay] is a cheap lookup at render time
+     * instead of running ML Kit per frame on the encoder thread. Returns empty when there's no
+     * foreground-over-background composite. The matte bitmaps are mask-sized (small), so holding
+     * the whole clip's worth is cheap.
+     */
+    private fun precomputeMattes(context: Context, document: Document): Map<Long, Bitmap> {
+        val disabled = document.disabledTrackIds
+        val videoClips = document.clips.filter { it.type == ClipType.VIDEO && it.trackId !in disabled }
+        val foreground = videoClips.filter { it.filters.removeBackground }
+        val background = videoClips.filter { !it.filters.removeBackground }
+        if (foreground.isEmpty() || background.isEmpty()) return emptyMap()
+
+        val videoTracks = document.videoTracks
+        // Only segment frames that survive into the output: the kept timeline ranges of the base clips.
+        val keptTimelineRanges = background.flatMap { base ->
+            TimelineMath.keptRanges(base).map { r ->
+                val s = base.startTimeMs + (r.first - base.trimStartMs)
+                val e = base.startTimeMs + (r.last + 1 - base.trimStartMs)
+                s until e
+            }
+        }
+
+        val out = HashMap<Long, Bitmap>()
+        val minStart = foreground.minOf { it.startTimeMs }
+        val maxEnd = foreground.maxOf { it.endTimeMs }
+        var t = minStart
+        while (t < maxEnd) {
+            val bucket = t / MatteOverlay.CACHE_MS
+            if (!out.containsKey(bucket) && keptTimelineRanges.any { t in it }) {
+                // Topmost foreground track wins, matching the preview's compositing.
+                val topmost = foreground
+                    .filter { t >= it.startTimeMs && t < it.endTimeMs }
+                    .minByOrNull { videoTracks.indexOf(it.trackId).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+                val media = topmost?.let { document.mediaFor(it) }
+                if (topmost != null && media != null) {
+                    val src = topmost.trimStartMs + (t - topmost.startTimeMs)
+                    SubjectSegmenter.cutoutBlocking(context, media.uri, media.kind, src)
+                        ?.let { out[bucket] = boundMatte(it) }
+                }
+            }
+            t += MatteOverlay.CACHE_MS
+        }
+        return out
+    }
+
+    /** Downscale a matte so holding a clip's worth can't OOM (the overlay scales it to frame anyway). */
+    private fun boundMatte(bmp: Bitmap): Bitmap {
+        val longest = maxOf(bmp.width, bmp.height)
+        if (longest <= MATTE_MAX_EDGE) return bmp
+        val scale = MATTE_MAX_EDGE.toFloat() / longest
+        val scaled = Bitmap.createScaledBitmap(
+            bmp,
+            (bmp.width * scale).toInt().coerceAtLeast(1),
+            (bmp.height * scale).toInt().coerceAtLeast(1),
+            true,
+        )
+        if (scaled !== bmp) bmp.recycle()
+        return scaled
+    }
+
+    private const val MATTE_MAX_EDGE = 720
+
     /**
      * Peak-normalization gain per clip that has "Normalize audio" enabled: scans the clip's audio
      * (via the cached waveform decoder) for its loudest sample and returns the gain that lifts that
@@ -282,9 +384,9 @@ object Exporter {
         val gains = HashMap<String, Float>()
         document.clips.filter { it.filters.normalize }.forEach { clip ->
             val media = document.mediaFor(clip) ?: return@forEach
-            val wf = com.hereliesaz.guillotine.media.MediaPreview.waveform(context, media.uri) ?: return@forEach
-            val peak = maxOf(wf.left.maxOrNull() ?: 0f, wf.right.maxOrNull() ?: 0f)
-            if (peak > 0.001f) gains[clip.id] = (0.97f / peak).coerceIn(0.1f, 8f)
+            val wf = MediaPreview.waveform(context, media.uri) ?: return@forEach
+            val gain = MediaPreview.normalizeGain(wf)
+            if (gain != 1f) gains[clip.id] = gain
         }
         return gains
     }

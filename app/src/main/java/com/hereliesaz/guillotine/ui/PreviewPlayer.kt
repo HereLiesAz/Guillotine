@@ -79,8 +79,19 @@ fun PreviewPlayer(
 ) {
     val context = LocalContext.current
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
-    val videoPlayer = remember { ExoPlayer.Builder(context).build() }
-    val audioPlayer = remember { ExoPlayer.Builder(context).build() }
+    // Live gain+pan processors so preview can boost (normalize) and pan, which ExoPlayer.volume can't.
+    val videoGain = remember { com.hereliesaz.guillotine.media.LiveAudioProcessor() }
+    val audioGain = remember { com.hereliesaz.guillotine.media.LiveAudioProcessor() }
+    val videoPlayer = remember {
+        ExoPlayer.Builder(context)
+            .setRenderersFactory(com.hereliesaz.guillotine.media.previewRenderersFactory(context, videoGain))
+            .build()
+    }
+    val audioPlayer = remember {
+        ExoPlayer.Builder(context)
+            .setRenderersFactory(com.hereliesaz.guillotine.media.previewRenderersFactory(context, audioGain))
+            .build()
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -126,6 +137,24 @@ fun PreviewPlayer(
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
     } ?: 0f) * (audioTrack?.volume ?: 1f)
 
+    // Peak-normalize gains (async; reuse the cached waveform decoder), matching the export. 1 = off.
+    val videoNorm by produceState(1f, videoMedia?.id, activeVideo?.filters?.normalize) {
+        value = if (activeVideo?.filters?.normalize == true && videoMedia != null) {
+            com.hereliesaz.guillotine.media.MediaPreview.waveform(context, videoMedia.uri)
+                ?.let { com.hereliesaz.guillotine.media.MediaPreview.normalizeGain(it) } ?: 1f
+        } else {
+            1f
+        }
+    }
+    val audioNorm by produceState(1f, audioMedia?.id, activeAudio?.filters?.normalize) {
+        value = if (activeAudio?.filters?.normalize == true && audioMedia != null) {
+            com.hereliesaz.guillotine.media.MediaPreview.waveform(context, audioMedia.uri)
+                ?.let { com.hereliesaz.guillotine.media.MediaPreview.normalizeGain(it) } ?: 1f
+        } else {
+            1f
+        }
+    }
+
     // ---- video player wiring ----
     LaunchedEffect(videoMedia?.id) {
         val clip = activeVideo
@@ -143,7 +172,12 @@ fun PreviewPlayer(
             runCatching { videoPlayer.setVideoEffects(VideoEffects.build(activeVideo.filters)) }
         }
     }
-    LaunchedEffect(videoVolume) { videoPlayer.volume = videoVolume.coerceIn(0f, 2f) }
+    // Gain (incl. normalize boost) + pan go through the processor; keep player.volume at unity.
+    LaunchedEffect(videoVolume, videoNorm, activeVideo?.filters?.pan) {
+        videoPlayer.volume = 1f
+        videoGain.gain = (videoVolume * videoNorm).coerceAtLeast(0f)
+        videoGain.pan = (activeVideo?.filters?.pan ?: 0f).coerceIn(-1f, 1f)
+    }
     LaunchedEffect(state.playbackRate) { videoPlayer.setPlaybackSpeed(state.playbackRate) }
     LaunchedEffect(state.isPlaying, videoMedia?.id) {
         videoPlayer.playWhenReady = state.isPlaying && videoMedia != null
@@ -162,7 +196,11 @@ fun PreviewPlayer(
             audioPlayer.seekTo(TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0))
         }
     }
-    LaunchedEffect(audioVolume) { audioPlayer.volume = audioVolume.coerceIn(0f, 2f) }
+    LaunchedEffect(audioVolume, audioNorm, activeAudio?.filters?.pan) {
+        audioPlayer.volume = 1f
+        audioGain.gain = (audioVolume * audioNorm).coerceAtLeast(0f)
+        audioGain.pan = (activeAudio?.filters?.pan ?: 0f).coerceIn(-1f, 1f)
+    }
     LaunchedEffect(state.playbackRate) { audioPlayer.setPlaybackSpeed(state.playbackRate) }
     LaunchedEffect(state.isPlaying, audioMedia?.id) {
         audioPlayer.playWhenReady = state.isPlaying && audioMedia != null

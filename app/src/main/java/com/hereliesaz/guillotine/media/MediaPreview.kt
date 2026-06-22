@@ -34,6 +34,16 @@ object MediaPreview {
     /** Per-channel peak envelopes (0..1). Mono sources have [left] == [right] (same values). */
     data class Waveform(val left: FloatArray, val right: FloatArray)
 
+    /**
+     * Peak-normalization gain for a [Waveform]: the factor that lifts the loudest sample to ~0.97
+     * full-scale, clamped to a sane range. 1f = leave unchanged. Shared by export and preview so
+     * both apply the same normalization.
+     */
+    fun normalizeGain(wf: Waveform): Float {
+        val peak = maxOf(wf.left.maxOrNull() ?: 0f, wf.right.maxOrNull() ?: 0f)
+        return if (peak > 0.001f) (0.97f / peak).coerceIn(0.1f, 8f) else 1f
+    }
+
     /** A downscaled frame ([MediaKind.IMAGE] decodes the image itself) at [atMs] of the source. */
     suspend fun thumbnail(
         context: Context,
