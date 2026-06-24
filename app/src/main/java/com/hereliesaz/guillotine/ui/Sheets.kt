@@ -1,5 +1,16 @@
 package com.hereliesaz.guillotine.ui
 
+
+
+
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import com.hereliesaz.guillotine.ui.theme.Black
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -72,7 +83,7 @@ private fun SheetCard(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: () -> Unit) {
+fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: () -> Unit) {
     var provider by remember { mutableStateOf(current.provider) }
     var keys by remember { mutableStateOf(current.keys) }
     var models by remember { mutableStateOf(current.models) }
@@ -82,195 +93,249 @@ fun SettingsSheet(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: 
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     var crashRelayUrl by remember { mutableStateOf(com.hereliesaz.guillotine.crash.CrashConfig.relayUrl(context)) }
-    Dialog(onDismissRequest = onDismiss) {
-        SheetCard {
-            Text("Settings", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            Text("Analyzer — free on-device, or bring your own key", color = Neutral400, fontSize = 12.sp)
 
-            // Provider list (scrolls if it outgrows the dialog).
-            Column(
-                Modifier
-                    .heightIn(max = 260.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                AiProviderType.values().forEach { p ->
-                    val meta = p.meta
-                    ProviderRow(meta.label, meta.blurb, selected = provider == p) { provider = p }
-                }
-            }
+    // Encrypted Cloudflare relay
+    var relayEnabled by remember { mutableStateOf(false) }
+    var relayUrl by remember { mutableStateOf("") }
+    var relayAccessKey by remember { mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val relay0 = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)
+        }
+        relayEnabled = relay0.enabled
+        relayUrl = relay0.workerUrl
+        relayAccessKey = relay0.accessKey
+    }
 
-            // Key field + model override + "get a key" link for the selected BYO provider.
-            // Free providers (LOCAL, on-device vision) need none of these.
-            if (provider.meta.keyUrl != null) {
-                val meta = provider.meta
-                KeyField("${meta.label} API key", keys[provider].orEmpty()) { keys = keys + (provider to it) }
-                Text("Model", color = Neutral500, fontSize = 10.sp)
-                LiveModelDropdown(
-                    current = models[provider].orEmpty(),
-                    defaultHint = "Default: ${meta.defaultModel}",
-                    load = { ModelCatalog.analyzerModels(provider, keys[provider].orEmpty()) },
-                    onSelect = { models = models + (provider to it) },
-                    resetKey = keys[provider].orEmpty(),
+    // MCP access token
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var mcpToken by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpAuth.token(context)) }
+
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabs = listOf("AI Analyzer", "Image Gen", "Transcription", "Advanced")
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Neutral900)
+            .padding(16.dp)
+            .systemBarsPadding(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Top Header
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Settings", color = White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Icon(
+                imageVector = androidx.compose.material.icons.Icons.Filled.Close,
+                contentDescription = "Close",
+                tint = White,
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable { onDismiss() }
+            )
+        }
+
+        // Tabs
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            tabs.forEachIndexed { index, title ->
+                val isSelected = selectedTab == index
+                Text(
+                    text = title,
+                    color = if (isSelected) Black else Neutral400,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isSelected) White else Color.Transparent)
+                        .border(1.dp, if (isSelected) White else Neutral800, RoundedCornerShape(6.dp))
+                        .clickable { selectedTab = index }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 )
-                Text("Pick from the provider's live list, or Default.", color = Neutral500, fontSize = 10.sp)
-                meta.keyUrl?.let { url ->
+            }
+        }
+
+        // Tab Content
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            when (selectedTab) {
+                0 -> { // AI Analyzer
+                    Text("Analyzer — free on-device, or bring your own key", color = Neutral400, fontSize = 12.sp)
+
+                    Column(
+                        Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        AiProviderType.values().forEach { p ->
+                            val meta = p.meta
+                            ProviderRow(meta.label, meta.blurb, selected = provider == p) { provider = p }
+                        }
+                    }
+
+                    if (provider.meta.keyUrl != null) {
+                        val meta = provider.meta
+                        KeyField("${meta.label} API key", keys[provider].orEmpty()) { keys = keys + (provider to it) }
+                        Text("Model", color = Neutral500, fontSize = 10.sp)
+                        LiveModelDropdown(
+                            current = models[provider].orEmpty(),
+                            defaultHint = "Default: ${meta.defaultModel}",
+                            load = { ModelCatalog.analyzerModels(provider, keys[provider].orEmpty()) },
+                            onSelect = { models = models + (provider to it) },
+                            resetKey = keys[provider].orEmpty(),
+                        )
+                        Text("Pick from the provider's live list, or Default.", color = Neutral500, fontSize = 10.sp)
+                        meta.keyUrl?.let { url ->
+                            Text(
+                                "Get a ${meta.label} API key  ↗",
+                                color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .clickableText { uriHandler.openUri(url) }
+                                    .padding(top = 2.dp),
+                            )
+                        }
+                    }
+                }
+                1 -> { // Image Gen
+                    Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
+                    KeyField("Leonardo API key", leonardoKey) { leonardoKey = it }
+                    Text("Default model", color = Neutral500, fontSize = 10.sp)
+                    LeonardoModelDropdown(leonardoKey, leonardoModel) { leonardoModel = it }
+                    Text("Leave the key blank to generate with free Pollinations.ai.", color = Neutral500, fontSize = 10.sp)
                     Text(
-                        "Get a ${meta.label} API key  ↗",
+                        "Get a Leonardo API key  ↗",
                         color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .clickableText { uriHandler.openUri(url) }
-                            .padding(top = 2.dp),
+                        modifier = Modifier.clickableText { uriHandler.openUri("https://app.leonardo.ai/api-access") },
+                    )
+                }
+                2 -> { // Transcription
+                    Text("Transcription", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = speechModelPath,
+                        onValueChange = { speechModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("On-device speech model path (Vosk)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text("Set a Vosk model folder for offline transcription; blank uses OpenAI Whisper.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                        "Download a Vosk model  ↗",
+                        color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickableText { uriHandler.openUri("https://alphacephei.com/vosk/models") },
+                    )
+                }
+                3 -> { // Advanced
+                    Text("Crash reporting", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = crashRelayUrl,
+                        onValueChange = { crashRelayUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Crash relay URL (your deployed endpoint)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text("Set the URL of your crash-relay (see tools/crash-relay) to auto-file issues.", color = Neutral500, fontSize = 10.sp)
+
+                    Text("MCP access token (external AI tools)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = mcpToken,
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text(
+                            "Copy", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickableText {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(mcpToken))
+                            },
+                        )
+                        Text(
+                            "Regenerate", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickableText {
+                                mcpToken = com.hereliesaz.guillotine.mcp.McpAuth.regenerate(context)
+                            },
+                        )
+                    }
+                    Text(
+                        "Send as 'Authorization: Bearer <token>' when POSTing to /mcp on port 6274. " +
+                            "Regenerate to revoke tools that have the old token.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Encrypted cloud relay (optional)", color = Neutral400, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(
+                            checked = relayEnabled,
+                            onCheckedChange = { relayEnabled = it },
+                        )
+                        Text("Reach the editor via Cloudflare (no port-forwarding)", color = Neutral400, fontSize = 12.sp)
+                    }
+                    OutlinedTextField(
+                        value = relayUrl,
+                        onValueChange = { relayUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Worker URL (wss://…workers.dev/relay)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = relayAccessKey,
+                        onValueChange = { relayAccessKey = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Worker access key (optional)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Deploy tools/mcp-relay, then run the local proxy with the same MCP token. " +
+                            "Traffic is end-to-end encrypted; Cloudflare only relays ciphertext.",
+                        color = Neutral500, fontSize = 10.sp,
                     )
                 }
             }
+        }
 
-            // Image generation — free Pollinations by default, or Leonardo.ai with your key.
-            Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
-            KeyField("Leonardo API key", leonardoKey) { leonardoKey = it }
-            Text("Default model", color = Neutral500, fontSize = 10.sp)
-            LeonardoModelDropdown(leonardoKey, leonardoModel) { leonardoModel = it }
-            Text("Leave the key blank to generate with free Pollinations.ai.", color = Neutral500, fontSize = 10.sp)
-            Text(
-                "Get a Leonardo API key  ↗",
-                color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clickableText { uriHandler.openUri("https://app.leonardo.ai/api-access") },
-            )
-
-            // On-device speech-to-text (optional Vosk model directory).
-            Text("Transcription", color = Neutral400, fontSize = 12.sp)
-            OutlinedTextField(
-                value = speechModelPath,
-                onValueChange = { speechModelPath = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("On-device speech model path (Vosk)", color = Neutral500, fontSize = 12.sp) },
-                textStyle = TextStyle(color = White, fontSize = 12.sp),
-                singleLine = true,
-            )
-            Text("Set a Vosk model folder for offline transcription; blank uses OpenAI Whisper.", color = Neutral500, fontSize = 10.sp)
-            Text(
-                "Download a Vosk model  ↗",
-                color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clickableText { uriHandler.openUri("https://alphacephei.com/vosk/models") },
-            )
-
-            // Crash reporting — POSTs captured crashes to a relay that opens a GitHub issue.
-            Text("Crash reporting", color = Neutral400, fontSize = 12.sp)
-            OutlinedTextField(
-                value = crashRelayUrl,
-                onValueChange = { crashRelayUrl = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Crash relay URL (your deployed endpoint)", color = Neutral500, fontSize = 12.sp) },
-                textStyle = TextStyle(color = White, fontSize = 12.sp),
-                singleLine = true,
-            )
-            Text("Set the URL of your crash-relay (see tools/crash-relay) to auto-file issues.", color = Neutral500, fontSize = 10.sp)
-
-            // MCP access — the bearer token external AI/ML tools must send to drive the editor.
-            val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-            var mcpToken by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpAuth.token(context)) }
-            Text("MCP access token (external AI tools)", color = Neutral400, fontSize = 12.sp)
-            OutlinedTextField(
-                value = mcpToken,
-                onValueChange = {},
-                readOnly = true,
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = TextStyle(color = White, fontSize = 12.sp),
-                singleLine = true,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    "Copy", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickableText {
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(mcpToken))
-                    },
-                )
-                Text(
-                    "Regenerate", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickableText {
-                        mcpToken = com.hereliesaz.guillotine.mcp.McpAuth.regenerate(context)
-                    },
-                )
-            }
-            Text(
-                "Send as 'Authorization: Bearer <token>' when POSTing to /mcp on port 6274. " +
-                    "Regenerate to revoke tools that have the old token.",
-                color = Neutral500, fontSize = 10.sp,
-            )
-
-            // Encrypted Cloudflare relay — reach the editor from anywhere without port-forwarding.
-            // Loaded off the main thread (EncryptedSharedPreferences touches the KeyStore + disk).
-            var relayEnabled by remember { mutableStateOf(false) }
-            var relayUrl by remember { mutableStateOf("") }
-            var relayAccessKey by remember { mutableStateOf("") }
-            androidx.compose.runtime.LaunchedEffect(Unit) {
-                val relay0 = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    com.hereliesaz.guillotine.mcp.McpRelayConfig.read(context)
-                }
-                relayEnabled = relay0.enabled
-                relayUrl = relay0.workerUrl
-                relayAccessKey = relay0.accessKey
-            }
-            Text("Encrypted cloud relay (optional)", color = Neutral400, fontSize = 12.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                androidx.compose.material3.Checkbox(
-                    checked = relayEnabled,
-                    onCheckedChange = { relayEnabled = it },
-                )
-                Text("Reach the editor via Cloudflare (no port-forwarding)", color = Neutral400, fontSize = 12.sp)
-            }
-            OutlinedTextField(
-                value = relayUrl,
-                onValueChange = { relayUrl = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Worker URL (wss://…workers.dev/relay)", color = Neutral500, fontSize = 12.sp) },
-                textStyle = TextStyle(color = White, fontSize = 12.sp),
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = relayAccessKey,
-                onValueChange = { relayAccessKey = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Worker access key (optional)", color = Neutral500, fontSize = 12.sp) },
-                textStyle = TextStyle(color = White, fontSize = 12.sp),
-                singleLine = true,
-            )
-            Text(
-                "Deploy tools/mcp-relay, then run the local proxy with the same MCP token. " +
-                    "Traffic is end-to-end encrypted; Cloudflare only relays ciphertext.",
-                color = Neutral500, fontSize = 10.sp,
-            )
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Button(
-                    onClick = {
-                        com.hereliesaz.guillotine.crash.CrashConfig.setRelayUrl(context, crashRelayUrl)
-                        com.hereliesaz.guillotine.mcp.McpRelayConfig.save(
-                            context,
-                            com.hereliesaz.guillotine.mcp.RelayConfig(
-                                enabled = relayEnabled,
-                                workerUrl = relayUrl.trim(),
-                                accessKey = relayAccessKey.trim(),
-                            ),
-                        )
-                        onSave(
-                            AiSettings(
-                                provider = provider,
-                                keys = keys,
-                                models = models,
-                                leonardoKey = leonardoKey.trim(),
-                                leonardoModel = leonardoModel,
-                                speechModelPath = speechModelPath.trim(),
-                            ),
-                        )
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Color.Black),
-                ) { Text("Save", fontSize = 12.sp, fontWeight = FontWeight.Medium) }
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Button(
+                onClick = {
+                    com.hereliesaz.guillotine.crash.CrashConfig.setRelayUrl(context, crashRelayUrl)
+                    com.hereliesaz.guillotine.mcp.McpRelayConfig.save(
+                        context,
+                        com.hereliesaz.guillotine.mcp.RelayConfig(
+                            enabled = relayEnabled,
+                            workerUrl = relayUrl.trim(),
+                            accessKey = relayAccessKey.trim(),
+                        ),
+                    )
+                    onSave(
+                        AiSettings(
+                            provider = provider,
+                            keys = keys,
+                            models = models,
+                            leonardoKey = leonardoKey.trim(),
+                            leonardoModel = leonardoModel,
+                            speechModelPath = speechModelPath.trim(),
+                        ),
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Color.Black),
+            ) { Text("Save", fontSize = 14.sp, fontWeight = FontWeight.Medium) }
         }
     }
 }
-
 @Composable
 private fun KeyField(label: String, value: String, onChange: (String) -> Unit) {
     OutlinedTextField(
