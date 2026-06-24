@@ -261,6 +261,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     //
     // Insets: exactly the pre-AzNavRail scheme — background drawn full-bleed, then systemBarsPadding
     // keeps content clear of the status/navigation bars. No extra insets beyond what was here before.
+    Box(Modifier.fillMaxSize()) {
     Column(
         modifier
             .fillMaxSize()
@@ -316,8 +317,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         BannerAd(Modifier.fillMaxWidth())
     }
 
+
     if (showSettings) {
-        SettingsSheet(
+        SettingsScreen(
             current = settings,
             onSave = { newSettings ->
                 scope.launch {
@@ -334,6 +336,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             },
         )
     }
+
+    }
+
     if (showProjectSettings) {
         ProjectSettingsSheet(
             current = state.document.settings,
