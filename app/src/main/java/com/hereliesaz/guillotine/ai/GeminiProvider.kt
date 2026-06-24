@@ -24,7 +24,7 @@ class GeminiProvider(
 ) : ClipAnalyzer {
 
     private val base = "https://generativelanguage.googleapis.com"
-    private val chunkSize = 2 * 1024 * 1024 // 2 MB – multiple of 256 KB as required
+    private val chunkSize = 8 * 1024 * 1024 // 8 MB – required multiple of 8388608 bytes
 
     override suspend fun analyze(
         context: Context,
