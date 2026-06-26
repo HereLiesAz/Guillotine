@@ -36,6 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,9 @@ import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.guillotine.ai.ModelCatalog
+import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
+import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
+import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
 import com.hereliesaz.guillotine.ai.meta
 import kotlinx.coroutines.launch
 import com.hereliesaz.guillotine.model.AspectRatio
@@ -171,7 +175,12 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         ) {
             when (selectedTab) {
                 0 -> { // AI Analyzer
-                    Text("Analyzer — free on-device, or bring your own key", color = Neutral400, fontSize = 12.sp)
+                    Text(
+                        "Analysis always runs on-device — your video never leaves the device. " +
+                            "Pick the AI that controls the editor (used by the assistant bar); it only " +
+                            "sends text, never your media.",
+                        color = Neutral400, fontSize = 12.sp,
+                    )
 
                     Column(
                         Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
@@ -218,16 +227,15 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         singleLine = true,
                     )
                     Text(
-                        "Point to a Gemma/Hammer/Llama .task model to run the assistant offline with no key; " +
-                            "otherwise it uses the selected provider's key above.",
+                        "Use a downloaded .task model to run the assistant offline with no key; otherwise " +
+                            "it uses the selected provider's key above. Pick a recommended model below — " +
+                            "they download straight to this device (Wi-Fi recommended).",
                         color = Neutral500, fontSize = 10.sp,
                     )
-                    Text(
-                        "Download an on-device model  ↗",
-                        color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickableText {
-                            uriHandler.openUri("https://huggingface.co/litert-community")
-                        },
+                    RecommendedModels(
+                        context = context,
+                        selectedPath = agentModelPath,
+                        onUse = { agentModelPath = it },
                     )
                 }
                 1 -> { // Image Gen
@@ -362,6 +370,84 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         }
     }
 }
+
+/**
+ * Curated on-device model picker: recommended `.task` models with size/license, a one-tap in-app
+ * download for the ungated ones (progress + cancel; auto-adopted as the assistant brain on success),
+ * and a Hugging Face link-out for gated ones. Observes the process-level [ModelDownloadManager].
+ */
+@Composable
+private fun RecommendedModels(
+    context: android.content.Context,
+    selectedPath: String,
+    onUse: (String) -> Unit,
+) {
+    val state by ModelDownloadManager.state.collectAsState()
+    val uriHandler = LocalUriHandler.current
+
+    Text("Recommended on-device models", color = Neutral400, fontSize = 12.sp)
+    RECOMMENDED_ON_DEVICE_MODELS.forEach { model ->
+        val installed = ModelDownloadManager.installedPath(context, model)
+        val downloading = (state as? ModelDownloadManager.DownloadState.Downloading)
+            ?.takeIf { it.modelId == model.id }
+        val failed = (state as? ModelDownloadManager.DownloadState.Failed)
+            ?.takeIf { it.modelId == model.id }
+        val inUse = installed != null && installed == selectedPath
+
+        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(model.label, color = White, fontSize = 12.sp)
+                    Text("${model.sizeLabel} · ${model.license}", color = Neutral500, fontSize = 10.sp)
+                }
+                when {
+                    inUse -> Text("In use", color = Neutral500, fontSize = 11.sp)
+                    installed != null -> ActionText("✓ Installed · Use") { onUse(installed) }
+                    downloading != null -> ActionText("Cancel") { ModelDownloadManager.cancel() }
+                    model.gated -> ActionText("Get ↗") { uriHandler.openUri(model.repoUrl) }
+                    else -> ActionText("Download") { ModelDownloadManager.start(context, model) }
+                }
+            }
+            if (downloading != null) {
+                LinearProgressIndicator(
+                    progress = { downloading.fraction },
+                    color = Red500,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
+                Text(
+                    "${(downloading.fraction * 100).toInt()}% · ${model.sizeLabel}",
+                    color = Neutral500, fontSize = 10.sp,
+                )
+            }
+            if (failed != null) Text(failed.message, color = Red500, fontSize = 10.sp)
+            if (model.gated) {
+                Text(
+                    "Free Hugging Face sign-in required; then paste the .task path above.",
+                    color = Neutral500, fontSize = 10.sp,
+                )
+            }
+        }
+    }
+
+    // A freshly finished download becomes the assistant brain automatically (applies on Save).
+    val done = state as? ModelDownloadManager.DownloadState.Done
+    androidx.compose.runtime.LaunchedEffect(done?.path) {
+        if (done != null && done.path != selectedPath) onUse(done.path)
+    }
+}
+
+@Composable
+private fun ActionText(label: String, onClick: () -> Unit) {
+    Text(
+        label, color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.clickableText { onClick() },
+    )
+}
+
 @Composable
 private fun KeyField(label: String, value: String, onChange: (String) -> Unit) {
     OutlinedTextField(
