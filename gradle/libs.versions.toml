@@ -13,13 +13,13 @@
 agp = "9.2.0"
 kotlin = "2.4.0"
 coreKtx = "1.13.1"
-lifecycle = "2.10.0"
+lifecycle = "2.11.0"
 activityCompose = "1.9.3"
-composeUi = "1.12.0-alpha03"
+composeUi = "1.12.0-beta01"
 material3 = "1.5.0-alpha21"
 iconsExtended = "1.7.8"
 media3 = "1.10.1"
-datastore = "1.1.1"
+datastore = "1.2.1"
 coroutines = "1.8.1"
 serialization = "1.7.3"
 navigation = "2.9.8"
@@ -28,14 +28,15 @@ coreSplashscreen = "1.2.0"
 mlkitImageLabeling = "17.0.9"
 mlkitFaceDetection = "16.1.7"
 mlkitSelfieSegmentation = "16.0.0-beta6"
-vosk = "0.3.47"
+vosk = "0.3.75"
+mediapipeTasksGenai = "0.10.27"
 aznavrail = "10.8"
 playServicesAds = "24.9.0"
 userMessaging = "3.2.0"
 nanohttpd = "2.3.1"
 okhttp = "4.12.0"
 junit = "4.13.2"
-json = "20240303"
+json = "20260522"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -63,6 +64,7 @@ mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", ve
 mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFaceDetection" }
 mlkit-segmentation-selfie = { group = "com.google.mlkit", name = "segmentation-selfie", version.ref = "mlkitSelfieSegmentation" }
 vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
+mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
 aznavrail = { group = "com.github.HereLiesAz", name = "AzNavRail", version.ref = "aznavrail" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 user-messaging-platform = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "userMessaging" }

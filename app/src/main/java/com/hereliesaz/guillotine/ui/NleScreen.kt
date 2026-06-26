@@ -129,6 +129,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val settings by keyStore.settings.collectAsState(initial = AiSettings())
     val scope = rememberCoroutineScope()
 
+    // One shared MCP tool surface: the embedded server, the optional relay, and the in-app AI
+    // assistant all drive the editor through this same object ({ settings } reads live).
+    val sharedMcpTools = remember { com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings } }
+    val assistantVm: AssistantViewModel = viewModel()
+    val assistantState by assistantVm.state.collectAsState()
+
     var showSettings by remember { mutableStateOf(false) }
     // Cloudflare relay config; loaded off the main thread (EncryptedSharedPreferences touches the
     // KeyStore + disk) and re-read whenever Settings closes so changes restart the bridge.
@@ -313,6 +319,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
 
+        // In-app AI assistant: type an instruction and the agent drives the editor via the MCP
+        // tools (timeline updates live; edits are undoable).
+        AssistantBar(
+            state = assistantState,
+            onInput = assistantVm::setInput,
+            onSend = {
+                val text = assistantState.input
+                assistantVm.run(
+                    text,
+                    sharedMcpTools,
+                    com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools),
+                )
+            },
+        )
+
         // Bottom banner ad (renders only after ad consent is resolved).
         BannerAd(Modifier.fillMaxWidth())
     }
@@ -402,10 +423,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // Embedded MCP server: external AI tools interact with the editor over HTTP on port 6274.
     val mcpServer = remember { com.hereliesaz.guillotine.mcp.McpServer() }
     DisposableEffect(Unit) {
-        val tools = com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings }
         // /mcp requires this bearer token; the supplier reads the (cached) live token so a
         // regenerate from Settings takes effect without restarting the server.
-        runCatching { mcpServer.startServer(tools) { com.hereliesaz.guillotine.mcp.McpAuth.token(context) } }
+        runCatching { mcpServer.startServer(sharedMcpTools) { com.hereliesaz.guillotine.mcp.McpAuth.token(context) } }
         onDispose { runCatching { mcpServer.stop() } }
     }
 
@@ -414,7 +434,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     DisposableEffect(relayConfig) {
         val client = if (relayConfig.isUsable) {
             com.hereliesaz.guillotine.mcp.McpRelayClient(
-                com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings },
+                sharedMcpTools,
                 { com.hereliesaz.guillotine.mcp.McpAuth.token(context) },
                 relayConfig,
             ).also { runCatching { it.start() } }

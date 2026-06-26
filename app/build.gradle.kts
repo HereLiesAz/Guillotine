@@ -127,6 +127,9 @@ dependencies {
 
     // On-device speech-to-text (BYO model) for transcription/captions.
     implementation(libs.vosk.android)
+
+    // On-device LLM (BYO .task model) — the offline brain for the in-app AI assistant.
+    implementation(libs.mediapipe.tasks.genai)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
