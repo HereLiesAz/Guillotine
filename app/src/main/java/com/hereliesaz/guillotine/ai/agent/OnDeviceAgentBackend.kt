@@ -3,6 +3,7 @@ package com.hereliesaz.guillotine.ai.agent
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.hereliesaz.guillotine.mcp.McpTools
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -28,15 +29,9 @@ class OnDeviceAgentBackend(
         tools: McpTools,
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        var llm: LlmInference? = null
         try {
-            llm = LlmInference.createFromOptions(
-                context,
-                LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(modelPath)
-                    .setMaxTokens(1024)
-                    .build(),
-            )
+            // Loading a multi-GB model takes seconds, so reuse it across instructions.
+            val llm = LlmCache.get(context, modelPath)
 
             val preamble = buildString {
                 appendLine(AGENT_SYSTEM_PROMPT)
@@ -76,11 +71,11 @@ class OnDeviceAgentBackend(
                 transcript.append("OBSERVATION: ").append(outcome.content().take(1500)).append('\n')
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
+        } catch (e: CancellationException) {
+            throw e // preserve structured concurrency — a cancel is not a failure
         } catch (e: Throwable) {
             // Throwable: model load can fail with errors/UnsatisfiedLinkError on unsupported devices.
             onEvent(AgentEvent.Failed(e.message ?: "On-device model failed (check the model path)."))
-        } finally {
-            runCatching { llm?.close() }
         }
     }
 
@@ -96,13 +91,28 @@ class OnDeviceAgentBackend(
         }
     }
 
-    /** Pull the first balanced {…} object out of model text (tolerates code fences / prose). */
+    /**
+     * Pull the first balanced {…} object out of model text (tolerates code fences / prose).
+     * String-aware: braces inside JSON string literals don't affect nesting depth.
+     */
     private fun extractJsonObject(text: String): JSONObject? {
         val start = text.indexOf('{')
         if (start < 0) return null
         var depth = 0
+        var inString = false
+        var escaped = false
         for (i in start until text.length) {
-            when (text[i]) {
+            val c = text[i]
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    c == '\\' -> escaped = true
+                    c == '"' -> inString = false
+                }
+                continue
+            }
+            when (c) {
+                '"' -> inString = true
                 '{' -> depth++
                 '}' -> if (--depth == 0) {
                     return runCatching { JSONObject(text.substring(start, i + 1)) }.getOrNull()
@@ -110,5 +120,30 @@ class OnDeviceAgentBackend(
             }
         }
         return null
+    }
+
+    /**
+     * Process-level cache of the loaded model, keyed by path. Model load is expensive and the
+     * native handle holds a lot of memory, so we keep one alive and reuse it; switching paths
+     * closes the previous one. Guarded because callers could (in theory) overlap.
+     */
+    private object LlmCache {
+        private var path: String? = null
+        private var instance: LlmInference? = null
+
+        @Synchronized
+        fun get(context: Context, modelPath: String): LlmInference {
+            instance?.let { if (path == modelPath) return it }
+            runCatching { instance?.close() }
+            instance = LlmInference.createFromOptions(
+                context.applicationContext,
+                LlmInference.LlmInferenceOptions.builder()
+                    .setModelPath(modelPath)
+                    .setMaxTokens(1024)
+                    .build(),
+            )
+            path = modelPath
+            return instance!!
+        }
     }
 }

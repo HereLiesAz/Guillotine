@@ -72,6 +72,8 @@ class OpenAiAgentBackend(
                 return@withContext
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             onEvent(AgentEvent.Failed(e.message ?: "$label agent failed"))
         }

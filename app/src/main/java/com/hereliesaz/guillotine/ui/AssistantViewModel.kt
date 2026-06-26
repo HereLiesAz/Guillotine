@@ -50,6 +50,8 @@ class AssistantViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 agent.run(instruction, tools) { event -> apply(event) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // let cancellation propagate cleanly instead of showing a false error
             } catch (e: Exception) {
                 _state.update { it.copy(status = e.message ?: "Assistant failed", running = false, isError = true) }
             } finally {
