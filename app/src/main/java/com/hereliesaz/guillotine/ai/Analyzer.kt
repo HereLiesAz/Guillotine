@@ -18,9 +18,13 @@ interface ClipAnalyzer {
 }
 
 /**
- * Routes an analysis request to the configured provider. LOCAL never needs a key
- * or network; GEMINI uses the user's own key. Throws on provider error so the UI
- * can surface it and the user can fall back to LOCAL.
+ * Runs an analysis request **entirely on-device** — the video never leaves the device.
+ *
+ * This is deliberate: cloud AIs (Gemini/OpenAI/Anthropic/…) are *controllers* that drive the
+ * editor through the MCP server and only ever exchange text; they never receive clips or frames.
+ * So no matter which AI the user selects, the actual keep/remove analysis happens here, locally,
+ * with no key and no network: ML Kit vision for video/images, the Local silence heuristic for
+ * audio (and for the explicit on-device "Local" choice).
  */
 object Analysis {
     suspend fun run(
@@ -31,30 +35,15 @@ object Analysis {
         prompt: String,
         durationMs: Long,
         onProgress: (AnalysisProgress) -> Unit = {},
-    ): List<EditSegment> {
-        val key = settings.keyFor(settings.provider)
-        if (settings.provider.meta.keyUrl != null) {
-            require(key.isNotBlank()) {
-                "Add your ${settings.provider.meta.label} API key in Settings, or use a free analyzer."
-            }
-        }
-        val model = settings.modelFor(settings.provider)
-        return when (settings.provider) {
-            AiProviderType.LOCAL -> LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
-            AiProviderType.MLKIT -> MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
-            AiProviderType.GEMINI -> GeminiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
-            AiProviderType.OPENAI -> OpenAiProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
-            AiProviderType.ANTHROPIC -> AnthropicProvider(key, model).analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
-            else -> {
-                // OpenRouter / Groq / xAI / Mistral — generic OpenAI-compatible endpoint.
-                val meta = settings.provider.meta
-                OpenAiCompatibleProvider(
-                    apiKey = key,
-                    endpoint = requireNotNull(meta.openAiCompatUrl),
-                    model = model,
-                    label = meta.label,
-                ).analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
-            }
-        }
+    ): List<EditSegment> = when {
+        // Audio has no frames to look at — silence detection is the on-device answer.
+        kind == MediaKind.AUDIO ->
+            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+        // Explicit on-device "Local": audio-based silence cut (kept whole for images).
+        settings.provider == AiProviderType.LOCAL ->
+            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+        // Everything else (video/image): free on-device ML Kit face/label vision.
+        else ->
+            MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
     }
 }

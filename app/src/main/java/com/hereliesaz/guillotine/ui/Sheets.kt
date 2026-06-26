@@ -171,7 +171,12 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         ) {
             when (selectedTab) {
                 0 -> { // AI Analyzer
-                    Text("Analyzer — free on-device, or bring your own key", color = Neutral400, fontSize = 12.sp)
+                    Text(
+                        "Analysis always runs on-device — your video never leaves the device. " +
+                            "Pick the AI that controls the editor (used by the assistant bar); it only " +
+                            "sends text, never your media.",
+                        color = Neutral400, fontSize = 12.sp,
+                    )
 
                     Column(
                         Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),

@@ -10,9 +10,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Agent brain backed by Anthropic's Messages API tool-use. Mirrors the HTTP shape of
- * [com.hereliesaz.guillotine.ai.AnthropicProvider] (x-api-key, anthropic-version) but adds a
- * `tools` array and runs the multi-turn tool_use ⇄ tool_result loop.
+ * Agent brain backed by Anthropic's Messages API tool-use. Uses the standard Messages HTTP
+ * shape (x-api-key, anthropic-version) with a `tools` array, running the multi-turn
+ * tool_use ⇄ tool_result loop. It only ever exchanges text — tool definitions and JSON
+ * results — and never sends any media.
  */
 class AnthropicAgentBackend(
     private val apiKey: String,

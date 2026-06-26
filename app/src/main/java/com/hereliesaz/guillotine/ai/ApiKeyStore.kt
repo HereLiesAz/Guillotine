@@ -37,54 +37,54 @@ val AiProviderType.meta: ProviderMeta
     get() = when (this) {
         AiProviderType.LOCAL -> ProviderMeta(
             "Local (free, on-device)",
-            "Cuts silences. No key, works offline.",
+            "On-device silence cut. No key, works offline.",
         )
         AiProviderType.MLKIT -> ProviderMeta(
             "On-device vision (free)",
-            "Faces & objects, no key — keep/remove by what's on screen.",
+            "On-device faces & objects, no key — keep/remove by what's on screen.",
         )
         AiProviderType.GEMINI -> ProviderMeta(
             "Gemini",
-            "Google · video-native analysis.",
+            "Google · drives the editor via tools (no video sent).",
             keyUrl = "https://aistudio.google.com/app/apikey",
             defaultModel = "gemini-2.5-flash",
         )
         AiProviderType.OPENAI -> ProviderMeta(
             "OpenAI",
-            "GPT-4o frame sampling + Whisper audio.",
+            "GPT · drives the editor via tools (no video sent).",
             keyUrl = "https://platform.openai.com/api-keys",
             defaultModel = "gpt-4o",
         )
         AiProviderType.ANTHROPIC -> ProviderMeta(
             "Anthropic",
-            "Claude · video frame analysis.",
+            "Claude · drives the editor via tools (no video sent).",
             keyUrl = "https://console.anthropic.com/settings/keys",
             defaultModel = "claude-opus-4-8",
         )
         AiProviderType.OPENROUTER -> ProviderMeta(
             "OpenRouter",
-            "One key, many vision models (frames).",
+            "One key, many models · drives the editor via tools.",
             keyUrl = "https://openrouter.ai/keys",
             openAiCompatUrl = "https://openrouter.ai/api/v1/chat/completions",
             defaultModel = "openai/gpt-4o-mini",
         )
         AiProviderType.GROQ -> ProviderMeta(
             "Groq",
-            "Fast Llama 4 vision (frames).",
+            "Fast Llama · drives the editor via tools.",
             keyUrl = "https://console.groq.com/keys",
             openAiCompatUrl = "https://api.groq.com/openai/v1/chat/completions",
             defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct",
         )
         AiProviderType.XAI -> ProviderMeta(
             "xAI (Grok)",
-            "Grok vision (frames).",
+            "Grok · drives the editor via tools.",
             keyUrl = "https://console.x.ai",
             openAiCompatUrl = "https://api.x.ai/v1/chat/completions",
             defaultModel = "grok-2-vision-1212",
         )
         AiProviderType.MISTRAL -> ProviderMeta(
             "Mistral",
-            "Pixtral vision (frames).",
+            "Mistral · drives the editor via tools.",
             keyUrl = "https://console.mistral.ai/api-keys",
             openAiCompatUrl = "https://api.mistral.ai/v1/chat/completions",
             defaultModel = "pixtral-12b-2409",
