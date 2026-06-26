@@ -29,6 +29,7 @@ mlkitImageLabeling = "17.0.9"
 mlkitFaceDetection = "16.1.7"
 mlkitSelfieSegmentation = "16.0.0-beta6"
 vosk = "0.3.75"
+mediapipeTasksGenai = "0.10.27"
 aznavrail = "10.8"
 playServicesAds = "24.9.0"
 userMessaging = "3.2.0"
@@ -63,6 +64,7 @@ mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", ve
 mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFaceDetection" }
 mlkit-segmentation-selfie = { group = "com.google.mlkit", name = "segmentation-selfie", version.ref = "mlkitSelfieSegmentation" }
 vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
+mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
 aznavrail = { group = "com.github.HereLiesAz", name = "AzNavRail", version.ref = "aznavrail" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 user-messaging-platform = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "userMessaging" }

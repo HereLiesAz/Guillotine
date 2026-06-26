@@ -107,6 +107,8 @@ data class AiSettings(
     val leonardoModel: String = com.hereliesaz.guillotine.ai.ImageGen.LeonardoDefaultModel,
     /** Optional on-device Vosk speech model directory (else cloud Whisper for transcription). */
     val speechModelPath: String = "",
+    /** Optional on-device LLM `.task` model path — the assistant's offline brain (else a cloud key). */
+    val agentModelPath: String = "",
 ) {
     fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
     /** The effective model id for [p]: the user's override if set, else the code default. */
@@ -151,6 +153,7 @@ class ApiKeyStore(context: Context) {
         leonardoModel = prefs.getString(KEY_LEONARDO_MODEL, "")
             ?.takeIf { it.isNotBlank() } ?: ImageGen.LeonardoDefaultModel,
         speechModelPath = prefs.getString(KEY_SPEECH, "").orEmpty(),
+        agentModelPath = prefs.getString(KEY_AGENT_MODEL, "").orEmpty(),
     )
 
     suspend fun save(settings: AiSettings) {
@@ -164,6 +167,7 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_LEONARDO_KEY, settings.leonardoKey)
                 putString(KEY_LEONARDO_MODEL, settings.leonardoModel)
                 putString(KEY_SPEECH, settings.speechModelPath)
+                putString(KEY_AGENT_MODEL, settings.agentModelPath)
             }.apply()
         }
         _settings.value = settings
@@ -174,6 +178,7 @@ class ApiKeyStore(context: Context) {
         const val KEY_LEONARDO_KEY = "leonardo_key"
         const val KEY_LEONARDO_MODEL = "leonardo_model"
         const val KEY_SPEECH = "speech_model_path"
+        const val KEY_AGENT_MODEL = "agent_model_path"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"
     }

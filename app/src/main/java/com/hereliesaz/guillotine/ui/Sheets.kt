@@ -90,6 +90,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var leonardoKey by remember { mutableStateOf(current.leonardoKey) }
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
+    var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     var crashRelayUrl by remember { mutableStateOf(com.hereliesaz.guillotine.crash.CrashConfig.relayUrl(context)) }
@@ -204,6 +205,30 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             )
                         }
                     }
+
+                    // Assistant brain: the command bar uses the selected provider's key when set,
+                    // else this on-device LLM. Lets the AI drive the editor fully offline.
+                    Text("AI assistant — on-device model (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = agentModelPath,
+                        onValueChange = { agentModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("On-device LLM model path (.task)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Point to a Gemma/Hammer/Llama .task model to run the assistant offline with no key; " +
+                            "otherwise it uses the selected provider's key above.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    Text(
+                        "Download an on-device model  ↗",
+                        color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickableText {
+                            uriHandler.openUri("https://huggingface.co/litert-community")
+                        },
+                    )
                 }
                 1 -> { // Image Gen
                     Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
@@ -328,6 +353,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             leonardoKey = leonardoKey.trim(),
                             leonardoModel = leonardoModel,
                             speechModelPath = speechModelPath.trim(),
+                            agentModelPath = agentModelPath.trim(),
                         ),
                     )
                 },
