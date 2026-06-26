@@ -42,8 +42,19 @@ object Analysis {
         // Explicit on-device "Local": audio-based silence cut (kept whole for images).
         settings.provider == AiProviderType.LOCAL ->
             LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+        // A silence/quiet request on a video is an audio task — ML Kit is vision-only and can't
+        // hear it, so route to the silence heuristic (it decodes the clip's audio track).
+        isSilenceIntent(prompt) ->
+            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
         // Everything else (video/image): free on-device ML Kit face/label vision.
         else ->
             MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+    }
+
+    /** Heuristic: does the prompt ask about audio (silence/quiet/pauses) rather than what's on screen? */
+    private fun isSilenceIntent(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        return listOf("silen", "quiet", "pause", "dead air", "dead-air", "mute", "no sound", "no audio")
+            .any { it in p }
     }
 }
