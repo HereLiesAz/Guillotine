@@ -124,7 +124,7 @@ class GeminiProvider(
         return GeminiFile(f.getString("name"), f.optString("uri"), f.optString("state", "PROCESSING"))
     }
 
-    private fun generate(prompt: String, kind: MediaKind, fileUri: String, mime: String): String {
+    private suspend fun generate(prompt: String, kind: MediaKind, fileUri: String, mime: String): String {
         val sys = systemPrompt(prompt, kind)
         val body = JSONObject().apply {
             put("contents", JSONArray().put(JSONObject().apply {
@@ -140,19 +140,38 @@ class GeminiProvider(
                 put("response_schema", segmentSchema())
             })
         }
-        val conn = open("$base/v1beta/models/$model:generateContent?key=$apiKey", "POST")
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.doOutput = true
-        conn.outputStream.use { it.write(body.toString().toByteArray()) }
-        if (conn.responseCode !in 200..299) error("generate", conn)
-        val json = JSONObject(readBody(conn))
-        conn.disconnect()
-        return json.getJSONArray("candidates")
-            .getJSONObject(0)
-            .getJSONObject("content")
-            .getJSONArray("parts")
-            .getJSONObject(0)
-            .getString("text")
+
+        var attempt = 0
+        val maxRetries = 3
+        while (true) {
+            val conn = open("$base/v1beta/models/$model:generateContent?key=$apiKey", "POST")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+
+            val code = conn.responseCode
+            if (code in 200..299) {
+                val json = JSONObject(readBody(conn))
+                conn.disconnect()
+                return json.getJSONArray("candidates")
+                    .getJSONObject(0)
+                    .getJSONObject("content")
+                    .getJSONArray("parts")
+                    .getJSONObject(0)
+                    .getString("text")
+            }
+
+            // Retry on 503 (Service Unavailable) or 429 (Too Many Requests)
+            if ((code == 503 || code == 429) && attempt < maxRetries) {
+                conn.disconnect()
+                attempt++
+                val backoffMs = (1000L * attempt) + (0..500).random()
+                kotlinx.coroutines.delay(backoffMs)
+                continue
+            }
+
+            error("generate", conn)
+        }
     }
 
     private fun segmentSchema() = JSONObject().apply {
