@@ -94,8 +94,10 @@ object ImageGen {
             require(key.isNotEmpty()) { "Add your Leonardo API key in Settings to generate replacements." }
 
             val (w, h) = fitDims(frame.width, frame.height)
-            val initId = uploadImage(key, pngBytes(scaleTo(frame, w, h)))
-            val maskId = uploadImage(key, pngBytes(scaleTo(mask, w, h)))
+            val sf = scaleTo(frame, w, h)
+            val initId = try { uploadImage(key, pngBytes(sf)) } finally { if (sf !== frame) sf.recycle() }
+            val sm = scaleTo(mask, w, h)
+            val maskId = try { uploadImage(key, pngBytes(sm)) } finally { if (sm !== mask) sm.recycle() }
 
             val body = JSONObject().apply {
                 put("prompt", prompt)

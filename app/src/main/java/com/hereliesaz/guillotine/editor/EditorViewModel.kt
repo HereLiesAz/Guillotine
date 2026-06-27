@@ -417,10 +417,39 @@ class EditorViewModel : ViewModel() {
                 }
             }
             if (pieces.isEmpty()) return@mutateDocument doc
+            // Split the linked shadow audio at the same boundaries so its audio survives and stays
+            // grouped. Kept video segments keep their shadow (linked → skipped on export, video carries
+            // audio); generated-image segments unlink the shadow so the ORIGINAL audio still plays there.
+            val shadow = doc.clips.firstOrNull { it.linkedClipId == c.id }
+            val shadowPieces = shadow?.let { sh ->
+                buildList {
+                    for (i in 0 until cuts.size - 1) {
+                        val relStart = cuts[i]
+                        val relEnd = cuts[i + 1]
+                        val dur = relEnd - relStart
+                        if (dur < MIN_CLIP_DURATION_MS) continue
+                        val isReplaced = replacements.any { relStart >= it.relStartMs && relEnd <= it.relEndMs }
+                        val videoPiece = pieces.firstOrNull { it.startTimeMs == c.startTimeMs + relStart }
+                        add(sh.copy(
+                            id = newId(),
+                            startTimeMs = c.startTimeMs + relStart,
+                            trimStartMs = sh.trimStartMs + relStart,
+                            durationMs = dur,
+                            edits = emptyList(),
+                            groupId = gid,
+                            linkedClipId = if (isReplaced) null else videoPiece?.id,
+                            keyframes = sh.keyframes
+                                .filter { it.timeMs >= relStart && it.timeMs < relEnd }
+                                .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                        ))
+                    }
+                }
+            } ?: emptyList()
             val newMedia = replacements.map { it.media }.filter { m -> doc.mediaItems.none { it.id == m.id } }
+            val replaced = setOfNotNull(c.id, shadow?.id)
             doc.copy(
                 mediaItems = doc.mediaItems + newMedia,
-                clips = doc.clips.flatMap { if (it.id == clipId) pieces else listOf(it) },
+                clips = doc.clips.flatMap { if (it.id in replaced) emptyList() else listOf(it) } + pieces + shadowPieces,
             )
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
