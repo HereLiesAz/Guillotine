@@ -284,25 +284,32 @@ class McpTools(
         val replacements = runBlocking {
             removes.mapNotNull { seg ->
                 val frame = grabFrame(Uri.parse(media.uri), (seg.startMs + seg.endMs) / 2) ?: return@mapNotNull null
-                val boxes = com.hereliesaz.guillotine.ai.ObjectVision(context).use { ov ->
-                    ov.detect(frame).filter { matchesPrompt(clip.prompt, it.label) }.map { it.box }
-                }
-                if (boxes.isEmpty()) { frame.recycle(); return@mapNotNull null }
-                val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, boxes)
-                val uri = runCatching {
-                    com.hereliesaz.guillotine.ai.ImageGen.Leonardo.inpaint(
-                        context, key, settings.leonardoModel, frame, mask,
-                        "remove the ${clip.prompt}, clean natural background, photorealistic",
-                    )
-                }.getOrNull()
-                frame.recycle(); mask.recycle()
-                uri?.let {
-                    val relStart = (seg.startMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
-                    val relEnd = (seg.endMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
-                    EditorViewModel.Replacement(
-                        relStart, relEnd,
-                        MediaItem(newId(), it.toString(), "inpaint", MediaKind.IMAGE, relEnd - relStart),
-                    )
+                try {
+                    val boxes = com.hereliesaz.guillotine.ai.ObjectVision(context).use { ov ->
+                        ov.detect(frame).filter { matchesPrompt(clip.prompt, it.label) }.map { it.box }
+                    }
+                    if (boxes.isEmpty()) return@mapNotNull null
+                    val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, boxes)
+                    try {
+                        val uri = runCatching {
+                            com.hereliesaz.guillotine.ai.ImageGen.Leonardo.inpaint(
+                                context, key, settings.leonardoModel, frame, mask,
+                                "remove the ${clip.prompt}, clean natural background, photorealistic",
+                            )
+                        }.getOrNull()
+                        uri?.let {
+                            val relStart = (seg.startMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
+                            val relEnd = (seg.endMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
+                            EditorViewModel.Replacement(
+                                relStart, relEnd,
+                                MediaItem(newId(), it.toString(), "inpaint", MediaKind.IMAGE, relEnd - relStart),
+                            )
+                        }
+                    } finally {
+                        mask.recycle()
+                    }
+                } finally {
+                    frame.recycle()
                 }
             }
         }
