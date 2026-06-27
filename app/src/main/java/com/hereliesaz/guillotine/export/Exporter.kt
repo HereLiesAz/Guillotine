@@ -126,15 +126,18 @@ object Exporter {
 
     /**
      * Build the export composition: one or more video sequences (kept ranges of video clips + image
-     * clips) plus a separate audio sequence for standalone audio-track clips. With several video
-     * tracks and no background-removal composite, each track becomes its own sequence composited
-     * bottom-to-top (top-of-panel track on top), matching the multi-track preview; otherwise a single
-     * flattened sequence + matte overlay is used. Project crop + aspect apply
+     * clips) plus a separate audio sequence for standalone audio-track clips. When the opaque layers
+     * can't be flattened into one sequence — several background tracks, or two clips overlapping on one
+     * track — an "advanced" path builds one sequence per track *lane* (a lane per overlap depth) composited
+     * bottom-to-top (top-of-panel track on top, matching the preview), **crossfades** overlapping clips
+     * by ramping the incoming clip in over a held outgoing clip (via [VideoEffects.fadeIn]), and draws
+     * the **background-removal subjects + captions over the final composite** as Composition-level
+     * overlays (so a bg-removed clip on an upper track shows lower tracks through its matte). Otherwise a
+     * single flattened sequence + per-item matte/caption overlay is used. Project crop + aspect apply
      * to every video clip via [VideoEffects.geometry]. Per clip/item this bakes in: color filters,
      * the Crop-tool transform, keyframed opacity/scale (via [VideoEffects.keyframeEffects]),
      * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
-     * (attached to every base item with that item's timeline start, so they stay in sync across
-     * 'remove' cuts).
+     * (which stay in sync across 'remove' cuts via each item's timeline start).
      *
      * Known limit (verify on device): mixing image clips (no audio) with video clips (audio) in one
      * sequence may need Transformer's force-audio-track flag — most projects are all-video/all-image.
@@ -187,15 +190,18 @@ object Exporter {
             clipLocalStartMs: Long,
             timelineStartMs: Long,
             withOverlays: Boolean,
+            fade: LongRange? = null,
         ): Effects {
             val ts = document.trackSettingsFor(clip.trackId)
             val alpha = if (ts.opacity < 1f) listOf(AlphaScale(ts.opacity)) else emptyList()
             val transform = VideoEffects.transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY)
             val keyframes = VideoEffects.keyframeEffects(clip, clipLocalStartMs)
+            // Crossfade ramp: the incoming clip fades 0→1 across its overlap with the held outgoing clip.
+            val fadeFx = fade?.let { listOf(VideoEffects.fadeIn(timelineStartMs, it.first, it.last)) } ?: emptyList()
             val overlay = if (withOverlays) listOfNotNull(overlaysFor(timelineStartMs)) else emptyList()
             return Effects(
                 audioFor(clip, clipLocalStartMs),
-                VideoEffects.build(clip.filters) + transform + keyframes + geometry + overlay + alpha,
+                VideoEffects.build(clip.filters) + transform + keyframes + fadeFx + geometry + overlay + alpha,
             )
         }
 
@@ -209,11 +215,13 @@ object Exporter {
             clips: List<TimelineClip>,
             startCursor: Long,
             withOverlays: Boolean,
+            fadeFor: (TimelineClip) -> LongRange? = { null },
         ): Boolean {
             var cursor = startCursor
             var added = false
             clips.sortedBy { it.startTimeMs }.forEach { clip ->
                 val media = document.mediaFor(clip) ?: return@forEach
+                val fade = fadeFor(clip)
                 val gap = clip.startTimeMs - cursor
                 if (gap > 0) { seq.addGap(gap * 1000); cursor += gap }
                 if (media.kind == MediaKind.IMAGE) {
@@ -224,7 +232,7 @@ object Exporter {
                         .build()
                     seq.addItem(
                         EditedMediaItem.Builder(mediaItem).setFrameRate(30)
-                            .setEffects(videoEffectsFor(clip, 0L, clip.startTimeMs, withOverlays)).build(),
+                            .setEffects(videoEffectsFor(clip, 0L, clip.startTimeMs, withOverlays, fade)).build(),
                     )
                     added = true; cursor += dur
                 } else {
@@ -245,7 +253,7 @@ object Exporter {
                             .build()
                         seq.addItem(
                             EditedMediaItem.Builder(mediaItem)
-                                .setEffects(videoEffectsFor(clip, clipLocalStart, timelineStart, withOverlays)).build(),
+                                .setEffects(videoEffectsFor(clip, clipLocalStart, timelineStart, withOverlays, fade)).build(),
                         )
                         added = true; cursor += (endMs - startMs)
                     }
@@ -254,39 +262,81 @@ object Exporter {
             return added
         }
 
-        // Video sequences. With several video tracks and NO background-removal composite, each track
-        // becomes its own sequence and Media3 composites them bottom-to-top (the top-of-panel track is
-        // added last, so it draws on top) — matching the multi-track preview. Otherwise (single track,
-        // or a foreground/background matte composite) we keep the original single flattened sequence +
-        // matte overlay. Each sequence is zeroed to a common timeline origin; a track that starts later
-        // gets a leading gap so the layers stay aligned (verify leading gaps on device — older Media3
-        // could not lead with a gap; we target 1.10.1).
+        // Video sequences. The "advanced" compositor kicks in when the OPAQUE (background) layers can't
+        // be expressed as one flattened sequence: several background tracks, or two background clips
+        // overlapping on one track (a crossfade). It builds one sequence per track *lane* (a track gets
+        // a lane per simultaneous-overlap depth), composites them bottom-to-top, ramps the incoming clip in
+        // with VideoEffects.fadeIn over a held outgoing clip, and draws the background-removal subjects +
+        // captions over the FINAL composite as Composition-level overlays. Otherwise (single background
+        // track, no overlap — incl. the classic foreground-over-one-background matte) we keep the
+        // original single flattened sequence + per-item overlay path, byte-for-byte unchanged.
+        // Each sequence is zeroed to a common timeline origin; a track/lane that starts later gets a
+        // leading gap to stay aligned (verify leading gaps on device — older Media3 couldn't lead with a
+        // gap; we target 1.10.1).
         val videoTrackOrder = document.videoTracks
-        val tracksWithVideo = videoTrackOrder.filter { tid ->
-            videoClips.any { it.trackId == tid && document.mediaFor(it) != null }
+        fun trackPos(tid: String) = videoTrackOrder.indexOf(tid).let { if (it < 0) Int.MAX_VALUE else it }
+        // Tracks carrying an opaque (non-bg-removed) clip, top-of-panel first.
+        val bgTracks = background.filter { document.mediaFor(it) != null }
+            .map { it.trackId }.distinct().sortedBy { trackPos(it) }
+        val sameTrackOverlap = bgTracks.any { tid ->
+            background.filter { it.trackId == tid && document.mediaFor(it) != null }
+                .sortedBy { it.startTimeMs }
+                .zipWithNext().any { (a, b) -> b.startTimeMs < a.endTimeMs }
         }
-        val multiTrack = foreground.isEmpty() && tracksWithVideo.size >= 2
-        // Common zero across every composited track so they stay time-aligned; also the time base for
-        // the composition-level caption overlays below (composition time 0 == this timeline instant).
-        val globalZero = if (multiTrack) {
+        val advanced = bgTracks.size >= 2 || sameTrackOverlap
+        // Common zero across every composited clip (incl. foreground, whose matte overlay is timed
+        // against it): composition time 0 == this timeline instant.
+        val globalZero = if (advanced) {
             videoClips.filter { document.mediaFor(it) != null }.minOf { it.startTimeMs }
         } else {
             0L
         }
 
-        val videoSequences: List<EditedMediaItemSequence> = if (multiTrack) {
-            // Bottom track first (asReversed: videoTracks index 0 is the top of the panel), top track
-            // last = on top. Overlays are NOT attached per track here — a caption on a lower track would
-            // hide under upper tracks and vanish in that track's gaps — they go on the Composition below.
-            tracksWithVideo.asReversed().mapNotNull { tid ->
-                val seq = EditedMediaItemSequence.Builder()
-                val any = appendVideoItems(
-                    seq,
-                    videoClips.filter { it.trackId == tid },
-                    globalZero,
-                    withOverlays = false,
-                )
-                if (any) seq.build() else null
+        // Split a track's opaque clips into lanes so overlapping clips land on different sequences and
+        // can crossfade. Each lane's running end time is tracked independently; a clip is placed on the
+        // lowest lane that is FREE at its start AND above the top (highest) lane it overlaps — a fresh
+        // lane only when none qualifies — so no two clips on a lane ever overlap (no invalid sequence)
+        // and the incoming clip always composites on top of the one it dissolves from. It fades in over
+        // that top overlapping clip. Lane count = max simultaneous overlap depth (1–2 in practice).
+        fun laneLayout(trackClips: List<TimelineClip>): List<Triple<TimelineClip, Int, LongRange?>> {
+            val out = ArrayList<Triple<TimelineClip, Int, LongRange?>>()
+            val laneEnds = ArrayList<Long>() // running end-time of the clip currently on each lane
+            trackClips.sortedBy { it.startTimeMs }.forEach { c ->
+                // Top lane whose clip is still playing at c.start = the clip c dissolves from (-1 = none).
+                var topOverlap = -1
+                var topOverlapEnd = Long.MIN_VALUE
+                for (i in laneEnds.indices) if (laneEnds[i] > c.startTimeMs) { topOverlap = i; topOverlapEnd = laneEnds[i] }
+                // Lowest free lane strictly above the top overlapping lane; else a new lane.
+                var lane = ((topOverlap + 1) until laneEnds.size).firstOrNull { laneEnds[it] <= c.startTimeMs }
+                    ?: laneEnds.size.also { laneEnds.add(Long.MIN_VALUE) }
+                val fade = if (topOverlap >= 0) c.startTimeMs..minOf(c.endTimeMs, topOverlapEnd) else null
+                out += Triple(c, lane, fade)
+                laneEnds[lane] = c.endTimeMs
+            }
+            return out
+        }
+
+        val videoSequences: List<EditedMediaItemSequence> = if (advanced) {
+            // Bottom track first (so it's the composite base), top track last = on top; within a track,
+            // lane 0 then lane 1 (lane 1 holds the incoming clip, fading in over lane 0). Overlays are
+            // NOT attached per item here — they go on the Composition below so they sit over every layer
+            // and survive gaps in any one track/lane.
+            buildList {
+                bgTracks.asReversed().forEach { tid ->
+                    val layout = laneLayout(background.filter { it.trackId == tid && document.mediaFor(it) != null })
+                    val fadeByClip = layout.associate { (c, _, fade) -> c.id to fade }
+                    val laneCount = (layout.maxOfOrNull { it.second } ?: -1) + 1
+                    // Lane 0 first (composite base), higher lanes on top (incoming dissolves over outgoing).
+                    for (lane in 0 until laneCount) {
+                        val laneClips = layout.filter { it.second == lane }.map { it.first }
+                        if (laneClips.isEmpty()) continue
+                        val seq = EditedMediaItemSequence.Builder()
+                        val any = appendVideoItems(
+                            seq, laneClips, globalZero, withOverlays = false, fadeFor = { fadeByClip[it.id] },
+                        )
+                        if (any) add(seq.build())
+                    }
+                }
             }
         } else {
             val seq = EditedMediaItemSequence.Builder()
@@ -338,10 +388,11 @@ object Exporter {
         val sequences = videoSequences.toMutableList()
         if (addedAudio) sequences += audioSeq.build()
         val composition = Composition.Builder(sequences)
-        // Multi-track captions composite over the FINAL stacked video (not a single track), so they sit
-        // on top of every layer and survive gaps in any one track. (Single-track keeps its per-item
-        // overlays; the matte never applies here since multi-track requires no bg-removal composite.)
-        if (multiTrack) {
+        // Advanced path: the background-removal subjects (matte) + captions composite over the FINAL
+        // stacked video, so a bg-removed clip on an upper track shows the lower tracks through its matte,
+        // and overlays sit on top of every layer and survive gaps in any one track/lane. (The simple
+        // path keeps its per-item overlays.)
+        if (advanced) {
             overlaysFor(globalZero)?.let { composition.setEffects(Effects(emptyList(), listOf(it))) }
         }
         return composition.build()

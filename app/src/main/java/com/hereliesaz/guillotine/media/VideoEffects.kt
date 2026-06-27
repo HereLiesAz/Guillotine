@@ -123,6 +123,28 @@ object VideoEffects {
         return out
     }
 
+    /**
+     * A linear alpha fade-in from 0→1 across the timeline window [[fromMs], [toMs]] (used by the
+     * exporter's crossfade: the incoming clip fades in over the held outgoing clip). [startMs] is the
+     * timeline time of the item's first frame (presentationTimeUs 0), so this works across 'remove'
+     * cuts the same way [KeyframeAlpha] does. Before the window alpha is 0, after it 1.
+     */
+    fun fadeIn(startMs: Long, fromMs: Long, toMs: Long): Effect = FadeInAlpha(startMs, fromMs, toMs)
+
+    private class FadeInAlpha(
+        private val startMs: Long,
+        private val fromMs: Long,
+        private val toMs: Long,
+    ) : RgbMatrix {
+        private val m = floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f)
+        private val span = (toMs - fromMs).coerceAtLeast(1L)
+        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
+            val t = startMs + presentationTimeUs / 1000
+            m[15] = ((t - fromMs).toFloat() / span).coerceIn(0f, 1f)
+            return m
+        }
+    }
+
     /** Animates the frame's alpha from the clip's OPACITY keyframes (1 = opaque). */
     private class KeyframeAlpha(private val clip: TimelineClip, private val startMs: Long) : RgbMatrix {
         // Column-major identity; element[15] is the alpha→alpha factor, updated per frame.
