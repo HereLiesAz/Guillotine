@@ -130,6 +130,9 @@ dependencies {
 
     // On-device LLM (BYO .task model) — the offline brain for the in-app AI assistant.
     implementation(libs.mediapipe.tasks.genai)
+
+    // On-device object detection (bundled EfficientDet COCO model) — reliable "cut frames with a <object>".
+    implementation(libs.mediapipe.tasks.vision)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
