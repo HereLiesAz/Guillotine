@@ -3,6 +3,7 @@ package com.hereliesaz.guillotine.editor
 import androidx.lifecycle.ViewModel
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.ClipType
+import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.Document
 import com.hereliesaz.guillotine.model.GlobalSettings
 import com.hereliesaz.guillotine.model.Keyframe
@@ -324,6 +325,110 @@ class EditorViewModel : ViewModel() {
             doc.copy(clips = doc.clips.flatMap { if (it.id == clip.id) pieces else listOf(it) })
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
+    }
+
+    /**
+     * Turn a clip's keep/remove edits into REAL timeline structure: the kept (non-removed) ranges
+     * become **separate clips, grouped together**, butted contiguously so playback has no black gaps —
+     * not a single merged clip. The removed ranges are dropped, the rest of the timeline ripples left to
+     * stay in sync, and the linked shadow-audio clip is cut the same way and joined to the group. One
+     * undo step. This is what the AI calls (via the `apply_cuts` MCP tool) to actually remove content,
+     * instead of leaving non-destructive remove marks that only the exporter honors.
+     */
+    fun applyCuts(clipId: String) {
+        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
+        if (clip.edits.none { it.action == EditAction.REMOVE }) return
+        mutateDocument { doc ->
+            val c = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val shadow = doc.clips.firstOrNull { it.linkedClipId == c.id }
+            // Kept ranges in source ms -> clip-relative (start, end) intervals shared by clip + shadow.
+            val rel = com.hereliesaz.guillotine.model.TimelineMath.keptRanges(c)
+                .map { (it.first - c.trimStartMs) to (it.last + 1 - c.trimStartMs) }
+            val gid = newId()
+            val videoPieces = cutPieces(c, rel, gid)
+            if (videoPieces.isEmpty()) return@mutateDocument doc
+            val removedTotal = c.durationMs - videoPieces.sumOf { it.durationMs }
+            val shadowPieces = shadow?.let { cutPieces(it, rel, gid) } ?: emptyList()
+            val replaced = setOfNotNull(c.id, shadow?.id)
+            val origEnd = c.endTimeMs
+            val rest = doc.clips.flatMap { cl ->
+                when {
+                    cl.id in replaced -> emptyList()
+                    // Ripple later clips left to close the gap the removed ranges left behind.
+                    cl.startTimeMs >= origEnd -> listOf(cl.copy(startTimeMs = cl.startTimeMs - removedTotal))
+                    else -> listOf(cl)
+                }
+            }
+            doc.copy(clips = rest + videoPieces + shadowPieces)
+        }
+        _uiState.update { it.copy(selectedClipIds = emptyList()) }
+    }
+
+    /** Build contiguous, grouped sub-clips for the given clip-relative kept intervals. */
+    private fun cutPieces(clip: TimelineClip, rel: List<Pair<Long, Long>>, groupId: String): List<TimelineClip> {
+        var cursor = clip.startTimeMs
+        val out = mutableListOf<TimelineClip>()
+        for ((relStart, relEnd) in rel) {
+            val dur = relEnd - relStart
+            if (dur < MIN_CLIP_DURATION_MS) continue
+            out += piece(clip, relStart, dur, cursor, groupId)
+            cursor += dur
+        }
+        return out
+    }
+
+    /** A fresh sub-clip of [clip]: trim window [relStart, relStart+dur) placed at [startTimeline]. */
+    private fun piece(clip: TimelineClip, relStart: Long, dur: Long, startTimeline: Long, groupId: String? = clip.groupId) =
+        clip.copy(
+            id = newId(),
+            startTimeMs = startTimeline,
+            trimStartMs = clip.trimStartMs + relStart,
+            durationMs = dur,
+            edits = emptyList(),
+            groupId = groupId,
+            linkedClipId = null,
+            keyframes = clip.keyframes
+                .filter { it.timeMs >= relStart && it.timeMs < relStart + dur }
+                .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+        )
+
+    /**
+     * Generic ripple delete: cut the timeline span [startMs, endMs) out of every track — clips fully
+     * inside vanish, overlapping clips are trimmed, and everything after shifts left to close the gap.
+     */
+    fun rippleDeleteRange(startMs: Long, endMs: Long) {
+        if (endMs <= startMs) return
+        mutateDocument { doc -> doc.copy(clips = doc.clips.flatMap { rippleClip(it, startMs, endMs) }) }
+    }
+
+    private fun rippleClip(c: TimelineClip, start: Long, end: Long): List<TimelineClip> {
+        val gap = end - start
+        return when {
+            c.endTimeMs <= start -> listOf(c)                              // entirely before the cut
+            c.startTimeMs >= end -> listOf(c.copy(startTimeMs = c.startTimeMs - gap)) // entirely after → ripple
+            else -> buildList {                                            // overlaps the cut → keep the edges
+                if (c.startTimeMs < start) {
+                    val dur = start - c.startTimeMs
+                    if (dur >= MIN_CLIP_DURATION_MS) add(piece(c, 0, dur, c.startTimeMs))
+                }
+                if (c.endTimeMs > end) {
+                    val dur = c.endTimeMs - end
+                    if (dur >= MIN_CLIP_DURATION_MS) add(piece(c, end - c.startTimeMs, dur, start))
+                }
+            }
+        }
+    }
+
+    /** Delete a single clip by id, including its linked shadow audio and any group members. */
+    fun deleteClip(clipId: String) {
+        mutateDocument { doc ->
+            val c = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val ids = expandGroups(doc, listOf(clipId)).toMutableSet()
+            doc.clips.firstOrNull { it.linkedClipId == clipId }?.let { ids.add(it.id) }
+            c.linkedClipId?.let { ids.add(it) }
+            doc.copy(clips = doc.clips.filter { it.id !in ids })
+        }
+        _uiState.update { st -> st.copy(selectedClipIds = st.selectedClipIds.filter { id -> document.clips.any { it.id == id } }) }
     }
 
     private fun trackListFor(doc: Document, type: ClipType): List<String> = when (type) {

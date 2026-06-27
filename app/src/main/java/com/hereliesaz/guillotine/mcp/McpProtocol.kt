@@ -34,3 +34,9 @@ fun stringProp(desc: String = ""): JSONObject = JSONObject().apply {
     put("type", "string")
     if (desc.isNotEmpty()) put("description", desc)
 }
+
+/** Shorthand for a JSON schema integer property. */
+fun intProp(desc: String = ""): JSONObject = JSONObject().apply {
+    put("type", "integer")
+    if (desc.isNotEmpty()) put("description", desc)
+}
