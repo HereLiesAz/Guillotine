@@ -112,10 +112,11 @@ fun PreviewPlayer(
     val backgroundClip = activeVideoClips.firstOrNull { !it.filters.removeBackground }
     val activeVideo = backgroundClip ?: foregroundClip
     val overlayClip = if (backgroundClip != null && foregroundClip != null) foregroundClip else null
-    // Exclude linked shadow clips: their sound is the video's own audio, already played by the
-    // video player — playing them here too would double it.
+    // The preview's video player is muted (picture only), so ALL preview audio is played here —
+    // including a video clip's own sound, via its linked audio clip — through the gain/pan/normalize
+    // pipeline. One audio source, so preview audio can never double.
     val activeAudio = TimelineMath.topActiveClip(
-        clips.filter { it.linkedClipId == null }, ClipType.AUDIO, now, state.document.audioTracks,
+        clips, ClipType.AUDIO, now, state.document.audioTracks,
     )
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val videoTrack = activeVideo?.let { state.document.trackSettingsFor(it.trackId) }
@@ -130,22 +131,11 @@ fun PreviewPlayer(
     val scale = activeVideo?.let {
         TimelineMath.valueAt(it, KeyframeProperty.SCALE, now - it.startTimeMs, 1f)
     } ?: 1f
-    val videoVolume = if (videoTrack?.muted == true) 0f else (activeVideo?.let {
-        TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
-    } ?: 0f) * (videoTrack?.volume ?: 1f)
     val audioVolume = if (audioTrack?.muted == true) 0f else (activeAudio?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
     } ?: 0f) * (audioTrack?.volume ?: 1f)
 
-    // Peak-normalize gains (async; reuse the cached waveform decoder), matching the export. 1 = off.
-    val videoNorm by produceState(1f, videoMedia?.id, activeVideo?.filters?.normalize) {
-        value = if (activeVideo?.filters?.normalize == true && videoMedia != null) {
-            com.hereliesaz.guillotine.media.MediaPreview.waveform(context, videoMedia.uri)
-                ?.let { com.hereliesaz.guillotine.media.MediaPreview.normalizeGain(it) } ?: 1f
-        } else {
-            1f
-        }
-    }
+    // Peak-normalize gain (async; reuse the cached waveform decoder), matching the export. 1 = off.
     val audioNorm by produceState(1f, audioMedia?.id, activeAudio?.filters?.normalize) {
         value = if (activeAudio?.filters?.normalize == true && audioMedia != null) {
             com.hereliesaz.guillotine.media.MediaPreview.waveform(context, audioMedia.uri)
@@ -172,11 +162,11 @@ fun PreviewPlayer(
             runCatching { videoPlayer.setVideoEffects(VideoEffects.build(activeVideo.filters)) }
         }
     }
-    // Gain (incl. normalize boost) + pan go through the processor; keep player.volume at unity.
-    LaunchedEffect(videoVolume, videoNorm, activeVideo?.filters?.pan) {
-        videoPlayer.volume = 1f
-        videoGain.gain = (videoVolume * videoNorm).coerceAtLeast(0f)
-        videoGain.pan = (activeVideo?.filters?.pan ?: 0f).coerceIn(-1f, 1f)
+    // The preview's video player is picture-only and NEVER outputs its own audio — the clip's sound
+    // is played through the audio player above (via its linked audio clip), so this stays muted.
+    LaunchedEffect(Unit) {
+        videoPlayer.volume = 0f
+        videoGain.gain = 0f
     }
     LaunchedEffect(state.playbackRate) { videoPlayer.setPlaybackSpeed(state.playbackRate) }
     LaunchedEffect(state.isPlaying, videoMedia?.id) {

@@ -113,17 +113,23 @@ class MlKitProvider : ClipAnalyzer {
             val refBox = objectVision.detect(reference)
                 .filter { matchesTerm(it.label) }
                 .maxByOrNull { it.score }
-            val refEmbedding = refBox
-                ?.let { crop(reference, it.box) }
-                ?.takeIf { embed.available }
-                ?.let { embed.embed(it) }
+            val refEmbedding = if (refBox != null && embed.available) {
+                crop(reference, refBox.box)?.let { c ->
+                    try { embed.embed(c) } finally { if (c !== reference) c.recycle() }
+                }
+            } else null
 
             val blockFrames = if (objectVision.available) OBJECT_BLOCK_FRAMES else BLOCK_FRAMES
             val match: (Bitmap) -> Boolean = if (refEmbedding != null) {
                 { bmp ->
                     objectVision.detect(bmp).filter { matchesTerm(it.label) }.any { d ->
-                        val c = crop(bmp, d.box)
-                        c != null && embed.embed(c)?.let { embed.similarity(refEmbedding, it) >= REF_THRESHOLD } == true
+                        val c = crop(bmp, d.box) ?: return@any false
+                        try {
+                            val e = embed.embed(c) ?: return@any false
+                            embed.similarity(refEmbedding, e) >= REF_THRESHOLD
+                        } finally {
+                            if (c !== bmp) c.recycle() // free each crop — a long scan makes hundreds
+                        }
                     }
                 }
             } else {

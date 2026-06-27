@@ -1,6 +1,7 @@
 package com.hereliesaz.guillotine.ai
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -73,6 +74,108 @@ object ImageGen {
                 }
             }
             throw IllegalStateException("Leonardo generation timed out.")
+        }
+
+        /**
+         * Inpaint [frame] where [mask] is white, using Leonardo Canvas inpainting (BYO key). Uploads the
+         * frame + mask, runs a canvas INPAINT generation, polls, and downloads the result. [prompt] should
+         * describe the desired clean result (e.g. "clean background, no phone"). The frame/mask are scaled
+         * to a Leonardo-friendly size; the returned image is that size (used as an image clip).
+         */
+        suspend fun inpaint(
+            context: Context,
+            apiKey: String,
+            modelId: String,
+            frame: Bitmap,
+            mask: Bitmap,
+            prompt: String,
+        ): Uri = withContext(Dispatchers.IO) {
+            val key = apiKey.trim()
+            require(key.isNotEmpty()) { "Add your Leonardo API key in Settings to generate replacements." }
+
+            val (w, h) = fitDims(frame.width, frame.height)
+            val initId = uploadImage(key, pngBytes(scaleTo(frame, w, h)))
+            val maskId = uploadImage(key, pngBytes(scaleTo(mask, w, h)))
+
+            val body = JSONObject().apply {
+                put("prompt", prompt)
+                if (modelId.isNotBlank()) put("modelId", modelId)
+                put("width", w); put("height", h)
+                put("num_images", 1)
+                put("canvasRequest", true)
+                put("canvasRequestType", "INPAINT")
+                put("canvasInitId", initId)
+                put("canvasMaskId", maskId)
+            }
+            val created = request("POST", "$BASE/generations", key, body)
+            val genId = JSONObject(created).optJSONObject("sdGenerationJob")?.optString("generationId").orEmpty()
+            if (genId.isEmpty()) throw IllegalStateException("Leonardo did not return a generation id.")
+
+            repeat(90) {
+                delay(2_000)
+                val pollText = request("GET", "$BASE/generations/$genId", key, null)
+                val pk = JSONObject(pollText).optJSONObject("generations_by_pk") ?: return@repeat
+                when (pk.optString("status")) {
+                    "COMPLETE" -> {
+                        val imgs = pk.optJSONArray("generated_images")
+                        val url = if (imgs != null && imgs.length() > 0) imgs.getJSONObject(0).optString("url") else ""
+                        if (url.isBlank()) throw IllegalStateException("Leonardo returned no image.")
+                        return@withContext download(context, url)
+                    }
+                    "FAILED" -> throw IllegalStateException("Leonardo inpainting failed.")
+                }
+            }
+            throw IllegalStateException("Leonardo inpainting timed out.")
+        }
+
+        /** Upload a PNG to Leonardo's init-image endpoint (presigned S3 POST); returns the image id. */
+        private fun uploadImage(key: String, png: ByteArray): String {
+            val init = request("POST", "$BASE/init-image", key, JSONObject().put("extension", "png"))
+            val up = JSONObject(init).getJSONObject("uploadInitImage")
+            val id = up.getString("id")
+            multipartUpload(up.getString("url"), JSONObject(up.getString("fields")), png)
+            return id
+        }
+
+        private fun multipartUpload(url: String, fields: JSONObject, file: ByteArray) {
+            val boundary = "----guillotine${System.currentTimeMillis()}"
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 30_000
+                readTimeout = 120_000
+                setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            }
+            conn.outputStream.use { os ->
+                fun str(s: String) = os.write(s.toByteArray())
+                fields.keys().forEach { k ->
+                    str("--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n${fields.getString(k)}\r\n")
+                }
+                str("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"image.png\"\r\nContent-Type: image/png\r\n\r\n")
+                os.write(file)
+                str("\r\n--$boundary--\r\n")
+                os.flush()
+            }
+            val code = conn.responseCode
+            conn.disconnect()
+            if (code !in 200..299) throw IllegalStateException("Image upload failed ($code).")
+        }
+
+        private fun pngBytes(bmp: Bitmap): ByteArray {
+            val out = java.io.ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+            return out.toByteArray()
+        }
+
+        private fun scaleTo(bmp: Bitmap, w: Int, h: Int): Bitmap =
+            if (bmp.width == w && bmp.height == h) bmp else Bitmap.createScaledBitmap(bmp, w, h, true)
+
+        /** Fit within 1024px on the long edge, dimensions rounded to multiples of 8 (Leonardo requirement). */
+        private fun fitDims(w: Int, h: Int): Pair<Int, Int> {
+            val maxEdge = 1024f
+            val scale = (maxEdge / maxOf(w, h)).coerceAtMost(1f)
+            fun round8(v: Int) = (v / 8 * 8).coerceAtLeast(8)
+            return round8((w * scale).toInt()) to round8((h * scale).toInt())
         }
 
         private fun request(method: String, urlStr: String, apiKey: String, body: JSONObject?): String {

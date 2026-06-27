@@ -8,6 +8,9 @@ import com.hereliesaz.guillotine.ai.MlKitProvider
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.EditSegment
+import com.hereliesaz.guillotine.model.MediaItem
+import com.hereliesaz.guillotine.model.MediaKind
+import com.hereliesaz.guillotine.model.newId
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -87,6 +90,14 @@ class McpTools(
                 "(e.g. \"this is my phone\"). Set the clip's prompt to the object first.",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
         ))
+        put(toolDefinition(
+            "remove_object_generative",
+            "Remove an object by GENERATING replacement frames (cloud, BYO Leonardo key) so the clip stays " +
+                "the SAME length: the object's segments become inpainted image clips grouped with the " +
+                "original pieces. Use when the user wants the object gone but the video kept natural / the " +
+                "same length (NOT cut shorter). Set the clip's prompt to the object first.",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
+        ))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -104,6 +115,7 @@ class McpTools(
         "apply_cuts" -> applyCutsTool(args.getString("clip_id"))
         "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
         "analyze_clip_with_reference" -> analyzeClipWithReference(args.getString("clip_id"))
+        "remove_object_generative" -> removeObjectGenerative(args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -247,6 +259,67 @@ class McpTools(
             put("ok", true); put("clipId", clipId); put("segmentsFound", edits.size)
             put("segments", segmentsJson(edits))
         }
+    }
+
+    private fun removeObjectGenerative(clipId: String): JSONObject {
+        val settings = settingsProvider()
+        val key = settings.leonardoKey
+        require(key.isNotBlank()) { "Add your Leonardo API key in Settings to generate replacements." }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        require(clip.prompt.isNotBlank()) { "Set the clip's prompt to the object to remove first (use set_prompt)." }
+
+        // 1. Object's segments, on-device (the REMOVE ranges), via the normal on-device analyzer.
+        val removes = runBlocking {
+            Analysis.run(context, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs)
+        }.filter { it.action == EditAction.REMOVE }
+        if (removes.isEmpty()) {
+            return JSONObject().apply { put("ok", true); put("replaced", 0); put("note", "No matching object to remove.") }
+        }
+
+        // 2. For each segment: on-device mask from a representative frame -> cloud inpaint -> media.
+        val replacements = runBlocking {
+            removes.mapNotNull { seg ->
+                val frame = grabFrame(Uri.parse(media.uri), (seg.startMs + seg.endMs) / 2) ?: return@mapNotNull null
+                val boxes = com.hereliesaz.guillotine.ai.ObjectVision(context).use { ov ->
+                    ov.detect(frame).filter { matchesPrompt(clip.prompt, it.label) }.map { it.box }
+                }
+                if (boxes.isEmpty()) { frame.recycle(); return@mapNotNull null }
+                val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, boxes)
+                val uri = runCatching {
+                    com.hereliesaz.guillotine.ai.ImageGen.Leonardo.inpaint(
+                        context, key, settings.leonardoModel, frame, mask,
+                        "remove the ${clip.prompt}, clean natural background, photorealistic",
+                    )
+                }.getOrNull()
+                frame.recycle(); mask.recycle()
+                uri?.let {
+                    val relStart = (seg.startMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
+                    val relEnd = (seg.endMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
+                    EditorViewModel.Replacement(
+                        relStart, relEnd,
+                        MediaItem(newId(), it.toString(), "inpaint", MediaKind.IMAGE, relEnd - relStart),
+                    )
+                }
+            }
+        }
+        if (replacements.isEmpty()) throw IllegalStateException("Generation produced no usable replacements.")
+        vm.replaceSegmentsWithGenerated(clipId, replacements)
+        return JSONObject().apply {
+            put("ok", true); put("replaced", replacements.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("totalDurationMs", vm.uiState.value.document.totalDurationMs)
+        }
+    }
+
+    private fun matchesPrompt(prompt: String, label: String): Boolean {
+        val p = prompt.lowercase()
+        return label in p || p.contains(label) ||
+            label.split(" ").any { it.length > 2 && p.contains(it) } ||
+            p.split(" ").any { it.length > 2 && label.contains(it) }
     }
 
     private fun grabFrame(uri: Uri, atMs: Long): android.graphics.Bitmap? {

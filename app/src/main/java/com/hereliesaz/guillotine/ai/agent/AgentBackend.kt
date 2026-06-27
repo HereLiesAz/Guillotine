@@ -58,6 +58,10 @@ internal val AGENT_SYSTEM_PROMPT = """
       ranges become separate clips grouped together and the removed ranges are deleted with the
       timeline closing up (no black gaps). Just marking with analyze_clip/apply_edits does NOT remove
       anything on screen — you must call apply_cuts to make the cut real;
+    - distinguish CUT from ERASE: "cut/delete/trim the frames with X" shortens the clip → apply_cuts.
+      But "remove X but make it look natural / keep the length / like it was never there / erase X" means
+      keep the clip the SAME length and repaint X out → call remove_object_generative (it generates
+      inpainted replacement segments, grouped with the originals);
     - for manual edits use split_clip (at a timeline ms), delete_clip, segment_clip, or
       ripple_delete_range; use select_clip / get_clip as needed.
 
