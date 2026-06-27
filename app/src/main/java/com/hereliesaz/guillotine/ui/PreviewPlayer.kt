@@ -9,7 +9,6 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
@@ -18,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -44,11 +44,13 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.hereliesaz.guillotine.editor.EditorUiState
+import com.hereliesaz.guillotine.media.LiveAudioProcessor
 import com.hereliesaz.guillotine.media.SubjectSegmenter
 import com.hereliesaz.guillotine.media.VideoEffects
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.KeyframeProperty
+import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.TimelineMath
@@ -65,10 +67,16 @@ private const val PLAY_DRIFT_TOLERANCE_MS = 300L
 
 /**
  * The video preview surface. It is slaved to the editor's timeline clock
- * (`state.currentTimeMs`): it picks the active video/audio clips, applies the
- * shared [VideoEffects], animates keyframed opacity/scale, and corrects drift
- * against two ExoPlayer instances (one for picture+its audio, one for separate
- * audio clips — so there is never double audio from a single source).
+ * (`state.currentTimeMs`).
+ *
+ * The picture is composited like a real NLE: **one video layer per video track**
+ * (see [VideoTrackLayer]), stacked bottom-to-top so `videoTracks[0]` is on top.
+ * Each layer crossfades its own overlapping clips and, for background-removed
+ * clips, renders an on-device matte cutout so lower tracks show through.
+ *
+ * Audio is separate and unified: a single muted picture path plus one [audioPlayer]
+ * that sources ALL audio (including a video clip's own sound via its linked audio
+ * clip) through the gain/pan/normalize pipeline — so preview audio can never double.
  */
 @Composable
 fun PreviewPlayer(
@@ -79,58 +87,32 @@ fun PreviewPlayer(
 ) {
     val context = LocalContext.current
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
-    // Live gain+pan processors so preview can boost (normalize) and pan, which ExoPlayer.volume can't.
-    val videoGain = remember { com.hereliesaz.guillotine.media.LiveAudioProcessor() }
-    val audioGain = remember { com.hereliesaz.guillotine.media.LiveAudioProcessor() }
-    val videoPlayer = remember {
-        ExoPlayer.Builder(context)
-            .setRenderersFactory(com.hereliesaz.guillotine.media.previewRenderersFactory(context, videoGain))
-            .build()
-    }
+    // Live gain+pan processor so preview can boost (normalize) and pan, which ExoPlayer.volume can't.
+    val audioGain = remember { LiveAudioProcessor() }
     val audioPlayer = remember {
         ExoPlayer.Builder(context)
             .setRenderersFactory(com.hereliesaz.guillotine.media.previewRenderersFactory(context, audioGain))
             .build()
     }
-
     DisposableEffect(Unit) {
-        onDispose {
-            videoPlayer.release()
-            audioPlayer.release()
-        }
+        onDispose { audioPlayer.release() }
     }
 
     val now = state.currentTimeMs
     // Disabled/hidden tracks drop out entirely.
     val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
-    // Layer-aware compositing: the player shows the topmost non-removed (background) video;
-    // a background-removed clip above it is overlaid as a matted cutout so the background
-    // shows through. With no background, the removed clip just plays normally.
-    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
-        .sortedBy { state.document.videoTracks.indexOf(it.trackId).let { i -> if (i < 0) Int.MAX_VALUE else i } }
-    val foregroundClip = activeVideoClips.firstOrNull { it.filters.removeBackground }
-    val backgroundClip = activeVideoClips.firstOrNull { !it.filters.removeBackground }
-    val activeVideo = backgroundClip ?: foregroundClip
-    val overlayClip = if (backgroundClip != null && foregroundClip != null) foregroundClip else null
-    // The preview's video player is muted (picture only), so ALL preview audio is played here —
+
+    // The preview's video layers are muted (picture only), so ALL preview audio is played here —
     // including a video clip's own sound, via its linked audio clip — through the gain/pan/normalize
     // pipeline. One audio source, so preview audio can never double.
     val activeAudio = TimelineMath.topActiveClip(
         clips, ClipType.AUDIO, now, state.document.audioTracks,
     )
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
-    val videoTrack = activeVideo?.let { state.document.trackSettingsFor(it.trackId) }
+    val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
     val audioTrack = activeAudio?.let { state.document.trackSettingsFor(it.trackId) }
-    val videoMedia = activeVideo?.let { state.document.mediaFor(it) }
     val audioMedia = activeAudio?.let { state.document.mediaFor(it) }
 
-    // Keyframed view-layer values for the active video clip, scaled by whole-track settings.
-    val opacity = (activeVideo?.let {
-        TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
-    } ?: 1f) * (videoTrack?.opacity ?: 1f)
-    val scale = activeVideo?.let {
-        TimelineMath.valueAt(it, KeyframeProperty.SCALE, now - it.startTimeMs, 1f)
-    } ?: 1f
     val audioVolume = if (audioTrack?.muted == true) 0f else (activeAudio?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
     } ?: 0f) * (audioTrack?.volume ?: 1f)
@@ -144,35 +126,6 @@ fun PreviewPlayer(
             1f
         }
     }
-
-    // ---- video player wiring ----
-    LaunchedEffect(videoMedia?.id) {
-        val clip = activeVideo
-        if (videoMedia == null || clip == null) {
-            videoPlayer.stop()
-            videoPlayer.clearMediaItems()
-        } else {
-            videoPlayer.setMediaItem(buildExoItem(videoMedia.uri, videoMedia.kind, clip.durationMs))
-            videoPlayer.prepare()
-            videoPlayer.seekTo(TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0))
-        }
-    }
-    LaunchedEffect(activeVideo?.id, activeVideo?.filters) {
-        if (activeVideo != null) {
-            runCatching { videoPlayer.setVideoEffects(VideoEffects.build(activeVideo.filters)) }
-        }
-    }
-    // The preview's video player is picture-only and NEVER outputs its own audio — the clip's sound
-    // is played through the audio player above (via its linked audio clip), so this stays muted.
-    LaunchedEffect(Unit) {
-        videoPlayer.volume = 0f
-        videoGain.gain = 0f
-    }
-    LaunchedEffect(state.playbackRate) { videoPlayer.setPlaybackSpeed(state.playbackRate) }
-    LaunchedEffect(state.isPlaying, videoMedia?.id) {
-        videoPlayer.playWhenReady = state.isPlaying && videoMedia != null
-    }
-    syncPosition(videoPlayer, activeVideo, now, state.isPlaying)
 
     // ---- audio player wiring ----
     LaunchedEffect(audioMedia?.id) {
@@ -224,61 +177,28 @@ fun PreviewPlayer(
             .then(cropModifier),
         contentAlignment = Alignment.Center,
     ) {
-        if (videoMedia == null) {
+        if (!anyActiveVideo) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
-        } else {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        setBackgroundColor(android.graphics.Color.BLACK)
-                        player = videoPlayer
-                    }
-                },
-                modifier = aspectMod
-                    .wrapContentSize()
-                    .graphicsLayer {
-                        alpha = opacity.coerceIn(0f, 1f)
-                        // Keyframed scale × crop-tool base scale; crop offset translates it.
-                        val s = (scale * (activeVideo?.scale ?: 1f)).coerceAtLeast(0f)
-                        scaleX = s
-                        scaleY = s
-                        rotationZ = activeVideo?.rotation ?: 0f
-                        translationX = (activeVideo?.offsetX ?: 0f) * size.width
-                        translationY = (activeVideo?.offsetY ?: 0f) * size.height
-                    },
-            )
         }
-        // Background-removed foreground composited over the background video. The matte is
-        // computed on-device per ~150 ms bucket (crisp when paused, frame-coarse while playing).
-        val fgMedia = overlayClip?.let { state.document.mediaFor(it) }
-        if (overlayClip != null && fgMedia != null) {
-            val bucket = now / 150L
-            val cutout by produceState<ImageBitmap?>(null, overlayClip.id, bucket) {
-                val src = TimelineMath.sourceTimeMs(overlayClip, now).coerceAtLeast(0)
-                value = SubjectSegmenter.cutout(context, fgMedia.uri, fgMedia.kind, src)?.asImageBitmap()
-            }
-            cutout?.let { cb ->
-                Image(
-                    bitmap = cb,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = aspectMod
-                        .wrapContentSize()
-                        .graphicsLayer {
-                            val s = overlayClip.scale.coerceAtLeast(0f)
-                            scaleX = s
-                            scaleY = s
-                            rotationZ = overlayClip.rotation
-                            translationX = overlayClip.offsetX * size.width
-                            translationY = overlayClip.offsetY * size.height
-                        },
+        // One video layer per video track, stacked bottom-to-top: reverse the track order so
+        // videoTracks[0] (top of the panel) is rendered LAST and ends up on top. Each layer owns
+        // its own players (released when its track leaves composition), so deleting a track is clean.
+        state.document.videoTracks.asReversed().forEach { trackId ->
+            key(trackId) {
+                VideoTrackLayer(
+                    trackId = trackId,
+                    clips = clips,
+                    trackSettings = state.document.trackSettingsFor(trackId),
+                    mediaFor = state.document::mediaFor,
+                    now = now,
+                    isPlaying = state.isPlaying,
+                    playbackRate = state.playbackRate,
+                    aspectMod = aspectMod,
                 )
             }
         }
         // Caption/text overlay — each text clip positioned/scaled by its crop transform
-        // (offset from center as a fraction of the frame), rendered on top of the video.
+        // (offset from center as a fraction of the frame), rendered on top of every video layer.
         activeText.forEach { t ->
             Text(
                 t.text,
@@ -300,6 +220,187 @@ fun PreviewPlayer(
             )
         }
     }
+}
+
+/**
+ * One composited video layer for a single video track. Owns two muted, picture-only
+ * ExoPlayers so it can crossfade its own overlapping clips (outgoing + incoming).
+ * A background-removed clip is rendered as an on-device matte cutout instead of a raw
+ * player surface, so the tracks below show through its transparent areas.
+ *
+ * The players are created here and released in [DisposableEffect] when this track leaves
+ * composition (e.g. the track is deleted), so there is no manual player pool to manage.
+ */
+@Composable
+private fun VideoTrackLayer(
+    trackId: String,
+    clips: List<TimelineClip>,
+    trackSettings: com.hereliesaz.guillotine.model.TrackSettings,
+    mediaFor: (TimelineClip) -> MediaItem?,
+    now: Long,
+    isPlaying: Boolean,
+    playbackRate: Float,
+    aspectMod: Modifier,
+) {
+    val context = LocalContext.current
+    val gainA = remember { LiveAudioProcessor() }
+    val gainB = remember { LiveAudioProcessor() }
+    val playerA = remember {
+        ExoPlayer.Builder(context)
+            .setRenderersFactory(com.hereliesaz.guillotine.media.previewRenderersFactory(context, gainA))
+            .build()
+    }
+    val playerB = remember {
+        ExoPlayer.Builder(context)
+            .setRenderersFactory(com.hereliesaz.guillotine.media.previewRenderersFactory(context, gainB))
+            .build()
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            playerA.release()
+            playerB.release()
+        }
+    }
+
+    // This track's active clips, earliest first. Two overlapping = a crossfade region
+    // (outgoing fades out, incoming fades in across the overlap); >2 is degenerate, take the first two.
+    val active = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+        .filter { it.trackId == trackId }
+        .sortedBy { it.startTimeMs }
+    val outgoing = active.getOrNull(0)
+    val incoming = active.getOrNull(1)
+    // Crossfade progress 0..1 across the overlap [incoming.start, outgoing.end); null when not crossfading.
+    val xfade = if (outgoing != null && incoming != null) {
+        val span = (outgoing.endTimeMs - incoming.startTimeMs).coerceAtLeast(1)
+        ((now - incoming.startTimeMs).toFloat() / span).coerceIn(0f, 1f)
+    } else {
+        null
+    }
+
+    // A bg-removed clip is drawn as a cutout (no player surface), so don't keep a decoder running for it.
+    val playClipA = outgoing?.takeIf { !it.filters.removeBackground }
+    val playClipB = incoming?.takeIf { !it.filters.removeBackground }
+    wireVideoPlayer(playerA, gainA, playClipA, playClipA?.let(mediaFor), now, isPlaying, playbackRate)
+    wireVideoPlayer(playerB, gainB, playClipB, playClipB?.let(mediaFor), now, isPlaying, playbackRate)
+
+    // On-device matte cutouts for background-removed clips, recomputed per ~150 ms bucket
+    // (crisp when paused, frame-coarse while playing). Null unless the clip removes its background.
+    val bucket = now / 150L
+    val cutoutA by produceState<ImageBitmap?>(null, outgoing?.id, outgoing?.filters?.removeBackground, bucket) {
+        value = cutoutFor(context, outgoing, mediaFor, now)
+    }
+    val cutoutB by produceState<ImageBitmap?>(null, incoming?.id, incoming?.filters?.removeBackground, bucket) {
+        value = cutoutFor(context, incoming, mediaFor, now)
+    }
+
+    val trackOpacity = trackSettings.opacity
+    // Outgoing fades out as xfade 0 -> 1; a lone clip stays fully opaque.
+    val opacityA = outgoing?.let {
+        TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
+    }?.times(trackOpacity)?.times(1f - (xfade ?: 0f)) ?: 0f
+    // Incoming fades IN over the same overlap.
+    val opacityB = incoming?.let {
+        TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
+    }?.times(trackOpacity)?.times(xfade ?: 0f) ?: 0f
+
+    VideoSlot(outgoing, playerA, cutoutA, opacityA, now, aspectMod, transparent = false)
+    VideoSlot(incoming, playerB, cutoutB, opacityB, now, aspectMod, transparent = true)
+}
+
+/** Compute a background-removal cutout for [clip], or null when the clip doesn't remove its background. */
+private suspend fun cutoutFor(
+    context: android.content.Context,
+    clip: TimelineClip?,
+    mediaFor: (TimelineClip) -> MediaItem?,
+    now: Long,
+): ImageBitmap? {
+    if (clip == null || !clip.filters.removeBackground) return null
+    val media = mediaFor(clip) ?: return null
+    val src = TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0)
+    return SubjectSegmenter.cutout(context, media.uri, media.kind, src)?.asImageBitmap()
+}
+
+/**
+ * Render one clip's picture: a background-removed clip becomes a matte [cutout] [Image]
+ * (transparent where the subject isn't), otherwise the [player]'s [PlayerView]. Keyframed
+ * scale × crop transform and [alpha] are applied via a shared graphics layer.
+ */
+@Composable
+private fun VideoSlot(
+    clip: TimelineClip?,
+    player: ExoPlayer,
+    cutout: ImageBitmap?,
+    alpha: Float,
+    now: Long,
+    aspectMod: Modifier,
+    transparent: Boolean,
+) {
+    if (clip == null) return
+    val mod = aspectMod
+        .wrapContentSize()
+        .graphicsLayer {
+            this.alpha = alpha.coerceIn(0f, 1f)
+            // Keyframed scale × crop-tool base scale; crop offset translates it.
+            val s = (TimelineMath.valueAt(clip, KeyframeProperty.SCALE, now - clip.startTimeMs, 1f) *
+                clip.scale).coerceAtLeast(0f)
+            scaleX = s
+            scaleY = s
+            rotationZ = clip.rotation
+            translationX = clip.offsetX * size.width
+            translationY = clip.offsetY * size.height
+        }
+    if (clip.filters.removeBackground) {
+        cutout?.let { cb ->
+            Image(bitmap = cb, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
+        }
+    } else {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    setBackgroundColor(
+                        if (transparent) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK,
+                    )
+                    this.player = player
+                }
+            },
+            modifier = mod,
+        )
+    }
+}
+
+/** Wire a muted, picture-only ExoPlayer to [clip] (or clear it when [clip]/[media] is null). */
+@Composable
+private fun wireVideoPlayer(
+    player: ExoPlayer,
+    gain: LiveAudioProcessor,
+    clip: TimelineClip?,
+    media: MediaItem?,
+    now: Long,
+    isPlaying: Boolean,
+    playbackRate: Float,
+) {
+    LaunchedEffect(media?.id) {
+        if (media == null || clip == null) {
+            player.stop()
+            player.clearMediaItems()
+        } else {
+            player.setMediaItem(buildExoItem(media.uri, media.kind, clip.durationMs))
+            player.prepare()
+            player.seekTo(TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0))
+        }
+    }
+    LaunchedEffect(clip?.id, clip?.filters) {
+        if (clip != null) runCatching { player.setVideoEffects(VideoEffects.build(clip.filters)) }
+    }
+    // Picture-only and NEVER outputs its own audio — the clip's sound plays through the audio player.
+    LaunchedEffect(Unit) { player.volume = 0f; gain.gain = 0f }
+    LaunchedEffect(playbackRate) { player.setPlaybackSpeed(playbackRate) }
+    LaunchedEffect(isPlaying, media?.id) {
+        player.playWhenReady = isPlaying && media != null
+    }
+    syncPosition(player, clip, now, isPlaying)
 }
 
 /** Build a Media3 item; images become timed image items so one path handles all kinds. */
