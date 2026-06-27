@@ -266,19 +266,25 @@ object Exporter {
             videoClips.any { it.trackId == tid && document.mediaFor(it) != null }
         }
         val multiTrack = foreground.isEmpty() && tracksWithVideo.size >= 2
+        // Common zero across every composited track so they stay time-aligned; also the time base for
+        // the composition-level caption overlays below (composition time 0 == this timeline instant).
+        val globalZero = if (multiTrack) {
+            videoClips.filter { document.mediaFor(it) != null }.minOf { it.startTimeMs }
+        } else {
+            0L
+        }
 
         val videoSequences: List<EditedMediaItemSequence> = if (multiTrack) {
-            // Common zero across every composited track so they stay time-aligned. Bottom track first
-            // (asReversed: videoTracks index 0 is the top of the panel), top track last = on top.
-            val globalZero = videoClips.filter { document.mediaFor(it) != null }.minOf { it.startTimeMs }
-            val bottomTrack = tracksWithVideo.last()
+            // Bottom track first (asReversed: videoTracks index 0 is the top of the panel), top track
+            // last = on top. Overlays are NOT attached per track here — a caption on a lower track would
+            // hide under upper tracks and vanish in that track's gaps — they go on the Composition below.
             tracksWithVideo.asReversed().mapNotNull { tid ->
                 val seq = EditedMediaItemSequence.Builder()
                 val any = appendVideoItems(
                     seq,
                     videoClips.filter { it.trackId == tid },
                     globalZero,
-                    withOverlays = tid == bottomTrack,
+                    withOverlays = false,
                 )
                 if (any) seq.build() else null
             }
@@ -331,7 +337,14 @@ object Exporter {
 
         val sequences = videoSequences.toMutableList()
         if (addedAudio) sequences += audioSeq.build()
-        return Composition.Builder(sequences).build()
+        val composition = Composition.Builder(sequences)
+        // Multi-track captions composite over the FINAL stacked video (not a single track), so they sit
+        // on top of every layer and survive gaps in any one track. (Single-track keeps its per-item
+        // overlays; the matte never applies here since multi-track requires no bg-removal composite.)
+        if (multiTrack) {
+            overlaysFor(globalZero)?.let { composition.setEffects(Effects(emptyList(), listOf(it))) }
+        }
+        return composition.build()
     }
 
     /**
