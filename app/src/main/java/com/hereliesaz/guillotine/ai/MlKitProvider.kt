@@ -45,10 +45,12 @@ class MlKitProvider : ClipAnalyzer {
         if (kind == MediaKind.AUDIO) {
             throw IllegalStateException("On-device vision analyzes video and images. For audio, use the free Local analyzer.")
         }
-        val intent = parseIntent(prompt)
-        if (!intent.useFaces && intent.terms.isEmpty()) {
-            throw IllegalStateException("Tell on-device vision what to look for, e.g. \"keep shots with a face\" or \"cut clips with a car\".")
+        val parsed = parseIntent(prompt)
+        if (!parsed.useFaces && parsed.terms.isEmpty()) {
+            throw IllegalStateException("Tell on-device vision what to look for, e.g. \"keep shots with a face\" or \"cut clips with a phone\".")
         }
+        // Map common words to COCO category names ("phone" -> "cell phone") so object detection matches.
+        val intent = parsed.copy(terms = expandTerms(parsed.terms))
 
         val labeler = ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS)
         val faceDetector = if (intent.useFaces) {
@@ -58,21 +60,27 @@ class MlKitProvider : ClipAnalyzer {
                     .build(),
             )
         } else null
+        // Precise bounding-box COCO detection for object terms (face intents stay on the face detector).
+        val objectVision = if (intent.useFaces) null else ObjectVision(context)
+        // Scan denser + claim a tighter window when real object detection is driving the match, so brief
+        // or partial appearances aren't skipped and cut boundaries hug the actual range.
+        val blockFrames = if (objectVision?.available == true) OBJECT_BLOCK_FRAMES else BLOCK_FRAMES
 
         try {
             if (kind == MediaKind.IMAGE) {
                 val bmp = decodeImage(context, mediaUri)
                     ?: throw IllegalStateException("Could not read image for on-device vision.")
-                val match = qualifies(bmp, intent, labeler, faceDetector)
+                val match = qualifies(bmp, intent, labeler, faceDetector, objectVision)
                 bmp.recycle()
                 val action = if (match == intent.keepMatches) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, if (match) "match" else "no match"))
             } else {
-                scanVideo(context, mediaUri, durationMs, intent, labeler, faceDetector, onProgress)
+                scanVideo(context, mediaUri, durationMs, intent, labeler, faceDetector, objectVision, blockFrames, onProgress)
             }
         } finally {
             labeler.close()
             faceDetector?.close()
+            objectVision?.close()
         }
     }
 
@@ -84,6 +92,8 @@ class MlKitProvider : ClipAnalyzer {
         intent: Intent,
         labeler: com.google.mlkit.vision.label.ImageLabeler,
         faceDetector: com.google.mlkit.vision.face.FaceDetector?,
+        objectVision: ObjectVision?,
+        blockFrames: Int,
         onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> {
         val retriever = MediaMetadataRetriever()
@@ -100,10 +110,10 @@ class MlKitProvider : ClipAnalyzer {
 
             // Check 1 frame, skip BLOCK, check the (BLOCK+1)th. Widen the step for very long
             // clips so we never exceed MAX_CHECKS frame grabs.
-            var stepMs = ((BLOCK_FRAMES + 1) * frameMs).toLong().coerceAtLeast(1L)
+            var stepMs = ((blockFrames + 1) * frameMs).toLong().coerceAtLeast(1L)
             if (dur / stepMs > MAX_CHECKS) stepMs = (dur / MAX_CHECKS).coerceAtLeast(1L)
-            // Each match claims ±BLOCK frames, but at least half a step so consecutive matches stay contiguous.
-            val halfMs = max((BLOCK_FRAMES * frameMs).toLong(), stepMs / 2 + 1)
+            // Each match claims ±block frames, but at least half a step so consecutive matches stay contiguous.
+            val halfMs = max((blockFrames * frameMs).toLong(), stepMs / 2 + 1)
 
             val totalChecks = (dur / stepMs).coerceAtMost(MAX_CHECKS.toLong())
             var t = 0L
@@ -112,7 +122,7 @@ class MlKitProvider : ClipAnalyzer {
             while (t <= dur && checks < MAX_CHECKS) {
                 val bmp = retriever.getFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (bmp != null) {
-                    if (qualifies(bmp, intent, labeler, faceDetector)) {
+                    if (qualifies(bmp, intent, labeler, faceDetector, objectVision)) {
                         matched += (t - halfMs).coerceAtLeast(0L)..(t + halfMs).coerceAtMost(dur)
                         matchCount++
                     }
@@ -139,17 +149,25 @@ class MlKitProvider : ClipAnalyzer {
         intent: Intent,
         labeler: com.google.mlkit.vision.label.ImageLabeler,
         faceDetector: com.google.mlkit.vision.face.FaceDetector?,
+        objectVision: ObjectVision?,
     ): Boolean {
+        if (intent.useFaces && faceDetector != null) {
+            val image = InputImage.fromBitmap(bmp, 0)
+            return Tasks.await(faceDetector.process(image)).isNotEmpty()
+        }
+        // Primary signal: precise COCO object detection (catches non-prominent / partial objects).
+        if (objectVision != null && objectVision.available) {
+            if (objectVision.labels(bmp).any { o -> intent.terms.any { t -> o.contains(t) || t.contains(o) } }) {
+                return true
+            }
+        }
+        // Fallback: whole-image scene/object labeling for terms the COCO detector doesn't cover.
         val image = InputImage.fromBitmap(bmp, 0)
-        return if (intent.useFaces && faceDetector != null) {
-            Tasks.await(faceDetector.process(image)).isNotEmpty()
-        } else {
-            val labels = Tasks.await(labeler.process(image))
-            labels.any { l ->
-                l.confidence >= 0.5f && intent.terms.any { t ->
-                    val text = l.text.lowercase()
-                    text.contains(t) || t.contains(text)
-                }
+        val labels = Tasks.await(labeler.process(image))
+        return labels.any { l ->
+            l.confidence >= 0.5f && intent.terms.any { t ->
+                val text = l.text.lowercase()
+                text.contains(t) || t.contains(text)
             }
         }
     }
@@ -175,6 +193,10 @@ class MlKitProvider : ClipAnalyzer {
             .distinct().toList()
         return Intent(terms, keepMatches, useFaces)
     }
+
+    /** Add COCO category names for common synonyms so object detection matches everyday words. */
+    private fun expandTerms(terms: List<String>): List<String> =
+        (terms + terms.mapNotNull { ALIASES[it] }).distinct()
 
     private fun mergeRanges(ranges: List<LongRange>): List<LongRange> {
         if (ranges.isEmpty()) return emptyList()
@@ -208,6 +230,16 @@ class MlKitProvider : ClipAnalyzer {
 
     private companion object {
         const val BLOCK_FRAMES = 10
+        // Denser stride when COCO object detection drives the match (it's fast and we want tight cuts).
+        const val OBJECT_BLOCK_FRAMES = 3
         const val MAX_CHECKS = 600
+
+        /** Everyday word -> COCO category name. Substring matching covers the rest (e.g. "car"). */
+        val ALIASES = mapOf(
+            "phone" to "cell phone", "cellphone" to "cell phone", "smartphone" to "cell phone",
+            "mobile" to "cell phone", "iphone" to "cell phone", "android" to "cell phone",
+            "television" to "tv", "telly" to "tv",
+            "computer" to "laptop", "sofa" to "couch", "remote" to "remote",
+        )
     }
 }
