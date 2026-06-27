@@ -128,7 +128,7 @@ object Exporter {
      * Build the export composition: one or more video sequences (kept ranges of video clips + image
      * clips) plus a separate audio sequence for standalone audio-track clips. When the opaque layers
      * can't be flattened into one sequence — several background tracks, or two clips overlapping on one
-     * track — an "advanced" path builds one sequence per track *lane* (2 lanes/track) composited
+     * track — an "advanced" path builds one sequence per track *lane* (a lane per overlap depth) composited
      * bottom-to-top (top-of-panel track on top, matching the preview), **crossfades** overlapping clips
      * by ramping the incoming clip in over a held outgoing clip (via [VideoEffects.fadeIn]), and draws
      * the **background-removal subjects + captions over the final composite** as Composition-level
@@ -264,8 +264,8 @@ object Exporter {
 
         // Video sequences. The "advanced" compositor kicks in when the OPAQUE (background) layers can't
         // be expressed as one flattened sequence: several background tracks, or two background clips
-        // overlapping on one track (a crossfade). It builds one sequence per track *lane* (2 lanes per
-        // track so an overlap can crossfade), composites them bottom-to-top, ramps the incoming clip in
+        // overlapping on one track (a crossfade). It builds one sequence per track *lane* (a track gets
+        // a lane per simultaneous-overlap depth), composites them bottom-to-top, ramps the incoming clip in
         // with VideoEffects.fadeIn over a held outgoing clip, and draws the background-removal subjects +
         // captions over the FINAL composite as Composition-level overlays. Otherwise (single background
         // track, no overlap — incl. the classic foreground-over-one-background matte) we keep the
@@ -292,24 +292,26 @@ object Exporter {
             0L
         }
 
-        // Split a track's opaque clips into 2 lanes so overlapping clips land on different sequences and
-        // can crossfade. Lane 0 carries non-overlapping clips; an overlapping (incoming) clip goes to the
-        // other lane and gets a fade-in window over its overlap with the previous clip. Alternating lanes
-        // keeps chains from colliding on one lane (3+ simultaneous overlaps degrade to a cut — rare).
+        // Split a track's opaque clips into lanes so overlapping clips land on different sequences and
+        // can crossfade. Each lane's running end time is tracked independently; a clip is placed on the
+        // lowest lane that is FREE at its start AND above the top (highest) lane it overlaps — a fresh
+        // lane only when none qualifies — so no two clips on a lane ever overlap (no invalid sequence)
+        // and the incoming clip always composites on top of the one it dissolves from. It fades in over
+        // that top overlapping clip. Lane count = max simultaneous overlap depth (1–2 in practice).
         fun laneLayout(trackClips: List<TimelineClip>): List<Triple<TimelineClip, Int, LongRange?>> {
             val out = ArrayList<Triple<TimelineClip, Int, LongRange?>>()
-            var prevEnd = Long.MIN_VALUE
-            var prevLane = 0
+            val laneEnds = ArrayList<Long>() // running end-time of the clip currently on each lane
             trackClips.sortedBy { it.startTimeMs }.forEach { c ->
-                if (c.startTimeMs >= prevEnd) {
-                    out += Triple(c, 0, null)
-                    prevLane = 0
-                } else {
-                    val lane = 1 - prevLane
-                    out += Triple(c, lane, c.startTimeMs..minOf(c.endTimeMs, prevEnd))
-                    prevLane = lane
-                }
-                prevEnd = c.endTimeMs
+                // Top lane whose clip is still playing at c.start = the clip c dissolves from (-1 = none).
+                var topOverlap = -1
+                var topOverlapEnd = Long.MIN_VALUE
+                for (i in laneEnds.indices) if (laneEnds[i] > c.startTimeMs) { topOverlap = i; topOverlapEnd = laneEnds[i] }
+                // Lowest free lane strictly above the top overlapping lane; else a new lane.
+                var lane = ((topOverlap + 1) until laneEnds.size).firstOrNull { laneEnds[it] <= c.startTimeMs }
+                    ?: laneEnds.size.also { laneEnds.add(Long.MIN_VALUE) }
+                val fade = if (topOverlap >= 0) c.startTimeMs..minOf(c.endTimeMs, topOverlapEnd) else null
+                out += Triple(c, lane, fade)
+                laneEnds[lane] = c.endTimeMs
             }
             return out
         }
@@ -323,7 +325,9 @@ object Exporter {
                 bgTracks.asReversed().forEach { tid ->
                     val layout = laneLayout(background.filter { it.trackId == tid && document.mediaFor(it) != null })
                     val fadeByClip = layout.associate { (c, _, fade) -> c.id to fade }
-                    for (lane in 0..1) {
+                    val laneCount = (layout.maxOfOrNull { it.second } ?: -1) + 1
+                    // Lane 0 first (composite base), higher lanes on top (incoming dissolves over outgoing).
+                    for (lane in 0 until laneCount) {
                         val laneClips = layout.filter { it.second == lane }.map { it.first }
                         if (laneClips.isEmpty()) continue
                         val seq = EditedMediaItemSequence.Builder()
