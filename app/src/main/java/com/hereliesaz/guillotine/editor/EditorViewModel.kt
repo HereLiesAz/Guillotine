@@ -348,7 +348,13 @@ class EditorViewModel : ViewModel() {
             val videoPieces = cutPieces(c, rel, gid)
             if (videoPieces.isEmpty()) return@mutateDocument doc
             val removedTotal = c.durationMs - videoPieces.sumOf { it.durationMs }
-            val shadowPieces = shadow?.let { cutPieces(it, rel, gid) } ?: emptyList()
+            // Re-link each shadow-audio piece to its video piece so preview/export keep treating it as a
+            // skipped shadow (otherwise the audio would play twice).
+            val shadowPieces = shadow?.let { sh ->
+                cutPieces(sh, rel, gid).mapIndexed { i, s ->
+                    videoPieces.getOrNull(i)?.let { s.copy(linkedClipId = it.id) } ?: s
+                }
+            } ?: emptyList()
             val replaced = setOfNotNull(c.id, shadow?.id)
             val origEnd = c.endTimeMs
             val rest = doc.clips.flatMap { cl ->
@@ -360,6 +366,62 @@ class EditorViewModel : ViewModel() {
                 }
             }
             doc.copy(clips = rest + videoPieces + shadowPieces)
+        }
+        _uiState.update { it.copy(selectedClipIds = emptyList()) }
+    }
+
+    /** A generated replacement for a clip-relative range: [relStartMs, relEndMs) -> [media] (e.g. inpaint). */
+    data class Replacement(val relStartMs: Long, val relEndMs: Long, val media: MediaItem)
+
+    /**
+     * Replace clip-relative ranges of [clipId] with generated media (e.g. inpainted frames) while keeping
+     * the clip the SAME length: the clip is split at the range boundaries, replaced ranges become clips
+     * referencing the new media and the rest stay original pieces, all grouped and at their original
+     * positions/durations. Used by the AI for "remove X but keep it natural / keep the length". One undo
+     * step. (Audio is untouched here — see remove_object_generative notes.)
+     */
+    fun replaceSegmentsWithGenerated(clipId: String, replacements: List<Replacement>) {
+        if (replacements.isEmpty()) return
+        mutateDocument { doc ->
+            val c = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val bounds = sortedSetOf(0L, c.durationMs)
+            replacements.forEach {
+                bounds.add(it.relStartMs.coerceIn(0, c.durationMs))
+                bounds.add(it.relEndMs.coerceIn(0, c.durationMs))
+            }
+            val cuts = bounds.toList()
+            val gid = newId()
+            val pieces = mutableListOf<TimelineClip>()
+            for (i in 0 until cuts.size - 1) {
+                val relStart = cuts[i]
+                val relEnd = cuts[i + 1]
+                val dur = relEnd - relStart
+                if (dur < MIN_CLIP_DURATION_MS) continue
+                val repl = replacements.firstOrNull { relStart >= it.relStartMs && relEnd <= it.relEndMs }
+                if (repl != null) {
+                    // Generated replacement: an image clip of the same span (object removed).
+                    pieces += c.copy(
+                        id = newId(),
+                        mediaId = repl.media.id,
+                        startTimeMs = c.startTimeMs + relStart,
+                        trimStartMs = 0,
+                        durationMs = dur,
+                        edits = emptyList(),
+                        keyframes = emptyList(),
+                        groupId = gid,
+                        linkedClipId = null,
+                        prompt = "",
+                    )
+                } else {
+                    pieces += piece(c, relStart, dur, c.startTimeMs + relStart, gid)
+                }
+            }
+            if (pieces.isEmpty()) return@mutateDocument doc
+            val newMedia = replacements.map { it.media }.filter { m -> doc.mediaItems.none { it.id == m.id } }
+            doc.copy(
+                mediaItems = doc.mediaItems + newMedia,
+                clips = doc.clips.flatMap { if (it.id == clipId) pieces else listOf(it) },
+            )
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
     }
