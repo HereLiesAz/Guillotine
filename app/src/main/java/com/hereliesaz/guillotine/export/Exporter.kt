@@ -125,8 +125,11 @@ object Exporter {
     }
 
     /**
-     * Build the export composition: a video sequence (kept ranges of video clips + image clips),
-     * plus a separate audio sequence for standalone audio-track clips. Project crop + aspect apply
+     * Build the export composition: one or more video sequences (kept ranges of video clips + image
+     * clips) plus a separate audio sequence for standalone audio-track clips. With several video
+     * tracks and no background-removal composite, each track becomes its own sequence composited
+     * bottom-to-top (top-of-panel track on top), matching the multi-track preview; otherwise a single
+     * flattened sequence + matte overlay is used. Project crop + aspect apply
      * to every video clip via [VideoEffects.geometry]. Per clip/item this bakes in: color filters,
      * the Crop-tool transform, keyframed opacity/scale (via [VideoEffects.keyframeEffects]),
      * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
@@ -179,64 +182,117 @@ object Exporter {
             }
         }
 
-        fun videoEffectsFor(clip: TimelineClip, clipLocalStartMs: Long, timelineStartMs: Long): Effects {
+        fun videoEffectsFor(
+            clip: TimelineClip,
+            clipLocalStartMs: Long,
+            timelineStartMs: Long,
+            withOverlays: Boolean,
+        ): Effects {
             val ts = document.trackSettingsFor(clip.trackId)
             val alpha = if (ts.opacity < 1f) listOf(AlphaScale(ts.opacity)) else emptyList()
             val transform = VideoEffects.transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY)
             val keyframes = VideoEffects.keyframeEffects(clip, clipLocalStartMs)
-            val overlay = listOfNotNull(overlaysFor(timelineStartMs))
+            val overlay = if (withOverlays) listOfNotNull(overlaysFor(timelineStartMs)) else emptyList()
             return Effects(
                 audioFor(clip, clipLocalStartMs),
                 VideoEffects.build(clip.filters) + transform + keyframes + geometry + overlay + alpha,
             )
         }
 
-        // Video sequence with clips at their timeline positions: gaps fill the space between
-        // clips. The sequence is zeroed to its first clip (Media3 1.5 can't lead with a gap),
-        // so the earliest clip starts the output; inter-clip spacing is preserved.
-        val videoSeq = EditedMediaItemSequence.Builder()
-        var videoCursor = baseClips.firstOrNull()?.startTimeMs ?: 0L
-        var addedVideo = false
-        baseClips.forEach { clip ->
-            val media = document.mediaFor(clip) ?: return@forEach
-            val gap = clip.startTimeMs - videoCursor
-            if (gap > 0) { videoSeq.addGap(gap * 1000); videoCursor += gap }
-            if (media.kind == MediaKind.IMAGE) {
-                val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
-                val mediaItem = ExoMediaItem.Builder()
-                    .setUri(Uri.parse(media.uri))
-                    .setImageDurationMs(dur)
-                    .build()
-                videoSeq.addItem(
-                    EditedMediaItem.Builder(mediaItem).setFrameRate(30)
-                        .setEffects(videoEffectsFor(clip, 0L, clip.startTimeMs)).build(),
-                )
-                addedVideo = true; videoCursor += dur
-            } else {
-                for (range in TimelineMath.keptRanges(clip)) {
-                    val startMs = range.first
-                    val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
-                    if (endMs <= startMs) continue
-                    val clipLocalStart = startMs - clip.trimStartMs
-                    val timelineStart = clip.startTimeMs + clipLocalStart
+        // Append a list of video clips into [seq] starting at [startCursor] on the timeline (a leading
+        // gap fills startCursor..firstClip, so stacked track sequences stay time-aligned). Overlays
+        // (matte + captions) are attached only when [withOverlays] — in multi-track mode that's the
+        // bottom track, so a caption isn't drawn once per stacked track. Returns true if any real item
+        // (not just a gap) was added.
+        fun appendVideoItems(
+            seq: EditedMediaItemSequence.Builder,
+            clips: List<TimelineClip>,
+            startCursor: Long,
+            withOverlays: Boolean,
+        ): Boolean {
+            var cursor = startCursor
+            var added = false
+            clips.sortedBy { it.startTimeMs }.forEach { clip ->
+                val media = document.mediaFor(clip) ?: return@forEach
+                val gap = clip.startTimeMs - cursor
+                if (gap > 0) { seq.addGap(gap * 1000); cursor += gap }
+                if (media.kind == MediaKind.IMAGE) {
+                    val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
                     val mediaItem = ExoMediaItem.Builder()
                         .setUri(Uri.parse(media.uri))
-                        .setClippingConfiguration(
-                            ExoMediaItem.ClippingConfiguration.Builder()
-                                .setStartPositionMs(startMs)
-                                .setEndPositionMs(endMs)
-                                .build(),
-                        )
+                        .setImageDurationMs(dur)
                         .build()
-                    videoSeq.addItem(
-                        EditedMediaItem.Builder(mediaItem)
-                            .setEffects(videoEffectsFor(clip, clipLocalStart, timelineStart)).build(),
+                    seq.addItem(
+                        EditedMediaItem.Builder(mediaItem).setFrameRate(30)
+                            .setEffects(videoEffectsFor(clip, 0L, clip.startTimeMs, withOverlays)).build(),
                     )
-                    addedVideo = true; videoCursor += (endMs - startMs)
+                    added = true; cursor += dur
+                } else {
+                    for (range in TimelineMath.keptRanges(clip)) {
+                        val startMs = range.first
+                        val endMs = range.last + 1 // ranges are exclusive-end (built with `until`)
+                        if (endMs <= startMs) continue
+                        val clipLocalStart = startMs - clip.trimStartMs
+                        val timelineStart = clip.startTimeMs + clipLocalStart
+                        val mediaItem = ExoMediaItem.Builder()
+                            .setUri(Uri.parse(media.uri))
+                            .setClippingConfiguration(
+                                ExoMediaItem.ClippingConfiguration.Builder()
+                                    .setStartPositionMs(startMs)
+                                    .setEndPositionMs(endMs)
+                                    .build(),
+                            )
+                            .build()
+                        seq.addItem(
+                            EditedMediaItem.Builder(mediaItem)
+                                .setEffects(videoEffectsFor(clip, clipLocalStart, timelineStart, withOverlays)).build(),
+                        )
+                        added = true; cursor += (endMs - startMs)
+                    }
                 }
             }
+            return added
         }
-        if (!addedVideo) return null
+
+        // Video sequences. With several video tracks and NO background-removal composite, each track
+        // becomes its own sequence and Media3 composites them bottom-to-top (the top-of-panel track is
+        // added last, so it draws on top) — matching the multi-track preview. Otherwise (single track,
+        // or a foreground/background matte composite) we keep the original single flattened sequence +
+        // matte overlay. Each sequence is zeroed to a common timeline origin; a track that starts later
+        // gets a leading gap so the layers stay aligned (verify leading gaps on device — older Media3
+        // could not lead with a gap; we target 1.10.1).
+        val videoTrackOrder = document.videoTracks
+        val tracksWithVideo = videoTrackOrder.filter { tid ->
+            videoClips.any { it.trackId == tid && document.mediaFor(it) != null }
+        }
+        val multiTrack = foreground.isEmpty() && tracksWithVideo.size >= 2
+
+        val videoSequences: List<EditedMediaItemSequence> = if (multiTrack) {
+            // Common zero across every composited track so they stay time-aligned. Bottom track first
+            // (asReversed: videoTracks index 0 is the top of the panel), top track last = on top.
+            val globalZero = videoClips.filter { document.mediaFor(it) != null }.minOf { it.startTimeMs }
+            val bottomTrack = tracksWithVideo.last()
+            tracksWithVideo.asReversed().mapNotNull { tid ->
+                val seq = EditedMediaItemSequence.Builder()
+                val any = appendVideoItems(
+                    seq,
+                    videoClips.filter { it.trackId == tid },
+                    globalZero,
+                    withOverlays = tid == bottomTrack,
+                )
+                if (any) seq.build() else null
+            }
+        } else {
+            val seq = EditedMediaItemSequence.Builder()
+            val any = appendVideoItems(
+                seq,
+                baseClips,
+                baseClips.firstOrNull()?.startTimeMs ?: 0L,
+                withOverlays = true,
+            )
+            if (any) listOf(seq.build()) else emptyList()
+        }
+        if (videoSequences.isEmpty()) return null
 
         val audioClips = document.clips
             // Skip linked shadow clips — that audio is rendered by their video clip already.
@@ -273,7 +329,7 @@ object Exporter {
             }
         }
 
-        val sequences = mutableListOf(videoSeq.build())
+        val sequences = videoSequences.toMutableList()
         if (addedAudio) sequences += audioSeq.build()
         return Composition.Builder(sequences).build()
     }
