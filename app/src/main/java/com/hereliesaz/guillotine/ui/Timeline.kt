@@ -84,6 +84,11 @@ private val HEADER_WIDTH = 56.dp
 private val RULER_HEIGHT = 24.dp
 /** Snap radius (px) when dragging a clip to the playhead / other clip edges / timeline start. */
 private const val SNAP_PX = 12f
+/** Weaker snap radius (px) for the timeline grid (increment) magnet. */
+private const val SNAP_GRID_PX = 6f
+
+/** Live drag offset shared across a clip's group so every member moves together DURING the drag. */
+private data class GroupDrag(val ids: Set<String>, val dx: Float, val dy: Float)
 
 /**
  * Full timeline panel: scrollable multi-track lanes with playhead. The editing
@@ -114,6 +119,9 @@ private fun TimelineLanes(
     val density = LocalDensity.current
     val pps = state.pixelsPerSecond
     val scroll = rememberScrollState()
+    // Live, group-aware drag offset: while a clip is dragged, every clip in its group reads this and
+    // moves together (snapped) — so the whole group tracks the cursor, not just the grabbed clip.
+    var groupDrag by remember { mutableStateOf<GroupDrag?>(null) }
 
     fun msToDp(ms: Long) = with(density) { (ms / 1000f * pps).toDp() }
     val totalMs = state.document.totalDurationMs
@@ -210,10 +218,10 @@ private fun TimelineLanes(
                 Ruler(totalMs, pps, contentWidth)
                 Column(Modifier.weight(1f).verticalScroll(vScroll)) {
                     state.document.videoTracks.forEach { trackId ->
-                        Lane(vm, state, trackId, pps) { msToDp(it) }
+                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
                     }
                     state.document.audioTracks.forEach { trackId ->
-                        Lane(vm, state, trackId, pps) { msToDp(it) }
+                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
                     }
                 }
             }
@@ -358,6 +366,8 @@ private fun Lane(
     trackId: String,
     pps: Float,
     msToDp: (Long) -> androidx.compose.ui.unit.Dp,
+    groupDrag: GroupDrag?,
+    onGroupDrag: (GroupDrag?) -> Unit,
 ) {
     val clips = state.document.clips.filter { it.trackId == trackId }
     // No tap handler here: taps on empty lane area fall through to the timeline surface
@@ -370,7 +380,7 @@ private fun Lane(
             .border(0.5.dp, Neutral800),
     ) {
         clips.forEach { clip ->
-            ClipView(vm, state, clip, pps, msToDp)
+            ClipView(vm, state, clip, pps, msToDp, groupDrag, onGroupDrag)
         }
     }
 }
@@ -382,16 +392,24 @@ private fun ClipView(
     clip: TimelineClip,
     pps: Float,
     msToDp: (Long) -> androidx.compose.ui.unit.Dp,
+    groupDrag: GroupDrag?,
+    onGroupDrag: (GroupDrag?) -> Unit,
 ) {
     val selected = clip.id in state.selectedClipIds
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val media = state.document.mediaFor(clip)
     val selectedKf = clip.keyframes.firstOrNull { it.id == state.selectedKeyframeId }
+    // Raw accumulated drag of THIS clip (when it's the grabbed one); the live visual offset comes from
+    // the shared, snapped groupDrag so every group member moves together.
     var dragPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var dragPy by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimStartPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimEndPx by remember(clip.id) { mutableFloatStateOf(0f) }
+    // This clip's live move offset: the shared group drag if it's part of the active drag, else none.
+    val moveDrag = groupDrag?.takeIf { clip.id in it.ids }
+    val moveDx = moveDrag?.dx ?: 0f
+    val moveDy = moveDrag?.dy ?: 0f
     val baseLeftPx = with(density) { msToDp(clip.startTimeMs).toPx() }
     val trackHeightPx = with(density) { state.trackHeight(clip.trackId).dp.toPx() }
     val sameTypeTracks = when (clip.type) {
@@ -402,7 +420,7 @@ private fun ClipView(
 
     Box(
         Modifier
-            .offset { androidx.compose.ui.unit.IntOffset((baseLeftPx + dragPx).roundToInt(), dragPy.roundToInt()) }
+            .offset { androidx.compose.ui.unit.IntOffset((baseLeftPx + moveDx).roundToInt(), moveDy.roundToInt()) }
             .padding(vertical = 6.dp)
             .width(msToDp(clip.durationMs))
             .fillMaxHeight()
@@ -450,20 +468,23 @@ private fun ClipView(
             // Disabled while a keyframe of this clip is selected (drag then edits the ease).
             .pointerInput(clip.id, state.tool, pps, sameTypeTracks, state.selectedKeyframeId) {
                 if (state.tool == EditorTool.SELECT && selectedKf == null) {
+                    val ids = groupIdsOf(state, clip)
                     detectDragGestures(
-                        onDragStart = { dragPx = 0f; dragPy = 0f },
+                        onDragStart = { dragPx = 0f; dragPy = 0f; onGroupDrag(GroupDrag(ids, 0f, 0f)) },
                         onDragEnd = {
-                            // Snap the dropped position to the playhead, the timeline start, or
-                            // any other clip's start/end (incl. other tracks) within SNAP_PX.
-                            val rawDeltaMs = (dragPx / pps * 1000f).toLong()
-                            val deltaMs = snappedDeltaMs(state, clip, rawDeltaMs, pps)
+                            // Commit the same snapped delta the live preview showed. Group-aware:
+                            // moveClipBy moves the whole group together.
+                            val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
                             val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
-                            // Group-aware: moves the whole group together when clip is grouped.
                             vm.moveClipBy(clip.id, shift, deltaMs)
-                            dragPx = 0f; dragPy = 0f
+                            onGroupDrag(null)
                         },
-                        onDragCancel = { dragPx = 0f; dragPy = 0f },
-                        onDrag = { change, drag -> change.consume(); dragPx += drag.x; dragPy += drag.y },
+                        onDragCancel = { onGroupDrag(null) },
+                        onDrag = { change, drag ->
+                            change.consume(); dragPx += drag.x; dragPy += drag.y
+                            // Live + snapped: the whole group jumps to the magnet as any edge nears it.
+                            onGroupDrag(GroupDrag(ids, snappedDragPx(state, clip, dragPx, pps), dragPy))
+                        },
                     )
                 }
             }
@@ -634,33 +655,65 @@ private fun ClipView(
     }
 }
 
+/** Ids of [clip]'s group (or just the clip when ungrouped). */
+private fun groupIdsOf(state: EditorUiState, clip: TimelineClip): Set<String> =
+    clip.groupId?.let { g -> state.document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
+        ?: setOf(clip.id)
+
+/** A "nice" grid increment (ms) whose on-screen spacing is at least ~44px at the current zoom. */
+private fun gridIncrementMs(pps: Float): Long {
+    val nice = listOf(33L, 50L, 100L, 200L, 500L, 1000L, 2000L, 5000L, 10000L, 30000L, 60000L)
+    return nice.firstOrNull { it / 1000f * pps >= 44f } ?: 60000L
+}
+
 /**
- * Snap a dragged clip's delta so its start OR end lands on a magnet: the timeline start (0),
- * the playback cursor, or any other clip's start/end (on any track). Group members are
- * excluded (they move with the clip). Returns the adjusted delta, or the raw delta if nothing
- * is within [SNAP_PX].
+ * Vegas-style snap for a moving clip/group: try to land ANY moving edge (every group member's start
+ * AND end) on a magnet — timeline start (0), the playhead, or ANY non-moving clip's start/end (any
+ * track) — within the strong radius; else snap a moving edge to the timeline grid within the weaker
+ * radius; else free. Returns the (floor-clamped) delta to apply to the whole group. Soft: dragging
+ * past a magnet keeps going (so you can overlap into a crossfade).
  */
 private fun snappedDeltaMs(state: EditorUiState, clip: TimelineClip, rawDeltaMs: Long, pps: Float): Long {
-    val thresholdMs = (SNAP_PX / pps * 1000f).toLong().coerceAtLeast(1L)
-    val groupMembers = clip.groupId
-        ?.let { g -> state.document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
-        ?: setOf(clip.id)
-    val targets = sortedSetOf(0L, state.currentTimeMs)
-    state.document.clips.forEach { c ->
-        if (c.id !in groupMembers) { targets.add(c.startTimeMs); targets.add(c.endTimeMs) }
-    }
-    val newStart = (clip.startTimeMs + rawDeltaMs).coerceAtLeast(0)
-    val newEnd = newStart + clip.durationMs
-    var best = newStart
+    val movingIds = groupIdsOf(state, clip)
+    val moving = state.document.clips.filter { it.id in movingIds }
+    val floorDelta = -(moving.minOfOrNull { it.startTimeMs } ?: 0L) // earliest member stays >= 0
+
+    val strong = (SNAP_PX / pps * 1000f).toLong().coerceAtLeast(1L)
+    val edges = sortedSetOf(0L, state.currentTimeMs)
+    state.document.clips.forEach { c -> if (c.id !in movingIds) { edges.add(c.startTimeMs); edges.add(c.endTimeMs) } }
+
+    var best = rawDeltaMs
     var bestDist = Long.MAX_VALUE
-    targets.forEach { t ->
-        val dStart = kotlin.math.abs(newStart - t)
-        if (dStart <= thresholdMs && dStart < bestDist) { best = t; bestDist = dStart }
-        val dEnd = kotlin.math.abs(newEnd - t)
-        if (dEnd <= thresholdMs && dEnd < bestDist) { best = (t - clip.durationMs).coerceAtLeast(0); bestDist = dEnd }
+    fun consider(adjust: Long) {
+        val d = kotlin.math.abs(adjust - rawDeltaMs)
+        if (d < bestDist) { best = adjust; bestDist = d }
     }
-    return best - clip.startTimeMs
+    // Strong: any moving edge to any clip edge / playhead / start.
+    moving.forEach { m ->
+        val s = m.startTimeMs + rawDeltaMs
+        val e = m.endTimeMs + rawDeltaMs
+        edges.forEach { t ->
+            if (kotlin.math.abs(t - s) <= strong) consider(rawDeltaMs + (t - s))
+            if (kotlin.math.abs(t - e) <= strong) consider(rawDeltaMs + (t - e))
+        }
+    }
+    if (bestDist == Long.MAX_VALUE) {
+        // Weak: any moving edge to the nearest grid line.
+        val grid = gridIncrementMs(pps)
+        val weak = (SNAP_GRID_PX / pps * 1000f).toLong().coerceAtLeast(1L)
+        moving.forEach { m ->
+            listOf(m.startTimeMs + rawDeltaMs, m.endTimeMs + rawDeltaMs).forEach { pos ->
+                val nearest = Math.round(pos.toDouble() / grid) * grid
+                if (kotlin.math.abs(nearest - pos) <= weak) consider(rawDeltaMs + (nearest - pos))
+            }
+        }
+    }
+    return best.coerceAtLeast(floorDelta)
 }
+
+/** The snapped horizontal offset in px for a live drag of [rawPx] (drives the live group preview). */
+private fun snappedDragPx(state: EditorUiState, clip: TimelineClip, rawPx: Float, pps: Float): Float =
+    snappedDeltaMs(state, clip, (rawPx / pps * 1000f).toLong(), pps) / 1000f * pps
 
 /** Canvas position of a keyframe: x by time, y by value (higher value = higher on the clip). */
 private fun keyframePos(kf: Keyframe, pps: Float, heightPx: Float): Offset {
