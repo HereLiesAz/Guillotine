@@ -41,7 +41,8 @@ class ObjectVision(context: Context) : Closeable {
             d.detect(BitmapImageBuilder(bitmap).build())
                 .detections()
                 .flatMap { it.categories() }
-                .map { it.categoryName().lowercase() }
+                // categoryName() is a platform type and can be null/blank — guard before lowercasing.
+                .mapNotNull { it.categoryName()?.takeIf(String::isNotBlank)?.lowercase() }
                 .toSet()
         }.getOrDefault(emptySet())
     }
@@ -50,9 +51,28 @@ class ObjectVision(context: Context) : Closeable {
         runCatching { detector?.close() }
     }
 
-    private companion object {
-        const val MODEL_ASSET = "efficientdet_lite0.tflite"
-        const val SCORE_THRESHOLD = 0.4f
-        const val MAX_RESULTS = 25
+    companion object {
+        private const val MODEL_ASSET = "efficientdet_lite0.tflite"
+        private const val SCORE_THRESHOLD = 0.4f
+        private const val MAX_RESULTS = 25
+
+        /** The 80 COCO labels this model emits (used to know when the labeler fallback is redundant). */
+        val COCO_LABELS: Set<String> = setOf(
+            "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+            "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
+            "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
+            "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
+            "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+            "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+            "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
+            "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse",
+            "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+            "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
+            "toothbrush",
+        )
+
+        /** True if [term] is reliably handled by the COCO detector (so the labeler fallback adds nothing). */
+        fun coversTerm(term: String): Boolean =
+            COCO_LABELS.any { it.contains(term) || term.contains(it) }
     }
 }

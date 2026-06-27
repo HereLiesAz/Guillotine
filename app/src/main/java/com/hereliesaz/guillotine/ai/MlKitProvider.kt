@@ -65,17 +65,20 @@ class MlKitProvider : ClipAnalyzer {
         // Scan denser + claim a tighter window when real object detection is driving the match, so brief
         // or partial appearances aren't skipped and cut boundaries hug the actual range.
         val blockFrames = if (objectVision?.available == true) OBJECT_BLOCK_FRAMES else BLOCK_FRAMES
+        // When every term is a COCO class the detector owns, the whole-image labeler adds no recall
+        // (too-small objects aren't top labels either) and only burns time per frame — skip it.
+        val useFallback = objectVision?.available != true || intent.terms.any { !ObjectVision.coversTerm(it) }
 
         try {
             if (kind == MediaKind.IMAGE) {
                 val bmp = decodeImage(context, mediaUri)
                     ?: throw IllegalStateException("Could not read image for on-device vision.")
-                val match = qualifies(bmp, intent, labeler, faceDetector, objectVision)
+                val match = qualifies(bmp, intent, labeler, faceDetector, objectVision, useFallback)
                 bmp.recycle()
                 val action = if (match == intent.keepMatches) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, if (match) "match" else "no match"))
             } else {
-                scanVideo(context, mediaUri, durationMs, intent, labeler, faceDetector, objectVision, blockFrames, onProgress)
+                scanVideo(context, mediaUri, durationMs, intent, labeler, faceDetector, objectVision, blockFrames, useFallback, onProgress)
             }
         } finally {
             labeler.close()
@@ -94,6 +97,7 @@ class MlKitProvider : ClipAnalyzer {
         faceDetector: com.google.mlkit.vision.face.FaceDetector?,
         objectVision: ObjectVision?,
         blockFrames: Int,
+        useFallback: Boolean,
         onProgress: (AnalysisProgress) -> Unit,
     ): List<EditSegment> {
         val retriever = MediaMetadataRetriever()
@@ -122,7 +126,7 @@ class MlKitProvider : ClipAnalyzer {
             while (t <= dur && checks < MAX_CHECKS) {
                 val bmp = retriever.getFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (bmp != null) {
-                    if (qualifies(bmp, intent, labeler, faceDetector, objectVision)) {
+                    if (qualifies(bmp, intent, labeler, faceDetector, objectVision, useFallback)) {
                         matched += (t - halfMs).coerceAtLeast(0L)..(t + halfMs).coerceAtMost(dur)
                         matchCount++
                     }
@@ -150,6 +154,7 @@ class MlKitProvider : ClipAnalyzer {
         labeler: com.google.mlkit.vision.label.ImageLabeler,
         faceDetector: com.google.mlkit.vision.face.FaceDetector?,
         objectVision: ObjectVision?,
+        useFallback: Boolean,
     ): Boolean {
         if (intent.useFaces && faceDetector != null) {
             val image = InputImage.fromBitmap(bmp, 0)
@@ -161,6 +166,7 @@ class MlKitProvider : ClipAnalyzer {
                 return true
             }
         }
+        if (!useFallback) return false
         // Fallback: whole-image scene/object labeling for terms the COCO detector doesn't cover.
         val image = InputImage.fromBitmap(bmp, 0)
         val labels = Tasks.await(labeler.process(image))
@@ -194,9 +200,30 @@ class MlKitProvider : ClipAnalyzer {
         return Intent(terms, keepMatches, useFaces)
     }
 
-    /** Add COCO category names for common synonyms so object detection matches everyday words. */
-    private fun expandTerms(terms: List<String>): List<String> =
-        (terms + terms.mapNotNull { ALIASES[it] }).distinct()
+    /**
+     * Expand parsed terms for matching: add the singular of plurals ("phones" -> "phone",
+     * "cars" -> "car") and map everyday words to COCO category names ("phone" -> "cell phone").
+     */
+    private fun expandTerms(terms: List<String>): List<String> {
+        val out = LinkedHashSet<String>()
+        for (t in terms) {
+            out += t
+            ALIASES[t]?.let { out += it }
+            val singular = singularize(t)
+            if (singular != t) {
+                out += singular
+                ALIASES[singular]?.let { out += it }
+            }
+        }
+        return out.toList()
+    }
+
+    private fun singularize(w: String): String = when {
+        w.length > 4 && w.endsWith("ses") -> w.dropLast(2)              // buses -> bus, glasses -> glass
+        w.length > 4 && w.endsWith("ies") -> w.dropLast(3) + "y"       // berries -> berry
+        w.length > 3 && w.endsWith("s") && !w.endsWith("ss") -> w.dropLast(1) // phones -> phone, cars -> car
+        else -> w
+    }
 
     private fun mergeRanges(ranges: List<LongRange>): List<LongRange> {
         if (ranges.isEmpty()) return emptyList()
