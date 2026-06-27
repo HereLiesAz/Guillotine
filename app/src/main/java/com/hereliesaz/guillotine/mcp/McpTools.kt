@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
+import com.hereliesaz.guillotine.ai.MlKitProvider
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.EditSegment
@@ -61,6 +62,31 @@ class McpTools(
         }))
         put(toolDefinition("select_clip", "Select a clip by ID (empty string to clear).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+
+        // ---- real timeline edits (the app's actual split/delete/ripple operations) ----
+        put(toolDefinition("split_clip", "Split a clip into two at a timeline position (ms).",
+            objSchema("clip_id" to stringProp(), "at_ms" to intProp("Timeline position in ms"),
+                required = listOf("clip_id", "at_ms"))))
+        put(toolDefinition("segment_clip", "Split a clip into separate clips at every keep/remove edit boundary (keeps all pieces).",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+        put(toolDefinition("delete_clip", "Delete a clip (and its linked audio / group) from the timeline.",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+        put(toolDefinition(
+            "apply_cuts",
+            "Apply a clip's REMOVE edits for real: the kept ranges become separate, grouped clips and the " +
+                "removed ranges are deleted with the timeline closing up (no black gaps). Call this after " +
+                "analyze_clip/apply_edits to actually cut, instead of only marking.",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
+        ))
+        put(toolDefinition("ripple_delete_range", "Cut a timeline span [start_ms, end_ms) out of every track and close the gap.",
+            objSchema("start_ms" to intProp(), "end_ms" to intProp(), required = listOf("start_ms", "end_ms"))))
+        put(toolDefinition(
+            "analyze_clip_with_reference",
+            "Like analyze_clip, but use the clip's CURRENT playhead frame as a visual reference to find " +
+                "that specific object across the clip. Use when the user points at the current frame " +
+                "(e.g. \"this is my phone\"). Set the clip's prompt to the object first.",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
+        ))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -72,6 +98,12 @@ class McpTools(
         "analyze_clip" -> analyzeClip(args.getString("clip_id"))
         "apply_edits" -> applyEdits(args.getString("clip_id"), args.getJSONArray("segments"))
         "select_clip" -> selectClip(args.getString("clip_id"))
+        "split_clip" -> splitClipTool(args.getString("clip_id"), args.getLong("at_ms"))
+        "segment_clip" -> segmentClipTool(args.getString("clip_id"))
+        "delete_clip" -> deleteClipTool(args.getString("clip_id"))
+        "apply_cuts" -> applyCutsTool(args.getString("clip_id"))
+        "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
+        "analyze_clip_with_reference" -> analyzeClipWithReference(args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -103,6 +135,7 @@ class McpTools(
         return JSONObject().apply {
             put("name", doc.name)
             put("totalDurationMs", doc.totalDurationMs)
+            put("currentTimeMs", vm.uiState.value.currentTimeMs)
             put("videoTracks", JSONArray(doc.videoTracks))
             put("audioTracks", JSONArray(doc.audioTracks))
             put("clipCount", doc.clips.size)
@@ -163,6 +196,72 @@ class McpTools(
         vm.selectClip(clipId.ifBlank { null })
         return JSONObject().apply { put("ok", true) }
     }
+
+    private fun splitClipTool(clipId: String, atMs: Long): JSONObject {
+        vm.splitClip(clipId, atMs)
+        return ok().put("clipCount", vm.uiState.value.document.clips.size)
+    }
+
+    private fun segmentClipTool(clipId: String): JSONObject {
+        vm.segmentClip(clipId)
+        return ok().put("clipCount", vm.uiState.value.document.clips.size)
+    }
+
+    private fun deleteClipTool(clipId: String): JSONObject {
+        vm.deleteClip(clipId)
+        return ok().put("clipCount", vm.uiState.value.document.clips.size)
+    }
+
+    private fun applyCutsTool(clipId: String): JSONObject {
+        vm.applyCuts(clipId)
+        return ok()
+            .put("clipCount", vm.uiState.value.document.clips.size)
+            .put("totalDurationMs", vm.uiState.value.document.totalDurationMs)
+    }
+
+    private fun rippleDeleteRangeTool(startMs: Long, endMs: Long): JSONObject {
+        vm.rippleDeleteRange(startMs, endMs)
+        return ok().put("totalDurationMs", vm.uiState.value.document.totalDurationMs)
+    }
+
+    private fun analyzeClipWithReference(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        require(clip.prompt.isNotBlank()) { "Set the clip's prompt to the target object first (use set_prompt)." }
+        // The frame the user scrubbed to: timeline playhead -> this clip's source time.
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath
+            .sourceTimeMs(clip, vm.uiState.value.currentTimeMs).coerceAtLeast(0)
+        val reference = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: throw IllegalStateException("Could not read the current frame for reference matching.")
+        val edits = runBlocking {
+            MlKitProvider().analyzeWithReference(
+                context, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs, reference,
+            )
+        }
+        reference.recycle()
+        vm.applyEdits(clipId, edits)
+        return JSONObject().apply {
+            put("ok", true); put("clipId", clipId); put("segmentsFound", edits.size)
+            put("segments", segmentsJson(edits))
+        }
+    }
+
+    private fun grabFrame(uri: Uri, atMs: Long): android.graphics.Bitmap? {
+        val r = android.media.MediaMetadataRetriever()
+        return try {
+            r.setDataSource(context, uri)
+            r.getFrameAtTime(atMs * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { r.release() }
+        }
+    }
+
+    private fun ok() = JSONObject().put("ok", true)
 
     // ---- helpers -------------------------------------------------------------
 

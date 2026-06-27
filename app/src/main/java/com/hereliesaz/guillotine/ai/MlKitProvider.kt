@@ -69,16 +69,17 @@ class MlKitProvider : ClipAnalyzer {
         // (too-small objects aren't top labels either) and only burns time per frame — skip it.
         val useFallback = objectVision?.available != true || intent.terms.any { !ObjectVision.coversTerm(it) }
 
+        val match: (Bitmap) -> Boolean = { bmp -> qualifies(bmp, intent, labeler, faceDetector, objectVision, useFallback) }
         try {
             if (kind == MediaKind.IMAGE) {
                 val bmp = decodeImage(context, mediaUri)
                     ?: throw IllegalStateException("Could not read image for on-device vision.")
-                val match = qualifies(bmp, intent, labeler, faceDetector, objectVision, useFallback)
+                val matched = match(bmp)
                 bmp.recycle()
-                val action = if (match == intent.keepMatches) EditAction.KEEP else EditAction.REMOVE
-                listOf(EditSegment(0, durationMs, action, if (match) "match" else "no match"))
+                val action = if (matched == intent.keepMatches) EditAction.KEEP else EditAction.REMOVE
+                listOf(EditSegment(0, durationMs, action, if (matched) "match" else "no match"))
             } else {
-                scanVideo(context, mediaUri, durationMs, intent, labeler, faceDetector, objectVision, blockFrames, useFallback, onProgress)
+                scanVideo(context, mediaUri, durationMs, blockFrames, intent.keepMatches, onProgress, match)
             }
         } finally {
             labeler.close()
@@ -87,18 +88,80 @@ class MlKitProvider : ClipAnalyzer {
         }
     }
 
-    /** Stride-and-block scan: check every ~(BLOCK+1)th frame, claiming ±BLOCK frames per match. */
+    /**
+     * Like [analyze], but uses a [reference] frame the user scrubbed to as the visual target: detect the
+     * prompt's object in [reference], embed its crop, then keep/remove frames whose same-class detections
+     * match that embedding — so "this is my phone, cut every frame with my phone" tracks *that* phone, not
+     * any phone. Falls back to generic class matching if the reference object or the embedder is missing.
+     */
+    suspend fun analyzeWithReference(
+        context: Context,
+        mediaUri: Uri,
+        kind: MediaKind,
+        prompt: String,
+        durationMs: Long,
+        reference: Bitmap,
+        onProgress: (AnalysisProgress) -> Unit = {},
+    ): List<EditSegment> = withContext(Dispatchers.IO) {
+        require(kind != MediaKind.AUDIO) { "Reference matching needs a video or image clip." }
+        val parsed = parseIntent(prompt)
+        val terms = expandTerms(parsed.terms)
+        val objectVision = ObjectVision(context)
+        val embed = ImageEmbed(context)
+        try {
+            fun matchesTerm(label: String) = terms.any { it.contains(label) || label.contains(it) }
+            val refBox = objectVision.detect(reference)
+                .filter { matchesTerm(it.label) }
+                .maxByOrNull { it.score }
+            val refEmbedding = refBox
+                ?.let { crop(reference, it.box) }
+                ?.takeIf { embed.available }
+                ?.let { embed.embed(it) }
+
+            val blockFrames = if (objectVision.available) OBJECT_BLOCK_FRAMES else BLOCK_FRAMES
+            val match: (Bitmap) -> Boolean = if (refEmbedding != null) {
+                { bmp ->
+                    objectVision.detect(bmp).filter { matchesTerm(it.label) }.any { d ->
+                        val c = crop(bmp, d.box)
+                        c != null && embed.embed(c)?.let { embed.similarity(refEmbedding, it) >= REF_THRESHOLD } == true
+                    }
+                }
+            } else {
+                // No usable reference embedding — fall back to generic class detection.
+                { bmp -> objectVision.available && objectVision.labels(bmp).any { matchesTerm(it) } }
+            }
+
+            if (kind == MediaKind.IMAGE) {
+                val matched = match(reference)
+                val action = if (matched == parsed.keepMatches) EditAction.KEEP else EditAction.REMOVE
+                listOf(EditSegment(0, durationMs, action, if (matched) "match" else "no match"))
+            } else {
+                scanVideo(context, mediaUri, durationMs, blockFrames, parsed.keepMatches, onProgress, match)
+            }
+        } finally {
+            objectVision.close()
+            embed.close()
+        }
+    }
+
+    /** Crop [box] (pixel rect) out of [bmp]; null if the rect is degenerate. */
+    private fun crop(bmp: Bitmap, box: android.graphics.RectF): Bitmap? = runCatching {
+        val l = box.left.toInt().coerceIn(0, bmp.width - 1)
+        val t = box.top.toInt().coerceIn(0, bmp.height - 1)
+        val r = box.right.toInt().coerceIn(l + 1, bmp.width)
+        val b = box.bottom.toInt().coerceIn(t + 1, bmp.height)
+        Bitmap.createBitmap(bmp, l, t, r - l, b - t)
+    }.getOrNull()
+
+    /** Stride-and-block scan: check every ~(block+1)th frame, claiming ±block frames per match. */
     private fun scanVideo(
         context: Context,
         uri: Uri,
         durationMs: Long,
-        intent: Intent,
-        labeler: com.google.mlkit.vision.label.ImageLabeler,
-        faceDetector: com.google.mlkit.vision.face.FaceDetector?,
-        objectVision: ObjectVision?,
         blockFrames: Int,
-        useFallback: Boolean,
+        keepMatches: Boolean,
         onProgress: (AnalysisProgress) -> Unit,
+        match: (Bitmap) -> Boolean,
     ): List<EditSegment> {
         val retriever = MediaMetadataRetriever()
         val matched = mutableListOf<LongRange>()
@@ -126,7 +189,7 @@ class MlKitProvider : ClipAnalyzer {
             while (t <= dur && checks < MAX_CHECKS) {
                 val bmp = retriever.getFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (bmp != null) {
-                    if (qualifies(bmp, intent, labeler, faceDetector, objectVision, useFallback)) {
+                    if (match(bmp)) {
                         matched += (t - halfMs).coerceAtLeast(0L)..(t + halfMs).coerceAtMost(dur)
                         matchCount++
                     }
@@ -145,7 +208,7 @@ class MlKitProvider : ClipAnalyzer {
         } finally {
             runCatching { retriever.release() }
         }
-        return buildCover(mergeRanges(matched), durationMs, intent.keepMatches)
+        return buildCover(mergeRanges(matched), durationMs, keepMatches)
     }
 
     private fun qualifies(
@@ -260,6 +323,8 @@ class MlKitProvider : ClipAnalyzer {
         // Denser stride when COCO object detection drives the match (it's fast and we want tight cuts).
         const val OBJECT_BLOCK_FRAMES = 3
         const val MAX_CHECKS = 600
+        // Cosine-similarity cutoff for "same object as the reference" (tune on device).
+        const val REF_THRESHOLD = 0.75
 
         /** Everyday word -> COCO category name. Substring matching covers the rest (e.g. "car"). */
         val ALIASES = mapOf(

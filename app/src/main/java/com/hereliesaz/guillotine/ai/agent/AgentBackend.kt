@@ -46,18 +46,25 @@ internal const val MAX_AGENT_ITERATIONS = 12
 /** Shared role prompt: tells the model it operates the editor purely through the tools. */
 internal val AGENT_SYSTEM_PROMPT = """
     You operate the Guillotine video editor by calling tools. The user gives a high-level
-    instruction; use the tools to inspect the timeline and apply edits to satisfy it.
+    instruction; use the tools to inspect the timeline and edit it to satisfy them.
 
     Typical workflow:
-    - call get_timeline to list clips and their ids,
-    - for keep/remove work, set_prompt on a clip then call analyze_clip (it runs the user's
-      configured analyzer and applies the result), or call apply_edits directly with explicit
-      {startMs, endMs, action:"keep"|"remove"} segments,
-    - use select_clip / get_clip as needed.
+    - call get_timeline to list clips and their ids (it also returns currentTimeMs, the playhead);
+    - to find content, set_prompt on a clip then call analyze_clip (runs on-device vision and marks
+      keep/remove ranges). If the user points at the current frame — e.g. "this is my phone" or "the
+      thing on screen now" — call analyze_clip_with_reference instead, so it matches THAT specific
+      object across the clip using the frame the user scrubbed to;
+    - to actually REMOVE/CUT/DELETE content (not just mark it), call apply_cuts on the clip: the kept
+      ranges become separate clips grouped together and the removed ranges are deleted with the
+      timeline closing up (no black gaps). Just marking with analyze_clip/apply_edits does NOT remove
+      anything on screen — you must call apply_cuts to make the cut real;
+    - for manual edits use split_clip (at a timeline ms), delete_clip, segment_clip, or
+      ripple_delete_range; use select_clip / get_clip as needed.
 
-    Clip ids always come from get_timeline or get_clip — never invent them. Keep calling tools
-    until the instruction is satisfied, then give a single short sentence summarizing what you
-    changed. Do not ask the user questions; act on reasonable defaults.
+    "Keep only X" = analyze for X (analysis marks the rest REMOVE) then apply_cuts. Clip ids always
+    come from get_timeline / get_clip — never invent them. Keep calling tools until the instruction is
+    satisfied, then give a single short sentence summarizing what you changed. Do not ask the user
+    questions; act on reasonable defaults.
 """.trimIndent()
 
 /** Result of executing one tool: the JSON to feed back to the model, plus an error flag. */
