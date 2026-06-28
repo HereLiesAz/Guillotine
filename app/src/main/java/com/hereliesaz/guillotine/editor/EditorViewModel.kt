@@ -1035,7 +1035,11 @@ class EditorViewModel : ViewModel() {
                 scale = (it.scale * zoom).coerceIn(0.1f, 6f),
                 offsetX = (it.offsetX + panXFrac).coerceIn(-1.5f, 1.5f),
                 offsetY = (it.offsetY + panYFrac).coerceIn(-1.5f, 1.5f),
-                rotation = it.rotation + rotationDelta,
+                // Subtract: the gesture's rotation sign is opposite graphicsLayer.rotationZ, so adding
+                // it spins the layer against the fingers. Negating makes the layer follow the twist.
+                // Normalize to [-180,180) so it stays within KeyframeProperty.ROTATION's uiRange (the
+                // inspector slider / keyframe envelope) instead of growing unbounded across twists.
+                rotation = ((it.rotation - rotationDelta + 180f) % 360f + 360f) % 360f - 180f,
             )
         }
     }
