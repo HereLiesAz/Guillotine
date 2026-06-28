@@ -2,20 +2,25 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
-## Export fidelity — implemented; verify on device
-The previously-deferred export/preview gaps are now implemented (assume `presentationTimeUs` is
-item-relative/0-based per Media3 item) and need an on-device pass to confirm:
-- **Keyframed opacity/scale** baked into export via time-varying `RgbMatrix`/`MatrixTransformation`,
-  **keyframed volume** via `KeyframeVolumeProcessor` (clip-local time = `rangeStart - trimStart + pts`).
-- **Caption/matte overlays** attached to every base item with that item's timeline start, so they
-  stay in sync across 'remove' cuts.
-- **Preview audio parity**: pan + peak-normalize (with boost) via `LiveAudioProcessor` on the
-  preview ExoPlayers (mono pan is export-only).
-- **Matte precompute**: segmentation runs off-thread up front (`Exporter.precomputeMattes`), not per
-  render frame.
+## Needs an on-device verification pass (built; untestable in CI)
+Implemented but never run on a device — confirm and tune:
+- **Multi-track compositor** (preview `PreviewPlayer` + export `Exporter`): one layer/sequence per
+  video track, stacked bottom-to-top; per-track **crossfade** of overlapping clips; a background-
+  removed clip on an upper track showing lower tracks through its matte (composition-level overlay).
+  Verify leading-gap alignment, N-sequence compositing, and alpha-blend dissolve on Media3 1.10.1.
+- **Background operations** (`operation/OperationController` + `OperationService`): foreground-service
+  notification, Pause/Resume (analysis + generative), Cancel, and that work survives backgrounding.
+- **Long-press edge trim** (`Timeline.kt`): gesture layering vs. move/keyframe handles; re-extend
+  bounds; linked-audio sync. **Follow-up:** snap the trimmed edge to playhead/clips/grid.
+- **3 fps sampling + ±5-frame extension** (`MlKitProvider.scanVideo`): cut tightness + speed.
+- **Export fidelity** (keyframed opacity/scale via `RgbMatrix`/`MatrixTransformation`, keyframed
+  volume via `KeyframeVolumeProcessor`, caption/matte overlay timing after cuts, audio gain/pan
+  levels): eyeball compositing, centering, and overlay sync.
 
-Things to eyeball on device: opacity-via-alpha compositing, scale/translate centering, audio
-gain/pan levels, and overlay timing after cuts.
+## Export follow-ups
+- **Cross-process resume**: an OS kill currently drops an in-flight operation (by design). Persisting
+  a checkpoint to resume analysis/generative after relaunch (and a resumable/segmented export) is open.
+- **Pausable export**: Media3's `Transformer` can't pause an encode, so export is cancel-only.
 
 ## Windows & Linux desktop builds (Compose Multiplatform)
 Ship native desktop apps reusing the existing Kotlin/Compose code.
