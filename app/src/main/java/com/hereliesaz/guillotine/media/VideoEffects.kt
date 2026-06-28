@@ -194,7 +194,8 @@ object VideoEffects {
         private val offsetYKfs = clip.keyframes.filter { it.property == KeyframeProperty.OFFSET_Y }.sortedBy { it.timeMs }
 
         override fun configure(inputWidth: Int, inputHeight: Int): androidx.media3.common.util.Size {
-            aspect = if (inputHeight > 0) inputWidth.toFloat() / inputHeight else 1f
+            // Both must be positive — a zero width would make aspect 0 and 1/aspect infinite.
+            aspect = if (inputWidth > 0 && inputHeight > 0) inputWidth.toFloat() / inputHeight else 1f
             return androidx.media3.common.util.Size(inputWidth, inputHeight)
         }
 
