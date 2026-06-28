@@ -50,8 +50,14 @@ class OperationService : Service() {
         }
 
         // Promote to foreground immediately with whatever the current state is (idle → a generic
-        // "working" placeholder; the collector replaces it on the next emission).
-        startForegroundWith(OperationController.state.value)
+        // "working" placeholder; the collector replaces it on the next emission). If the platform
+        // refuses the promotion (operation kicked off while the app was backgrounded — see below),
+        // bail out cleanly: the work runs on OperationController's own scope, not ours, so stopping
+        // here just drops the notification/wakelock, not the operation.
+        if (!startForegroundWith(OperationController.state.value)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         acquireWakeLock()
 
         if (collector == null) {
@@ -68,11 +74,27 @@ class OperationService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startForegroundWith(state: OperationState?) {
-        if (started) return
-        started = true
+    /**
+     * Promote to foreground. Returns false (without crashing) if the platform refuses the start.
+     *
+     * `mediaProcessing` is a background-start-restricted FGS type: when the service is launched while
+     * the app is in the background (e.g. an external MCP tool triggering generative removal while the
+     * app is backgrounded), Android 14+ strips the requested type down to `none` and — because
+     * targetSdk ≥ 34 — throws InvalidForegroundServiceTypeException ("Starting FGS with type none …
+     * has been prohibited"). That throw lands here on the main thread, so OperationController's
+     * runCatching around startForegroundService() can't catch it; without this guard it crashes the
+     * whole app. ForegroundServiceStartNotAllowedException is the older-shape variant of the same.
+     */
+    private fun startForegroundWith(state: OperationState?): Boolean {
+        if (started) return true
         val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING else 0
-        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(state), type)
+        return try {
+            ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(state), type)
+            started = true
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun stopEverything() {
