@@ -57,6 +57,7 @@ import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.guillotine.ai.ModelCatalog
+import com.hereliesaz.guillotine.ai.agent.BundledModelExtractor
 import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
 import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
@@ -385,6 +386,15 @@ private fun RecommendedModels(
     val state by ModelDownloadManager.state.collectAsState()
     val uriHandler = LocalUriHandler.current
 
+    // Ensure the bundled model is extracted so installedPath picks it up.
+    var bundledReady by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            BundledModelExtractor.ensureExtracted(context)
+        }
+        bundledReady = true
+    }
+
     Text("Recommended on-device models", color = Neutral400, fontSize = 12.sp)
     RECOMMENDED_ON_DEVICE_MODELS.forEach { model ->
         val installed = ModelDownloadManager.installedPath(context, model)
@@ -410,6 +420,7 @@ private fun RecommendedModels(
                     inUse -> Text("In use", color = Neutral500, fontSize = 11.sp)
                     installed != null -> ActionText("✓ Installed · Use") { onUse(installed) }
                     downloading != null -> ActionText("Cancel") { ModelDownloadManager.cancel() }
+                    model.bundled -> {} // bundled but not yet extracted; will appear once ready
                     model.gated -> ActionText("Get ↗") { uriHandler.openUri(model.repoUrl) }
                     partial > 0 -> ActionText("Resume") { ModelDownloadManager.start(context, model) }
                     else -> ActionText("Download") { ModelDownloadManager.start(context, model) }

@@ -173,12 +173,17 @@ class ApiKeyStore(context: Context) {
         _settings.value = settings
     }
 
+    val onboardingDone: Boolean get() = prefs.getBoolean(KEY_ONBOARDING_DONE, false)
+
+    fun markOnboardingDone() { prefs.edit().putBoolean(KEY_ONBOARDING_DONE, true).apply() }
+
     private companion object {
         const val KEY_PROVIDER = "ai_provider"
         const val KEY_LEONARDO_KEY = "leonardo_key"
         const val KEY_LEONARDO_MODEL = "leonardo_model"
         const val KEY_SPEECH = "speech_model_path"
         const val KEY_AGENT_MODEL = "agent_model_path"
+        const val KEY_ONBOARDING_DONE = "onboarding_done"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"
     }

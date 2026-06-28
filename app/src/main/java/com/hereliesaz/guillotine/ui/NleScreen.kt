@@ -137,6 +137,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val assistantVm: AssistantViewModel = viewModel()
     val assistantState by assistantVm.state.collectAsState()
 
+    var showOnboarding by remember { mutableStateOf(!keyStore.onboardingDone) }
     var showSettings by remember { mutableStateOf(false) }
     // Cloudflare relay config; loaded off the main thread (EncryptedSharedPreferences touches the
     // KeyStore + disk) and re-read whenever Settings closes so changes restart the bridge.
@@ -439,6 +440,17 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
     if (showAiComparison) {
         AiComparisonSheet(onDismiss = { showAiComparison = false })
+    }
+    if (showOnboarding) {
+        OnboardingDialog(
+            onComplete = { selectedModelPath ->
+                scope.launch {
+                    keyStore.save(settings.copy(agentModelPath = selectedModelPath))
+                    keyStore.markOnboardingDone()
+                }
+                showOnboarding = false
+            },
+        )
     }
 
     // Embedded MCP server: external AI tools interact with the editor over HTTP on port 6274.

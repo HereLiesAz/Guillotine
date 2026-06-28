@@ -1,6 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
-
 # On-device ML model bundles are binary — never normalize line endings.
 *.tflite binary
-*.task binary
+*.task filter=lfs diff=lfs merge=lfs -text

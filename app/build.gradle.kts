@@ -45,6 +45,7 @@ val patchBaseMinor = versionProps.getProperty("versionPatchBaseMinor", verMinor.
 val isArtifactBuild = gradle.startParameter.taskNames.any { name ->
     listOf("assemble", "bundle", "install").any { name.contains(it, ignoreCase = true) }
 }
+println(">>> VERSION DEBUG: taskNames=${gradle.startParameter.taskNames}, isArtifactBuild=$isArtifactBuild, override=$versionBuildOverride")
 
 // This increment-and-write happens in the configuration phase (versionCode/versionName must be
 // resolved before tasks run). That is a deliberate tradeoff: it mutates a project file at config
@@ -76,7 +77,7 @@ android {
     defaultConfig {
         applicationId = "com.hereliesaz.guillotine"
         minSdk = 26
-        targetSdk = 36 // runtime behavior target stays on stable API 36
+        targetSdk = 37 // runtime behavior target stays on stable API 36
         versionCode = currentVersionCode
         versionName = currentVersionName
         vectorDrawables { useSupportLibrary = true }
@@ -108,8 +109,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     buildFeatures {
@@ -121,12 +122,18 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // The bundled SmolLM .task model is already quantized — skip AAPT compression to avoid
+    // double-compressing, which slows builds and inflates memory during asset extraction.
+    aaptOptions {
+        noCompress("task")
+    }
 }
 
 // KGP 2.x: the old android.kotlinOptions DSL is deprecated; set the JVM target here.
 kotlin {
     compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
+        jvmTarget.set(JvmTarget.JVM_21)
     }
 }
 
