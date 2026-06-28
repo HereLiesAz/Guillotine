@@ -690,8 +690,9 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Crop, "Crop / transform", active = state.tool == EditorTool.CROP) {
                 vm.setTool(EditorTool.CROP)
             }
-            IconToolButton(Icons.Filled.Diamond, "Keyframe tool", active = state.tool == EditorTool.KEYFRAME) {
-                vm.setTool(EditorTool.KEYFRAME)
+            // Action (not a mode): record the selected clip's crop/placement (+opacity) at the playhead.
+            IconToolButton(Icons.Filled.Diamond, "Keyframe crop/placement at playhead") {
+                vm.addKeyframeAtPlayhead()
             }
             IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
                 vm.toggleAutoEase()

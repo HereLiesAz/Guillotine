@@ -392,6 +392,8 @@ private fun RecommendedModels(
             ?.takeIf { it.modelId == model.id }
         val failed = (state as? ModelDownloadManager.DownloadState.Failed)
             ?.takeIf { it.modelId == model.id }
+        // Recompute on every state change so a cancel/finish refreshes the resume offset.
+        val partial = remember(state, model.id) { ModelDownloadManager.partialBytes(context, model) }
         val inUse = installed != null && installed == selectedPath
 
         Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -409,6 +411,7 @@ private fun RecommendedModels(
                     installed != null -> ActionText("✓ Installed · Use") { onUse(installed) }
                     downloading != null -> ActionText("Cancel") { ModelDownloadManager.cancel() }
                     model.gated -> ActionText("Get ↗") { uriHandler.openUri(model.repoUrl) }
+                    partial > 0 -> ActionText("Resume") { ModelDownloadManager.start(context, model) }
                     else -> ActionText("Download") { ModelDownloadManager.start(context, model) }
                 }
             }
@@ -420,6 +423,12 @@ private fun RecommendedModels(
                 )
                 Text(
                     "${(downloading.fraction * 100).toInt()}% · ${model.sizeLabel}",
+                    color = Neutral500, fontSize = 10.sp,
+                )
+            }
+            if (downloading == null && partial > 0 && installed == null) {
+                Text(
+                    "Paused at ${(partial * 100 / model.sizeBytes).toInt()}% · resumes where it left off",
                     color = Neutral500, fontSize = 10.sp,
                 )
             }

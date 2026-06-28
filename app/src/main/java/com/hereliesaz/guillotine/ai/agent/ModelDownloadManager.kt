@@ -57,13 +57,25 @@ object ModelDownloadManager {
             .takeIf { it.isFile && it.length() == model.sizeBytes }
             ?.absolutePath
 
+    /**
+     * Bytes already on disk from an interrupted download of [model] (its `.part` file), or 0 if none.
+     * Lets the picker offer "Resume" instead of "Download" and show how far along it is.
+     */
+    fun partialBytes(context: Context, model: OnDeviceModel): Long =
+        File(modelsDir(context), "${model.fileName}.part")
+            .takeIf { it.isFile }?.length()?.coerceAtMost(model.sizeBytes) ?: 0L
+
+    /**
+     * Stop the in-flight download. The partial `.part` file is **kept** so a later [start] for the
+     * same model resumes from where it left off (HTTP Range), rather than starting over.
+     */
     fun cancel() {
         job?.cancel()
         job = null
         _state.value = DownloadState.Idle
     }
 
-    /** Start downloading [model]; no-op if a download is already running or the model is gated. */
+    /** Start (or resume) downloading [model]; no-op if a download is already running or the model is gated. */
     fun start(context: Context, model: OnDeviceModel) {
         if (job?.isActive == true) return
         val url = model.downloadUrl ?: run {
@@ -75,20 +87,37 @@ object ModelDownloadManager {
         val partFile = File(dir, "${model.fileName}.part")
 
         job = scope.launch {
-            _state.value = DownloadState.Downloading(model.id, 0f, 0, model.sizeBytes)
+            // Resume point: bytes already on disk from a previous interrupted attempt. A stale `.part`
+            // larger than the expected size is bogus — discard it and start clean.
+            var resumeFrom = if (partFile.isFile) partFile.length() else 0L
+            if (resumeFrom > model.sizeBytes) {
+                runCatching { partFile.delete() }
+                resumeFrom = 0L
+            }
+            _state.value = DownloadState.Downloading(
+                model.id, (resumeFrom.toFloat() / model.sizeBytes).coerceIn(0f, 1f), resumeFrom, model.sizeBytes,
+            )
             try {
-                if (availableBytes(dir) < model.sizeBytes + SAFETY_MARGIN) {
+                // Only the still-missing bytes need to fit on disk.
+                if (availableBytes(dir) < (model.sizeBytes - resumeFrom) + SAFETY_MARGIN) {
                     throw IllegalStateException("Not enough free space for ${model.sizeLabel}.")
                 }
-                client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                val request = Request.Builder().url(url).apply {
+                    if (resumeFrom > 0) header("Range", "bytes=$resumeFrom-")
+                }.build()
+                client.newCall(request).execute().use { resp ->
                     if (!resp.isSuccessful) throw IllegalStateException("Download failed (HTTP ${resp.code}).")
                     val body = resp.body ?: throw IllegalStateException("Empty response.")
-                    val total = body.contentLength().takeIf { it > 0 } ?: model.sizeBytes
-                    partFile.outputStream().use { out ->
+                    // 206 => server honoured the range, body is the tail to append. Anything else (e.g. 200)
+                    // means the range was ignored, so we must rewrite the file from the start.
+                    val resuming = resumeFrom > 0 && resp.code == 206
+                    val startBytes = if (resuming) resumeFrom else 0L
+                    val total = model.sizeBytes
+                    java.io.FileOutputStream(partFile, /* append = */ resuming).use { out ->
                         body.byteStream().use { input ->
                             val buf = ByteArray(1 shl 16)
-                            var done = 0L
-                            var lastEmit = 0L
+                            var done = startBytes
+                            var lastEmit = startBytes
                             while (true) {
                                 ensureActive() // cooperative cancel
                                 val n = input.read(buf)
@@ -112,7 +141,8 @@ object ModelDownloadManager {
                 if (!partFile.renameTo(finalFile)) throw IllegalStateException("Could not save the model file.")
                 _state.value = DownloadState.Done(model.id, finalFile.absolutePath)
             } catch (e: Throwable) {
-                runCatching { partFile.delete() }
+                // Keep the `.part` file so the next start resumes — both on user cancel and on transient
+                // network failure. (A size-mismatch "incomplete" is also resumable: the tail is retried.)
                 if (e is kotlinx.coroutines.CancellationException) {
                     _state.value = DownloadState.Idle
                     throw e

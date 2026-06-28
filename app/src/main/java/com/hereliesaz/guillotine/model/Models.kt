@@ -14,8 +14,51 @@ enum class MediaKind { VIDEO, AUDIO, IMAGE }
 @Serializable
 enum class ClipType { VIDEO, AUDIO, TEXT }
 
+/**
+ * A per-clip parameter that can be animated with keyframes. Each carries its UI range (for the
+ * envelope + sliders) and whether it's an audio param. [staticValue] is the clip's current value
+ * when the property isn't keyframed (and the default fed to [TimelineMath.valueAt]); keyframes store
+ * absolute values. Color params compose into one per-frame color matrix; transform params into the
+ * per-frame geometry; volume/pan into the audio path.
+ */
 @Serializable
-enum class KeyframeProperty { OPACITY, SCALE, VOLUME }
+enum class KeyframeProperty(val uiRange: ClosedFloatingPointRange<Float>, val isAudio: Boolean = false) {
+    OPACITY(0f..1f),
+    SCALE(0f..6f),
+    VOLUME(0f..2f, isAudio = true),
+    ROTATION(-180f..180f),
+    OFFSET_X(-1.5f..1.5f),
+    OFFSET_Y(-1.5f..1.5f),
+    BRIGHTNESS(0f..2f),
+    CONTRAST(0f..2f),
+    SATURATION(0f..2f),
+    HUE(0f..360f),
+    SEPIA(0f..100f),
+    PAN(-1f..1f, isAudio = true);
+
+    /** The clip's current value for this property (default when unkeyframed; what the diamond records). */
+    fun staticValue(clip: TimelineClip): Float = when (this) {
+        OPACITY -> 1f
+        SCALE -> clip.scale
+        ROTATION -> clip.rotation
+        OFFSET_X -> clip.offsetX
+        OFFSET_Y -> clip.offsetY
+        VOLUME -> clip.filters.volume
+        PAN -> clip.filters.pan
+        BRIGHTNESS -> clip.filters.brightness
+        CONTRAST -> clip.filters.contrast
+        SATURATION -> clip.filters.saturation
+        HUE -> clip.filters.hueRotate
+        SEPIA -> clip.filters.sepia
+    }
+
+    companion object {
+        /** Color adjustments that compose into one per-frame color matrix. */
+        val COLOR = setOf(BRIGHTNESS, CONTRAST, SATURATION, HUE, SEPIA)
+        /** Geometry params animated via the per-frame transform. */
+        val TRANSFORM = setOf(SCALE, ROTATION, OFFSET_X, OFFSET_Y)
+    }
+}
 
 /** Typeface for [ClipType.TEXT] clips. Mapped to a Compose FontFamily in the UI layer. */
 @Serializable

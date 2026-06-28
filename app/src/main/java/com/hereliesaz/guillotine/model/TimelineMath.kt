@@ -43,8 +43,19 @@ object TimelineMath {
         property: KeyframeProperty,
         clipTimeMs: Long,
         default: Float,
-    ): Float {
-        val kfs = clip.keyframes.filter { it.property == property }.sortedBy { it.timeMs }
+    ): Float = interpolateSorted(
+        clip.keyframes.filter { it.property == property }.sortedBy { it.timeMs },
+        clipTimeMs,
+        default,
+    )
+
+    /**
+     * Interpolated value over a **pre-filtered, time-sorted** keyframe list [kfs] (all for one
+     * property). Allocation-free — call this from hot per-frame/per-sample paths where the caller
+     * has filtered+sorted once up front, instead of [valueAt] which re-filters and re-sorts on every
+     * call. Returns [default] when [kfs] is empty.
+     */
+    fun interpolateSorted(kfs: List<Keyframe>, clipTimeMs: Long, default: Float): Float {
         if (kfs.isEmpty()) return default
         if (clipTimeMs <= kfs.first().timeMs) return kfs.first().value
         if (clipTimeMs >= kfs.last().timeMs) return kfs.last().value

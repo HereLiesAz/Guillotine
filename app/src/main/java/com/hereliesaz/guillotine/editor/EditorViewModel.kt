@@ -781,6 +781,68 @@ class EditorViewModel : ViewModel() {
         }
     }
 
+    private fun easingNow() =
+        if (_uiState.value.autoEase) com.hereliesaz.guillotine.model.CubicBezier()
+        else com.hereliesaz.guillotine.model.CubicBezier(0f, 0f, 1f, 1f)
+
+    /**
+     * Record one setting's current value as a keyframe at the playhead on [clipId] (used by the per-
+     * slider keyframe diamonds in the inspector). No-op if the playhead isn't within the clip.
+     */
+    fun keyframeSettingAtPlayhead(clipId: String, property: KeyframeProperty) {
+        val now = _uiState.value.currentTimeMs
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            if (now < clip.startTimeMs || now > clip.endTimeMs) return@mutateDocument doc
+            val rel = (now - clip.startTimeMs).coerceIn(0, clip.durationMs)
+            doc.copy(clips = doc.clips.map {
+                if (it.id == clipId) it.copy(keyframes = it.keyframes.withKeyframeAt(it, rel, property)) else it
+            })
+        }
+    }
+
+    /**
+     * Return this keyframe list with one recorded at [rel] for [property], capturing the property's
+     * **current interpolated** value at that time (so a new keyframe doesn't disturb an existing
+     * curve), overwriting any keyframe already at the same time/property to avoid duplicates.
+     */
+    private fun List<Keyframe>.withKeyframeAt(clip: TimelineClip, rel: Long, property: KeyframeProperty): List<Keyframe> {
+        val value = com.hereliesaz.guillotine.model.TimelineMath.valueAt(clip, property, rel, property.staticValue(clip))
+        val existing = firstOrNull { it.property == property && it.timeMs == rel }
+        return if (existing != null) {
+            map { if (it.id == existing.id) it.copy(value = value) else it }
+        } else {
+            (this + Keyframe(newId(), rel, value, property, easingNow())).sortedBy { it.timeMs }
+        }
+    }
+
+    /**
+     * Keyframe button — record the selected clip's crop/placement (+opacity) at the playhead: a
+     * keyframe for SCALE/ROTATION/OFFSET_X/OFFSET_Y/OPACITY at their current values, on the selected
+     * clip(s) the cursor is over (and only those — never other group members). One undo step.
+     */
+    fun addKeyframeAtPlayhead() {
+        val now = _uiState.value.currentTimeMs
+        val ids = _uiState.value.selectedClipIds.toHashSet()
+        if (ids.isEmpty()) return
+        val props = listOf(
+            KeyframeProperty.OPACITY, KeyframeProperty.SCALE, KeyframeProperty.ROTATION,
+            KeyframeProperty.OFFSET_X, KeyframeProperty.OFFSET_Y,
+        )
+        mutateDocument { doc ->
+            var changed = false
+            val clips = doc.clips.map { clip ->
+                if (clip.id !in ids || now < clip.startTimeMs || now > clip.endTimeMs) return@map clip
+                val rel = (now - clip.startTimeMs).coerceIn(0, clip.durationMs)
+                var kfs = clip.keyframes
+                props.forEach { p -> kfs = kfs.withKeyframeAt(clip, rel, p) }
+                changed = true
+                clip.copy(keyframes = kfs)
+            }
+            if (changed) doc.copy(clips = clips) else doc
+        }
+    }
+
     fun updateKeyframe(clipId: String, keyframeId: String, transform: (Keyframe) -> Keyframe) {
         mutateDocument { doc ->
             doc.copy(clips = doc.clips.map { clip ->
