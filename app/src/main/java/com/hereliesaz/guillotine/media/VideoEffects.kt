@@ -179,17 +179,25 @@ object VideoEffects {
 
     /**
      * Per-frame crop/placement transform from SCALE/ROTATION/OFFSET_X/OFFSET_Y keyframes (absolute —
-     * the clip's static value is the default). Rotation is applied in NDC: exact on square frames,
-     * slightly skewed on wide frames (preview's graphicsLayer rotation is exact); an aspect-correct
-     * GL fix for export rotation is a follow-up.
+     * the clip's static value is the default). The matrix acts in normalized device coords ([-1,1] on
+     * both axes), where a raw rotation skews on non-square frames because NDC squashes the aspect ratio.
+     * We capture the frame aspect in [configure] and wrap the rotation in an aspect normalize/denormalize
+     * (x·a → rotate → x/a) so export rotation matches preview's aspect-correct `graphicsLayer`.
      */
     private class KeyframeTransform(private val clip: TimelineClip, private val startMs: Long) : MatrixTransformation {
         private val m = android.graphics.Matrix()
+        private var aspect = 1f // width / height of the input frame, set in configure()
         // Pre-filtered/sorted once so getMatrix (per frame) stays allocation-free.
         private val scaleKfs = clip.keyframes.filter { it.property == KeyframeProperty.SCALE }.sortedBy { it.timeMs }
         private val rotationKfs = clip.keyframes.filter { it.property == KeyframeProperty.ROTATION }.sortedBy { it.timeMs }
         private val offsetXKfs = clip.keyframes.filter { it.property == KeyframeProperty.OFFSET_X }.sortedBy { it.timeMs }
         private val offsetYKfs = clip.keyframes.filter { it.property == KeyframeProperty.OFFSET_Y }.sortedBy { it.timeMs }
+
+        override fun configure(inputWidth: Int, inputHeight: Int): androidx.media3.common.util.Size {
+            aspect = if (inputHeight > 0) inputWidth.toFloat() / inputHeight else 1f
+            return androidx.media3.common.util.Size(inputWidth, inputHeight)
+        }
+
         override fun getMatrix(presentationTimeUs: Long): android.graphics.Matrix {
             val t = startMs + presentationTimeUs / 1000
             val s = TimelineMath.interpolateSorted(scaleKfs, t, clip.scale).coerceAtLeast(0f)
@@ -197,8 +205,13 @@ object VideoEffects {
             val ox = TimelineMath.interpolateSorted(offsetXKfs, t, clip.offsetX)
             val oy = TimelineMath.interpolateSorted(offsetYKfs, t, clip.offsetY)
             m.reset()
-            m.postScale(s, s)   // NDC centre (0,0)
+            m.postScale(s, s)   // uniform scale about NDC centre (0,0) — aspect-neutral
+            // Aspect-correct rotation: NDC→square (x·a), rotate, square→NDC (x/a). On a square frame
+            // a==1 and this collapses to a plain rotation. Post order builds S(1/a)·R·S(a), so S(a)
+            // (applied to the point first) un-squashes x before the rotation.
+            m.postScale(1f / aspect, 1f)
             m.postRotate(-rot)  // Compose CW vs Media3 CCW
+            m.postScale(aspect, 1f)
             m.postTranslate(ox * 2f, -oy * 2f)
             return m
         }
