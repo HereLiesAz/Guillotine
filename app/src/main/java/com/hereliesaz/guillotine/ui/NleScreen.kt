@@ -104,6 +104,8 @@ import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.model.newId
+import com.hereliesaz.guillotine.operation.OperationController
+import com.hereliesaz.guillotine.operation.OperationKind
 import com.hereliesaz.guillotine.ui.theme.Black
 import com.hereliesaz.guillotine.ui.theme.Neutral400
 import com.hereliesaz.guillotine.ui.theme.Neutral500
@@ -218,22 +220,38 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         vm.setProcessing(true, null)
         vm.setAnalyzing(targets.map { it.id }, true)
         vm.setAnalysisProgress(com.hereliesaz.guillotine.ai.AnalysisProgress("Starting\u2026"))
-        scope.launch {
-            try {
-                for (clip in targets) {
-                    val media = vm.uiState.value.document.mediaFor(clip) ?: continue
-                    val edits = Analysis.run(
-                        context, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
-                    ) { progress -> vm.setAnalysisProgress(progress) }
-                    vm.applyEdits(clip.id, edits)
-                }
-                vm.setProcessing(false, null)
-            } catch (e: Exception) {
-                vm.setAnalyzing(targets.map { it.id }, false)
+        val ids = targets.map { it.id }
+        // Run in the background via the foreground service so it survives backgrounding and can be
+        // paused/cancelled from the notification; results + status still flow into the editor state.
+        val started = OperationController.start(
+            context, OperationKind.ANALYZE, "Analyzing\u2026", pausable = true,
+            onError = { e ->
+                vm.setAnalyzing(ids, false)
                 vm.setProcessing(false, e.message ?: "Analysis failed")
-            } finally {
                 vm.setAnalysisProgress(null)
+            },
+            onComplete = {
+                vm.setProcessing(false, null)
+                vm.setAnalysisProgress(null)
+            },
+        ) { sink ->
+            for (clip in targets) {
+                val media = vm.uiState.value.document.mediaFor(clip) ?: continue
+                val edits = Analysis.run(
+                    context, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
+                    onProgress = { progress ->
+                        vm.setAnalysisProgress(progress)
+                        sink.report(progress.fraction, progress.stage)
+                    },
+                    checkpoint = sink::checkpointBlocking,
+                )
+                vm.applyEdits(clip.id, edits)
             }
+        }
+        if (!started) {
+            vm.setAnalyzing(ids, false)
+            vm.setProcessing(false, "Another operation is already running.")
+            vm.setAnalysisProgress(null)
         }
     }
 
@@ -402,16 +420,19 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     (context.applicationContext as? GuillotineApplication)?.interstitialAdManager?.show(act)
                 }
                 exporting = true; exportError = null; exportProgress = 0f
-                scope.launch {
-                    try {
-                        Exporter.export(context, vm.uiState.value.document, name) { p -> exportProgress = p }
-                        exportDone = "Saved to Movies/Guillotine."
-                    } catch (e: Exception) {
-                        exportError = e.message ?: "Export failed"
-                    } finally {
-                        exporting = false
+                // Export in the background via the foreground service (cancel-only — Media3 can't pause
+                // an encode). Progress feeds the in-app sheet and the notification.
+                val startedExport = OperationController.start(
+                    context, OperationKind.EXPORT, "Exporting…", pausable = false,
+                    onError = { e -> exportError = e.message ?: "Export failed"; exporting = false },
+                    onComplete = { exportDone = "Saved to Movies/Guillotine."; exporting = false },
+                ) { sink ->
+                    Exporter.export(context, vm.uiState.value.document, name) { p ->
+                        exportProgress = p
+                        sink.report(p, "Exporting…")
                     }
                 }
+                if (!startedExport) { exportError = "Another operation is already running."; exporting = false }
             },
             onDismiss = { if (!exporting) showExport = false },
         )
