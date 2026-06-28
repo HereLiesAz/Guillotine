@@ -1035,7 +1035,9 @@ class EditorViewModel : ViewModel() {
                 scale = (it.scale * zoom).coerceIn(0.1f, 6f),
                 offsetX = (it.offsetX + panXFrac).coerceIn(-1.5f, 1.5f),
                 offsetY = (it.offsetY + panYFrac).coerceIn(-1.5f, 1.5f),
-                rotation = it.rotation + rotationDelta,
+                // Subtract: the gesture's rotation sign is opposite graphicsLayer.rotationZ, so adding
+                // it spins the layer against the fingers. Negating makes the layer follow the twist.
+                rotation = it.rotation - rotationDelta,
             )
         }
     }

@@ -16,26 +16,48 @@ val versionProps = Properties().apply {
     }
 }
 
-// versionCode: an explicit override wins (CI passes -PversionBuild=<git commit count>), giving a
-// deterministic, monotonically-increasing code required for Play Store uploads. Without it, fall
-// back to the local auto-increment in version.properties (handy for ad-hoc release builds).
+// Four-part version: Major.Minor.Patch.Build
+//   • Major  — bumped by hand (a human edits version.properties).
+//   • Minor  — bumped by hand.
+//   • Patch  — auto-increments on every build that produces an artifact; RESETS to 0 the first
+//              build after Minor changes.
+//   • Build  — auto-increments on every such build and NEVER resets (monotonic ⇒ versionCode).
+//
+// versionPatchBaseMinor records the Minor that the current Patch counter belongs to, so we can
+// detect a hand-edited Minor and reset Patch.
+//
+// CI passes -PversionBuild=<git commit count> as a deterministic, monotonically-increasing
+// override (no file write, so parallel/fresh CI checkouts stay reproducible); when present it wins
+// for both the code and the name's build component and the local auto-increment is skipped.
 val versionBuildOverride = (project.findProperty("versionBuild") as String?)?.toIntOrNull()
-var currentVersionCode = versionBuildOverride ?: versionProps.getProperty("versionBuild", "1").toInt()
 
-// Automatically increment versionCode for release builds (only when not explicitly overridden).
-val isReleaseBuild = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
-if (versionBuildOverride == null && isReleaseBuild) {
-    currentVersionCode++
-    versionProps.setProperty("versionBuild", currentVersionCode.toString())
+val verMajor = versionProps.getProperty("versionMajor", "1").toInt()
+val verMinor = versionProps.getProperty("versionMinor", "0").toInt()
+var verPatch = versionProps.getProperty("versionPatch", "0").toInt()
+var verBuild = versionProps.getProperty("versionBuild", "0").toInt()
+val patchBaseMinor = versionProps.getProperty("versionPatchBaseMinor", verMinor.toString()).toInt()
+
+// "Every build" = any task that actually assembles/bundles/installs an artifact (apk or aab,
+// debug or release). Pure config/sync tasks (clean, tasks, IDE sync) are excluded so they don't
+// churn version.properties on every Gradle invocation.
+val isArtifactBuild = gradle.startParameter.taskNames.any { name ->
+    listOf("assemble", "bundle", "install").any { name.contains(it, ignoreCase = true) }
+}
+
+if (versionBuildOverride == null && isArtifactBuild) {
+    verPatch = if (patchBaseMinor != verMinor) 0 else verPatch + 1 // reset on minor bump, else ++
+    verBuild += 1 // never resets
+    versionProps.setProperty("versionPatch", verPatch.toString())
+    versionProps.setProperty("versionBuild", verBuild.toString())
+    versionProps.setProperty("versionPatchBaseMinor", verMinor.toString())
     versionPropsFile.outputStream().use {
-        versionProps.store(it, "Auto-incremented by release build")
+        versionProps.store(it, "Auto-incremented by build (patch resets on minor, build never)")
     }
 }
 
-val verMajor = versionProps.getProperty("versionMajor", "1")
-val verMinor = versionProps.getProperty("versionMinor", "0")
-val verPatch = versionProps.getProperty("versionPatch", "0")
-val currentVersionName = "$verMajor.$verMinor.$verPatch"
+val effectiveBuild = versionBuildOverride ?: verBuild
+val currentVersionCode = effectiveBuild
+val currentVersionName = "$verMajor.$verMinor.$verPatch.$effectiveBuild"
 
 android {
     namespace = "com.hereliesaz.guillotine"
