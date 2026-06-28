@@ -1,0 +1,54 @@
+Guillotine is a free, on-device video editor for Android — a real multi-track timeline plus an AI that actually does the editing. Tell it what to cut, and it cuts.
+
+No account. No subscription. No cloud required. Your footage never leaves your device.
+
+✂️ TELL IT WHAT TO CUT
+Type a plain-English instruction — “cut the silences,” “keep only the shots with a face,” “delete every frame with my phone in it” — and Guillotine finds the ranges and makes the cuts. Point it at a single frame (“this is my phone”) to track that exact object through the clip. All of this runs on-device with real vision: object, face and scene detection, plus a free silence detector.
+
+🤖 AN AI THAT USES THE REAL TOOLS
+A built-in assistant turns your words into real edits — splitting clips, deleting ranges, applying looks — by driving the same editor you use by hand. Bring your own key for a cloud model, or run a fully on-device LLM. Either way the AI only ever works with text: your video is never uploaded.
+
+🎬 A REAL MULTI-TRACK TIMELINE (VEGAS-STYLE)
+• Stack video and audio tracks that truly composite — the top track over the layers below
+• Crossfade overlapping clips on a track
+• Split, group, and drag clips across tracks
+• Long-press a clip’s edge to trim its in/out point — or re-extend a trimmed clip back into its source
+• Pinch or Ctrl-scroll to zoom; tap anywhere to seek
+• On-device thumbnails and audio waveforms on every clip
+
+🎚️ KEYFRAMES, FILTERS & AUDIO
+• Animate opacity, scale and volume with keyframes and a cubic-bezier curve editor
+• Brightness, contrast, saturation, hue, sepia, blur, grayscale, invert — with presets
+• Per-clip volume, left/right pan and loudness normalization
+• Crop, scale and rotate any clip — video, image or text — right on the preview
+
+🪄 GENERATIVE & CREATIVE
+• Remove an unwanted object and repaint the background so it looks natural
+• Background removal: drop a clip’s background so the layer below shows through
+• Generate images from a prompt — free with no key, or bring a key for more models
+• Text and captions as overlays; auto-transcribe speech into timed caption clips (on-device or cloud)
+
+📼 REAL MP4 EXPORT
+Rendering happens on-device with hardware encoding. Removed ranges are physically cut; every effect, transform, caption and audio mix is baked in; and the finished mp4 is saved straight to your gallery.
+
+🔔 KEEPS WORKING IN THE BACKGROUND
+Long jobs — analysis, object removal, export — keep running when you leave the app, with a progress notification you can pause, resume or cancel.
+
+⚡ AUTOMATION FOR POWER USERS
+While the editor is open, Guillotine runs a small, token-protected automation server (MCP) so an AI tool of your choice can read your timeline and apply edits for you. It carries your project — not your media files — and an optional end-to-end-encrypted relay lets a tool reach it from anywhere. Off by default.
+
+📱 BUILT FOR EVERY SCREEN
+One adaptive layout for phones, tablets and Chromebooks, with keyboard shortcuts and mouse + Ctrl-scroll zoom. Installs even without a touchscreen. Android 8.0 and up.
+
+🔒 PRIVATE BY DESIGN
+• Editing, playback and all AI analysis run on your device
+• Your video is never uploaded for analysis
+• Optional cloud-AI keys are stored encrypted on your device and used only for requests you start
+• No first-party servers, no account, no tracking
+
+💾 NEVER LOSE WORK
+Projects autosave and restore on launch, and save as a portable .gilt file so you can pick up exactly where you left off.
+
+Perfect for trimming dead air out of vlogs and podcasts, pulling clips for social, removing distractions from a shot, captioning talking-head videos, and quick multi-track edits on a phone, tablet or Chromebook — no timeline experience required.
+
+Free and open source. Bring your own AI key, or use the no-key on-device options and keep everything on your device.
