@@ -72,6 +72,9 @@ class AppOpenAdManager(private val application: Application) :
 
     private fun showAdIfAvailable() {
         if (isShowingAd) return
+        // Frequency cap: no more than one full-screen ad every 5 minutes (shared with the render
+        // interstitial). When gated, keep the loaded ad for the next eligible foreground.
+        if (!FullScreenAdGate.canShow()) return
         val activity = currentActivity ?: return
         val ad = appOpenAd
         if (ad == null || !isAdAvailable()) {
@@ -93,6 +96,7 @@ class AppOpenAdManager(private val application: Application) :
 
             override fun onAdShowedFullScreenContent() {
                 isShowingAd = true
+                FullScreenAdGate.markShown()
             }
         }
         ad.show(activity)
