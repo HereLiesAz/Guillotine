@@ -25,6 +25,7 @@ name: Release AAB to Play
 # versionCode is derived from the git commit count (-PversionBuild), so it always increases.
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       track:
