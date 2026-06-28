@@ -31,11 +31,13 @@ val versionProps = Properties().apply {
 // for both the code and the name's build component and the local auto-increment is skipped.
 val versionBuildOverride = (project.findProperty("versionBuild") as String?)?.toIntOrNull()
 
-val verMajor = versionProps.getProperty("versionMajor", "1").toInt()
-val verMinor = versionProps.getProperty("versionMinor", "0").toInt()
-var verPatch = versionProps.getProperty("versionPatch", "0").toInt()
-var verBuild = versionProps.getProperty("versionBuild", "0").toInt()
-val patchBaseMinor = versionProps.getProperty("versionPatchBaseMinor", verMinor.toString()).toInt()
+// trim().toIntOrNull(): Major/Minor are hand-edited, so a stray space or typo must not crash the
+// IDE sync or build — fall back to the default instead.
+val verMajor = versionProps.getProperty("versionMajor", "1").trim().toIntOrNull() ?: 1
+val verMinor = versionProps.getProperty("versionMinor", "0").trim().toIntOrNull() ?: 0
+var verPatch = versionProps.getProperty("versionPatch", "0").trim().toIntOrNull() ?: 0
+var verBuild = versionProps.getProperty("versionBuild", "0").trim().toIntOrNull() ?: 0
+val patchBaseMinor = versionProps.getProperty("versionPatchBaseMinor", verMinor.toString()).trim().toIntOrNull() ?: verMinor
 
 // "Every build" = any task that actually assembles/bundles/installs an artifact (apk or aab,
 // debug or release). Pure config/sync tasks (clean, tasks, IDE sync) are excluded so they don't
@@ -44,6 +46,12 @@ val isArtifactBuild = gradle.startParameter.taskNames.any { name ->
     listOf("assemble", "bundle", "install").any { name.contains(it, ignoreCase = true) }
 }
 
+// This increment-and-write happens in the configuration phase (versionCode/versionName must be
+// resolved before tasks run). That is a deliberate tradeoff: it mutates a project file at config
+// time, so it is not configuration-cache-clean (the cache is not enabled here) and a build that
+// fails after this point still "spends" a number. Both are harmless — the cache is off, and Build
+// is a monotonic versionCode where skipped numbers don't matter. CI never hits this branch (it
+// passes -PversionBuild), so release uploads stay deterministic and side-effect-free.
 if (versionBuildOverride == null && isArtifactBuild) {
     verPatch = if (patchBaseMinor != verMinor) 0 else verPatch + 1 // reset on minor bump, else ++
     verBuild += 1 // never resets
