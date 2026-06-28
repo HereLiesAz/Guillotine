@@ -579,8 +579,10 @@ class EditorViewModel : ViewModel() {
             var d = deltaMs.coerceAtLeast(-clip.trimStartMs)
             d = d.coerceAtMost(clip.durationMs - MIN_CLIP_DURATION_MS)
             if (d == 0L) return@mutateDocument doc
+            // The clip's linked waveform shadow (its own audio) trims identically so they stay aligned.
+            val affected = setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
             doc.copy(clips = doc.clips.map {
-                if (it.id != clipId) it
+                if (it.id !in affected) it
                 else it.copy(
                     startTimeMs = (it.startTimeMs + d).coerceAtLeast(0),
                     trimStartMs = it.trimStartMs + d,
@@ -605,10 +607,14 @@ class EditorViewModel : ViewModel() {
                 d = d.coerceAtMost(maxDuration - clip.durationMs)
             }
             if (d == 0L) return@mutateDocument doc
-            val newDuration = clip.durationMs + d
+            // The clip's linked waveform shadow (its own audio) extends/shrinks identically.
+            val affected = setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
             doc.copy(clips = doc.clips.map {
-                if (it.id != clipId) it
-                else it.copy(durationMs = newDuration, keyframes = it.keyframes.filter { k -> k.timeMs <= newDuration })
+                if (it.id !in affected) it
+                else {
+                    val nd = it.durationMs + d
+                    it.copy(durationMs = nd, keyframes = it.keyframes.filter { k -> k.timeMs <= nd })
+                }
             })
         }
     }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -406,6 +408,12 @@ private fun ClipView(
     var dragPy by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimStartPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimEndPx by remember(clip.id) { mutableFloatStateOf(0f) }
+    // -1 = trimming the left edge, +1 = the right edge, 0 = not trimming (long-press near an edge).
+    var trimEdge by remember(clip.id) { mutableIntStateOf(0) }
+    val edgeThresholdPx = with(density) { 24.dp.toPx() }
+    // Live edge-trim preview: shift/resize the clip's box while dragging an edge (commit on release).
+    val leftTrimPx = if (trimEdge < 0) trimStartPx else 0f
+    val rightTrimPx = if (trimEdge > 0) trimEndPx else 0f
     // This clip's live move offset: the shared group drag if it's part of the active drag, else none.
     val moveDrag = groupDrag?.takeIf { clip.id in it.ids }
     val moveDx = moveDrag?.dx ?: 0f
@@ -420,9 +428,11 @@ private fun ClipView(
 
     Box(
         Modifier
-            .offset { androidx.compose.ui.unit.IntOffset((baseLeftPx + moveDx).roundToInt(), moveDy.roundToInt()) }
+            // Live preview folds an in-progress edge trim into the box geometry: the left edge shifts the
+            // offset and shrinks the width; the right edge changes the width. Committed on drag end.
+            .offset { androidx.compose.ui.unit.IntOffset((baseLeftPx + moveDx + leftTrimPx).roundToInt(), moveDy.roundToInt()) }
             .padding(vertical = 6.dp)
-            .width(msToDp(clip.durationMs))
+            .width(with(density) { (msToDp(clip.durationMs).toPx() - leftTrimPx + rightTrimPx).coerceAtLeast(1f).toDp() })
             .fillMaxHeight()
             .clip(RoundedCornerShape(4.dp))
             .background(if (selected) Red500.copy(alpha = 0.22f) else Neutral800)
@@ -431,9 +441,13 @@ private fun ClipView(
             // from the current selection to this clip (across tracks, all clips between).
             .pointerInput(clip.id, state.tool, pps, clip.keyframes) {
                 detectTapGestures(
-                    onLongPress = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        vm.selectRangeTo(clip.id)
+                    onLongPress = { offset ->
+                        // Near an edge, a long-press starts an edge-trim drag (handled below) — only the
+                        // middle of the clip range-selects.
+                        if (offset.x > edgeThresholdPx && offset.x < size.width - edgeThresholdPx) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            vm.selectRangeTo(clip.id)
+                        }
                     },
                     onTap = onTap@{ offset ->
                         // Tap a keyframe diamond: select it + toggle its ease.
@@ -487,6 +501,38 @@ private fun ClipView(
                         },
                     )
                 }
+            }
+            // Long-press near an edge, then drag, to trim that in/out point (Vegas-style). A previously
+            // split/trimmed clip re-extends by dragging its edge outward — trimClipStart/trimClipEnd
+            // bound it to the source media. The grabbed edge previews live and commits on release.
+            .pointerInput(clip.id, pps, state.tool) {
+                if (state.tool != EditorTool.SELECT) return@pointerInput
+                val edgePx = 24.dp.toPx()
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { down ->
+                        trimEdge = when {
+                            down.x <= edgePx -> -1
+                            down.x >= size.width - edgePx -> 1
+                            else -> 0
+                        }
+                        trimStartPx = 0f; trimEndPx = 0f
+                        if (trimEdge != 0) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    },
+                    onDrag = { change, drag ->
+                        if (trimEdge != 0) {
+                            change.consume()
+                            if (trimEdge < 0) trimStartPx += drag.x else trimEndPx += drag.x
+                        }
+                    },
+                    onDragEnd = {
+                        when {
+                            trimEdge < 0 -> vm.trimClipStart(clip.id, (trimStartPx / pps * 1000f).toLong())
+                            trimEdge > 0 -> vm.trimClipEnd(clip.id, (trimEndPx / pps * 1000f).toLong())
+                        }
+                        trimEdge = 0; trimStartPx = 0f; trimEndPx = 0f
+                    },
+                    onDragCancel = { trimEdge = 0; trimStartPx = 0f; trimEndPx = 0f },
+                )
             }
             // With a keyframe selected, dragging adjusts its nearest bezier ease handle.
             .pointerInput(clip.id, state.selectedKeyframeId, pps) {
@@ -619,37 +665,22 @@ private fun ClipView(
             }
         }
 
-        // Trim handles — drag clip edges to adjust in/out points (select tool, when selected).
+        // Edge affordance: a subtle handle on each edge when selected (long-press + drag to trim),
+        // brightening on the edge currently being trimmed.
         if (selected && state.tool == EditorTool.SELECT) {
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .width(10.dp)
+                    .width(6.dp)
                     .fillMaxHeight()
-                    .background(Red500)
-                    .pointerInput(clip.id, pps) {
-                        detectDragGestures(
-                            onDragStart = { trimStartPx = 0f },
-                            onDragEnd = { vm.trimClipStart(clip.id, (trimStartPx / pps * 1000f).toLong()); trimStartPx = 0f },
-                            onDragCancel = { trimStartPx = 0f },
-                            onDrag = { change, drag -> change.consume(); trimStartPx += drag.x },
-                        )
-                    },
+                    .background(Red500.copy(alpha = if (trimEdge < 0) 1f else 0.45f)),
             )
             Box(
                 Modifier
                     .align(Alignment.CenterEnd)
-                    .width(10.dp)
+                    .width(6.dp)
                     .fillMaxHeight()
-                    .background(Red500)
-                    .pointerInput(clip.id, pps) {
-                        detectDragGestures(
-                            onDragStart = { trimEndPx = 0f },
-                            onDragEnd = { vm.trimClipEnd(clip.id, (trimEndPx / pps * 1000f).toLong()); trimEndPx = 0f },
-                            onDragCancel = { trimEndPx = 0f },
-                            onDrag = { change, drag -> change.consume(); trimEndPx += drag.x },
-                        )
-                    },
+                    .background(Red500.copy(alpha = if (trimEdge > 0) 1f else 0.45f)),
             )
         }
     }
