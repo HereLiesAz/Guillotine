@@ -32,6 +32,7 @@ object LocalHeuristicProvider : ClipAnalyzer {
         prompt: String,
         durationMs: Long,
         onProgress: (AnalysisProgress) -> Unit,
+        checkpoint: () -> Unit,
     ): List<EditSegment> = withContext(Dispatchers.Default) {
         val keepWhole = listOf(EditSegment(0, durationMs, EditAction.KEEP, "Kept (local heuristic)"))
         if (kind == MediaKind.IMAGE) return@withContext keepWhole
@@ -51,6 +52,7 @@ object LocalHeuristicProvider : ClipAnalyzer {
         var cursor = 0L
         var silenceCount = 0
         while (i < audible.size) {
+            checkpoint() // pause/cancel hook
             if (audible[i]) { i++; continue }
             val startW = i
             while (i < audible.size && !audible[i]) i++

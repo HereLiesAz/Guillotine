@@ -3,7 +3,7 @@
 ## Requirements
 
 - **Android Studio** (current stable) — bundles a compatible JDK 17.
-- **Android SDK** API 35 (compile/target) installed; a device or emulator on **API 26+**.
+- **Android SDK** API 37 (compile) / 36 (target) installed; a device or emulator on **API 26+**.
 - The Gradle wrapper (`gradlew` / `gradlew.bat` + `gradle/wrapper/gradle-wrapper.jar`) is committed,
   so no separate Gradle install is needed.
 
@@ -21,10 +21,12 @@ corrupt builds. Before building:
 ## ⚠️ Version reconciliation on first sync
 
 The toolchain versions in `gradle/libs.versions.toml` and `gradle/wrapper/gradle-wrapper.properties`
-(Gradle, AGP, Kotlin, Compose BOM, `material3`, compileSdk 35) were set while authoring offline and
-**must be mutually compatible**. If the first sync reports an AGP↔Gradle or Compose↔Kotlin mismatch,
-let Android Studio's **AGP Upgrade Assistant** pick the matching versions — that is the source of
-truth. `material3` is pinned to 1.4.x so the Material 3 Expressive APIs resolve.
+(Gradle, AGP, Kotlin, the Compose UI artifacts, `material3`, compileSdk 37) **must be mutually
+compatible**. If the first sync reports an AGP↔Gradle or Compose↔Kotlin mismatch, let Android
+Studio's **AGP Upgrade Assistant** pick the matching versions — that is the source of truth.
+`material3` is pinned to the **1.5.0-alpha** line so the Material 3 Expressive APIs resolve (the
+Compose UI artifacts are pinned explicitly rather than via a BOM); see the notes in
+`gradle/libs.versions.toml`.
 
 ## Build & run
 

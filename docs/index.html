@@ -412,7 +412,7 @@
       <div class="section-head reveal">
         <div class="kicker">Bring your own brain</div>
         <h2>Free by default. Powerful when you plug in a key.</h2>
-        <p>Start with the free on-device analyzer — no account, no key, nothing leaves your device. Want video-native understanding? Drop in your own API key; it's stored encrypted on-device and never sent anywhere but the provider you chose.</p>
+        <p>Tell the in-app assistant what you want and it drives the editor for you. Every analysis runs <strong>on-device</strong> — your video never leaves your device. Cloud AIs are <em>controllers</em>: plug in your own key and the provider only exchanges text (your instructions + the timeline), never your clips or frames. Prefer fully local? Use the on-device LLM brain. Keys are stored encrypted on-device.</p>
       </div>
 
       <div class="providers">
@@ -429,17 +429,17 @@
         <div class="prov reveal">
           <span class="tag byo">BYO key</span>
           <h4>Gemini</h4>
-          <p>Video-native analysis for the richest keep/remove decisions.</p>
+          <p>Drives the editor as a text controller via the MCP tools (no video sent).</p>
         </div>
         <div class="prov reveal">
           <span class="tag byo">BYO key</span>
           <h4>OpenAI</h4>
-          <p>Frame sampling with GPT-4o, plus Whisper for transcript-aware cuts.</p>
+          <p>Text controller via MCP; Whisper still handles cloud transcription if you choose it.</p>
         </div>
         <div class="prov reveal">
           <span class="tag byo">BYO key</span>
           <h4>Anthropic</h4>
-          <p>Claude frame-sampling analysis for visual prompts.</p>
+          <p>Claude drives the editor as a text controller via MCP (no frames sent).</p>
         </div>
         <div class="prov reveal">
           <span class="tag byo">BYO key</span>
@@ -449,7 +449,7 @@
         <div class="prov reveal">
           <span class="tag byo">BYO key</span>
           <h4>Groq</h4>
-          <p>Fast Llama-vision frame analysis.</p>
+          <p>Fast text controller via an OpenAI-compatible endpoint.</p>
         </div>
         <div class="prov reveal">
           <span class="tag byo">BYO key</span>
@@ -518,7 +518,7 @@
       <div class="faq reveal">
         <details class="qa">
           <summary>Is it really free?</summary>
-          <div class="a">Yes — Guillotine is free and open source. The on-device analyzer needs no key and no account. If you want sharper, video-native AI, you can plug in your own Gemini, OpenAI or Anthropic key.</div>
+          <div class="a">Yes — Guillotine is free and open source. The on-device analyzer and the in-app assistant's on-device LLM brain need no key and no account. You can also plug in your own Gemini, OpenAI or Anthropic key to use that model as the assistant.</div>
         </details>
         <details class="qa">
           <summary>Do I need an account or internet connection?</summary>
@@ -526,7 +526,7 @@
         </details>
         <details class="qa">
           <summary>Is my footage uploaded anywhere?</summary>
-          <div class="a">Not by default. Your media stays on your device. If you opt into a BYO-key provider, only what's needed for that analysis is sent to the provider you picked. API keys are stored encrypted on-device.</div>
+          <div class="a">No — your video is never uploaded for analysis. All frame/audio analysis runs on-device. A cloud AI, if you choose one, acts only as a text controller: it receives your instructions and the timeline state and replies with edits, never your media or frames. (Generative object removal is the one exception: only the individual masked frames are sent to Leonardo.ai with your key to be repainted.) API keys are stored encrypted on-device.</div>
         </details>
         <details class="qa">
           <summary>Where do my exports go?</summary>

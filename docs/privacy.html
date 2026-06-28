@@ -85,7 +85,7 @@
 <main>
   <div class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="eff">Effective date: 2026-06-20</p>
+    <p class="eff">Effective date: 2026-06-28</p>
 
     <p class="lead">Guillotine is an on-device, non-linear video editor for Android, tablets, and
     Chromebooks. In short: <strong>Guillotine has no servers of its own, no account system, and no
@@ -97,8 +97,8 @@
     <ul>
       <li>We (the developer) do <strong>not</strong> collect, store, or receive your data on any server we control.</li>
       <li>We <strong>do</strong> show ads through <strong>Google AdMob</strong>, which collects your device’s advertising ID and related data to serve and measure ads — the one third-party SDK in the app.</li>
-      <li>Editing, playback, thumbnails, waveforms, on-device vision (ML Kit), and on-device speech recognition (Vosk) all run <strong>locally on your device</strong>.</li>
-      <li>The app only sends data over the network when <strong>you</strong> trigger an action that uses a third-party service you configured (an AI provider, image generation, or crash reporting).</li>
+      <li>Editing, playback, thumbnails, waveforms, <strong>all frame/audio analysis</strong> (ML Kit + MediaPipe vision and the local silence heuristic), an optional on-device LLM, and on-device speech recognition (Vosk) all run <strong>locally on your device</strong>. <strong>Your video is never uploaded</strong> for analysis — cloud AIs only ever act as text controllers (see below).</li>
+      <li>The app only sends data over the network when <strong>you</strong> trigger an action that uses a third-party service you configured (a cloud AI controller, image generation, or crash reporting).</li>
       <li>API keys you enter are <strong>encrypted on your device</strong> and are sent only to the matching provider, only in requests you initiate.</li>
     </ul>
 
@@ -117,7 +117,8 @@
     only when, you run one of these actions, the relevant content is sent directly from your device
     to the provider you selected</strong> — it does not pass through any server we operate:</p>
     <ul>
-      <li><strong>Analysis / editing suggestions</strong> — your selected clip’s media (or sampled frames) and your prompt are sent to the provider you chose: Google Gemini, OpenAI, Anthropic, OpenRouter, Groq, xAI, or Mistral.</li>
+      <li><strong>AI assistant / editing control</strong> — when you use a <strong>cloud</strong> AI (Google Gemini, OpenAI, Anthropic, OpenRouter, Groq, xAI, or Mistral) as the assistant, only <strong>text</strong> is exchanged: your instructions and the project/timeline state go to the provider, and it replies with tool calls that drive the editor. The provider <strong>does not receive your media or frames</strong> — the actual keep/remove analysis and any background removal run <strong>on your device</strong> (ML Kit + MediaPipe). The free on-device LLM brain keeps even that text local.</li>
+      <li><strong>Generative object removal</strong> — the object is detected and masked <strong>on-device</strong>; only the individual masked frame(s) + mask are sent to <strong>Leonardo.ai</strong> (with your key) to be repainted.</li>
       <li><strong>Image generation</strong> — your text prompt is sent to <strong>Leonardo.ai</strong> (with your key) or, for the free no-key option, to <strong>Pollinations.ai</strong>.</li>
       <li><strong>Transcription / captions</strong> — handled <strong>on-device</strong> with Vosk if you configure a local speech model; otherwise audio is sent to OpenAI Whisper using your key.</li>
     </ul>
@@ -182,6 +183,7 @@
       <li><strong>Advertising ID</strong> (<code>com.google.android.gms.permission.AD_ID</code>) — used by Google AdMob to serve ads.</li>
       <li><strong>Storage access (Storage Access Framework)</strong> — only the specific media files you pick are accessible to the app; it does not scan your library.</li>
       <li><strong>Media output (MediaStore)</strong> — to save exported videos to your Movies folder.</li>
+      <li><strong>Notifications + foreground service</strong> (<code>POST_NOTIFICATIONS</code>, <code>FOREGROUND_SERVICE</code>, <code>FOREGROUND_SERVICE_MEDIA_PROCESSING</code>, <code>WAKE_LOCK</code>) — to keep a long operation (analysis, generative removal, or export) running with a progress notification while the app is in the background. Purely local; nothing is transmitted.</li>
     </ul>
     <p>The app does not request location, contacts, the microphone, or the camera; it only works with media you explicitly import.</p>
 

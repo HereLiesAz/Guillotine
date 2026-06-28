@@ -41,6 +41,7 @@ class MlKitProvider : ClipAnalyzer {
         prompt: String,
         durationMs: Long,
         onProgress: (AnalysisProgress) -> Unit,
+        checkpoint: () -> Unit,
     ): List<EditSegment> = withContext(Dispatchers.IO) {
         if (kind == MediaKind.AUDIO) {
             throw IllegalStateException("On-device vision analyzes video and images. For audio, use the free Local analyzer.")
@@ -62,9 +63,6 @@ class MlKitProvider : ClipAnalyzer {
         } else null
         // Precise bounding-box COCO detection for object terms (face intents stay on the face detector).
         val objectVision = if (intent.useFaces) null else ObjectVision(context)
-        // Scan denser + claim a tighter window when real object detection is driving the match, so brief
-        // or partial appearances aren't skipped and cut boundaries hug the actual range.
-        val blockFrames = if (objectVision?.available == true) OBJECT_BLOCK_FRAMES else BLOCK_FRAMES
         // When every term is a COCO class the detector owns, the whole-image labeler adds no recall
         // (too-small objects aren't top labels either) and only burns time per frame — skip it.
         val useFallback = objectVision?.available != true || intent.terms.any { !ObjectVision.coversTerm(it) }
@@ -79,7 +77,7 @@ class MlKitProvider : ClipAnalyzer {
                 val action = if (matched == intent.keepMatches) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, if (matched) "match" else "no match"))
             } else {
-                scanVideo(context, mediaUri, durationMs, blockFrames, intent.keepMatches, onProgress, match)
+                scanVideo(context, mediaUri, durationMs, intent.keepMatches, onProgress, checkpoint, match)
             }
         } finally {
             labeler.close()
@@ -102,6 +100,7 @@ class MlKitProvider : ClipAnalyzer {
         durationMs: Long,
         reference: Bitmap,
         onProgress: (AnalysisProgress) -> Unit = {},
+        checkpoint: () -> Unit = {},
     ): List<EditSegment> = withContext(Dispatchers.IO) {
         require(kind != MediaKind.AUDIO) { "Reference matching needs a video or image clip." }
         val parsed = parseIntent(prompt)
@@ -119,7 +118,6 @@ class MlKitProvider : ClipAnalyzer {
                 }
             } else null
 
-            val blockFrames = if (objectVision.available) OBJECT_BLOCK_FRAMES else BLOCK_FRAMES
             val match: (Bitmap) -> Boolean = if (refEmbedding != null) {
                 { bmp ->
                     objectVision.detect(bmp).filter { matchesTerm(it.label) }.any { d ->
@@ -142,7 +140,7 @@ class MlKitProvider : ClipAnalyzer {
                 val action = if (matched == parsed.keepMatches) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, if (matched) "match" else "no match"))
             } else {
-                scanVideo(context, mediaUri, durationMs, blockFrames, parsed.keepMatches, onProgress, match)
+                scanVideo(context, mediaUri, durationMs, parsed.keepMatches, onProgress, checkpoint, match)
             }
         } finally {
             objectVision.close()
@@ -159,14 +157,14 @@ class MlKitProvider : ClipAnalyzer {
         Bitmap.createBitmap(bmp, l, t, r - l, b - t)
     }.getOrNull()
 
-    /** Stride-and-block scan: check every ~(block+1)th frame, claiming ±block frames per match. */
+    /** Sample frames at a fixed [SAMPLE_FPS] fps; each match claims ±[EXTEND_FRAMES] frames around it. */
     private fun scanVideo(
         context: Context,
         uri: Uri,
         durationMs: Long,
-        blockFrames: Int,
         keepMatches: Boolean,
         onProgress: (AnalysisProgress) -> Unit,
+        checkpoint: () -> Unit,
         match: (Bitmap) -> Boolean,
     ): List<EditSegment> {
         val retriever = MediaMetadataRetriever()
@@ -181,18 +179,21 @@ class MlKitProvider : ClipAnalyzer {
                 ?.toFloatOrNull()?.takeIf { it > 1f } ?: 30f
             val frameMs = 1000f / fps
 
-            // Check 1 frame, skip BLOCK, check the (BLOCK+1)th. Widen the step for very long
-            // clips so we never exceed MAX_CHECKS frame grabs.
-            var stepMs = ((blockFrames + 1) * frameMs).toLong().coerceAtLeast(1L)
+            // Sample at a fixed 3 fps. Widen the step for very long clips so we never exceed
+            // MAX_CHECKS frame grabs.
+            var stepMs = (1000L / SAMPLE_FPS).coerceAtLeast(1L)
             if (dur / stepMs > MAX_CHECKS) stepMs = (dur / MAX_CHECKS).coerceAtLeast(1L)
-            // Each match claims ±block frames, but at least half a step so consecutive matches stay contiguous.
-            val halfMs = max((blockFrames * frameMs).toLong(), stepMs / 2 + 1)
+            // Each match claims ±EXTEND_FRAMES source frames around the sampled time, but at least
+            // half a step so consecutive matches always merge into one contiguous segment (at high fps
+            // ±5 frames is shorter than the 3 fps step, which would otherwise leave gaps).
+            val halfMs = max((EXTEND_FRAMES * frameMs).toLong(), stepMs / 2 + 1)
 
             val totalChecks = (dur / stepMs).coerceAtMost(MAX_CHECKS.toLong())
             var t = 0L
             var checks = 0
             var matchCount = 0
             while (t <= dur && checks < MAX_CHECKS) {
+                checkpoint() // pause/cancel hook (blocks while paused, throws on cancel)
                 val bmp = retriever.getFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (bmp != null) {
                     if (match(bmp)) {
@@ -325,9 +326,10 @@ class MlKitProvider : ClipAnalyzer {
     }
 
     private companion object {
-        const val BLOCK_FRAMES = 10
-        // Denser stride when COCO object detection drives the match (it's fast and we want tight cuts).
-        const val OBJECT_BLOCK_FRAMES = 3
+        // Sample the video at a fixed 3 frames/second instead of scanning every frame.
+        const val SAMPLE_FPS = 3
+        // On a match, extend applicability ±5 frames around the sampled time (in source frames).
+        const val EXTEND_FRAMES = 5
         const val MAX_CHECKS = 600
         // Cosine-similarity cutoff for "same object as the reference" (tune on device).
         const val REF_THRESHOLD = 0.75

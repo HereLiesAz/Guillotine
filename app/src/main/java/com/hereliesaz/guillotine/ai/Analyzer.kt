@@ -14,6 +14,8 @@ interface ClipAnalyzer {
         prompt: String,
         durationMs: Long,
         onProgress: (AnalysisProgress) -> Unit = {},
+        /** Called periodically during the scan; may block to pause or throw to cancel the operation. */
+        checkpoint: () -> Unit = {},
     ): List<EditSegment>
 }
 
@@ -35,20 +37,21 @@ object Analysis {
         prompt: String,
         durationMs: Long,
         onProgress: (AnalysisProgress) -> Unit = {},
+        checkpoint: () -> Unit = {},
     ): List<EditSegment> = when {
         // Audio has no frames to look at — silence detection is the on-device answer.
         kind == MediaKind.AUDIO ->
-            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
         // Explicit on-device "Local": audio-based silence cut (kept whole for images).
         settings.provider == AiProviderType.LOCAL ->
-            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
         // A silence/quiet request on a video is an audio task — ML Kit is vision-only and can't
         // hear it, so route to the silence heuristic (it decodes the clip's audio track).
         isSilenceIntent(prompt) ->
-            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
         // Everything else (video/image): free on-device ML Kit face/label vision.
         else ->
-            MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs, onProgress)
+            MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
     }
 
     /** Heuristic: does the prompt ask about audio (silence/quiet/pauses) rather than what's on screen? */

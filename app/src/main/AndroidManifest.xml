@@ -7,6 +7,13 @@
     <!-- AdMob advertising identifier (app-open ad). -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
+    <!-- Run long video operations (analysis / generative removal / export) in the background with a
+         progress notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Run on Chromebooks / large screens without a touchscreen or hard keyboard. -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.freeform_window_management" android:required="false" />
@@ -30,6 +37,12 @@
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-7304740804770627~9735202017" />
+
+        <!-- Hosts long video operations in the background with a progress notification. -->
+        <service
+            android:name=".operation.OperationService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProcessing" />
 
         <activity
             android:name=".MainActivity"

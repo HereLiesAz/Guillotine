@@ -1,0 +1,13 @@
+# Docs excluded from the in-app About reader (AzNavRail footer).
+# The reader auto-discovers every .md in the repo root and docs/; these are
+# developer/internal docs that aren't useful to end users in-app.
+# README.md and PRIVACY.md are intentionally NOT listed — they belong in About.
+
+# Developer build/setup guide.
+BUILDING.md
+
+# Internal backlog / roadmap.
+TODO.md
+
+# Historical record of the prompts that generated the app.
+ORIGINAL_PROMPTS.md

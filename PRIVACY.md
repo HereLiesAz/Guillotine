@@ -1,6 +1,6 @@
 # Privacy Policy — Guillotine
 
-**Effective date:** 2026-06-20
+**Effective date:** 2026-06-28
 
 Guillotine is an on-device, non-linear video editor for Android, tablets, and Chromebooks.
 This policy explains what the app does and does not do with your data. In short: **Guillotine
@@ -14,10 +14,12 @@ identifier for that purpose.
 - We (the developer) do **not** collect, store, or receive your data on any server we control.
 - We **do** show ads through **Google AdMob**, which collects your device’s advertising ID and
   related data to serve and measure ads — this is the one third‑party SDK in the app.
-- Editing, playback, thumbnails, waveforms, on‑device vision (ML Kit), and on‑device speech
-  recognition (Vosk) all run **locally on your device**.
+- Editing, playback, thumbnails, waveforms, **all frame/audio analysis** (ML Kit + MediaPipe
+  vision and the local silence heuristic), an optional on‑device LLM, and on‑device speech
+  recognition (Vosk) all run **locally on your device**. **Your video is never uploaded** for
+  analysis — cloud AIs only ever act as text controllers (see below).
 - The app only sends data over the network when **you** trigger an action that uses a
-  third‑party service you configured (an AI provider, image generation, or crash reporting).
+  third‑party service you configured (a cloud AI controller, image generation, or crash reporting).
 - API keys you enter are **encrypted on your device** and are sent only to the matching
   provider, only in requests you initiate.
 
@@ -42,9 +44,14 @@ Guillotine lets you use external AI services by bringing your own API key. **Whe
 when, you run one of these actions, the relevant content is sent directly from your device to
 the provider you selected** — it does not pass through any server we operate:
 
-- **Analysis / editing suggestions** — your selected clip’s media (or sampled frames) and your
-  prompt are sent to the provider you chose: Google Gemini, OpenAI, Anthropic, OpenRouter,
-  Groq, xAI, or Mistral.
+- **AI assistant / editing control** — when you use a **cloud** AI (Google Gemini, OpenAI,
+  Anthropic, OpenRouter, Groq, xAI, or Mistral) as the assistant, only **text** is exchanged:
+  your instructions and the project/timeline state go to the provider, and it replies with
+  tool calls that drive the editor. The provider **does not receive your media or frames** — the
+  actual keep/remove analysis and any background removal run **on your device** (ML Kit +
+  MediaPipe). The free on‑device LLM brain keeps even that text local.
+- **Generative object removal** — the object is detected and masked **on‑device**; only the
+  individual masked frame(s) + mask are sent to **Leonardo.ai** (with your key) to be repainted.
 - **Image generation** — your text prompt is sent to **Leonardo.ai** (with your key) or, for
   the free no‑key option, to **Pollinations.ai**.
 - **Transcription / captions** — handled **on‑device** with Vosk if you configure a local
@@ -117,6 +124,10 @@ shown. You can also reset or limit ad personalization in your device’s Google 
 - **Storage access (Storage Access Framework)** — only the specific media files you pick are
   accessible to the app; it does not scan your library.
 - **Media output (MediaStore)** — to save exported videos to your Movies folder.
+- **Notifications + foreground service (`POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`,
+  `FOREGROUND_SERVICE_MEDIA_PROCESSING`, `WAKE_LOCK`)** — to keep a long operation (analysis,
+  generative removal, or export) running with a progress notification while the app is in the
+  background. These are purely local; nothing is transmitted.
 
 The app does not request location, contacts, the microphone, or the camera; it only works with
 media you explicitly import.
