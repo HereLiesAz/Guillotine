@@ -100,6 +100,10 @@ class OperationService : Service() {
     private fun stopEverything() {
         releaseWakeLock()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        // Clear the foreground latch: if a new operation reuses this not-yet-destroyed instance, the
+        // next onStartCommand must actually call startForeground again rather than short-circuit on a
+        // stale `started == true` (which would leave us un-promoted and trip a did-not-start crash).
+        started = false
         stopSelf()
     }
 
