@@ -27,6 +27,13 @@ class KeyframeVolumeProcessor(
     private val staticMultiplier: Float,
 ) : BaseAudioProcessor() {
 
+    // Pre-filtered, time-sorted once — the queueInput hot loop runs per sample-frame (tens of
+    // thousands per second), so re-filtering/sorting the keyframe list there would thrash the GC.
+    private val volumeKfs = clip.keyframes
+        .filter { it.property == KeyframeProperty.VOLUME }.sortedBy { it.timeMs }
+    private val panKfs = clip.keyframes
+        .filter { it.property == KeyframeProperty.PAN }.sortedBy { it.timeMs }
+
     private var sampleRate = 0
     private var channelCount = 0
     private var framesProcessed = 0L
@@ -51,9 +58,9 @@ class KeyframeVolumeProcessor(
         for (f in 0 until frames) {
             val tMs = clipLocalStartMs + (framesProcessed * 1000L / sampleRate.coerceAtLeast(1))
             val gain = staticMultiplier *
-                TimelineMath.valueAt(clip, KeyframeProperty.VOLUME, tMs, clip.filters.volume)
+                TimelineMath.interpolateSorted(volumeKfs, tMs, clip.filters.volume)
             // Per-frame stereo pan (only meaningful for 2 channels): -1 = full left … +1 = full right.
-            val pan = TimelineMath.valueAt(clip, KeyframeProperty.PAN, tMs, clip.filters.pan).coerceIn(-1f, 1f)
+            val pan = TimelineMath.interpolateSorted(panKfs, tMs, clip.filters.pan).coerceIn(-1f, 1f)
             val left = if (pan <= 0f) 1f else 1f - pan
             val right = if (pan >= 0f) 1f else 1f + pan
             for (c in 0 until channelCount) {

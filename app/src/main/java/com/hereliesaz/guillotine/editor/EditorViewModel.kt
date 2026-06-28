@@ -793,12 +793,26 @@ class EditorViewModel : ViewModel() {
         val now = _uiState.value.currentTimeMs
         mutateDocument { doc ->
             val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
-            if (now < clip.startTimeMs || now >= clip.endTimeMs) return@mutateDocument doc
+            if (now < clip.startTimeMs || now > clip.endTimeMs) return@mutateDocument doc
             val rel = (now - clip.startTimeMs).coerceIn(0, clip.durationMs)
-            val kf = Keyframe(newId(), rel, property.staticValue(clip), property, easingNow())
             doc.copy(clips = doc.clips.map {
-                if (it.id == clipId) it.copy(keyframes = (it.keyframes + kf).sortedBy { k -> k.timeMs }) else it
+                if (it.id == clipId) it.copy(keyframes = it.keyframes.withKeyframeAt(it, rel, property)) else it
             })
+        }
+    }
+
+    /**
+     * Return this keyframe list with one recorded at [rel] for [property], capturing the property's
+     * **current interpolated** value at that time (so a new keyframe doesn't disturb an existing
+     * curve), overwriting any keyframe already at the same time/property to avoid duplicates.
+     */
+    private fun List<Keyframe>.withKeyframeAt(clip: TimelineClip, rel: Long, property: KeyframeProperty): List<Keyframe> {
+        val value = com.hereliesaz.guillotine.model.TimelineMath.valueAt(clip, property, rel, property.staticValue(clip))
+        val existing = firstOrNull { it.property == property && it.timeMs == rel }
+        return if (existing != null) {
+            map { if (it.id == existing.id) it.copy(value = value) else it }
+        } else {
+            (this + Keyframe(newId(), rel, value, property, easingNow())).sortedBy { it.timeMs }
         }
     }
 
@@ -818,11 +832,12 @@ class EditorViewModel : ViewModel() {
         mutateDocument { doc ->
             var changed = false
             val clips = doc.clips.map { clip ->
-                if (clip.id !in ids || now < clip.startTimeMs || now >= clip.endTimeMs) return@map clip
+                if (clip.id !in ids || now < clip.startTimeMs || now > clip.endTimeMs) return@map clip
                 val rel = (now - clip.startTimeMs).coerceIn(0, clip.durationMs)
-                val newKfs = props.map { p -> Keyframe(newId(), rel, p.staticValue(clip), p, easingNow()) }
+                var kfs = clip.keyframes
+                props.forEach { p -> kfs = kfs.withKeyframeAt(clip, rel, p) }
                 changed = true
-                clip.copy(keyframes = (clip.keyframes + newKfs).sortedBy { it.timeMs })
+                clip.copy(keyframes = kfs)
             }
             if (changed) doc.copy(clips = clips) else doc
         }

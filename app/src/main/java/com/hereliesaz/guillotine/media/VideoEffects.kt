@@ -185,12 +185,17 @@ object VideoEffects {
      */
     private class KeyframeTransform(private val clip: TimelineClip, private val startMs: Long) : MatrixTransformation {
         private val m = android.graphics.Matrix()
+        // Pre-filtered/sorted once so getMatrix (per frame) stays allocation-free.
+        private val scaleKfs = clip.keyframes.filter { it.property == KeyframeProperty.SCALE }.sortedBy { it.timeMs }
+        private val rotationKfs = clip.keyframes.filter { it.property == KeyframeProperty.ROTATION }.sortedBy { it.timeMs }
+        private val offsetXKfs = clip.keyframes.filter { it.property == KeyframeProperty.OFFSET_X }.sortedBy { it.timeMs }
+        private val offsetYKfs = clip.keyframes.filter { it.property == KeyframeProperty.OFFSET_Y }.sortedBy { it.timeMs }
         override fun getMatrix(presentationTimeUs: Long): android.graphics.Matrix {
             val t = startMs + presentationTimeUs / 1000
-            val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, t, clip.scale).coerceAtLeast(0f)
-            val rot = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, t, clip.rotation)
-            val ox = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, t, clip.offsetX)
-            val oy = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, t, clip.offsetY)
+            val s = TimelineMath.interpolateSorted(scaleKfs, t, clip.scale).coerceAtLeast(0f)
+            val rot = TimelineMath.interpolateSorted(rotationKfs, t, clip.rotation)
+            val ox = TimelineMath.interpolateSorted(offsetXKfs, t, clip.offsetX)
+            val oy = TimelineMath.interpolateSorted(offsetYKfs, t, clip.offsetY)
             m.reset()
             m.postScale(s, s)   // NDC centre (0,0)
             m.postRotate(-rot)  // Compose CW vs Media3 CCW
@@ -229,13 +234,19 @@ object VideoEffects {
      */
     private class KeyframeColorMatrix(private val clip: TimelineClip, private val startMs: Long) : RgbMatrix {
         private val out = FloatArray(16)
+        // Pre-filtered/sorted once so getMatrix (per frame) stays allocation-free.
+        private val brightnessKfs = clip.keyframes.filter { it.property == KeyframeProperty.BRIGHTNESS }.sortedBy { it.timeMs }
+        private val contrastKfs = clip.keyframes.filter { it.property == KeyframeProperty.CONTRAST }.sortedBy { it.timeMs }
+        private val saturationKfs = clip.keyframes.filter { it.property == KeyframeProperty.SATURATION }.sortedBy { it.timeMs }
+        private val hueKfs = clip.keyframes.filter { it.property == KeyframeProperty.HUE }.sortedBy { it.timeMs }
+        private val sepiaKfs = clip.keyframes.filter { it.property == KeyframeProperty.SEPIA }.sortedBy { it.timeMs }
         override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
             val t = startMs + presentationTimeUs / 1000
-            val b = TimelineMath.valueAt(clip, KeyframeProperty.BRIGHTNESS, t, clip.filters.brightness)
-            val c = TimelineMath.valueAt(clip, KeyframeProperty.CONTRAST, t, clip.filters.contrast)
-            val s = TimelineMath.valueAt(clip, KeyframeProperty.SATURATION, t, clip.filters.saturation)
-            val hue = TimelineMath.valueAt(clip, KeyframeProperty.HUE, t, clip.filters.hueRotate)
-            val sepia = (TimelineMath.valueAt(clip, KeyframeProperty.SEPIA, t, clip.filters.sepia) / 100f)
+            val b = TimelineMath.interpolateSorted(brightnessKfs, t, clip.filters.brightness)
+            val c = TimelineMath.interpolateSorted(contrastKfs, t, clip.filters.contrast)
+            val s = TimelineMath.interpolateSorted(saturationKfs, t, clip.filters.saturation)
+            val hue = TimelineMath.interpolateSorted(hueKfs, t, clip.filters.hueRotate)
+            val sepia = (TimelineMath.interpolateSorted(sepiaKfs, t, clip.filters.sepia) / 100f)
                 .coerceIn(0f, 1f)
             return colorMatrixGl(b, c, s, hue, sepia, out)
         }
