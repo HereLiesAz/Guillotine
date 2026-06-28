@@ -2,6 +2,7 @@ package com.hereliesaz.guillotine.ads
 
 import android.app.Activity
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,26 @@ object AdsState {
 
     /** Flips true after consent is gathered and MobileAds is initialized; gates ad requests. */
     val ready = mutableStateOf(false)
+}
+
+/**
+ * Shared frequency cap for the full-screen ("big") ads — the render interstitial and the app-open
+ * ad. At most one full-screen ad is shown per [MIN_INTERVAL_MS]; when gated, the ad stays preloaded
+ * for the next eligible moment. Uses [SystemClock.elapsedRealtime] so it's immune to wall-clock
+ * changes; it resets on process restart (ads reload then anyway).
+ */
+object FullScreenAdGate {
+    private const val MIN_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
+    @Volatile private var lastShownAtMs = 0L
+
+    /** True if enough time has passed since the last full-screen ad was shown. */
+    fun canShow(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        return lastShownAtMs == 0L || now - lastShownAtMs >= MIN_INTERVAL_MS
+    }
+
+    /** Record that a full-screen ad just displayed (call from onAdShowedFullScreenContent). */
+    fun markShown() { lastShownAtMs = SystemClock.elapsedRealtime() }
 }
 
 /**
@@ -77,9 +98,13 @@ class InterstitialAdManager(private val adUnitId: String) {
 
     /** Show the interstitial if one is ready; otherwise just preload for next time. */
     fun show(activity: Activity) {
+        // Frequency cap: no more than one full-screen ad every 5 minutes (shared with the app-open
+        // ad). When gated, keep one preloaded for the next eligible show.
+        if (!FullScreenAdGate.canShow()) { if (ad == null) load(activity); return }
         val current = ad
         if (current == null) { load(activity); return }
         current.fullScreenContentCallback = object : FullScreenContentCallback() {
+            override fun onAdShowedFullScreenContent() { FullScreenAdGate.markShown() }
             override fun onAdDismissedFullScreenContent() { ad = null; load(activity) }
             override fun onAdFailedToShowFullScreenContent(e: AdError) { ad = null; load(activity) }
         }
