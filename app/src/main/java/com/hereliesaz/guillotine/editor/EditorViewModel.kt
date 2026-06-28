@@ -781,6 +781,53 @@ class EditorViewModel : ViewModel() {
         }
     }
 
+    private fun easingNow() =
+        if (_uiState.value.autoEase) com.hereliesaz.guillotine.model.CubicBezier()
+        else com.hereliesaz.guillotine.model.CubicBezier(0f, 0f, 1f, 1f)
+
+    /**
+     * Record one setting's current value as a keyframe at the playhead on [clipId] (used by the per-
+     * slider keyframe diamonds in the inspector). No-op if the playhead isn't within the clip.
+     */
+    fun keyframeSettingAtPlayhead(clipId: String, property: KeyframeProperty) {
+        val now = _uiState.value.currentTimeMs
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            if (now < clip.startTimeMs || now >= clip.endTimeMs) return@mutateDocument doc
+            val rel = (now - clip.startTimeMs).coerceIn(0, clip.durationMs)
+            val kf = Keyframe(newId(), rel, property.staticValue(clip), property, easingNow())
+            doc.copy(clips = doc.clips.map {
+                if (it.id == clipId) it.copy(keyframes = (it.keyframes + kf).sortedBy { k -> k.timeMs }) else it
+            })
+        }
+    }
+
+    /**
+     * Keyframe button — record the selected clip's crop/placement (+opacity) at the playhead: a
+     * keyframe for SCALE/ROTATION/OFFSET_X/OFFSET_Y/OPACITY at their current values, on the selected
+     * clip(s) the cursor is over (and only those — never other group members). One undo step.
+     */
+    fun addKeyframeAtPlayhead() {
+        val now = _uiState.value.currentTimeMs
+        val ids = _uiState.value.selectedClipIds.toHashSet()
+        if (ids.isEmpty()) return
+        val props = listOf(
+            KeyframeProperty.OPACITY, KeyframeProperty.SCALE, KeyframeProperty.ROTATION,
+            KeyframeProperty.OFFSET_X, KeyframeProperty.OFFSET_Y,
+        )
+        mutateDocument { doc ->
+            var changed = false
+            val clips = doc.clips.map { clip ->
+                if (clip.id !in ids || now < clip.startTimeMs || now >= clip.endTimeMs) return@map clip
+                val rel = (now - clip.startTimeMs).coerceIn(0, clip.durationMs)
+                val newKfs = props.map { p -> Keyframe(newId(), rel, p.staticValue(clip), p, easingNow()) }
+                changed = true
+                clip.copy(keyframes = (clip.keyframes + newKfs).sortedBy { it.timeMs })
+            }
+            if (changed) doc.copy(clips = clips) else doc
+        }
+    }
+
     fun updateKeyframe(clipId: String, keyframeId: String, transform: (Keyframe) -> Keyframe) {
         mutateDocument { doc ->
             doc.copy(clips = doc.clips.map { clip ->

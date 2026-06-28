@@ -106,20 +106,41 @@ object VideoEffects {
     }
 
     /**
-     * Time-varying keyframe effects (opacity→alpha, scale) for [clip] baked into the export. The
-     * export item's first frame (presentationTimeUs 0) corresponds to [clipLocalStartMs] from the
-     * clip's start — i.e. for a kept range starting at source `rangeStart`,
-     * `clipLocalStartMs = rangeStart - clip.trimStartMs`. Only emitted when the clip actually has
-     * keyframes for that property, so non-keyframed clips are unaffected.
+     * Keyframe-aware video effects. [startMs] maps the renderer's presentationTime to clip-relative
+     * time: export passes `clipLocalStartMs` (`rangeStart - clip.trimStartMs`); preview passes
+     * `-clip.trimStartMs` (the picture player is seeked to source time). Each returns the animated
+     * effect only when that property group is keyframed, else the static equivalent — so non-keyframed
+     * clips render exactly as before.
      */
-    fun keyframeEffects(clip: TimelineClip, clipLocalStartMs: Long): List<Effect> {
-        val out = mutableListOf<Effect>()
+    fun colorEffects(clip: TimelineClip, startMs: Long): List<Effect> =
+        if (clip.keyframes.any { it.property in KeyframeProperty.COLOR }) {
+            listOf(KeyframeColorMatrix(clip, startMs)) + nonColorStatic(clip.filters)
+        } else {
+            build(clip.filters)
+        }
+
+    /** Per-frame crop/placement transform when keyframed (SCALE/ROTATION/OFFSET_X/OFFSET_Y), else static. */
+    fun transformEffects(clip: TimelineClip, startMs: Long): List<Effect> =
+        if (clip.keyframes.any { it.property in KeyframeProperty.TRANSFORM }) {
+            listOf(KeyframeTransform(clip, startMs))
+        } else {
+            transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY)
+        }
+
+    /** Per-frame alpha when opacity is keyframed (track/clip-level opacity is applied separately). */
+    fun opacityEffects(clip: TimelineClip, startMs: Long): List<Effect> =
         if (clip.keyframes.any { it.property == KeyframeProperty.OPACITY }) {
-            out += KeyframeAlpha(clip, clipLocalStartMs)
+            listOf(KeyframeAlpha(clip, startMs))
+        } else {
+            emptyList()
         }
-        if (clip.keyframes.any { it.property == KeyframeProperty.SCALE }) {
-            out += KeyframeScale(clip, clipLocalStartMs)
-        }
+
+    /** Filters that can't be keyframed (fixed Media3 config): binary grayscale/invert + Gaussian blur. */
+    private fun nonColorStatic(filters: ClipFilters): List<Effect> {
+        val out = mutableListOf<Effect>()
+        if (filters.grayscale >= 50f) out += RgbFilter.createGrayscaleFilter()
+        if (filters.invert >= 50f) out += RgbFilter.createInvertedFilter()
+        if (filters.blur > 0f) out += GaussianBlur(filters.blur)
         return out
     }
 
@@ -156,14 +177,24 @@ object VideoEffects {
         }
     }
 
-    /** Animates uniform scale about the frame centre from the clip's SCALE keyframes. */
-    private class KeyframeScale(private val clip: TimelineClip, private val startMs: Long) : MatrixTransformation {
+    /**
+     * Per-frame crop/placement transform from SCALE/ROTATION/OFFSET_X/OFFSET_Y keyframes (absolute —
+     * the clip's static value is the default). Rotation is applied in NDC: exact on square frames,
+     * slightly skewed on wide frames (preview's graphicsLayer rotation is exact); an aspect-correct
+     * GL fix for export rotation is a follow-up.
+     */
+    private class KeyframeTransform(private val clip: TimelineClip, private val startMs: Long) : MatrixTransformation {
         private val m = android.graphics.Matrix()
         override fun getMatrix(presentationTimeUs: Long): android.graphics.Matrix {
-            val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, startMs + presentationTimeUs / 1000, 1f)
-                .coerceAtLeast(0f)
+            val t = startMs + presentationTimeUs / 1000
+            val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, t, clip.scale).coerceAtLeast(0f)
+            val rot = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, t, clip.rotation)
+            val ox = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, t, clip.offsetX)
+            val oy = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, t, clip.offsetY)
             m.reset()
-            m.setScale(s, s) // NDC centre is (0,0), so this scales about the frame centre
+            m.postScale(s, s)   // NDC centre (0,0)
+            m.postRotate(-rot)  // Compose CW vs Media3 CCW
+            m.postTranslate(ox * 2f, -oy * 2f)
             return m
         }
     }
@@ -189,6 +220,101 @@ object VideoEffects {
         }
 
         override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = matrix
+    }
+
+    /**
+     * Per-frame color matrix animating brightness/contrast/saturation/hue/sepia from the clip's color
+     * keyframes (absolute; the clip's static filter value is the default). Composed via android's
+     * tested [android.graphics.ColorMatrix] then converted to Media3's column-major 4×4 RGBA matrix.
+     */
+    private class KeyframeColorMatrix(private val clip: TimelineClip, private val startMs: Long) : RgbMatrix {
+        private val out = FloatArray(16)
+        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
+            val t = startMs + presentationTimeUs / 1000
+            val b = TimelineMath.valueAt(clip, KeyframeProperty.BRIGHTNESS, t, clip.filters.brightness)
+            val c = TimelineMath.valueAt(clip, KeyframeProperty.CONTRAST, t, clip.filters.contrast)
+            val s = TimelineMath.valueAt(clip, KeyframeProperty.SATURATION, t, clip.filters.saturation)
+            val hue = TimelineMath.valueAt(clip, KeyframeProperty.HUE, t, clip.filters.hueRotate)
+            val sepia = (TimelineMath.valueAt(clip, KeyframeProperty.SEPIA, t, clip.filters.sepia) / 100f)
+                .coerceIn(0f, 1f)
+            return colorMatrixGl(b, c, s, hue, sepia, out)
+        }
+    }
+
+    /**
+     * Compose brightness/contrast/saturation/hue/sepia into Media3's column-major 4×4 RGBA matrix
+     * (`element[in*4 + out]`), reusing [android.graphics.ColorMatrix]'s tested math. Contrast's affine
+     * offset rides on the alpha-input column (valid because the picture is opaque before this runs) and
+     * is rescaled from ColorMatrix's 0..255 space to Media3's 0..1. [out] is reused to avoid GC churn.
+     */
+    private fun colorMatrixGl(
+        brightness: Float, contrast: Float, saturation: Float, hueDeg: Float, sepia: Float, out: FloatArray,
+    ): FloatArray {
+        val cm = android.graphics.ColorMatrix()
+        cm.setSaturation(saturation.coerceAtLeast(0f))
+        if (hueDeg != 0f) cm.postConcat(hueMatrix(hueDeg))
+        if (brightness != 1f) {
+            cm.postConcat(
+                android.graphics.ColorMatrix(
+                    floatArrayOf(
+                        brightness, 0f, 0f, 0f, 0f,
+                        0f, brightness, 0f, 0f, 0f,
+                        0f, 0f, brightness, 0f, 0f,
+                        0f, 0f, 0f, 1f, 0f,
+                    ),
+                ),
+            )
+        }
+        if (contrast != 1f) {
+            val o = 128f * (1f - contrast)
+            cm.postConcat(
+                android.graphics.ColorMatrix(
+                    floatArrayOf(
+                        contrast, 0f, 0f, 0f, o,
+                        0f, contrast, 0f, 0f, o,
+                        0f, 0f, contrast, 0f, o,
+                        0f, 0f, 0f, 1f, 0f,
+                    ),
+                ),
+            )
+        }
+        if (sepia > 0f) cm.postConcat(sepiaColorMatrix(sepia))
+
+        val a = cm.array // float[20], row-major: out row r (R,G,B,A) × in col (R,G,B,A) + offset
+        for (outc in 0 until 4) for (inc in 0 until 4) out[inc * 4 + outc] = a[outc * 5 + inc]
+        for (outc in 0 until 3) out[3 * 4 + outc] += a[outc * 5 + 4] / 255f // offsets on the alpha-input column
+        return out
+    }
+
+    /** Standard hue-rotation matrix about the luma axis. */
+    private fun hueMatrix(deg: Float): android.graphics.ColorMatrix {
+        val r = Math.toRadians(deg.toDouble())
+        val cos = Math.cos(r).toFloat()
+        val sin = Math.sin(r).toFloat()
+        val lr = 0.213f
+        val lg = 0.715f
+        val lb = 0.072f
+        return android.graphics.ColorMatrix(
+            floatArrayOf(
+                lr + cos * (1 - lr) + sin * (-lr), lg + cos * (-lg) + sin * (-lg), lb + cos * (-lb) + sin * (1 - lb), 0f, 0f,
+                lr + cos * (-lr) + sin * (0.143f), lg + cos * (1 - lg) + sin * (0.140f), lb + cos * (-lb) + sin * (-0.283f), 0f, 0f,
+                lr + cos * (-lr) + sin * (-(1 - lr)), lg + cos * (-lg) + sin * (lg), lb + cos * (1 - lb) + sin * (lb), 0f, 0f,
+                0f, 0f, 0f, 1f, 0f,
+            ),
+        )
+    }
+
+    /** Blend identity → classic sepia weights by [amt] (0..1), as an [android.graphics.ColorMatrix]. */
+    private fun sepiaColorMatrix(amt: Float): android.graphics.ColorMatrix {
+        fun l(id: Float, sep: Float) = (1f - amt) * id + amt * sep
+        return android.graphics.ColorMatrix(
+            floatArrayOf(
+                l(1f, 0.393f), l(0f, 0.769f), l(0f, 0.189f), 0f, 0f,
+                l(0f, 0.349f), l(1f, 0.686f), l(0f, 0.168f), 0f, 0f,
+                l(0f, 0.272f), l(0f, 0.534f), l(1f, 0.131f), 0f, 0f,
+                0f, 0f, 0f, 1f, 0f,
+            ),
+        )
     }
 
     /**

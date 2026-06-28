@@ -52,8 +52,13 @@ class KeyframeVolumeProcessor(
             val tMs = clipLocalStartMs + (framesProcessed * 1000L / sampleRate.coerceAtLeast(1))
             val gain = staticMultiplier *
                 TimelineMath.valueAt(clip, KeyframeProperty.VOLUME, tMs, clip.filters.volume)
+            // Per-frame stereo pan (only meaningful for 2 channels): -1 = full left … +1 = full right.
+            val pan = TimelineMath.valueAt(clip, KeyframeProperty.PAN, tMs, clip.filters.pan).coerceIn(-1f, 1f)
+            val left = if (pan <= 0f) 1f else 1f - pan
+            val right = if (pan >= 0f) 1f else 1f + pan
             for (c in 0 until channelCount) {
-                val scaled = (inputBuffer.short * gain).toInt().coerceIn(-32768, 32767)
+                val panGain = if (channelCount == 2) (if (c == 0) left else right) else 1f
+                val scaled = (inputBuffer.short * gain * panGain).toInt().coerceIn(-32768, 32767)
                 out.putShort(scaled.toShort())
             }
             framesProcessed++

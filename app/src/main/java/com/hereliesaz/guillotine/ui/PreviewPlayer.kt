@@ -116,6 +116,9 @@ fun PreviewPlayer(
     val audioVolume = if (audioTrack?.muted == true) 0f else (activeAudio?.let {
         TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
     } ?: 0f) * (audioTrack?.volume ?: 1f)
+    val audioPan = activeAudio?.let {
+        TimelineMath.valueAt(it, KeyframeProperty.PAN, now - it.startTimeMs, it.filters.pan)
+    } ?: 0f
 
     // Peak-normalize gain (async; reuse the cached waveform decoder), matching the export. 1 = off.
     val audioNorm by produceState(1f, audioMedia?.id, activeAudio?.filters?.normalize) {
@@ -139,10 +142,10 @@ fun PreviewPlayer(
             audioPlayer.seekTo(TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0))
         }
     }
-    LaunchedEffect(audioVolume, audioNorm, activeAudio?.filters?.pan) {
+    LaunchedEffect(audioVolume, audioNorm, audioPan) {
         audioPlayer.volume = 1f
         audioGain.gain = (audioVolume * audioNorm).coerceAtLeast(0f)
-        audioGain.pan = (activeAudio?.filters?.pan ?: 0f).coerceIn(-1f, 1f)
+        audioGain.pan = audioPan.coerceIn(-1f, 1f)
     }
     LaunchedEffect(state.playbackRate) { audioPlayer.setPlaybackSpeed(state.playbackRate) }
     LaunchedEffect(state.isPlaying, audioMedia?.id) {
@@ -340,14 +343,14 @@ private fun VideoSlot(
         .wrapContentSize()
         .graphicsLayer {
             this.alpha = alpha.coerceIn(0f, 1f)
-            // Keyframed scale × crop-tool base scale; crop offset translates it.
-            val s = (TimelineMath.valueAt(clip, KeyframeProperty.SCALE, now - clip.startTimeMs, 1f) *
-                clip.scale).coerceAtLeast(0f)
+            // Keyframe-aware crop/placement (absolute; the clip's static value is the default).
+            val rel = now - clip.startTimeMs
+            val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, rel, clip.scale).coerceAtLeast(0f)
             scaleX = s
             scaleY = s
-            rotationZ = clip.rotation
-            translationX = clip.offsetX * size.width
-            translationY = clip.offsetY * size.height
+            rotationZ = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, rel, clip.rotation)
+            translationX = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, rel, clip.offsetX) * size.width
+            translationY = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, rel, clip.offsetY) * size.height
         }
     if (clip.filters.removeBackground) {
         cutout?.let { cb ->
@@ -391,8 +394,10 @@ private fun wireVideoPlayer(
             player.seekTo(TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0))
         }
     }
-    LaunchedEffect(clip?.id, clip?.filters) {
-        if (clip != null) runCatching { player.setVideoEffects(VideoEffects.build(clip.filters)) }
+    LaunchedEffect(clip?.id, clip?.filters, clip?.keyframes) {
+        // Color filters; keyframe-aware so a keyframed color animates per frame (startMs = -trimStart
+        // maps the picture player's source-time position to clip-relative keyframe time).
+        if (clip != null) runCatching { player.setVideoEffects(VideoEffects.colorEffects(clip, -clip.trimStartMs)) }
     }
     // Picture-only and NEVER outputs its own audio — the clip's sound plays through the audio player.
     LaunchedEffect(Unit) { player.volume = 0f; gain.gain = 0f }

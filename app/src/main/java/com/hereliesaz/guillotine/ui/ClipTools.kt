@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.TextFields
@@ -158,11 +159,11 @@ private fun FiltersToolButton(vm: EditorViewModel, clip: TimelineClip) {
     IconToolButton(Icons.Filled.Tune, "Filters", active = open) { open = !open }
     if (open) ToolPopup("Filters", { open = false }) {
         val f = clip.filters
-        FilterSlider(vm, clip.id, "Brightness", f.brightness, 0f..2f) { v, ff -> ff.copy(brightness = v) }
-        FilterSlider(vm, clip.id, "Contrast", f.contrast, 0f..2f) { v, ff -> ff.copy(contrast = v) }
-        FilterSlider(vm, clip.id, "Saturation", f.saturation, 0f..2f) { v, ff -> ff.copy(saturation = v) }
-        FilterSlider(vm, clip.id, "Sepia", f.sepia, 0f..100f, "%") { v, ff -> ff.copy(sepia = v) }
-        FilterSlider(vm, clip.id, "Hue", f.hueRotate, 0f..360f, "°") { v, ff -> ff.copy(hueRotate = v) }
+        FilterSlider(vm, clip.id, "Brightness", f.brightness, 0f..2f, keyframe = KeyframeProperty.BRIGHTNESS) { v, ff -> ff.copy(brightness = v) }
+        FilterSlider(vm, clip.id, "Contrast", f.contrast, 0f..2f, keyframe = KeyframeProperty.CONTRAST) { v, ff -> ff.copy(contrast = v) }
+        FilterSlider(vm, clip.id, "Saturation", f.saturation, 0f..2f, keyframe = KeyframeProperty.SATURATION) { v, ff -> ff.copy(saturation = v) }
+        FilterSlider(vm, clip.id, "Sepia", f.sepia, 0f..100f, "%", keyframe = KeyframeProperty.SEPIA) { v, ff -> ff.copy(sepia = v) }
+        FilterSlider(vm, clip.id, "Hue", f.hueRotate, 0f..360f, "°", keyframe = KeyframeProperty.HUE) { v, ff -> ff.copy(hueRotate = v) }
         FilterSlider(vm, clip.id, "Invert", f.invert, 0f..100f, "%") { v, ff -> ff.copy(invert = v) }
         FilterSlider(vm, clip.id, "Grayscale", f.grayscale, 0f..100f, "%") { v, ff -> ff.copy(grayscale = v) }
         FilterSlider(vm, clip.id, "Blur", f.blur, 0f..20f, "px") { v, ff -> ff.copy(blur = v) }
@@ -176,8 +177,8 @@ private fun AudioToolButton(vm: EditorViewModel, clip: TimelineClip) {
     IconToolButton(Icons.Filled.VolumeUp, "Audio", active = open) { open = !open }
     if (open) ToolPopup("Audio", { open = false }) {
         val f = clip.filters
-        FilterSlider(vm, clip.id, "Volume", f.volume, 0f..2f) { v, ff -> ff.copy(volume = v) }
-        FilterSlider(vm, clip.id, "Pan", f.pan, -1f..1f) { v, ff -> ff.copy(pan = v) }
+        FilterSlider(vm, clip.id, "Volume", f.volume, 0f..2f, keyframe = KeyframeProperty.VOLUME) { v, ff -> ff.copy(volume = v) }
+        FilterSlider(vm, clip.id, "Pan", f.pan, -1f..1f, keyframe = KeyframeProperty.PAN) { v, ff -> ff.copy(pan = v) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = f.normalize, onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(normalize = c) } })
             Text("Normalize audio", color = Neutral400, fontSize = 12.sp)
@@ -205,11 +206,7 @@ private fun KeyframesToolButton(vm: EditorViewModel, clip: TimelineClip) {
             Text("  Add keyframe", color = White, fontSize = 12.sp)
         }
 
-        val range = when (property) {
-            KeyframeProperty.OPACITY -> 0f..1f
-            KeyframeProperty.SCALE -> 0f..3f
-            KeyframeProperty.VOLUME -> 0f..2f
-        }
+        val range = property.uiRange
         clip.keyframes.filter { it.property == property }.sortedBy { it.timeMs }.forEach { kf ->
             Column(
                 Modifier
@@ -310,12 +307,31 @@ private fun FilterSlider(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     suffix: String = "",
+    keyframe: KeyframeProperty? = null,
     apply: (Float, ClipFilters) -> ClipFilters,
 ) {
     Column {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(label, color = Neutral500, fontSize = 10.sp)
-            Text("${"%.2f".format(value)}$suffix", color = Neutral400, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${"%.2f".format(value)}$suffix", color = Neutral400, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                // Keyframeable settings get a diamond: record the current value at the playhead.
+                if (keyframe != null) {
+                    Icon(
+                        Icons.Filled.Diamond,
+                        contentDescription = "Keyframe $label at playhead",
+                        tint = Red500,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(16.dp)
+                            .clickable { vm.keyframeSettingAtPlayhead(clipId, keyframe) },
+                    )
+                }
+            }
         }
         Slider(
             value = value.coerceIn(range.start, range.endInclusive),

@@ -175,10 +175,14 @@ object Exporter {
         fun audioFor(clip: TimelineClip, clipLocalStartMs: Long): List<AudioProcessor> {
             val ts = document.trackSettingsFor(clip.trackId)
             val norm = normalizeGains[clip.id] ?: 1f
-            return if (clip.keyframes.any { it.property == KeyframeProperty.VOLUME }) {
-                // Time-varying gain (valueAt VOLUME) folding in track volume + normalize, plus pan.
+            val animated = clip.keyframes.any {
+                it.property == KeyframeProperty.VOLUME || it.property == KeyframeProperty.PAN
+            }
+            return if (animated) {
+                // Time-varying gain + pan (valueAt VOLUME/PAN, defaults = static) folding in track
+                // volume + normalize. The processor handles pan per-frame, so no separate panOnly.
                 val staticMult = (if (ts.muted) 0f else ts.volume) * norm
-                listOf(KeyframeVolumeProcessor(clip, clipLocalStartMs, staticMult)) + panOnly(clip.filters.pan)
+                listOf(KeyframeVolumeProcessor(clip, clipLocalStartMs, staticMult))
             } else {
                 val vol = (if (ts.muted) 0f else clip.filters.volume * ts.volume) * norm
                 audioProcessors(vol, clip.filters.pan)
@@ -194,14 +198,17 @@ object Exporter {
         ): Effects {
             val ts = document.trackSettingsFor(clip.trackId)
             val alpha = if (ts.opacity < 1f) listOf(AlphaScale(ts.opacity)) else emptyList()
-            val transform = VideoEffects.transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY)
-            val keyframes = VideoEffects.keyframeEffects(clip, clipLocalStartMs)
+            // Keyframe-aware color + crop/placement transform + opacity (animated when keyframed, static
+            // otherwise). clipLocalStartMs maps the item's presentationTime to clip-relative time.
+            val color = VideoEffects.colorEffects(clip, clipLocalStartMs)
+            val transform = VideoEffects.transformEffects(clip, clipLocalStartMs)
+            val opacity = VideoEffects.opacityEffects(clip, clipLocalStartMs)
             // Crossfade ramp: the incoming clip fades 0→1 across its overlap with the held outgoing clip.
             val fadeFx = fade?.let { listOf(VideoEffects.fadeIn(timelineStartMs, it.first, it.last)) } ?: emptyList()
             val overlay = if (withOverlays) listOfNotNull(overlaysFor(timelineStartMs)) else emptyList()
             return Effects(
                 audioFor(clip, clipLocalStartMs),
-                VideoEffects.build(clip.filters) + transform + keyframes + fadeFx + geometry + overlay + alpha,
+                color + transform + opacity + fadeFx + geometry + overlay + alpha,
             )
         }
 
@@ -415,17 +422,6 @@ object Exporter {
         val right = (if (pan >= 0f) 1f else 1f + pan) * volume
         return listOf(ChannelMixingAudioProcessor().apply {
             // Coefficients are row-major: index = inputChannel * outputChannelCount + outputChannel.
-            putChannelMixingMatrix(ChannelMixingMatrix(1, 2, floatArrayOf(left, right)))
-            putChannelMixingMatrix(ChannelMixingMatrix(2, 2, floatArrayOf(left, 0f, 0f, right)))
-        })
-    }
-
-    /** Pan-only (no gain) — used alongside [KeyframeVolumeProcessor], which handles the gain. */
-    private fun panOnly(pan: Float): List<AudioProcessor> {
-        if (pan == 0f) return emptyList()
-        val left = if (pan <= 0f) 1f else 1f - pan
-        val right = if (pan >= 0f) 1f else 1f + pan
-        return listOf(ChannelMixingAudioProcessor().apply {
             putChannelMixingMatrix(ChannelMixingMatrix(1, 2, floatArrayOf(left, right)))
             putChannelMixingMatrix(ChannelMixingMatrix(2, 2, floatArrayOf(left, 0f, 0f, right)))
         })

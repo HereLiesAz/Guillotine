@@ -618,17 +618,9 @@ private fun ClipView(
         if (clip.keyframes.isNotEmpty()) {
             Canvas(Modifier.fillMaxSize()) {
                 clip.keyframes.groupBy { it.property }.forEach { (prop, kfs) ->
-                    val lo = 0f
-                    val hi = when (prop) {
-                        KeyframeProperty.OPACITY -> 1f
-                        KeyframeProperty.SCALE -> 3f
-                        KeyframeProperty.VOLUME -> 2f
-                    }
-                    val color = when (prop) {
-                        KeyframeProperty.OPACITY -> White
-                        KeyframeProperty.SCALE -> Red500
-                        KeyframeProperty.VOLUME -> Neutral400
-                    }
+                    val lo = prop.uiRange.start
+                    val hi = prop.uiRange.endInclusive
+                    val color = keyframeColor(prop)
                     val sorted = kfs.sortedBy { it.timeMs }
                     fun ptOf(kf: com.hereliesaz.guillotine.model.Keyframe): Offset {
                         val x = kf.timeMs / 1000f * pps
@@ -746,14 +738,21 @@ private fun snappedDeltaMs(state: EditorUiState, clip: TimelineClip, rawDeltaMs:
 private fun snappedDragPx(state: EditorUiState, clip: TimelineClip, rawPx: Float, pps: Float): Float =
     snappedDeltaMs(state, clip, (rawPx / pps * 1000f).toLong(), pps) / 1000f * pps
 
+/** Display color for each keyframe property's envelope. */
+private fun keyframeColor(prop: KeyframeProperty): Color = when (prop) {
+    KeyframeProperty.OPACITY -> White
+    KeyframeProperty.SCALE, KeyframeProperty.ROTATION,
+    KeyframeProperty.OFFSET_X, KeyframeProperty.OFFSET_Y -> Red500
+    KeyframeProperty.VOLUME, KeyframeProperty.PAN -> Neutral400
+    KeyframeProperty.BRIGHTNESS, KeyframeProperty.CONTRAST, KeyframeProperty.SATURATION,
+    KeyframeProperty.HUE, KeyframeProperty.SEPIA -> Neutral500
+}
+
 /** Canvas position of a keyframe: x by time, y by value (higher value = higher on the clip). */
 private fun keyframePos(kf: Keyframe, pps: Float, heightPx: Float): Offset {
-    val hi = when (kf.property) {
-        KeyframeProperty.OPACITY -> 1f
-        KeyframeProperty.SCALE -> 3f
-        KeyframeProperty.VOLUME -> 2f
-    }
-    val norm = (kf.value / hi).coerceIn(0f, 1f)
+    val lo = kf.property.uiRange.start
+    val hi = kf.property.uiRange.endInclusive
+    val norm = ((kf.value - lo) / (hi - lo)).coerceIn(0f, 1f)
     return Offset(kf.timeMs / 1000f * pps, heightPx * (1f - norm))
 }
 
