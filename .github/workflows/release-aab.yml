@@ -33,13 +33,8 @@ on:
         default: internal
         options: [internal, alpha, beta, production]
       status:
-        description: "Release status (draft = upload only; you finalize in the console)"
-        type: choice
-        default: draft
-        options: [draft, completed]
+        default: completed
       publish:
-        description: "Publish to Play? (off = build + upload the .aab artifact only)"
-        type: boolean
         default: true
 
 jobs:
