@@ -682,8 +682,10 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
                 vm.setTool(EditorTool.SELECT)
             }
-            IconToolButton(Icons.Filled.ContentCut, "Split", active = state.tool == EditorTool.SPLIT) {
-                vm.setTool(EditorTool.SPLIT)
+            // Scissors is an action, not a mode: it splits at the playhead immediately (Vegas-style) —
+            // the selected clip/group, or every clip on every track when nothing is selected.
+            IconToolButton(Icons.Filled.ContentCut, "Split at playhead") {
+                vm.splitAtPlayhead()
             }
             IconToolButton(Icons.Filled.Crop, "Crop / transform", active = state.tool == EditorTool.CROP) {
                 vm.setTool(EditorTool.CROP)
@@ -844,7 +846,7 @@ private fun handleKey(e: KeyEvent, vm: EditorViewModel): Boolean {
         ctrl && e.isAltPressed && e.key == Key.V -> { vm.pasteFiltersToSelected(); true }
         ctrl && e.key == Key.C -> { vm.copySelected(); true }
         ctrl && e.key == Key.V -> { vm.pasteClip(); true }
-        !ctrl && e.key == Key.S -> { vm.splitSelectedAtPlayhead(); true }
+        !ctrl && e.key == Key.S -> { vm.splitAtPlayhead(); true }
         else -> false
     }
 }

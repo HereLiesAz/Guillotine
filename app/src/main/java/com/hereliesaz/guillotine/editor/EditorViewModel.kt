@@ -246,13 +246,69 @@ class EditorViewModel : ViewModel() {
     }
 
     /**
-     * Split [clipId] at the current playhead. Keyframes are partitioned and the
-     * second half's keyframe times are re-based; edits are source-absolute and so
-     * remain valid for both halves (clamped to each half's trim window at render).
+     * Scissors / blade — split at the playhead, Sony-Vegas style, in one undo step:
+     *  - With a selection, split the selected clip(s). If a selected clip is **grouped**, split every
+     *    member of its group and divide the group in two — the left pieces keep the group, the right
+     *    pieces become a new group.
+     *  - With **no** selection, split every clip on every track that the playhead passes through.
+     * A clip's linked audio shadow (a group member) splits with it and its right half re-links to the
+     * matching video right half so the two stay paired.
      */
-    fun splitSelectedAtPlayhead() {
-        val id = _uiState.value.selectedClipId ?: return
-        splitClip(id, _uiState.value.currentTimeMs)
+    fun splitAtPlayhead() {
+        val now = _uiState.value.currentTimeMs
+        val selIds = _uiState.value.selectedClipIds
+        mutateDocument { doc ->
+            // Targets: all clips (no selection) or the selection expanded to whole groups.
+            val targets = if (selIds.isEmpty()) {
+                doc.clips
+            } else {
+                val selGroups = doc.clips.filter { it.id in selIds }.mapNotNull { it.groupId }.toSet()
+                doc.clips.filter { it.id in selIds || (it.groupId != null && it.groupId in selGroups) }
+            }
+            val targetIds = targets.mapTo(HashSet()) { it.id }
+
+            // A group whose target members span across the playhead is divided: its right side becomes
+            // a new group (→ two groups). A group fully on one side keeps its id.
+            val rightGroupId = HashMap<String, String>()
+            targets.filter { it.groupId != null }.groupBy { it.groupId!! }.forEach { (g, members) ->
+                val divided = members.minOf { it.startTimeMs } < now && members.maxOf { it.endTimeMs } > now
+                rightGroupId[g] = if (divided) newId() else g
+            }
+            // Pre-assign each split clip's right-half id so a split audio shadow can re-link to its video half.
+            fun splitsHere(c: TimelineClip) = (now - c.startTimeMs) in 1 until c.durationMs
+            val rightHalfId = targets.filter { splitsHere(it) }.associate { it.id to newId() }
+
+            val anyDivided = rightGroupId.any { (g, r) -> r != g }
+            if (rightHalfId.isEmpty() && !anyDivided) return@mutateDocument doc
+
+            doc.copy(clips = doc.clips.flatMap { clip ->
+                if (clip.id !in targetIds) return@flatMap listOf(clip)
+                val rightG = clip.groupId?.let { rightGroupId[it] }
+                val clipTime = now - clip.startTimeMs
+                when {
+                    clipTime in 1 until clip.durationMs -> {
+                        val first = clip.copy(
+                            durationMs = clipTime,
+                            keyframes = clip.keyframes.filter { it.timeMs <= clipTime },
+                        )
+                        val second = clip.copy(
+                            id = rightHalfId.getValue(clip.id),
+                            startTimeMs = clip.startTimeMs + clipTime,
+                            trimStartMs = clip.trimStartMs + clipTime,
+                            durationMs = clip.durationMs - clipTime,
+                            groupId = rightG,
+                            linkedClipId = clip.linkedClipId?.let { rightHalfId[it] ?: it },
+                            keyframes = clip.keyframes.filter { it.timeMs > clipTime }
+                                .map { it.copy(id = newId(), timeMs = it.timeMs - clipTime) },
+                        )
+                        listOf(first, second)
+                    }
+                    // A grouped member entirely right of the playhead joins the new right group.
+                    clip.groupId != null && clip.startTimeMs >= now -> listOf(clip.copy(groupId = rightG))
+                    else -> listOf(clip)
+                }
+            })
+        }
     }
 
     fun splitClip(clipId: String, timelineMs: Long) {
