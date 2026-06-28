@@ -428,7 +428,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     onComplete = { exportDone = "Saved to Movies/Guillotine."; exporting = false },
                 ) { sink ->
                     Exporter.export(context, vm.uiState.value.document, name) { p ->
-                        exportProgress = p
+                        scope.launch { exportProgress = p } // hop to the main thread for Compose state
                         sink.report(p, "Exporting…")
                     }
                 }

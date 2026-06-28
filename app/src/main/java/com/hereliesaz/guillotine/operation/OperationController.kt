@@ -12,7 +12,9 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.coroutineContext
 
@@ -50,30 +52,27 @@ object OperationController {
     val isBusy: Boolean get() = _state.value != null
 
     fun pause() {
-        val s = _state.value ?: return
-        if (!s.pausable) return
         paused = true
-        _state.value = s.copy(paused = true)
+        _state.update { s -> if (s != null && s.pausable) s.copy(paused = true) else s }
     }
 
     fun resume() {
         paused = false
-        _state.value?.let { _state.value = it.copy(paused = false) }
+        _state.update { s -> s?.copy(paused = false) }
     }
 
     fun cancel() {
         cancelled = true
         paused = false
         job?.cancel()
-        _state.value?.let { _state.value = it.copy(paused = false) }
+        _state.update { s -> s?.copy(paused = false) }
     }
 
     /** Progress reporting + cooperative pause/cancel surface handed to a running operation. */
     class Sink internal constructor() {
         /** Update the notification / UI. [progress] is 0..1 or null for indeterminate. */
         fun report(progress: Float?, label: String? = null) {
-            val s = _state.value ?: return
-            _state.value = s.copy(progress = progress?.coerceIn(0f, 1f), label = label ?: s.label)
+            _state.update { s -> s?.copy(progress = progress?.coerceIn(0f, 1f), label = label ?: s.label) }
         }
 
         /** Suspend call sites: park while paused, throw on cancel. */
@@ -114,11 +113,12 @@ object OperationController {
         job = scope.launch {
             try {
                 block(sink)
-                onComplete()
+                // Terminal callbacks touch Compose/UI state — run them on the main thread.
+                withContext(Dispatchers.Main) { onComplete() }
             } catch (_: CancellationException) {
                 // Cancelled by the user — no error surfaced.
             } catch (e: Throwable) {
-                onError(e)
+                withContext(Dispatchers.Main) { onError(e) }
             } finally {
                 end()
             }
@@ -153,7 +153,10 @@ object OperationController {
         cancelled = false
         _state.value = OperationState(kind, label, progress = null, paused = false, pausable = pausable)
         val app = context.applicationContext
-        ContextCompat.startForegroundService(app, Intent(app, OperationService::class.java))
+        // Starting a foreground service from the background throws on API 31+ (e.g. an external MCP
+        // tool triggering generative removal while the app is backgrounded). Don't crash — the
+        // operation still runs, just without the foreground notification.
+        runCatching { ContextCompat.startForegroundService(app, Intent(app, OperationService::class.java)) }
     }
 
     private fun end() {

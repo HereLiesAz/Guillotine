@@ -183,9 +183,10 @@ class MlKitProvider : ClipAnalyzer {
             // MAX_CHECKS frame grabs.
             var stepMs = (1000L / SAMPLE_FPS).coerceAtLeast(1L)
             if (dur / stepMs > MAX_CHECKS) stepMs = (dur / MAX_CHECKS).coerceAtLeast(1L)
-            // Each match claims ±EXTEND_FRAMES source frames around the sampled time; adjacent windows
-            // then merge via mergeRanges so a run of matches becomes one contiguous segment.
-            val halfMs = (EXTEND_FRAMES * frameMs).toLong().coerceAtLeast(1L)
+            // Each match claims ±EXTEND_FRAMES source frames around the sampled time, but at least
+            // half a step so consecutive matches always merge into one contiguous segment (at high fps
+            // ±5 frames is shorter than the 3 fps step, which would otherwise leave gaps).
+            val halfMs = max((EXTEND_FRAMES * frameMs).toLong(), stepMs / 2 + 1)
 
             val totalChecks = (dur / stepMs).coerceAtMost(MAX_CHECKS.toLong())
             var t = 0L
