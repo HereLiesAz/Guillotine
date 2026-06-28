@@ -209,6 +209,42 @@ class TimelineMathTest {
         assertEquals(3000L until 5000L, r[1])
     }
 
+    // ---- interpolateSorted: allocation-free hot-path helper used by the per-frame renderers ----
+
+    @Test fun interpolateSorted_empty_returns_default() {
+        assertEquals(0.7f, TimelineMath.interpolateSorted(emptyList(), 500, 0.7f), 0f)
+    }
+
+    @Test fun interpolateSorted_clamps_and_interpolates() {
+        val kfs = listOf(
+            Keyframe("a", 0, 0f, KeyframeProperty.OPACITY, linear),
+            Keyframe("b", 1000, 1f, KeyframeProperty.OPACITY, linear),
+        )
+        assertEquals(0f, TimelineMath.interpolateSorted(kfs, -10, 9f), 0.001f)   // before first
+        assertEquals(1f, TimelineMath.interpolateSorted(kfs, 2000, 9f), 0.001f)  // after last
+        assertEquals(0.5f, TimelineMath.interpolateSorted(kfs, 500, 9f), 0.03f)  // midpoint
+    }
+
+    @Test fun interpolateSorted_matches_valueAt() {
+        // The renderers pre-filter+sort once and call interpolateSorted; it must agree with valueAt,
+        // which filters+sorts on each call.
+        val kfs = listOf(
+            Keyframe("a", 0, 0f, KeyframeProperty.SCALE, linear),
+            Keyframe("b", 1000, 2f, KeyframeProperty.SCALE, linear),
+            Keyframe("c", 2000, 1f, KeyframeProperty.SCALE, linear),
+        )
+        val c = clip(0, 0, 2000, kfs = kfs)
+        val sorted = kfs.sortedBy { it.timeMs }
+        for (t in longArrayOf(-100, 0, 250, 500, 1000, 1500, 2000, 3000)) {
+            assertEquals(
+                "mismatch at t=$t",
+                TimelineMath.valueAt(c, KeyframeProperty.SCALE, t, 9f),
+                TimelineMath.interpolateSorted(sorted, t, 9f),
+                0f,
+            )
+        }
+    }
+
     @Test fun keptRanges_remove_outside_trim_is_ignored() {
         // Remove sits entirely before the trimmed window → whole window kept.
         val cBefore = clip(0, 2000, 3000, edits = listOf(EditSegment(0, 1000, EditAction.REMOVE)))
