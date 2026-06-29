@@ -39,7 +39,12 @@ class McpTools(
                 "clip_id" to stringProp(), "prompt" to stringProp(),
                 required = listOf("clip_id", "prompt"),
             )))
-        put(toolDefinition("analyze_clip", "Run AI analysis on a clip using its current prompt.",
+        put(toolDefinition("analyze_clip",
+            "Run on-device vision on a clip using its current prompt AND cut it for real: matching ranges " +
+                "are found, then the clip is split into its kept pieces and the removed ranges are deleted " +
+                "with the timeline closing up (no black gaps). For \"cut/remove the frames with X\" the " +
+                "matched ranges are removed; for \"keep only X\" the non-matching ranges are removed. Use " +
+                "remove_object_generative instead when the clip must stay the SAME length.",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("apply_edits", "Apply keep/remove segments to a clip.", JSONObject().apply {
             put("type", "object")
@@ -79,17 +84,19 @@ class McpTools(
         put(toolDefinition(
             "apply_cuts",
             "Apply a clip's REMOVE edits for real: the kept ranges become separate, grouped clips and the " +
-                "removed ranges are deleted with the timeline closing up (no black gaps). Call this after " +
-                "analyze_clip/apply_edits to actually cut, instead of only marking.",
+                "removed ranges are deleted with the timeline closing up (no black gaps). analyze_clip " +
+                "already does this automatically; call apply_cuts only after marking ranges manually with " +
+                "apply_edits.",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
         ))
         put(toolDefinition("ripple_delete_range", "Cut a timeline span [start_ms, end_ms) out of every track and close the gap.",
             objSchema("start_ms" to intProp(), "end_ms" to intProp(), required = listOf("start_ms", "end_ms"))))
         put(toolDefinition(
             "analyze_clip_with_reference",
-            "Like analyze_clip, but use the clip's CURRENT playhead frame as a visual reference to find " +
-                "that specific object across the clip. Use when the user points at the current frame " +
-                "(e.g. \"this is my phone\"). Set the clip's prompt to the object first.",
+            "Like analyze_clip (finds matches AND cuts the clip for real), but uses the clip's CURRENT " +
+                "playhead frame as a visual reference to find that specific object across the clip. Use when " +
+                "the user points at the current frame (e.g. \"this is my phone\"). Set the clip's prompt to " +
+                "the object first.",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
         ))
         put(toolDefinition(
@@ -184,10 +191,27 @@ class McpTools(
         val edits = runBlocking {
             Analysis.run(context, settingsProvider(), Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs)
         }
+        return analyzeResult(clipId, edits)
+    }
+
+    /**
+     * Apply an analysis result and, whenever it removes anything, immediately perform the REAL cut —
+     * split the clip into its kept pieces and delete the removed ranges, rippling the timeline closed
+     * (via [EditorViewModel.applyCuts]). This is what makes "remove the frames with X" actually shorten
+     * the video using the app's own split/delete, instead of leaving non-destructive marks that only the
+     * exporter honors and the preview ignores (which played the removed frames black). Equivalent to a
+     * manual apply_edits + apply_cuts, done in one reliable step so the model can't skip the cut.
+     */
+    private fun analyzeResult(clipId: String, edits: List<EditSegment>): JSONObject {
         vm.applyEdits(clipId, edits)
+        val cutApplied = edits.any { it.action == EditAction.REMOVE }
+        if (cutApplied) vm.applyCuts(clipId)
         return JSONObject().apply {
             put("ok", true); put("clipId", clipId); put("segmentsFound", edits.size)
             put("segments", segmentsJson(edits))
+            put("cutApplied", cutApplied)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("totalDurationMs", vm.uiState.value.document.totalDurationMs)
         }
     }
 
@@ -256,11 +280,7 @@ class McpTools(
             )
         }
         reference.recycle()
-        vm.applyEdits(clipId, edits)
-        return JSONObject().apply {
-            put("ok", true); put("clipId", clipId); put("segmentsFound", edits.size)
-            put("segments", segmentsJson(edits))
-        }
+        return analyzeResult(clipId, edits)
     }
 
     private fun removeObjectGenerative(clipId: String): JSONObject {

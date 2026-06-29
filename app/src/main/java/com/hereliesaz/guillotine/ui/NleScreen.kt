@@ -247,6 +247,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     checkpoint = sink::checkpointBlocking,
                 )
                 vm.applyEdits(clip.id, edits)
+                // Perform the real cut so removed ranges actually leave the timeline (split into kept
+                // pieces, delete the rest, ripple closed) instead of staying as marks the preview ignores
+                // and plays through. Matches the agent's analyze_clip behavior.
+                if (edits.any { it.action == com.hereliesaz.guillotine.model.EditAction.REMOVE }) {
+                    vm.applyCuts(clip.id)
+                }
             }
         }
         if (!started) {
