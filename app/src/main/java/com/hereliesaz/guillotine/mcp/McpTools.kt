@@ -40,12 +40,11 @@ class McpTools(
                 required = listOf("clip_id", "prompt"),
             )))
         put(toolDefinition("analyze_clip",
-            "Run on-device vision on a clip using its current prompt AND cut it for real: the clip is split " +
-                "at the matched boundaries into separate clips and the matched pieces are deleted, leaving " +
-                "empty gaps at those spots (the surrounding clips stay put — the timeline does NOT close " +
-                "up), so the user can fill the gaps with their own footage. For \"cut/remove the frames " +
-                "with X\" the matched ranges are removed; for \"keep only X\" the non-matching ranges are " +
-                "removed. Use remove_object_generative instead when the clip must stay the SAME length.",
+            "Run on-device vision on a clip using its current prompt AND cut it for real: matching ranges " +
+                "are found, then the clip is split into its kept pieces and the removed ranges are deleted " +
+                "with the timeline closing up (no black gaps). For \"cut/remove the frames with X\" the " +
+                "matched ranges are removed; for \"keep only X\" the non-matching ranges are removed. Use " +
+                "remove_object_generative instead when the clip must stay the SAME length.",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("select_clip", "Select a clip by ID (empty string to clear).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
