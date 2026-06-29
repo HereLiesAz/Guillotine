@@ -388,10 +388,12 @@ class EditorViewModel : ViewModel() {
 
     /**
      * Turn keep/remove ranges into REAL timeline structure — the same split + delete the user does by
-     * hand with the scissors and trash: the kept (non-removed) ranges become **separate clips, grouped
-     * together**, butted contiguously (no black gaps); the removed ranges are deleted; the rest of the
-     * timeline ripples left; and the linked shadow-audio clip is cut the same way. If every range is
-     * removed, the whole clip (and its shadow) is deleted. One undo step.
+     * hand with the scissors and trash. The clip is split at the removed boundaries: the kept ranges
+     * become **separate clips, grouped together, each left at its original timeline position**, and the
+     * removed ranges are deleted, leaving **empty gaps** the user can drop their own footage into. The
+     * timeline does NOT close up — the rest of the tracks stay put — because we can't know what the user
+     * wants in the freed space. The linked shadow-audio clip is cut the same way. If every range is
+     * removed, the whole clip (and its shadow) is deleted, leaving its slot empty. One undo step.
      *
      * [overrideEdits] lets the analyzer pass its ranges directly so the whole thing happens in ONE atomic
      * mutation and **no REMOVE marks are ever persisted** on the clip — there is no intermediate state
@@ -409,10 +411,7 @@ class EditorViewModel : ViewModel() {
             val rel = com.hereliesaz.guillotine.model.TimelineMath.keptRanges(c)
                 .map { (it.first - c.trimStartMs) to (it.last + 1 - c.trimStartMs) }
             val gid = newId()
-            val videoPieces = cutPieces(c, rel, gid)
-            // videoPieces empty => every range removed => the clip is deleted outright (removedTotal is
-            // its full duration), and later clips ripple left to close the gap.
-            val removedTotal = c.durationMs - videoPieces.sumOf { it.durationMs }
+            val videoPieces = cutPieces(c, rel, gid) // each at its original position; gaps where removed
             // Re-link each shadow-audio piece to its video piece so preview/export keep treating it as a
             // skipped shadow (otherwise the audio would play twice).
             val shadowPieces = shadow?.let { sh ->
@@ -421,15 +420,8 @@ class EditorViewModel : ViewModel() {
                 }
             } ?: emptyList()
             val replaced = setOfNotNull(c.id, shadow?.id)
-            val origEnd = c.endTimeMs
-            val rest = doc.clips.flatMap { cl ->
-                when {
-                    cl.id in replaced -> emptyList()
-                    // Ripple later clips left to close the gap the removed ranges left behind.
-                    cl.startTimeMs >= origEnd -> listOf(cl.copy(startTimeMs = cl.startTimeMs - removedTotal))
-                    else -> listOf(cl)
-                }
-            }
+            // Every other clip stays exactly where it is — the removed ranges remain as empty gaps.
+            val rest = doc.clips.filter { it.id !in replaced }
             doc.copy(clips = rest + videoPieces + shadowPieces)
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
@@ -520,15 +512,17 @@ class EditorViewModel : ViewModel() {
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
     }
 
-    /** Build contiguous, grouped sub-clips for the given clip-relative kept intervals. */
+    /**
+     * Build grouped sub-clips for the given clip-relative kept intervals, each left **at its original
+     * timeline position** so the removed ranges stay as empty gaps the user can drop their own footage
+     * into (rather than butting the pieces together and closing the gaps).
+     */
     private fun cutPieces(clip: TimelineClip, rel: List<Pair<Long, Long>>, groupId: String): List<TimelineClip> {
-        var cursor = clip.startTimeMs
         val out = mutableListOf<TimelineClip>()
         for ((relStart, relEnd) in rel) {
             val dur = relEnd - relStart
             if (dur < MIN_CLIP_DURATION_MS) continue
-            out += piece(clip, relStart, dur, cursor, groupId)
-            cursor += dur
+            out += piece(clip, relStart, dur, clip.startTimeMs + relStart, groupId)
         }
         return out
     }
