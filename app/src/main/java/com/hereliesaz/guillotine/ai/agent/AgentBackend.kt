@@ -50,25 +50,24 @@ internal val AGENT_SYSTEM_PROMPT = """
 
     Typical workflow:
     - call get_timeline to list clips and their ids (it also returns currentTimeMs, the playhead);
-    - to find content, set_prompt on a clip then call analyze_clip (runs on-device vision and marks
-      keep/remove ranges). If the user points at the current frame — e.g. "this is my phone" or "the
-      thing on screen now" — call analyze_clip_with_reference instead, so it matches THAT specific
-      object across the clip using the frame the user scrubbed to;
-    - to actually REMOVE/CUT/DELETE content (not just mark it), call apply_cuts on the clip: the kept
-      ranges become separate clips grouped together and the removed ranges are deleted with the
-      timeline closing up (no black gaps). Just marking with analyze_clip/apply_edits does NOT remove
-      anything on screen — you must call apply_cuts to make the cut real;
-    - distinguish CUT from ERASE: "cut/delete/trim the frames with X" shortens the clip → apply_cuts.
-      But "remove X but make it look natural / keep the length / like it was never there / erase X" means
-      keep the clip the SAME length and repaint X out → call remove_object_generative (it generates
-      inpainted replacement segments, grouped with the originals);
+    - to CUT/REMOVE/DELETE content, set_prompt on a clip then call analyze_clip. This finds the matching
+      frames AND performs the real cut in one step: the clip is split into its kept pieces and the matched
+      ranges are deleted, the timeline closing up (no black gaps) — it actually shortens the video, it does
+      not just mark or grey out frames. If the user points at the current frame — e.g. "this is my phone"
+      or "the thing on screen now" — call analyze_clip_with_reference instead, so it matches THAT specific
+      object across the clip using the frame the user scrubbed to (it cuts the same way);
+    - distinguish CUT from ERASE: "cut/delete/trim/remove the frames with X" shortens the clip →
+      analyze_clip. But "remove X but make it look natural / keep the length / like it was never there /
+      erase X" means keep the clip the SAME length and repaint X out → call remove_object_generative (it
+      generates inpainted replacement segments, grouped with the originals);
     - for manual edits use split_clip (at a timeline ms), delete_clip, segment_clip, or
-      ripple_delete_range; use select_clip / get_clip as needed.
+      ripple_delete_range; use apply_edits to mark ranges by hand and apply_cuts to commit those marks;
+      use select_clip / get_clip as needed.
 
-    "Keep only X" = analyze for X (analysis marks the rest REMOVE) then apply_cuts. Clip ids always
-    come from get_timeline / get_clip — never invent them. Keep calling tools until the instruction is
-    satisfied, then give a single short sentence summarizing what you changed. Do not ask the user
-    questions; act on reasonable defaults.
+    "Keep only X" = analyze_clip for X — analysis removes the non-matching ranges and the cut is applied
+    automatically. Clip ids always come from get_timeline / get_clip — never invent them. Keep calling
+    tools until the instruction is satisfied, then give a single short sentence summarizing what you
+    changed. Do not ask the user questions; act on reasonable defaults.
 """.trimIndent()
 
 /** Result of executing one tool: the JSON to feed back to the model, plus an error flag. */
