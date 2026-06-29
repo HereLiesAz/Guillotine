@@ -25,7 +25,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
@@ -698,6 +700,10 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
                 vm.setTool(EditorTool.SELECT)
             }
+            // Marquee: drag a rectangle over a time range to select every clip it touches.
+            IconToolButton(Icons.Filled.SelectAll, "Select range (drag)", active = state.tool == EditorTool.MARQUEE) {
+                vm.setTool(EditorTool.MARQUEE)
+            }
             // Scissors is an action, not a mode: it splits at the playhead immediately (Vegas-style) —
             // the selected clip/group, or every clip on every track when nothing is selected.
             IconToolButton(Icons.Filled.ContentCut, "Split at playhead") {
@@ -718,6 +724,10 @@ private fun EditorToolStrip(
             }
             IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
                 vm.deleteSelected()
+            }
+            // Ripple: close the gaps among the selected clips (or all clips if none selected).
+            IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
+                vm.rippleCloseGaps()
             }
             // Zoom is pinch-only (horizontal = width, vertical = track height); no toolbar buttons.
             // Group / ungroup — only meaningful with a multi-clip selection.

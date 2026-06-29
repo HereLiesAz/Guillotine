@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP }
+enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP, MARQUEE }
 
 /** Default on-timeline duration for still images. */
 private const val IMAGE_DEFAULT_DURATION_MS = 5_000L
@@ -573,6 +573,57 @@ class EditorViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    /**
+     * Ripple / close gaps: pull clips left to remove empty space, so the timeline has no dead air.
+     * Operates on the selected clips, or **all** clips when nothing is selected. To keep every track
+     * in sync, a "gap" is a span empty across ALL clips within the target region (a time covered by a
+     * clip on any track is not a gap); closing each such span shifts everything after it left by the
+     * same amount. The earliest target clip stays where it is — only the gaps between clips collapse.
+     * One undo step.
+     */
+    fun rippleCloseGaps() {
+        val st = _uiState.value
+        val targets = if (st.selectedClipIds.isEmpty()) st.document.clips else st.selectedClips
+        if (targets.isEmpty()) return
+        val regionStart = targets.minOf { it.startTimeMs }
+        val regionEnd = targets.maxOf { it.endTimeMs }
+        mutateDocument { doc ->
+            // Occupied spans (any clip) clipped to the region, sorted — gaps are what's left uncovered.
+            val occ = doc.clips
+                .mapNotNull {
+                    val s = maxOf(it.startTimeMs, regionStart)
+                    val e = minOf(it.endTimeMs, regionEnd)
+                    if (e > s) s to e else null
+                }
+                .sortedBy { it.first }
+            val gaps = mutableListOf<Pair<Long, Long>>()
+            var cursor = regionStart
+            for ((s, e) in occ) {
+                if (s > cursor) gaps.add(cursor to s)
+                cursor = maxOf(cursor, e)
+            }
+            if (gaps.isEmpty()) return@mutateDocument doc
+            // Each clip shifts left by the total length of gaps that lie entirely before its start.
+            doc.copy(clips = doc.clips.map { c ->
+                val shift = gaps.filter { it.second <= c.startTimeMs }.sumOf { it.second - it.first }
+                if (shift > 0) c.copy(startTimeMs = c.startTimeMs - shift) else c
+            })
+        }
+    }
+
+    /**
+     * Marquee select: select every clip whose time span overlaps [startMs, endMs) — on every track,
+     * regardless of vertical position (the dragged rectangle is a time range). Used by the timeline's
+     * range-select (marquee) tool.
+     */
+    fun selectClipsInRange(startMs: Long, endMs: Long) {
+        val lo = minOf(startMs, endMs)
+        val hi = maxOf(startMs, endMs)
+        if (hi <= lo) return
+        val ids = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo }.map { it.id }
+        _uiState.update { it.copy(selectedClipIds = ids) }
     }
 
     /** Delete a single clip by id, including its linked shadow audio and any group members. */
