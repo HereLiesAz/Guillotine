@@ -383,26 +383,35 @@ class EditorViewModel : ViewModel() {
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
     }
 
+    /** Apply a clip's own keep/remove edits as a real cut. */
+    fun applyCuts(clipId: String) = applyCuts(clipId, null)
+
     /**
-     * Turn a clip's keep/remove edits into REAL timeline structure: the kept (non-removed) ranges
-     * become **separate clips, grouped together**, butted contiguously so playback has no black gaps —
-     * not a single merged clip. The removed ranges are dropped, the rest of the timeline ripples left to
-     * stay in sync, and the linked shadow-audio clip is cut the same way and joined to the group. One
-     * undo step. This is what the AI calls (via the `apply_cuts` MCP tool) to actually remove content,
-     * instead of leaving non-destructive remove marks that only the exporter honors.
+     * Turn keep/remove ranges into REAL timeline structure — the same split + delete the user does by
+     * hand with the scissors and trash: the kept (non-removed) ranges become **separate clips, grouped
+     * together**, butted contiguously (no black gaps); the removed ranges are deleted; the rest of the
+     * timeline ripples left; and the linked shadow-audio clip is cut the same way. If every range is
+     * removed, the whole clip (and its shadow) is deleted. One undo step.
+     *
+     * [overrideEdits] lets the analyzer pass its ranges directly so the whole thing happens in ONE atomic
+     * mutation and **no REMOVE marks are ever persisted** on the clip — there is no intermediate state
+     * where the timeline shows red "scripting" marks. Manual callers pass null to use the clip's own edits.
      */
-    fun applyCuts(clipId: String) {
-        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
-        if (clip.edits.none { it.action == EditAction.REMOVE }) return
+    fun applyCuts(clipId: String, overrideEdits: List<com.hereliesaz.guillotine.model.EditSegment>?) {
         mutateDocument { doc ->
-            val c = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val c0 = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            // Compute against the supplied ranges (analyzer) or the clip's existing marks (manual), but
+            // never write those marks back — the pieces below carry no edits, so nothing renders red.
+            val c = if (overrideEdits != null) c0.copy(edits = overrideEdits) else c0
+            if (c.edits.none { it.action == EditAction.REMOVE }) return@mutateDocument doc
             val shadow = doc.clips.firstOrNull { it.linkedClipId == c.id }
             // Kept ranges in source ms -> clip-relative (start, end) intervals shared by clip + shadow.
             val rel = com.hereliesaz.guillotine.model.TimelineMath.keptRanges(c)
                 .map { (it.first - c.trimStartMs) to (it.last + 1 - c.trimStartMs) }
             val gid = newId()
             val videoPieces = cutPieces(c, rel, gid)
-            if (videoPieces.isEmpty()) return@mutateDocument doc
+            // videoPieces empty => every range removed => the clip is deleted outright (removedTotal is
+            // its full duration), and later clips ripple left to close the gap.
             val removedTotal = c.durationMs - videoPieces.sumOf { it.durationMs }
             // Re-link each shadow-audio piece to its video piece so preview/export keep treating it as a
             // skipped shadow (otherwise the audio would play twice).

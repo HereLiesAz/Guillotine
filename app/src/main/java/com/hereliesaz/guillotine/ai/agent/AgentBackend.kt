@@ -60,9 +60,10 @@ internal val AGENT_SYSTEM_PROMPT = """
       analyze_clip. But "remove X but make it look natural / keep the length / like it was never there /
       erase X" means keep the clip the SAME length and repaint X out → call remove_object_generative (it
       generates inpainted replacement segments, grouped with the originals);
-    - for manual edits use split_clip (at a timeline ms), delete_clip, segment_clip, or
-      ripple_delete_range; use apply_edits to mark ranges by hand and apply_cuts to commit those marks;
-      use select_clip / get_clip as needed.
+    - every edit is a REAL timeline operation the user could do by hand — splitting clips and deleting
+      pieces. There is no "mark/script" mode that greys or skips frames; analyze_clip already splits the
+      clip and deletes the matched pieces. For other manual edits use split_clip (at a timeline ms),
+      delete_clip, segment_clip, or ripple_delete_range; use select_clip / get_clip as needed.
 
     "Keep only X" = analyze_clip for X — analysis removes the non-matching ranges and the cut is applied
     automatically. Clip ids always come from get_timeline / get_clip — never invent them. Keep calling
