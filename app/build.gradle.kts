@@ -19,8 +19,10 @@ val versionPropsFile = rootProject.file("version.properties")
 val versionProps = Properties().apply {
     if (versionPropsFile.exists()) versionPropsFile.inputStream().use { load(it) }
 }
-val versionBuildOverride = (project.findProperty("versionBuild") as String?)?.toIntOrNull()
-val versionPatchOverride = (project.findProperty("versionPatch") as String?)?.toIntOrNull()
+// findProperty returns Any? — use toString() (not an `as String?` cast) so a non-String value can't
+// throw ClassCastException.
+val versionBuildOverride = project.findProperty("versionBuild")?.toString()?.trim()?.toIntOrNull()
+val versionPatchOverride = project.findProperty("versionPatch")?.toString()?.trim()?.toIntOrNull()
 // trim().toIntOrNull(): Major/Minor are hand-edited, so a stray space/typo must not crash the build.
 val verMajor = versionProps.getProperty("versionMajor", "1").trim().toIntOrNull() ?: 1
 val verMinor = versionProps.getProperty("versionMinor", "0").trim().toIntOrNull() ?: 0
@@ -50,7 +52,8 @@ if (versionBuildOverride == null && isBuildTask) {
 }
 val effectiveBuild = versionBuildOverride ?: verBuild
 val effectivePatch = versionPatchOverride ?: verPatch
-val computedVersionCode = effectiveBuild
+// Android requires versionCode >= 1; a non-build evaluation or a 0/invalid override could yield 0.
+val computedVersionCode = maxOf(1, effectiveBuild)
 val computedVersionName = "$verMajor.$verMinor.$effectivePatch.$effectiveBuild"
 
 android {
