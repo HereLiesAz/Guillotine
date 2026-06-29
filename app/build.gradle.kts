@@ -1,9 +1,57 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// ---- Four-part version: Major.Minor.Patch.Build (from version.properties) ----
+//   • Major  — bumped by hand (edit versionMajor).
+//   • Minor  — bumped by hand (edit versionMinor).
+//   • Patch  — auto-increments on every artifact build; RESETS to 0 the first build after Minor changes.
+//   • Build  — auto-increments on every artifact build and NEVER resets ⇒ the monotonic versionCode.
+// CI passes authoritative, git-derived values as overrides (no file write needed, monotonic across
+// fresh checkouts): -PversionBuild=<git commit count> and -PversionPatch=<commits since minor bump>.
+// When an override is present it wins; otherwise local builds auto-increment the file counters below.
+val versionPropsFile = rootProject.file("version.properties")
+val versionProps = Properties().apply {
+    if (versionPropsFile.exists()) versionPropsFile.inputStream().use { load(it) }
+}
+val versionBuildOverride = (project.findProperty("versionBuild") as String?)?.toIntOrNull()
+val versionPatchOverride = (project.findProperty("versionPatch") as String?)?.toIntOrNull()
+// trim().toIntOrNull(): Major/Minor are hand-edited, so a stray space/typo must not crash the build.
+val verMajor = versionProps.getProperty("versionMajor", "1").trim().toIntOrNull() ?: 1
+val verMinor = versionProps.getProperty("versionMinor", "0").trim().toIntOrNull() ?: 0
+var verPatch = versionProps.getProperty("versionPatch", "0").trim().toIntOrNull() ?: 0
+var verBuild = versionProps.getProperty("versionBuild", "0").trim().toIntOrNull() ?: 0
+val patchBaseMinor = versionProps.getProperty("versionPatchBaseMinor", verMinor.toString()).trim().toIntOrNull() ?: verMinor
+// "Every compilation" — any task that compiles/assembles/bundles/installs/builds (apk or aab, debug or
+// release, an explicit compile task, or the aggregate build). Pure config/sync tasks (clean, tasks, IDE
+// sync) are excluded so they don't churn the file on every Gradle invocation.
+val isBuildTask = gradle.startParameter.taskNames.any { name ->
+    listOf("assemble", "bundle", "install", "compile", "build").any { name.contains(it, ignoreCase = true) }
+}
+// Local builds increment the file counters (Patch resets on a Minor bump, Build never resets). Skipped
+// when CI supplies the override, since CI derives the numbers from git instead. This write runs in the
+// configuration phase (versionCode/Name must resolve before tasks run): a deliberate tradeoff — not
+// configuration-cache-clean (cache is off here) and a failed build still "spends" a number, both
+// harmless since Build is a monotonic versionCode where skipped numbers don't matter.
+if (versionBuildOverride == null && isBuildTask) {
+    verPatch = if (patchBaseMinor != verMinor) 0 else verPatch + 1 // reset on minor bump, else ++
+    verBuild += 1 // never resets
+    versionProps.setProperty("versionPatch", verPatch.toString())
+    versionProps.setProperty("versionBuild", verBuild.toString())
+    versionProps.setProperty("versionPatchBaseMinor", verMinor.toString())
+    versionPropsFile.outputStream().use {
+        versionProps.store(it, "Auto-incremented by build (patch resets on minor, build never)")
+    }
+}
+val effectiveBuild = versionBuildOverride ?: verBuild
+val effectivePatch = versionPatchOverride ?: verPatch
+val computedVersionCode = effectiveBuild
+val computedVersionName = "$verMajor.$verMinor.$effectivePatch.$effectiveBuild"
 
 android {
     namespace = "com.hereliesaz.guillotine"
@@ -13,8 +61,8 @@ android {
         applicationId = "com.hereliesaz.guillotine"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = computedVersionCode
+        versionName = computedVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
