@@ -101,12 +101,14 @@ jobs:
           path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
+      # Publish runs by default (including on push) so a build that doesn't actually push FAILS the job —
+      # a green check means it reached Play. Skip only by explicitly dispatching with publish: false.
       - name: Publish to Google Play
-        if: ${{ inputs.publish }}
+        if: ${{ inputs.publish != 'false' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.hereliesaz.guillotine
           releaseFiles: app/build/outputs/bundle/release/*.aab
-          track: ${{ inputs.track }}
-          status: ${{ inputs.status }}
+          track: ${{ inputs.track || 'internal' }}
+          status: ${{ inputs.status || 'completed' }}
