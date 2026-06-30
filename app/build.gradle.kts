@@ -1,4 +1,10 @@
 import java.util.Properties
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     alias(libs.plugins.android.application)
@@ -146,6 +152,28 @@ dependencies {
     implementation(libs.json)
     testImplementation(libs.junit)
     debugImplementation(libs.androidx.ui.tooling)
+}
+
+// Bundle the repo's help docs into the APK at BUILD time, so the in-app Tutorial/FAQ read them
+// offline from a single source of truth: TUTORIAL.md / FAQ.md at the repo root. The task copies them
+// into an AGP-managed generated assets dir (under build/, not committed) registered via the Variant
+// API — no hand-maintained duplicate under src/main/assets. Edit the root .md and the next build picks
+// it up. They land at asset path `help/TUTORIAL.md` / `help/FAQ.md`.
+abstract class CopyHelpDocsTask : DefaultTask() {
+    @get:InputFiles abstract val docs: ConfigurableFileCollection
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+    @TaskAction fun run() {
+        val help = outputDir.get().asFile.resolve("help").apply { mkdirs() }
+        docs.files.forEach { it.copyTo(help.resolve(it.name), overwrite = true) }
+    }
+}
+val copyHelpDocs = tasks.register<CopyHelpDocsTask>("copyHelpDocs") {
+    docs.from(rootProject.file("TUTORIAL.md"), rootProject.file("FAQ.md"))
+}
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(copyHelpDocs, CopyHelpDocsTask::outputDir)
+    }
 }
 
 
