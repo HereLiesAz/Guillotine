@@ -137,6 +137,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // One shared MCP tool surface: the embedded server, the optional relay, and the in-app AI
     // assistant all drive the editor through this same object ({ settings } reads live).
     val sharedMcpTools = remember { com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings } }
+    // Headless assistant (no separate bar): the single prompt field below the tools runs the agent
+    // through this when nothing is selected, and shows its status inline.
     val assistantVm: AssistantViewModel = viewModel()
     val assistantState by assistantVm.state.collectAsState()
 
@@ -337,7 +339,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 )
                 TransportControls(vm, state)
             }
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true }, onHelp = { showHelp = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
             PreviewPlayer(
@@ -347,24 +349,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
             )
             TransportControls(vm, state)
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true }, onHelp = { showHelp = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
-
-        // In-app AI assistant: type an instruction and the agent drives the editor via the MCP
-        // tools (timeline updates live; edits are undoable).
-        AssistantBar(
-            state = assistantState,
-            onInput = assistantVm::setInput,
-            onSend = {
-                val text = assistantState.input
-                assistantVm.run(
-                    text,
-                    sharedMcpTools,
-                    com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools),
-                )
-            },
-        )
 
         // Bottom banner ad (renders only after ad consent is resolved).
         BannerAd(Modifier.fillMaxWidth())
@@ -697,16 +684,25 @@ private fun EditorToolStrip(
     onTranscribe: () -> Unit,
     providerLabel: String,
     onOpenSettings: () -> Unit,
-    onGenerate: () -> Unit,
+    assistant: AssistantViewModel.UiState,
+    onAgentInput: (String) -> Unit,
+    onAgentRun: (String) -> Unit,
+    onImport: () -> Unit,
     onHelp: () -> Unit,
 ) {
     val selected = state.selectedClips
-    // Submitting the prompt: analyze the selected clip(s), or open Generate when nothing
-    // is selected. Used by both the Enter key and the AI button. If the field is empty we
-    // fall back to the user's last prompt (also shown as the inline hint), so pressing
-    // Enter/AI on an empty field re-runs the previous instruction.
+    // The single AI prompt field does both jobs:
+    //  • a clip/group is selected  -> the text is an analysis prompt for it; run on-device analysis
+    //    (free, no LLM brain needed) — exactly as before.
+    //  • nothing is selected        -> the text is a general instruction; hand it to the agent, which
+    //    drives the whole editor through the MCP tools (this is what the old assistant bar did).
+    // Used by both the Enter key and the AI button.
     val submit: () -> Unit = submit@{
-        if (selected.isEmpty()) { onGenerate(); return@submit }
+        if (selected.isEmpty()) {
+            val text = assistant.input.ifBlank { state.lastPrompt }
+            if (text.isNotBlank()) { vm.rememberPrompt(text); onAgentRun(text) }
+            return@submit
+        }
         val current = selected.firstOrNull()?.prompt.orEmpty()
         val effective = current.ifBlank { state.lastPrompt }
         if (current.isBlank() && effective.isNotBlank()) vm.setPromptForSelected(effective)
@@ -749,9 +745,8 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Diamond, "Keyframe crop/placement at playhead") {
                 vm.addKeyframeAtPlayhead()
             }
-            IconToolButton(Icons.Filled.Add, "Add track") {
-                vm.addTrack(selected.singleOrNull()?.type ?: ClipType.VIDEO)
-            }
+            // Import media (new tracks come from the track-head popup or dragging a clip past the edge).
+            IconToolButton(Icons.Filled.Add, "Import media", onClick = onImport)
             IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
                 vm.deleteSelected()
             }
@@ -786,25 +781,35 @@ private fun EditorToolStrip(
                 ClipToolButtons(vm, state, onTranscribe)
             }
         }
+        // Agent status line (only when nothing is selected — the field is then driving the agent).
+        if (selected.isEmpty() && assistant.status.isNotBlank()) {
+            Text(
+                assistant.status,
+                color = if (assistant.isError) Red500 else Neutral400,
+                fontSize = 11.sp, maxLines = 2,
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 2.dp),
+            )
+        }
         Row(
             Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // With a clip selected the field edits/runs that clip's analysis prompt; with nothing
+            // selected it holds the assistant input and the agent runs it.
+            val hasClip = selected.isNotEmpty()
+            val fieldValue = if (hasClip) (selected.firstOrNull()?.prompt ?: "") else assistant.input
             Box(Modifier.weight(1f)) {
-                val currentPrompt = selected.firstOrNull()?.prompt ?: ""
                 OutlinedTextField(
-                    value = currentPrompt,
+                    value = fieldValue,
                     // Enter submits instead of inserting a newline. Soft keyboards send a '\n'
                     // through onValueChange; hardware Enter is caught by onPreviewKeyEvent below.
                     onValueChange = { v ->
-                        if (v.contains('\n')) {
-                            vm.setPromptForSelected(v.replace("\n", ""))
-                            submit()
-                        } else {
-                            vm.setPromptForSelected(v)
-                        }
+                        val submitNow = v.contains('\n')
+                        val text = v.replace("\n", "")
+                        if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
+                        if (submitNow) submit()
                     },
-                    enabled = selected.isNotEmpty(),
+                    enabled = !assistant.running,
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged { promptFocused = it.isFocused }
@@ -816,15 +821,12 @@ private fun EditorToolStrip(
                             }
                         },
                     placeholder = {
-                        // Inline hint = the user's last prompt (re-used on empty submit), or an
-                        // example before they've entered anything.
-                        val hint = state.lastPrompt.ifBlank {
-                            "e.g. \"keep shots with a face\" or \"cut clips with a car\""
+                        val hint = if (hasClip) {
+                            state.lastPrompt.ifBlank { "e.g. \"keep shots with a face\" or \"cut clips with a car\"" }
+                        } else {
+                            "Tell the AI what to do — e.g. \"cut the silences in clip 1\""
                         }
-                        Text(
-                            if (selected.isEmpty()) "Select a clip to prompt…" else hint,
-                            color = Neutral500, fontSize = 12.sp,
-                        )
+                        Text(hint, color = Neutral500, fontSize = 12.sp)
                     },
                     textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
                     maxLines = 6,
@@ -834,21 +836,25 @@ private fun EditorToolStrip(
                 // Recent-prompts history: appears when the empty field is focused. Tapping one
                 // fills the field (tap-to-reuse). focusable=false keeps the keyboard up.
                 DropdownMenu(
-                    expanded = promptFocused && currentPrompt.isBlank() && state.promptHistory.isNotEmpty(),
+                    expanded = promptFocused && fieldValue.isBlank() && state.promptHistory.isNotEmpty(),
                     onDismissRequest = { promptFocused = false },
                     properties = androidx.compose.ui.window.PopupProperties(focusable = false),
                 ) {
                     state.promptHistory.forEach { p ->
                         DropdownMenuItem(
                             text = { Text(p, color = White, fontSize = 12.sp, maxLines = 1) },
-                            onClick = { vm.setPromptForSelected(p); promptFocused = false },
+                            onClick = { if (hasClip) vm.setPromptForSelected(p) else onAgentInput(p); promptFocused = false },
                         )
                     }
                 }
             }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                ToolbarButton(if (selected.isEmpty()) "AI ▸" else "AI", tint = Red500, onClick = submit)
+                if (!hasClip && assistant.running) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Red500)
+                } else {
+                    ToolbarButton(if (hasClip) "AI" else "AI ▸", tint = Red500, onClick = submit)
+                }
                 // Shows which engine the AI button uses; tap to change it in Settings.
                 Text(
                     providerLabel,

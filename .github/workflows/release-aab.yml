@@ -87,12 +87,8 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          export VERSION_BUILD=$(git rev-list --count HEAD)
-          # Patch = commits since the versionMinor line last changed (resets on a minor bump).
-          MINOR_COMMIT=$(git blame -L '/versionMinor=/',+1 version.properties | awk '{print $1}' | tr -d '^')
-          if [ -n "$MINOR_COMMIT" ]; then PATCH=$(git rev-list --count $MINOR_COMMIT..HEAD); else PATCH=$(grep 'versionPatch=' version.properties | cut -d'=' -f2 | tr -d '\r '); fi
-          echo "versionCode = $VERSION_BUILD, patch = $PATCH"
-          ./gradlew bundleRelease -PversionBuild=$VERSION_BUILD -PversionPatch=$PATCH \
+          # version.properties auto-increments inside the build — no version override is passed.
+          ./gradlew bundleRelease \
             -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.jks \
             -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
             -Pandroid.injected.signing.key.alias=$KEY_ALIAS \

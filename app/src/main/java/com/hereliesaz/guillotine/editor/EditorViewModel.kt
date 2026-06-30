@@ -735,13 +735,49 @@ class EditorViewModel : ViewModel() {
         }
     }
 
+    /** Next non-colliding track id for [prefix] ("V"/"A"): one past the max existing numeric suffix
+     *  (so it stays unique even after tracks were deleted). */
+    private fun nextTrackId(existing: List<String>, prefix: String): String {
+        val maxN = existing.mapNotNull { it.removePrefix(prefix).toIntOrNull() }.maxOrNull() ?: 0
+        return "$prefix${maxN + 1}"
+    }
+
     fun addTrack(type: ClipType) {
         mutateDocument { doc ->
             when (type) {
                 // Text lives on video tracks, so "add track" for a text selection adds a video track.
-                ClipType.VIDEO, ClipType.TEXT -> doc.copy(videoTracks = doc.videoTracks + "V${doc.videoTracks.size + 1}")
-                ClipType.AUDIO -> doc.copy(audioTracks = doc.audioTracks + "A${doc.audioTracks.size + 1}")
+                ClipType.VIDEO, ClipType.TEXT -> doc.copy(videoTracks = doc.videoTracks + nextTrackId(doc.videoTracks, "V"))
+                ClipType.AUDIO -> doc.copy(audioTracks = doc.audioTracks + nextTrackId(doc.audioTracks, "A"))
             }
+        }
+    }
+
+    /**
+     * Create a fresh track at the top (prepend) or bottom (append) of the dragged clip's own track list
+     * and move the clip onto it. Used when a clip is dragged past the first/last lane of its type and
+     * held — a new video/audio track (matching the clip) appears there and the clip lands on it.
+     * [deltaMs] carries the in-progress horizontal drag so the clip keeps its time position. One undo step.
+     */
+    fun addEdgeTrackAndMoveClip(clipId: String, atTop: Boolean, deltaMs: Long) {
+        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
+        // Group members shift horizontally by the same delta so a linked video+audio pair stays in sync;
+        // only the dragged clip changes track (the linked audio keeps its own audio track).
+        val groupIds = clip.groupId?.let { g -> document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
+            ?: setOf(clipId)
+        mutateDocument { doc ->
+            val isAudio = clip.type == ClipType.AUDIO
+            val tracks = if (isAudio) doc.audioTracks else doc.videoTracks
+            val newId = nextTrackId(tracks, if (isAudio) "A" else "V")
+            val updatedTracks = if (atTop) listOf(newId) + tracks else tracks + newId
+            val movedClips = doc.clips.map { c ->
+                when {
+                    c.id == clipId -> c.copy(trackId = newId, startTimeMs = (c.startTimeMs + deltaMs).coerceAtLeast(0))
+                    c.id in groupIds -> c.copy(startTimeMs = (c.startTimeMs + deltaMs).coerceAtLeast(0))
+                    else -> c
+                }
+            }
+            if (isAudio) doc.copy(audioTracks = updatedTracks, clips = movedClips)
+            else doc.copy(videoTracks = updatedTracks, clips = movedClips)
         }
     }
 
