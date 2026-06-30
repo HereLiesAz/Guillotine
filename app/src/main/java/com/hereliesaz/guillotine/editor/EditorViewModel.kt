@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP }
+enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP, MARQUEE }
 
 /** Default on-timeline duration for still images. */
 private const val IMAGE_DEFAULT_DURATION_MS = 5_000L
@@ -383,26 +383,35 @@ class EditorViewModel : ViewModel() {
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
     }
 
+    /** Apply a clip's own keep/remove edits as a real cut. */
+    fun applyCuts(clipId: String) = applyCuts(clipId, null)
+
     /**
-     * Turn a clip's keep/remove edits into REAL timeline structure: the kept (non-removed) ranges
-     * become **separate clips, grouped together**, butted contiguously so playback has no black gaps —
-     * not a single merged clip. The removed ranges are dropped, the rest of the timeline ripples left to
-     * stay in sync, and the linked shadow-audio clip is cut the same way and joined to the group. One
-     * undo step. This is what the AI calls (via the `apply_cuts` MCP tool) to actually remove content,
-     * instead of leaving non-destructive remove marks that only the exporter honors.
+     * Turn keep/remove ranges into REAL timeline structure — the same split + delete the user does by
+     * hand with the scissors and trash: the kept (non-removed) ranges become **separate clips, grouped
+     * together**, butted contiguously (no black gaps); the removed ranges are deleted; the rest of the
+     * timeline ripples left; and the linked shadow-audio clip is cut the same way. If every range is
+     * removed, the whole clip (and its shadow) is deleted. One undo step.
+     *
+     * [overrideEdits] lets the analyzer pass its ranges directly so the whole thing happens in ONE atomic
+     * mutation and **no REMOVE marks are ever persisted** on the clip — there is no intermediate state
+     * where the timeline shows red "scripting" marks. Manual callers pass null to use the clip's own edits.
      */
-    fun applyCuts(clipId: String) {
-        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
-        if (clip.edits.none { it.action == EditAction.REMOVE }) return
+    fun applyCuts(clipId: String, overrideEdits: List<com.hereliesaz.guillotine.model.EditSegment>?) {
         mutateDocument { doc ->
-            val c = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val c0 = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            // Compute against the supplied ranges (analyzer) or the clip's existing marks (manual), but
+            // never write those marks back — the pieces below carry no edits, so nothing renders red.
+            val c = if (overrideEdits != null) c0.copy(edits = overrideEdits) else c0
+            if (c.edits.none { it.action == EditAction.REMOVE }) return@mutateDocument doc
             val shadow = doc.clips.firstOrNull { it.linkedClipId == c.id }
             // Kept ranges in source ms -> clip-relative (start, end) intervals shared by clip + shadow.
             val rel = com.hereliesaz.guillotine.model.TimelineMath.keptRanges(c)
                 .map { (it.first - c.trimStartMs) to (it.last + 1 - c.trimStartMs) }
             val gid = newId()
             val videoPieces = cutPieces(c, rel, gid)
-            if (videoPieces.isEmpty()) return@mutateDocument doc
+            // videoPieces empty => every range removed => the clip is deleted outright (removedTotal is
+            // its full duration), and later clips ripple left to close the gap.
             val removedTotal = c.durationMs - videoPieces.sumOf { it.durationMs }
             // Re-link each shadow-audio piece to its video piece so preview/export keep treating it as a
             // skipped shadow (otherwise the audio would play twice).
@@ -564,6 +573,57 @@ class EditorViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    /**
+     * Ripple / close gaps: pull clips left to remove empty space, so the timeline has no dead air.
+     * Operates on the selected clips, or **all** clips when nothing is selected. To keep every track
+     * in sync, a "gap" is a span empty across ALL clips within the target region (a time covered by a
+     * clip on any track is not a gap); closing each such span shifts everything after it left by the
+     * same amount. The earliest target clip stays where it is — only the gaps between clips collapse.
+     * One undo step.
+     */
+    fun rippleCloseGaps() {
+        val st = _uiState.value
+        val targets = if (st.selectedClipIds.isEmpty()) st.document.clips else st.selectedClips
+        if (targets.isEmpty()) return
+        val regionStart = targets.minOf { it.startTimeMs }
+        val regionEnd = targets.maxOf { it.endTimeMs }
+        mutateDocument { doc ->
+            // Occupied spans (any clip) clipped to the region, sorted — gaps are what's left uncovered.
+            val occ = doc.clips
+                .mapNotNull {
+                    val s = maxOf(it.startTimeMs, regionStart)
+                    val e = minOf(it.endTimeMs, regionEnd)
+                    if (e > s) s to e else null
+                }
+                .sortedBy { it.first }
+            val gaps = mutableListOf<Pair<Long, Long>>()
+            var cursor = regionStart
+            for ((s, e) in occ) {
+                if (s > cursor) gaps.add(cursor to s)
+                cursor = maxOf(cursor, e)
+            }
+            if (gaps.isEmpty()) return@mutateDocument doc
+            // Each clip shifts left by the total length of gaps that lie entirely before its start.
+            doc.copy(clips = doc.clips.map { c ->
+                val shift = gaps.filter { it.second <= c.startTimeMs }.sumOf { it.second - it.first }
+                if (shift > 0) c.copy(startTimeMs = c.startTimeMs - shift) else c
+            })
+        }
+    }
+
+    /**
+     * Marquee select: select every clip whose time span overlaps [startMs, endMs) — on every track,
+     * regardless of vertical position (the dragged rectangle is a time range). Used by the timeline's
+     * range-select (marquee) tool.
+     */
+    fun selectClipsInRange(startMs: Long, endMs: Long) {
+        val lo = minOf(startMs, endMs)
+        val hi = maxOf(startMs, endMs)
+        if (hi <= lo) return
+        val ids = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo }.map { it.id }
+        _uiState.update { it.copy(selectedClipIds = ids) }
     }
 
     /** Delete a single clip by id, including its linked shadow audio and any group members. */

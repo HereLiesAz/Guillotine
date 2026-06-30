@@ -235,6 +235,44 @@ private fun TimelineLanes(
                     .fillMaxHeight()
                     .background(Red500),
             )
+            // Marquee (range-select) overlay: only in MARQUEE mode. Dragging draws a rectangle over a
+            // time range and selects every clip it touches on release. It captures the drag (so the
+            // timeline doesn't scroll), and its local x == content x, so x/pps maps straight to ms.
+            if (state.tool == EditorTool.MARQUEE) {
+                var startX by remember { mutableStateOf<Float?>(null) }
+                var curX by remember { mutableFloatStateOf(0f) }
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .pointerInput(pps) {
+                            detectDragGestures(
+                                onDragStart = { off -> startX = off.x; curX = off.x },
+                                onDrag = { change, _ -> change.consume(); curX = change.position.x },
+                                onDragEnd = {
+                                    startX?.let { s ->
+                                        vm.selectClipsInRange(
+                                            (s / pps * 1000f).toLong(),
+                                            (curX / pps * 1000f).toLong(),
+                                        )
+                                    }
+                                    startX = null
+                                },
+                                onDragCancel = { startX = null },
+                            )
+                        },
+                ) {
+                    startX?.let { s ->
+                        Box(
+                            Modifier
+                                .offset(x = with(density) { kotlin.math.min(s, curX).toDp() })
+                                .width(with(density) { kotlin.math.abs(curX - s).toDp() })
+                                .fillMaxHeight()
+                                .background(Red500.copy(alpha = 0.18f))
+                                .border(1.dp, Red500),
+                        )
+                    }
+                }
+            }
         }
         }
     }
