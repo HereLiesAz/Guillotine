@@ -760,13 +760,21 @@ class EditorViewModel : ViewModel() {
      */
     fun addEdgeTrackAndMoveClip(clipId: String, atTop: Boolean, deltaMs: Long) {
         val clip = document.clips.firstOrNull { it.id == clipId } ?: return
+        // Group members shift horizontally by the same delta so a linked video+audio pair stays in sync;
+        // only the dragged clip changes track (the linked audio keeps its own audio track).
+        val groupIds = clip.groupId?.let { g -> document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
+            ?: setOf(clipId)
         mutateDocument { doc ->
             val isAudio = clip.type == ClipType.AUDIO
             val tracks = if (isAudio) doc.audioTracks else doc.videoTracks
             val newId = nextTrackId(tracks, if (isAudio) "A" else "V")
             val updatedTracks = if (atTop) listOf(newId) + tracks else tracks + newId
             val movedClips = doc.clips.map { c ->
-                if (c.id == clipId) c.copy(trackId = newId, startTimeMs = (c.startTimeMs + deltaMs).coerceAtLeast(0)) else c
+                when {
+                    c.id == clipId -> c.copy(trackId = newId, startTimeMs = (c.startTimeMs + deltaMs).coerceAtLeast(0))
+                    c.id in groupIds -> c.copy(startTimeMs = (c.startTimeMs + deltaMs).coerceAtLeast(0))
+                    else -> c
+                }
             }
             if (isAudio) doc.copy(audioTracks = updatedTracks, clips = movedClips)
             else doc.copy(videoTracks = updatedTracks, clips = movedClips)
