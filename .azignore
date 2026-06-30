@@ -11,3 +11,8 @@ TODO.md
 
 # Historical record of the prompts that generated the app.
 ORIGINAL_PROMPTS.md
+
+# Surfaced in-app through their own dedicated menu items (Tutorial / FAQ),
+# which fetch these same files — listing them in About too would be redundant.
+TUTORIAL.md
+FAQ.md

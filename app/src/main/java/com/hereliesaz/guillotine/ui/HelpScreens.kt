@@ -1,6 +1,5 @@
 package com.hereliesaz.guillotine.ui
 
-import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -39,12 +38,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -57,6 +56,10 @@ import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral900
 import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 // ---- Icon key -----------------------------------------------------------------
 
@@ -125,31 +128,39 @@ fun HelpKeyDialog(onDismiss: () -> Unit) {
 
 // ---- Tutorial (stepper) -------------------------------------------------------
 
-/** Multi-step walkthrough loaded from `tutorial.md` (one step per `## ` heading). */
+/** Multi-step walkthrough fetched from the repo's `TUTORIAL.md` (one step per `## ` heading). */
 @Composable
 fun TutorialDialog(onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val steps = remember { parseSections(readAsset(context, "tutorial.md")) }
-    if (steps.isEmpty()) { onDismiss(); return }
+    val md = rememberRepoDoc("TUTORIAL.md")
+    val steps = remember(md) { md?.let { parseSections(it) }.orEmpty() }
     var i by remember { mutableIntStateOf(0) }
-    val step = steps[i]
-    val last = i == steps.lastIndex
+    val idx = i.coerceIn(0, (steps.size - 1).coerceAtLeast(0))
+    val last = steps.isEmpty() || idx >= steps.lastIndex
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Column {
-                Text("Tutorial · ${i + 1} of ${steps.size}", color = Neutral500, fontSize = 11.sp)
-                Text(step.title, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                if (steps.isEmpty()) {
+                    Text("Tutorial", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                } else {
+                    Text("Tutorial · ${idx + 1} of ${steps.size}", color = Neutral500, fontSize = 11.sp)
+                    Text(steps[idx].title, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
             }
         },
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                MarkdownBody(step.body)
+                when {
+                    md == null -> Text("Loading…", color = Neutral500, fontSize = 13.sp)
+                    steps.isEmpty() -> Text("Couldn't load the tutorial — check your connection.",
+                        color = Neutral500, fontSize = 13.sp)
+                    else -> MarkdownBody(steps[idx].body)
+                }
             }
         },
-        confirmButton = { DialogAction(if (last) "Done" else "Next") { if (last) onDismiss() else i++ } },
+        confirmButton = { DialogAction(if (last) "Done" else "Next") { if (last) onDismiss() else i = idx + 1 } },
         dismissButton = {
-            DialogAction(if (i == 0) "Close" else "Back", tint = Neutral400) { if (i == 0) onDismiss() else i-- }
+            DialogAction(if (idx == 0) "Close" else "Back", tint = Neutral400) { if (idx == 0) onDismiss() else i = idx - 1 }
         },
         containerColor = Neutral900,
     )
@@ -157,25 +168,30 @@ fun TutorialDialog(onDismiss: () -> Unit) {
 
 // ---- FAQ (accordion) ----------------------------------------------------------
 
-/** FAQ loaded from `faq.md` (one question per `## ` heading), shown as a tap-to-expand list. */
+/** FAQ fetched from the repo's `FAQ.md` (one question per `## ` heading), as a tap-to-expand list. */
 @Composable
 fun FaqDialog(onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val entries = remember { parseSections(readAsset(context, "faq.md")) }
+    val md = rememberRepoDoc("FAQ.md")
+    val entries = remember(md) { md?.let { parseSections(it) }.orEmpty() }
     var open by remember { mutableStateOf(-1) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("FAQ", color = White) },
         text = {
             Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                entries.forEachIndexed { idx, e ->
-                    val expanded = open == idx
-                    Text(
-                        e.title, color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.fillMaxWidth().clickable { open = if (expanded) -1 else idx }
-                            .padding(vertical = 8.dp),
-                    )
-                    if (expanded) MarkdownBody(e.body, Modifier.padding(bottom = 6.dp))
+                when {
+                    md == null -> Text("Loading…", color = Neutral500, fontSize = 13.sp)
+                    entries.isEmpty() -> Text("Couldn't load the FAQ — check your connection.",
+                        color = Neutral500, fontSize = 13.sp)
+                    else -> entries.forEachIndexed { idx, e ->
+                        val expanded = open == idx
+                        Text(
+                            e.title, color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.fillMaxWidth().clickable { open = if (expanded) -1 else idx }
+                                .padding(vertical = 8.dp),
+                        )
+                        if (expanded) MarkdownBody(e.body, Modifier.padding(bottom = 6.dp))
+                    }
                 }
             }
         },
@@ -247,5 +263,20 @@ private fun parseSections(md: String): List<DocSection> {
     return out
 }
 
-private fun readAsset(context: Context, name: String): String =
-    runCatching { context.assets.open(name).bufferedReader().use { it.readText() } }.getOrDefault("")
+/**
+ * The repo's docs, fetched live from GitHub (the same source the About reader reads) so the in-app
+ * Tutorial/FAQ ARE the repo docs — no bundled copy. `null` = still loading; `""` = fetch failed.
+ */
+private const val DOCS_BASE = "https://raw.githubusercontent.com/HereLiesAz/Guillotine/main/"
+
+@Composable
+private fun rememberRepoDoc(fileName: String): String? =
+    produceState<String?>(initialValue = null, fileName) {
+        value = withContext(Dispatchers.IO) { fetchRepoDoc(fileName) }
+    }.value
+
+private fun fetchRepoDoc(fileName: String): String = runCatching {
+    OkHttpClient().newCall(Request.Builder().url(DOCS_BASE + fileName).build()).execute().use { resp ->
+        if (resp.isSuccessful) resp.body?.string().orEmpty() else ""
+    }
+}.getOrDefault("")
