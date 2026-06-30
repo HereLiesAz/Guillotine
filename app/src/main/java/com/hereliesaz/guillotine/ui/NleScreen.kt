@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.NearMe
@@ -152,6 +153,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showNameDialog by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
+    var showHelp by remember { mutableStateOf(false) }
+    var showTutorial by remember { mutableStateOf(false) }
+    var showFaq by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf<String?>(null) }
@@ -316,6 +320,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onProjectSettings = { showProjectSettings = true },
             onSettings = { showSettings = true },
             onAiComparison = { showAiComparison = true },
+            onHelp = { showHelp = true },
+            onTutorial = { showTutorial = true },
+            onFaq = { showFaq = true },
         )
 
         // Processing/error feedback for AI analysis (formerly shown in the Inspector).
@@ -330,7 +337,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 )
                 TransportControls(vm, state)
             }
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true }, onHelp = { showHelp = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
             PreviewPlayer(
@@ -340,7 +347,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
             )
             TransportControls(vm, state)
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, onGenerate = { showGenerate = true }, onHelp = { showHelp = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
 
@@ -447,6 +454,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     if (showAiComparison) {
         AiComparisonSheet(onDismiss = { showAiComparison = false })
     }
+    if (showHelp) HelpKeyDialog(onDismiss = { showHelp = false })
+    if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
+    if (showFaq) FaqDialog(onDismiss = { showFaq = false })
     if (showOnboarding) {
         OnboardingDialog(
             onComplete = { selectedModelPath ->
@@ -498,6 +508,9 @@ private fun TopBar(
     onProjectSettings: () -> Unit,
     onSettings: () -> Unit,
     onAiComparison: () -> Unit,
+    onHelp: () -> Unit,
+    onTutorial: () -> Unit,
+    onFaq: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(end = 8.dp),
@@ -520,6 +533,10 @@ private fun TopBar(
             azItem("Project settings") { onProjectSettings() }
             azItem("Settings") { onSettings() }
             azItem("Compare AI providers") { onAiComparison() }
+            azDivider()
+            azItem("Tutorial") { onTutorial() }
+            azItem("FAQ") { onFaq() }
+            azItem("Icon key") { onHelp() }
         }
         Text(
             state.document.name.ifBlank { "Untitled project" },
@@ -528,6 +545,7 @@ private fun TopBar(
         Spacer(Modifier.weight(1f))
         IconToolButton(Icons.Filled.Undo, "Undo", enabled = state.canUndo, onClick = onUndo)
         IconToolButton(Icons.Filled.Redo, "Redo", enabled = state.canRedo, onClick = onRedo)
+        IconToolButton(Icons.Filled.HelpOutline, "Help", onClick = onHelp)
     }
 }
 
@@ -655,6 +673,12 @@ private fun AnalysisStatusBar(state: EditorUiState, providerLabel: String, onDis
     }
 }
 
+/** Thin vertical rule that visually separates groups of toolbar buttons (modes | actions | help). */
+@Composable
+private fun ToolGroupSeparator() {
+    Box(Modifier.padding(horizontal = 4.dp).width(1.dp).height(20.dp).background(Neutral800))
+}
+
 /**
  * Shared editor tool strip used by both layouts: a horizontally-scrollable row of
  * tools (mirroring the web build — select, split, keyframe, add-track, delete, zoom)
@@ -674,6 +698,7 @@ private fun EditorToolStrip(
     providerLabel: String,
     onOpenSettings: () -> Unit,
     onGenerate: () -> Unit,
+    onHelp: () -> Unit,
 ) {
     val selected = state.selectedClips
     // Submitting the prompt: analyze the selected clip(s), or open Generate when nothing
@@ -697,6 +722,7 @@ private fun EditorToolStrip(
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // ---- Modes (toggle a tool on/off; active one is highlighted) ----
             IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
                 vm.setTool(EditorTool.SELECT)
             }
@@ -704,20 +730,24 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.SelectAll, "Select range (drag)", active = state.tool == EditorTool.MARQUEE) {
                 vm.setTool(EditorTool.MARQUEE)
             }
-            // Scissors is an action, not a mode: it splits at the playhead immediately (Vegas-style) —
-            // the selected clip/group, or every clip on every track when nothing is selected.
-            IconToolButton(Icons.Filled.ContentCut, "Split at playhead") {
-                vm.splitAtPlayhead()
-            }
             IconToolButton(Icons.Filled.Crop, "Crop / transform", active = state.tool == EditorTool.CROP) {
                 vm.setTool(EditorTool.CROP)
             }
-            // Action (not a mode): record the selected clip's crop/placement (+opacity) at the playhead.
-            IconToolButton(Icons.Filled.Diamond, "Keyframe crop/placement at playhead") {
-                vm.addKeyframeAtPlayhead()
-            }
             IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
                 vm.toggleAutoEase()
+            }
+
+            ToolGroupSeparator()
+
+            // ---- Actions (do something immediately; no mode) ----
+            // Scissors splits at the playhead immediately (Vegas-style) — the selected clip/group, or
+            // every clip on every track when nothing is selected.
+            IconToolButton(Icons.Filled.ContentCut, "Split at playhead") {
+                vm.splitAtPlayhead()
+            }
+            // Record the selected clip's crop/placement (+opacity) at the playhead.
+            IconToolButton(Icons.Filled.Diamond, "Keyframe crop/placement at playhead") {
+                vm.addKeyframeAtPlayhead()
             }
             IconToolButton(Icons.Filled.Add, "Add track") {
                 vm.addTrack(selected.singleOrNull()?.type ?: ClipType.VIDEO)
@@ -739,6 +769,12 @@ private fun EditorToolStrip(
                     active = grouped,
                 ) { if (grouped) vm.ungroupSelected() else vm.groupSelected() }
             }
+
+            ToolGroupSeparator()
+
+            // Help: opens the icon key (what every button does).
+            IconToolButton(Icons.Filled.HelpOutline, "Help / icon key", onClick = onHelp)
+
             // Context-sensitive per-clip tools (filters, audio, background, text,
             // keyframes, transcribe, split) — formerly the Inspector panel. Shown for a
             // single clip, or a single group (e.g. a linked video+audio pair) so its parts
@@ -746,7 +782,7 @@ private fun EditorToolStrip(
             val oneUnit = selected.size == 1 ||
                 (selected.size > 1 && selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null })
             if (oneUnit) {
-                Box(Modifier.width(1.dp).height(20.dp).background(Neutral800))
+                ToolGroupSeparator()
                 ClipToolButtons(vm, state, onTranscribe)
             }
         }
