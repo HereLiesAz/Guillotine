@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.DropdownMenu
@@ -34,6 +35,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -81,6 +83,7 @@ import com.hereliesaz.guillotine.ui.theme.Neutral950
 import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 private val HEADER_WIDTH = 56.dp
 private val RULER_HEIGHT = 24.dp
@@ -342,6 +345,14 @@ private fun TrackHeader(
                 TrackAction(if (type == ClipType.TEXT) "Add text clip" else "Create clip…") {
                     open = false; onCreate(trackId)
                 }
+                // A + icon button that adds a new track of this head's kind (video tracks carry
+                // text/image clips too).
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconToolButton(
+                        Icons.Filled.Add,
+                        if (type == ClipType.AUDIO) "New audio track" else "New video track",
+                    ) { open = false; vm.addTrack(type) }
+                }
             }
         }
     }
@@ -444,6 +455,11 @@ private fun ClipView(
     // the shared, snapped groupDrag so every group member moves together.
     var dragPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var dragPy by remember(clip.id) { mutableFloatStateOf(0f) }
+    // Auto-create-track-on-drag: which edge the clip is currently held past (-1 = above the top track,
+    // +1 = below the bottom track, 0 = within range), and a latch so the create fires once and the
+    // drag-end move is skipped (the auto-create already moved the clip).
+    var holdEdge by remember(clip.id) { mutableIntStateOf(0) }
+    var autoTrackConsumed by remember(clip.id) { mutableStateOf(false) }
     var trimStartPx by remember(clip.id) { mutableFloatStateOf(0f) }
     var trimEndPx by remember(clip.id) { mutableFloatStateOf(0f) }
     // -1 = trimming the left edge, +1 = the right edge, 0 = not trimming (long-press near an edge).
@@ -462,6 +478,18 @@ private fun ClipView(
         // Text clips live on video tracks, like any overlay/image clip.
         ClipType.VIDEO, ClipType.TEXT -> state.document.videoTracks
         ClipType.AUDIO -> state.document.audioTracks
+    }
+
+    // Held past the top/bottom edge for ~1s → create a new track of this clip's type there and drop the
+    // clip onto it. Keyed on holdEdge, so moving back into range before the second elapses cancels it.
+    LaunchedEffect(holdEdge, clip.id) {
+        if (holdEdge != 0 && !autoTrackConsumed) {
+            delay(1000)
+            autoTrackConsumed = true
+            val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
+            vm.addEdgeTrackAndMoveClip(clip.id, atTop = holdEdge < 0, deltaMs = deltaMs)
+            onGroupDrag(null)
+        }
     }
 
     Box(
@@ -522,20 +550,34 @@ private fun ClipView(
                 if (state.tool == EditorTool.SELECT && selectedKf == null) {
                     val ids = groupIdsOf(state, clip)
                     detectDragGestures(
-                        onDragStart = { dragPx = 0f; dragPy = 0f; onGroupDrag(GroupDrag(ids, 0f, 0f)) },
+                        onDragStart = { dragPx = 0f; dragPy = 0f; holdEdge = 0; autoTrackConsumed = false; onGroupDrag(GroupDrag(ids, 0f, 0f)) },
                         onDragEnd = {
-                            // Commit the same snapped delta the live preview showed. Group-aware:
-                            // moveClipBy moves the whole group together.
-                            val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
-                            val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
-                            vm.moveClipBy(clip.id, shift, deltaMs)
+                            holdEdge = 0
+                            // If the 1s hold already created a track + moved the clip, don't move again.
+                            if (!autoTrackConsumed) {
+                                // Commit the same snapped delta the live preview showed. Group-aware:
+                                // moveClipBy moves the whole group together.
+                                val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
+                                val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
+                                vm.moveClipBy(clip.id, shift, deltaMs)
+                            }
                             onGroupDrag(null)
                         },
-                        onDragCancel = { onGroupDrag(null) },
+                        onDragCancel = { holdEdge = 0; onGroupDrag(null) },
                         onDrag = { change, drag ->
                             change.consume(); dragPx += drag.x; dragPy += drag.y
                             // Live + snapped: the whole group jumps to the magnet as any edge nears it.
                             onGroupDrag(GroupDrag(ids, snappedDragPx(state, clip, dragPx, pps), dragPy))
+                            // Track whether the clip is currently dragged past the first/last lane of its
+                            // type — holding there for ~1s (see LaunchedEffect) spawns a new track.
+                            val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
+                            val targetIdx = sameTypeTracks.indexOf(clip.trackId) + shift
+                            holdEdge = when {
+                                autoTrackConsumed -> 0
+                                targetIdx < 0 -> -1
+                                targetIdx > sameTypeTracks.lastIndex -> 1
+                                else -> 0
+                            }
                         },
                     )
                 }
