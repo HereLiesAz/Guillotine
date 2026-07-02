@@ -87,7 +87,9 @@ import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.aznavrail.AzDropdownMenu
+import com.hereliesaz.aznavrail.bottomsheet.rememberAzSheetController
 import com.hereliesaz.aznavrail.model.AzDropdownDesign
+import com.hereliesaz.aznavrail.model.AzSheetDetent
 import com.hereliesaz.guillotine.GuillotineApplication
 import com.hereliesaz.guillotine.ads.BannerAd
 import com.hereliesaz.guillotine.ai.Transcription
@@ -141,6 +143,23 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // through this when nothing is selected, and shows its status inline.
     val assistantVm: AssistantViewModel = viewModel()
     val assistantState by assistantVm.state.collectAsState()
+
+    // Integrated activity feed (AI chat output, running process, progress, errors) shown in the
+    // AzNavRail bottom sheet. The single AI prompt stays in the tool strip; this sheet is output-only.
+    val logEntries by ActivityLog.entries.collectAsState()
+    val sheetController = rememberAzSheetController(initial = AzSheetDetent.HIDDEN)
+    // Analysis progress stages → log (deduped inside ActivityLog).
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        vm.uiState.map { it.analysisProgress?.stage }.distinctUntilChanged().collect { stage ->
+            if (!stage.isNullOrBlank()) ActivityLog.progress(stage)
+        }
+    }
+    // Editor errors → log. Clear after logging so a later identical error is reported again.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        vm.uiState.map { it.error }.distinctUntilChanged().collect { err ->
+            if (err != null) { ActivityLog.error(err); vm.clearError() }
+        }
+    }
 
     var showOnboarding by remember { mutableStateOf(!keyStore.onboardingDone) }
     var showSettings by remember { mutableStateOf(false) }
@@ -242,6 +261,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onComplete = {
                 vm.setProcessing(false, null)
                 vm.setAnalysisProgress(null)
+                ActivityLog.success("Analysis complete.")
             },
         ) { sink ->
             for (clip in targets) {
@@ -292,7 +312,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
     val providerLabel = settings.provider.meta.label
 
-    // The menu is a standalone, inline AzDropdownMenu (AzNavRail 10.7) in the TopBar — its trigger
+    // What the bottom sheet shows as the "active process" line: export takes precedence over
+    // analysis (they can't both run — the OperationController is single-slot — but export is the
+    // one started from NleScreen's own local state). Null when nothing is running.
+    val processLabel: String? = when {
+        exporting -> "Exporting…"
+        state.isProcessing -> state.analysisProgress?.stage ?: "Analyzing with $providerLabel…"
+        else -> null
+    }
+    val processFraction: Float? = when {
+        exporting -> exportProgress
+        state.isProcessing -> state.analysisProgress?.fraction
+        else -> null
+    }
+
+    // The menu is a standalone, inline AzDropdownMenu (AzNavRail 10.19) in the TopBar — its trigger
     // icon sits right next to the project name. There is no AzNavRail host wrapper here, so nothing
     // reserves horizontal space on the left edge.
     //
@@ -303,13 +337,20 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         modifier
             .fillMaxSize()
             .background(Black)
-            .systemBarsPadding()
-            .focusRequester(focusRequester)
-            .focusable()
-            // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
-            // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
-            .onKeyEvent { handleKey(it, vm) },
+            .systemBarsPadding(),
     ) {
+        // Editor area (weighted) + the activity-log sheet share this Box; the banner ad sits
+        // below it so the sheet's HIDDEN strip never overlaps the ad.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .focusRequester(focusRequester)
+                .focusable()
+                // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
+                // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
+                .onKeyEvent { handleKey(it, vm) },
+        ) {
         TopBar(
             state = state,
             onUndo = vm::undo,
@@ -327,8 +368,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onFaq = { showFaq = true },
         )
 
-        // Processing/error feedback for AI analysis (formerly shown in the Inspector).
-        AnalysisStatusBar(state, providerLabel) { vm.clearError() }
+        // Analysis/export status & errors now stream into the activity-log bottom sheet below,
+        // so there's no separate status strip here.
         if (widthClass == WindowWidthSizeClass.Expanded) {
             Column(Modifier.weight(0.6f).fillMaxWidth()) {
                 PreviewPlayer(
@@ -352,6 +393,18 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
+        } // editor Column
+
+        // Integrated activity log (AI chat, running process, progress, errors) — AzNavRail's
+        // four-detent bottom sheet, anchored to the bottom of the editor Box (above the ad).
+        ActivityLogSheet(
+            controller = sheetController,
+            entries = logEntries,
+            processLabel = processLabel,
+            processFraction = processFraction,
+            onClear = { ActivityLog.clear() },
+        )
+        } // editor + sheet Box
 
         // Bottom banner ad (renders only after ad consent is resolved).
         BannerAd(Modifier.fillMaxWidth())
@@ -421,12 +474,19 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     (context.applicationContext as? GuillotineApplication)?.interstitialAdManager?.show(act)
                 }
                 exporting = true; exportError = null; exportProgress = 0f
+                ActivityLog.info("Exporting \"$name\"…")
                 // Export in the background via the foreground service (cancel-only — Media3 can't pause
                 // an encode). Progress feeds the in-app sheet and the notification.
                 val startedExport = OperationController.start(
                     context, OperationKind.EXPORT, "Exporting…", pausable = false,
-                    onError = { e -> exportError = e.message ?: "Export failed"; exporting = false },
-                    onComplete = { exportDone = "Saved to Movies/Guillotine."; exporting = false },
+                    onError = { e ->
+                        exportError = e.message ?: "Export failed"; exporting = false
+                        ActivityLog.error(e.message ?: "Export failed")
+                    },
+                    onComplete = {
+                        exportDone = "Saved to Movies/Guillotine."; exporting = false
+                        ActivityLog.success("Exported to Movies/Guillotine.")
+                    },
                 ) { sink ->
                     Exporter.export(context, vm.uiState.value.document, name) { p ->
                         scope.launch { exportProgress = p } // hop to the main thread for Compose state
@@ -503,7 +563,7 @@ private fun TopBar(
         Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // AzNavRail 10.7 DSL: the standalone AzDropdownMenu's trigger is the app icon, styled
+        // AzNavRail 10.19 DSL: the standalone AzDropdownMenu's trigger is the app icon, styled
         // via azConfig (no icon/tint/alignment params anymore). design = MENU gives full-width
         // rows; items auto-close (closeOnClick defaults true - no dismiss() in 10.7).
         AzDropdownMenu {
@@ -599,64 +659,6 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
                 }
                 .padding(8.dp),
         )
-    }
-}
-
-/**
- * Thin status strip for AI analysis: a spinner + "Analyzing with <provider>…" while a run
- * is in flight, or the error (dismissable) if one failed. This is the feedback surface that
- * used to live in the Inspector — without it, running the on-device analyzer from the prompt
- * looked like it did nothing.
- */
-@Composable
-private fun AnalysisStatusBar(state: EditorUiState, providerLabel: String, onDismiss: () -> Unit) {
-    val error = state.error
-    val progress = state.analysisProgress
-    when {
-        state.isProcessing -> Row(
-            Modifier.fillMaxWidth().background(Neutral900).padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (progress?.fraction != null) {
-                CircularProgressIndicator(
-                    progress = { progress.fraction },
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp,
-                    color = Red500,
-                )
-            } else {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Red500)
-            }
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    progress?.stage ?: "Analyzing with $providerLabel\u2026",
-                    color = Neutral400, fontSize = 12.sp,
-                )
-                if (progress != null && progress.segmentsFound > 0) {
-                    Text(
-                        "${progress.segmentsFound} segments found",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
-                }
-            }
-            if (progress?.fraction != null) {
-                Text(
-                    "${(progress.fraction * 100).toInt()}%",
-                    color = Neutral500, fontSize = 11.sp,
-                )
-            }
-        }
-        error != null -> Row(
-            Modifier.fillMaxWidth().background(Red500.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(error, color = Red500, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Icon(
-                Icons.Filled.Close, "Dismiss", tint = Red500,
-                modifier = Modifier.size(16.dp).clickable(onClick = onDismiss),
-            )
-        }
     }
 }
 
@@ -781,15 +783,8 @@ private fun EditorToolStrip(
                 ClipToolButtons(vm, state, onTranscribe)
             }
         }
-        // Agent status line (only when nothing is selected — the field is then driving the agent).
-        if (selected.isEmpty() && assistant.status.isNotBlank()) {
-            Text(
-                assistant.status,
-                color = if (assistant.isError) Red500 else Neutral400,
-                fontSize = 11.sp, maxLines = 2,
-                modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 2.dp),
-            )
-        }
+        // The agent's running status/output now streams into the activity-log bottom sheet; the
+        // spinner on the AI button (below) is the only inline "it's working" cue.
         Row(
             Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -38,14 +38,13 @@ class AssistantViewModel : ViewModel() {
     fun run(instruction: String, tools: McpTools, agent: AgentBackend?) {
         if (instruction.isBlank() || _state.value.running) return
         if (agent == null) {
-            _state.update {
-                it.copy(
-                    status = "Add an API key, or set an on-device model path, in Settings to use the assistant.",
-                    isError = true,
-                )
-            }
+            val msg = "Add an API key, or set an on-device model path, in Settings to use the assistant."
+            _state.update { it.copy(status = msg, isError = true) }
+            ActivityLog.error(msg)
             return
         }
+        ActivityLog.user(instruction)
+        ActivityLog.info("Thinking…")
         _state.update { it.copy(running = true, isError = false, status = "Thinking…", input = "") }
         viewModelScope.launch {
             try {
@@ -60,14 +59,27 @@ class AssistantViewModel : ViewModel() {
         }
     }
 
-    private fun apply(event: AgentEvent) = _state.update { st ->
+    private fun apply(event: AgentEvent) {
+        // Mirror every event into the shared activity log (the bottom sheet) as well as the
+        // one-line status the tool strip reads for the spinner.
         when (event) {
-            is AgentEvent.ToolStarted -> st.copy(status = "→ ${event.tool}…", isError = false)
+            is AgentEvent.ToolStarted -> ActivityLog.info("→ ${event.tool}…")
             is AgentEvent.ToolFinished ->
-                st.copy(status = "${if (event.isError) "✗" else "✓"} ${event.tool}: ${event.summary}", isError = event.isError)
-            is AgentEvent.AssistantText -> st.copy(status = event.text.take(160), isError = false)
-            is AgentEvent.Done -> st.copy(status = event.summary.ifBlank { "Done." }, running = false, isError = false)
-            is AgentEvent.Failed -> st.copy(status = event.message, running = false, isError = true)
+                if (event.isError) ActivityLog.error("${event.tool}: ${event.summary}")
+                else ActivityLog.success("${event.tool}: ${event.summary}")
+            is AgentEvent.AssistantText -> ActivityLog.chat(event.text)
+            is AgentEvent.Done -> ActivityLog.success(event.summary.ifBlank { "Done." })
+            is AgentEvent.Failed -> ActivityLog.error(event.message)
+        }
+        _state.update { st ->
+            when (event) {
+                is AgentEvent.ToolStarted -> st.copy(status = "→ ${event.tool}…", isError = false)
+                is AgentEvent.ToolFinished ->
+                    st.copy(status = "${if (event.isError) "✗" else "✓"} ${event.tool}: ${event.summary}", isError = event.isError)
+                is AgentEvent.AssistantText -> st.copy(status = event.text.take(160), isError = false)
+                is AgentEvent.Done -> st.copy(status = event.summary.ifBlank { "Done." }, running = false, isError = false)
+                is AgentEvent.Failed -> st.copy(status = event.message, running = false, isError = true)
+            }
         }
     }
 }
