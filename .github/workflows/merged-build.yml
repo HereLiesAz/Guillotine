@@ -3,6 +3,10 @@ name: Merged Build & Release
 on:
   push:
     branches: [ "**" ]
+    # The release-aab workflow commits the auto-incremented versionCode back; that commit
+    # only touches version.properties and shouldn't trigger a full rebuild here.
+    paths-ignore:
+      - version.properties
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
