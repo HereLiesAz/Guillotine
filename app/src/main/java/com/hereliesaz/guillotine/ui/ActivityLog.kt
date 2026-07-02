@@ -35,9 +35,9 @@ object ActivityLog {
             // feed doesn't stutter, then cap to the newest MAX_ENTRIES.
             val last = cur.lastOrNull()
             if (last != null && last.level == level && last.text == t) return@update cur
-            (cur + Entry(ids.incrementAndGet(), level, t)).let {
-                if (it.size > MAX_ENTRIES) it.subList(it.size - MAX_ENTRIES, it.size) else it
-            }
+            // takeLast returns a fresh, independent list (subList would return a view that
+            // pins the parent list alive).
+            (cur + Entry(ids.incrementAndGet(), level, t)).takeLast(MAX_ENTRIES)
         }
     }
 
