@@ -115,16 +115,18 @@ fun OnboardingDialog(onComplete: (selectedModelPath: String) -> Unit) {
                             downloadModel = model
                         },
                     )
-                    2 -> DownloadStep(
-                        model = downloadModel!!,
-                        bundledPath = bundledPath.orEmpty(),
-                        onPathUpdate = { selectedModelPath = it },
-                        onComplete = { onComplete(selectedModelPath) },
-                        onFallback = {
-                            selectedModelPath = bundledPath.orEmpty()
-                            onComplete(bundledPath.orEmpty())
-                        },
-                    )
+                    2 -> downloadModel?.let { model ->
+                        DownloadStep(
+                            model = model,
+                            bundledPath = bundledPath.orEmpty(),
+                            onPathUpdate = { selectedModelPath = it },
+                            onComplete = { onComplete(selectedModelPath) },
+                            onFallback = {
+                                selectedModelPath = bundledPath.orEmpty()
+                                onComplete(bundledPath.orEmpty())
+                            },
+                        )
+                    }
                 }
             }
 

@@ -122,8 +122,9 @@ object MediaPreview {
 
     private fun decodeWaveform(context: Context, uri: Uri, buckets: Int, ensureActive: () -> Unit): Waveform? {
         val extractor = MediaExtractor()
-        extractor.setDataSource(context, uri, null)
         try {
+            // Inside the try so a setDataSource failure still releases the extractor.
+            extractor.setDataSource(context, uri, null)
             var trackIndex = -1
             var format: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
@@ -140,8 +141,15 @@ object MediaPreview {
             extractor.selectTrack(trackIndex)
 
             val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
-            codec.configure(format, null, null, 0)
-            codec.start()
+            // Release the codec if configure/start throws (common on unsupported/corrupt audio) —
+            // otherwise it leaks a native codec instance that repeated bad-file decodes exhaust.
+            try {
+                codec.configure(format, null, null, 0)
+                codec.start()
+            } catch (e: Throwable) {
+                runCatching { codec.release() }
+                throw e
+            }
 
             // Interleaved PCM is L,R,L,R… for stereo; track left/right envelopes separately.
             val leftPeaks = FloatArray(buckets)

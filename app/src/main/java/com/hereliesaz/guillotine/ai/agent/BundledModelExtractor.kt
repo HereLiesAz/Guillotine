@@ -19,12 +19,19 @@ object BundledModelExtractor {
     fun ensureExtracted(context: Context): String {
         val dir = ModelDownloadManager.modelsDir(context)
         val target = File(dir, bundledModel.fileName)
-        if (target.isFile && target.length() > 0) return target.absolutePath
+        // Match ModelDownloadManager.installedPath's exact-size check: a truncated/interrupted copy
+        // (length > 0 but != expected) must be re-extracted, not accepted as complete forever.
+        if (target.isFile && target.length() == bundledModel.sizeBytes) return target.absolutePath
+        // Copy to a temp file first, then rename, so an interrupted copy never leaves a partial file
+        // sitting at the final path where the size check above would still reject it on next launch.
+        val tmp = File(dir, bundledModel.fileName + ".part")
         context.assets.open(bundledModel.fileName).use { input ->
-            target.outputStream().use { output ->
+            tmp.outputStream().use { output ->
                 input.copyTo(output, bufferSize = 1 shl 16)
             }
         }
+        if (target.exists()) target.delete()
+        tmp.renameTo(target)
         return target.absolutePath
     }
 }

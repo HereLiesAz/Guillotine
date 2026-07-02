@@ -23,10 +23,9 @@ import kotlin.math.max
  * the prompt (face detection when it's about people, else object/scene labeling) and turns
  * matches into keep/remove ranges per the prompt's intent ("keep only…" vs "cut/remove…").
  *
- * To keep it fast it does **not** inspect every frame: it checks one frame, claims a block
- * of ±[BLOCK_FRAMES] frames around it, then jumps to the next checkpoint (≈ the 11th frame)
- * and checks again — extending the matched region while consecutive checkpoints qualify.
- * This samples ~1/11 of frames while still producing contiguous cut regions.
+ * To keep it fast it does **not** inspect every frame: it samples at [SAMPLE_FPS] fps and, on a
+ * match, claims ±[EXTEND_FRAMES] source frames (at least half a sampling step) around the sampled
+ * time so consecutive matches merge into one contiguous cut region.
  *
  * Audio can't be transcribed here, so audio clips are routed to the free Local analyzer.
  */
@@ -210,6 +209,10 @@ class MlKitProvider : ClipAnalyzer {
                 ))
                 t += stepMs
             }
+        } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+            // A pause/cancel via checkpoint() must propagate — otherwise cancelling a scan silently
+            // stops early and returns a partial cover as if it had finished normally.
+            throw c
         } catch (_: Exception) {
             // best effort — build a cover from whatever we collected
         } finally {

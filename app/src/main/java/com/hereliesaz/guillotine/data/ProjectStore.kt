@@ -19,7 +19,9 @@ object ProjectAutosave {
     private const val FILE = "current_project.gilt"
 
     fun save(context: Context, document: Document) {
-        File(context.filesDir, FILE).writeText(ProjectStore.serialize(document))
+        // Guard the write: a failed autosave (disk full / IO error), including the on-pause flush on
+        // the main thread, must not crash the app — a dropped autosave is recoverable, a crash isn't.
+        runCatching { File(context.filesDir, FILE).writeText(ProjectStore.serialize(document)) }
     }
 
     /** The autosaved current project, or null if none exists yet / it can't be read. */

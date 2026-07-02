@@ -72,7 +72,9 @@ object ModelDownloadManager {
     fun cancel() {
         job?.cancel()
         job = null
-        _state.value = DownloadState.Idle
+        // Only reset if a download is actually in flight — otherwise a cancel() racing a just-finished
+        // download would clobber its terminal Done/Failed state back to Idle.
+        if (_state.value is DownloadState.Downloading) _state.value = DownloadState.Idle
     }
 
     /** Start (or resume) downloading [model]; no-op if a download is already running or the model is gated. */

@@ -526,12 +526,18 @@ object Exporter {
         }
         val uri = resolver.insert(collection, values)
             ?: throw IllegalStateException("Could not create gallery entry.")
-        resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
-            ?: throw IllegalStateException("Could not write export to gallery.")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            values.clear()
-            values.put(MediaStore.Video.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
+        try {
+            resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                ?: throw IllegalStateException("Could not write export to gallery.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+        } catch (e: Throwable) {
+            // Don't leave an invisible IS_PENDING row behind on a failed/partial write.
+            runCatching { resolver.delete(uri, null, null) }
+            throw e
         }
         return uri
     }
