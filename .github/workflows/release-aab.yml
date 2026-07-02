@@ -43,6 +43,14 @@ on:
       publish:
         default: true
 
+# Serialize Play publishes across ALL refs: the Play API allows only one open Edit per app, so two
+# release-aab runs publishing at once (e.g. a merge to main overlapping a branch push) collide with
+# "A change was made to the application outside of this Edit". Queue them (don't cancel a publish
+# mid-flight) so each completes before the next starts.
+concurrency:
+  group: google-play-publish
+  cancel-in-progress: false
+
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
