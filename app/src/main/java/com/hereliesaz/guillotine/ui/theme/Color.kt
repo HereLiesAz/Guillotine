@@ -7,6 +7,9 @@ val Red400 = Color(0xFFF87171)
 val Red500 = Color(0xFFEF4444)
 val Red600 = Color(0xFFDC2626)
 
+// Success/confirmation accent (used by the activity log for finished operations).
+val Green500 = Color(0xFF22C55E)
+
 val Black = Color(0xFF000000)
 val Neutral950 = Color(0xFF0A0A0A)
 val Neutral900 = Color(0xFF171717)

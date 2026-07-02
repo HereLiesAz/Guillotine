@@ -241,9 +241,13 @@ class McpTools(
             context, OperationKind.GENERATE, "Removing ${clip.prompt}…", pausable = true,
         ) { sink ->
             // 1. Object's segments, on-device (the REMOVE ranges), via the normal on-device analyzer.
+            // Force a REMOVE intent ("remove <object>") so the analyzer marks the object-PRESENT
+            // ranges as REMOVE. Passing the bare object name is parsed as a "keep only <object>"
+            // intent, which inverts it — the object's ranges become KEEP and this filter would then
+            // pick the object-absent gaps, so detection below never finds the object to inpaint.
             val removes = runBlocking {
                 Analysis.run(
-                    context, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
+                    context, settings, Uri.parse(media.uri), media.kind, "remove ${clip.prompt}", clip.durationMs,
                     checkpoint = sink::checkpointBlocking,
                 )
             }.filter { it.action == EditAction.REMOVE }

@@ -397,7 +397,11 @@ private fun RecommendedModels(
 
     Text("Recommended on-device models", color = Neutral400, fontSize = 12.sp)
     RECOMMENDED_ON_DEVICE_MODELS.forEach { model ->
-        val installed = ModelDownloadManager.installedPath(context, model)
+        // Keyed on bundledReady so the bundled model flips to "Installed" once extraction finishes
+        // (without this the row never refreshes after the LaunchedEffect completes).
+        val installed = remember(state, bundledReady, model.id) {
+            ModelDownloadManager.installedPath(context, model)
+        }
         val downloading = (state as? ModelDownloadManager.DownloadState.Downloading)
             ?.takeIf { it.modelId == model.id }
         val failed = (state as? ModelDownloadManager.DownloadState.Failed)

@@ -34,12 +34,14 @@ object McpAgent {
                     onDevice(context, settings)
                 }
 
-            AiProviderType.OPENROUTER, AiProviderType.GROQ, AiProviderType.XAI, AiProviderType.MISTRAL ->
-                if (key.isNotBlank()) {
-                    OpenAiAgentBackend(key, provider.meta.openAiCompatUrl!!, model, provider.meta.label)
+            AiProviderType.OPENROUTER, AiProviderType.GROQ, AiProviderType.XAI, AiProviderType.MISTRAL -> {
+                val compatUrl = provider.meta.openAiCompatUrl
+                if (key.isNotBlank() && compatUrl != null) {
+                    OpenAiAgentBackend(key, compatUrl, model, provider.meta.label)
                 } else {
                     onDevice(context, settings)
                 }
+            }
 
             AiProviderType.GEMINI ->
                 if (key.isNotBlank()) GeminiAgentBackend(key, model) else onDevice(context, settings)
