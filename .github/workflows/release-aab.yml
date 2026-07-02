@@ -22,10 +22,15 @@ name: Release AAB to Play
 #   3. FIRST UPLOAD MUST BE MANUAL: Google's API cannot create the very first release for a new app.
 #      Upload one AAB by hand in the Play Console once; after that this workflow can publish.
 #
-# versionCode is derived from the git commit count (-PversionBuild), so it always increases.
+# versionCode comes from version.properties, which the build auto-increments. CI commits that bump
+# back after a successful publish (see the "Persist the version bump" step) so the next push starts
+# from the just-published code and Play never sees a duplicate versionCode. The bump commit only
+# touches version.properties, and the push trigger below ignores that path so it doesn't re-run.
 
 on:
   push:
+    paths-ignore:
+      - version.properties
   workflow_dispatch:
     inputs:
       track:
@@ -41,6 +46,8 @@ on:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # push the version-bump commit back
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -112,3 +119,32 @@ jobs:
           releaseFiles: app/build/outputs/bundle/release/*.aab
           track: ${{ inputs.track || 'internal' }}
           status: ${{ inputs.status || 'completed' }}
+
+      # Persist the versionCode the build just published. The build auto-increments
+      # version.properties on disk but CI would otherwise discard it, so every push
+      # rebuilt the same code and Play rejected the duplicate. Committing it back means
+      # the next push starts from the just-published code. The push ignores version.properties
+      # (see `on.push.paths-ignore`), so this commit does not trigger another build.
+      - name: Persist the version bump
+        if: success() && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version.properties
+          if git diff --cached --quiet; then
+            echo "version.properties unchanged — nothing to commit."
+            exit 0
+          fi
+          git commit -m "ci: persist auto-incremented versionCode [skip ci]"
+          # Retry to absorb a race with a concurrent push to the same branch.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "Persisted version bump."
+              exit 0
+            fi
+            echo "Push failed (attempt $attempt); rebasing and retrying…"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            sleep $((attempt * 5))
+          done
+          echo "::error::Could not persist the version bump; the next build may collide."
+          exit 1
