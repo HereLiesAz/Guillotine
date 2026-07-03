@@ -25,12 +25,23 @@ from __future__ import annotations
 import argparse
 import sys
 
+import httplib2
 from google.oauth2 import service_account
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 SCOPES = ["https://www.googleapis.com/auth/androidpublisher"]
+
+# The signed AAB is ~200MB. httplib2's default socket timeout (60s) fires long before Google's
+# ingest ack comes back on a slow leg; bump to 10 minutes so a slow-but-alive upload finishes
+# instead of tripping the timer.
+HTTP_TIMEOUT_S = 600
+# Resumable chunk. Smaller chunks make each request short enough that a transient blip retries
+# without restarting the whole upload; num_retries=5 in execute() covers the transient case.
+CHUNK_SIZE = 8 * 1024 * 1024  # 8 MiB
+UPLOAD_RETRIES = 5
 
 TRACK_PLAN: list[tuple[str, str]] = [
     ("internal", "completed"),
@@ -48,7 +59,8 @@ def main() -> int:
     args = ap.parse_args()
 
     creds = service_account.Credentials.from_service_account_file(args.sa_json, scopes=SCOPES)
-    svc = build("androidpublisher", "v3", credentials=creds, cache_discovery=False)
+    authed_http = AuthorizedHttp(creds, http=httplib2.Http(timeout=HTTP_TIMEOUT_S))
+    svc = build("androidpublisher", "v3", http=authed_http, cache_discovery=False)
     edits = svc.edits()
 
     edit = edits.insert(packageName=args.package, body={}).execute()
@@ -59,8 +71,13 @@ def main() -> int:
         bundle = edits.bundles().upload(
             packageName=args.package,
             editId=edit_id,
-            media_body=MediaFileUpload(args.aab, mimetype="application/octet-stream", resumable=True),
-        ).execute()
+            media_body=MediaFileUpload(
+                args.aab,
+                mimetype="application/octet-stream",
+                resumable=True,
+                chunksize=CHUNK_SIZE,
+            ),
+        ).execute(num_retries=UPLOAD_RETRIES)
         version_code = int(bundle["versionCode"])
         print(f"Uploaded bundle versionCode={version_code}")
 
