@@ -50,6 +50,10 @@ internal val AGENT_SYSTEM_PROMPT = """
 
     Typical workflow:
     - call get_timeline to list clips and their ids (it also returns currentTimeMs, the playhead);
+    - when the user points at the current preview ("this frame", "what's on screen", "the thing
+      here"), call describe_current_frame FIRST to learn what's in it — the raw pixels stay on
+      the device; you get back detected objects (labels + bounding boxes) and can then decide what
+      to act on (e.g. use analyze_clip_with_reference to match the same object across the clip);
     - to CUT/REMOVE/DELETE content, set_prompt on a clip then call analyze_clip. This finds the matching
       frames AND performs the real cut in one step: the clip is split into its kept pieces and the matched
       ranges are deleted, the timeline closing up (no black gaps) — it actually shortens the video, it does
