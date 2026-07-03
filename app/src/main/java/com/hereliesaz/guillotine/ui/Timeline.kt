@@ -129,6 +129,34 @@ private fun TimelineLanes(
     // moves together (snapped) — so the whole group tracks the cursor, not just the grabbed clip.
     var groupDrag by remember { mutableStateOf<GroupDrag?>(null) }
 
+    // Zoom-around-playhead plumbing: pinch / Ctrl+scroll must keep the playhead pinned to the same
+    // on-screen X, so the frame under it doesn't slide out from under the user's finger. We can't
+    // just call scroll.scrollTo() the moment we bump pps — the horizontal scroll's maxValue is
+    // measured from the child width, so until recomposition + layout runs with the new pps, the
+    // scroll clamps to the OLD maxValue and lands at the wrong offset. Instead we stash the target
+    // scroll position and apply it from a LaunchedEffect below, which the runtime schedules after
+    // layout catches up. Every reference here reads state fresh so old, closed-over captures inside
+    // `zoomModifier` (which pointerInput remembers with key=Unit) still hit the current values.
+    var pendingScrollTo by remember { mutableStateOf<Int?>(null) }
+    /** Zoom in/out and pin the playhead to its current on-screen X. */
+    fun zoomAroundPlayhead(newPps: Float) {
+        val oldPps = vm.uiState.value.pixelsPerSecond
+        val playheadMs = vm.uiState.value.currentTimeMs
+        vm.setZoom(newPps)
+        // setZoom may clamp — read the ACTUAL new pps back so the scroll math matches what layout
+        // will produce, otherwise the playhead drifts by whatever the clamp shaved off.
+        val appliedPps = vm.uiState.value.pixelsPerSecond
+        if (appliedPps == oldPps) return // clamped to a no-op zoom; nothing to reposition.
+        val shift = playheadMs / 1000f * (appliedPps - oldPps)
+        pendingScrollTo = (scroll.value + shift).toInt().coerceAtLeast(0)
+    }
+    LaunchedEffect(pendingScrollTo, pps) {
+        val target = pendingScrollTo ?: return@LaunchedEffect
+        // scroll.scrollTo() coerces into [0, maxValue] which is now up-to-date with the new pps.
+        scroll.scrollTo(target)
+        pendingScrollTo = null
+    }
+
     fun msToDp(ms: Long) = with(density) { (ms / 1000f * pps).toDp() }
     val totalMs = state.document.totalDurationMs
     val contentWidth = msToDp(totalMs) + 400.dp
@@ -160,7 +188,7 @@ private fun TimelineLanes(
                         var acted = false
                         if (dH >= dV) {
                             if (prevH > 1f && curH > 1f && curH != prevH) {
-                                vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH)); acted = true
+                                zoomAroundPlayhead(vm.uiState.value.pixelsPerSecond * (curH / prevH)); acted = true
                             }
                         } else {
                             if (prevV > 1f && curV > 1f && curV != prevV) {
@@ -178,7 +206,7 @@ private fun TimelineLanes(
                     val event = awaitPointerEvent()
                     if (event.type == PointerEventType.Scroll && event.keyboardModifiers.isCtrlPressed) {
                         val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-                        if (dy != 0f) vm.setZoom(vm.uiState.value.pixelsPerSecond * if (dy > 0) 0.9f else 1.1f)
+                        if (dy != 0f) zoomAroundPlayhead(vm.uiState.value.pixelsPerSecond * if (dy > 0) 0.9f else 1.1f)
                     }
                 }
             }
