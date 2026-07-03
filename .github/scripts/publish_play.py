@@ -1,31 +1,34 @@
 #!/usr/bin/env python3
-"""Publish an AAB to Google Play across four tracks in ONE Edit.
+"""Publish an AAB to Google Play across four tracks.
 
-Google's Play Publishing API groups all writes into an "Edit" — you insert an
-Edit, add uploads and track releases to it, then commit once. Everything in the
-commit becomes visible together; nothing does if any step fails. That property
-is why this script exists: `r0adkll/upload-google-play` commits its own Edit per
-call, so releasing the same bundle to four tracks would need four separate
-uploads — but Play rejects re-uploading the same versionCode. One Edit is the
-only way to hand one bundle to four tracks at once.
+Google's Play Publishing API groups writes into "Edits" — you insert an edit,
+add uploads and track releases to it, then commit once. Committing an edit is
+atomic; uncommitted edits are throwaway.
 
 Rollout policy (fixed):
   - internal      → completed  (published to internal testers immediately)
   - alpha         → draft      (closed testing, staged; promote by hand)
-  - beta         → draft      (open testing, staged; promote by hand)
+  - beta          → draft      (open testing, staged; promote by hand)
   - production    → draft      (staged; promote by hand)
 
-The alpha/beta/production tracks must already exist in the Play Console — the
-API surfaces "track not found" as a 404 if they don't. Create each one manually
-once (Play Console → Testing → Closed testing / Open testing / Production →
-Create a new release) before enabling this script.
+Structure: one bootstrap edit that uploads the AAB AND releases to internal
+(committed as the atomic critical path), then one small edit per remaining
+track that just references the already-uploaded versionCode. If a later track
+fails (e.g. Play returns FAILED_PRECONDITION because the track was never
+initialised in the Play Console), internal is still live and the failure is
+isolated to that track. The script exits 2 in that case so the workflow can:
+  - persist the versionCode bump (it was consumed by Play; must not be reused);
+  - still mark the job failed so the missing track is visible.
 
-We talk to the REST endpoints directly through `requests` (via
-`google.auth.transport.requests.AuthorizedSession`) rather than
-`google-api-python-client`. The client library uses httplib2, which raises
-`RedirectMissingLocation` on Play's 308 Resume-Incomplete responses during a
-resumable bundle upload — the upload restarts every chunk and never completes.
-Plain `requests` handles 308 as expected.
+Exit codes: 0 = full success, 2 = internal published but ≥1 other track failed,
+1 = upload or internal release failed (nothing published; versionCode NOT
+consumed by Play).
+
+Why we hit the REST endpoints directly through `requests`
+(via `google.auth.transport.requests.AuthorizedSession`) rather than
+`google-api-python-client`: the client library uses httplib2, which raises
+`RedirectMissingLocation` on Play's 308 "Resume Incomplete" chunk acks and
+never completes a resumable bundle upload. Plain `requests` handles 308.
 """
 from __future__ import annotations
 
@@ -52,12 +55,9 @@ META_TIMEOUT_S = 60
 # under load and the resumable protocol lets us re-PUT the same range verbatim.
 CHUNK_RETRIES = 5
 
-TRACK_PLAN: list[tuple[str, str]] = [
-    ("internal", "completed"),
-    ("alpha", "draft"),
-    ("beta", "draft"),
-    ("production", "draft"),
-]
+EXIT_OK = 0
+EXIT_FAIL = 1
+EXIT_PARTIAL = 2
 
 
 def _raise_for(resp: requests.Response, action: str) -> None:
@@ -65,9 +65,36 @@ def _raise_for(resp: requests.Response, action: str) -> None:
         raise RuntimeError(f"{action} failed: HTTP {resp.status_code} {resp.text[:400]}")
 
 
+def insert_edit(session: AuthorizedSession, package: str) -> str:
+    r = session.post(f"{API}/{package}/edits", json={}, timeout=META_TIMEOUT_S)
+    _raise_for(r, "Insert edit")
+    return r.json()["id"]
+
+
+def commit_edit(session: AuthorizedSession, package: str, edit_id: str) -> None:
+    r = session.post(f"{API}/{package}/edits/{edit_id}:commit", timeout=META_TIMEOUT_S)
+    _raise_for(r, f"Commit edit {edit_id}")
+
+
+def delete_edit(session: AuthorizedSession, package: str, edit_id: str) -> None:
+    try:
+        session.delete(f"{API}/{package}/edits/{edit_id}", timeout=META_TIMEOUT_S)
+    except requests.RequestException:
+        pass
+
+
+def update_track(session: AuthorizedSession, package: str, edit_id: str, track: str, status: str, version_code: int) -> None:
+    body = {"releases": [{"status": status, "versionCodes": [str(version_code)]}]}
+    r = session.put(
+        f"{API}/{package}/edits/{edit_id}/tracks/{track}",
+        json=body,
+        timeout=META_TIMEOUT_S,
+    )
+    _raise_for(r, f"Track {track} update")
+
+
 def upload_bundle(session: AuthorizedSession, package: str, edit_id: str, aab: str) -> int:
     file_size = os.path.getsize(aab)
-    # Initiate the resumable session — Play answers with a Location header we PUT chunks to.
     init = session.post(
         f"{UPLOAD_API}/{package}/edits/{edit_id}/bundles?uploadType=resumable",
         headers={
@@ -98,8 +125,6 @@ def upload_bundle(session: AuthorizedSession, package: str, edit_id: str, aab: s
                     time.sleep(2 ** attempt)
                     continue
                 if resp.status_code == 308:
-                    # Server ack of chunk; keep uploading. Range header tells us the last-received
-                    # byte, so we resync in case Play recorded less than we sent (rare but legal).
                     rng = resp.headers.get("Range")
                     if rng and rng.startswith("bytes=0-"):
                         offset = int(rng.split("-", 1)[1]) + 1
@@ -124,6 +149,33 @@ def upload_bundle(session: AuthorizedSession, package: str, edit_id: str, aab: s
     raise RuntimeError("Upload loop exited without a terminal response.")
 
 
+def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
+    """Bootstrap edit: upload bundle + release to internal (completed). Commit."""
+    edit_id = insert_edit(session, package)
+    print(f"Opened edit {edit_id} (upload + internal)")
+    try:
+        version_code = upload_bundle(session, package, edit_id, aab)
+        print(f"Uploaded bundle versionCode={version_code}")
+        update_track(session, package, edit_id, "internal", "completed", version_code)
+        commit_edit(session, package, edit_id)
+        print(f"  internal    → completed (versionCode {version_code} LIVE)")
+        return version_code
+    except Exception:
+        delete_edit(session, package, edit_id)
+        raise
+
+
+def stage_track(session: AuthorizedSession, package: str, track: str, status: str, version_code: int) -> None:
+    """Small edit: reference the already-uploaded versionCode into another track. Commit."""
+    edit_id = insert_edit(session, package)
+    try:
+        update_track(session, package, edit_id, track, status, version_code)
+        commit_edit(session, package, edit_id)
+    except Exception:
+        delete_edit(session, package, edit_id)
+        raise
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--package", required=True, help="applicationId, e.g. com.hereliesaz.guillotine")
@@ -134,43 +186,44 @@ def main() -> int:
     creds = service_account.Credentials.from_service_account_file(args.sa_json, scopes=SCOPES)
     session = AuthorizedSession(creds)
 
-    ins = session.post(f"{API}/{args.package}/edits", json={}, timeout=META_TIMEOUT_S)
-    _raise_for(ins, "Insert edit")
-    edit_id = ins.json()["id"]
-    print(f"Opened edit {edit_id}")
-
+    # Critical path: internal must go live, or the whole thing failed.
     try:
-        version_code = upload_bundle(session, args.package, edit_id, args.aab)
-        print(f"Uploaded bundle versionCode={version_code}")
-
-        for track, status in TRACK_PLAN:
-            body = {"releases": [{"status": status, "versionCodes": [str(version_code)]}]}
-            tr = session.put(
-                f"{API}/{args.package}/edits/{edit_id}/tracks/{track}",
-                json=body,
-                timeout=META_TIMEOUT_S,
-            )
-            _raise_for(tr, f"Track {track} update")
-            print(f"  {track:<11} → {status}")
-
-        commit = session.post(f"{API}/{args.package}/edits/{edit_id}:commit", timeout=META_TIMEOUT_S)
-        _raise_for(commit, "Commit edit")
-        print(
-            f"Committed edit {edit_id} — versionCode {version_code} live on internal, "
-            "staged on alpha/beta/production.",
-        )
-        return 0
+        version_code = publish_internal(session, args.package, args.aab)
     except Exception as e:
-        # Best-effort cleanup: an uncommitted edit expires on its own after ~7 days,
-        # but deleting it now frees the Edit slot immediately so a rerun isn't blocked
-        # by "an existing edit is already in progress".
+        print(f"Play publish failed (internal): {e}", file=sys.stderr)
+        return EXIT_FAIL
+
+    # Best-effort staging on the remaining tracks. Each runs in its own edit so
+    # a FAILED_PRECONDITION on one (e.g. the track was never initialised in the
+    # Play Console) doesn't undo the successful ones.
+    stage_plan = [
+        ("alpha", "draft"),      # closed testing
+        ("beta", "draft"),       # open testing
+        ("production", "draft"),
+    ]
+    failures: list[tuple[str, str]] = []
+    for track, status in stage_plan:
         try:
-            session.delete(f"{API}/{args.package}/edits/{edit_id}", timeout=META_TIMEOUT_S)
-            print(f"Rolled back edit {edit_id}", file=sys.stderr)
-        except requests.RequestException:
-            pass
-        print(f"Play publish failed: {e}", file=sys.stderr)
-        return 1
+            stage_track(session, args.package, track, status, version_code)
+            print(f"  {track:<11} → {status}")
+        except Exception as e:
+            failures.append((track, str(e)))
+            print(f"  {track:<11} → FAILED: {e}", file=sys.stderr)
+
+    if failures:
+        names = ", ".join(t for t, _ in failures)
+        print(
+            f"::warning::Track staging failed: {names}. "
+            "Internal WAS published; versionCode is burnt and must not be reused. "
+            "The failed tracks typically need to be initialised once in the Play "
+            "Console (create a manual release on each) before the API can post to "
+            "them; then re-run the workflow.",
+            file=sys.stderr,
+        )
+        return EXIT_PARTIAL
+
+    print(f"All four tracks released. versionCode {version_code}.")
+    return EXIT_OK
 
 
 if __name__ == "__main__":

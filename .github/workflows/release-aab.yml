@@ -132,12 +132,16 @@ jobs:
         with:
           python-version: '3.12'
 
+      # publish_play.py exits 0 = every track ok, 2 = internal published but ≥1
+      # other track failed (versionCode still consumed by Play), 1 = nothing published.
+      # We don't `set -e` here so we can inspect the exit code and decide whether the
+      # version bump must still be persisted.
       - name: Publish to Google Play (internal completed + alpha/beta/production drafts)
+        id: publish
         if: ${{ inputs.publish != 'false' }}
         env:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
-          set -e
           python -m pip install --quiet \
             google-auth==2.35.0 \
             requests==2.32.3
@@ -150,14 +154,25 @@ jobs:
             --package com.hereliesaz.guillotine \
             --aab "$AAB" \
             --sa-json "$SA_JSON"
+          CODE=$?
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          if [ "$CODE" = "1" ]; then
+            exit 1
+          fi
 
       # Persist the versionCode the build just published. The build auto-increments
       # version.properties on disk but CI would otherwise discard it, so every push
       # rebuilt the same code and Play rejected the duplicate. Committing it back means
       # the next push starts from the just-published code. The push ignores version.properties
       # (see `on.push.paths-ignore`), so this commit does not trigger another build.
+      #
+      # Runs on exit 0 (full success) OR exit 2 (internal published but ≥1 other track
+      # failed) — Play has consumed the versionCode either way, so the next build MUST
+      # start from the next number regardless of whether alpha/beta/production landed.
       - name: Persist the version bump
-        if: success() && github.event_name == 'push'
+        if: >-
+          github.event_name == 'push' &&
+          (steps.publish.outputs.exit_code == '0' || steps.publish.outputs.exit_code == '2')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -178,4 +193,14 @@ jobs:
             sleep $((attempt * 5))
           done
           echo "::error::Could not persist the version bump; the next build may collide."
+          exit 1
+
+      # Turn the job red on partial success so the missing tracks aren't invisible.
+      # Runs AFTER the persist step above, so the versionCode bump is safely committed
+      # first — the user sees a red X + the ::warning:: from publish_play.py telling
+      # them which tracks need setup, without losing the internal publish's version bump.
+      - name: Fail the job if any track was not staged
+        if: steps.publish.outputs.exit_code == '2'
+        run: |
+          echo "::error::Play publish completed for internal but at least one draft track failed. See the earlier warning for which tracks need to be initialised in the Play Console."
           exit 1
