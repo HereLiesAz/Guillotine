@@ -15,15 +15,25 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hereliesaz.aznavrail.bottomsheet.AzBottomSheet
@@ -44,11 +54,13 @@ import com.hereliesaz.guillotine.ui.theme.White
  * running process, its progress, and errors. Anchored to the bottom of its parent [Box] (no
  * AzHostActivityLayout required); at PEEK it's a one-line ticker, expanded it's the full feed.
  *
- * There is deliberately **no** prompt field here — the single AI input lives in the editor tool
- * strip; this sheet is output only.
+ * The general AI prompt input still lives in the editor tool strip; the ONLY input here is the
+ * clarification-reply field that appears when the agent asks a follow-up question ([awaitingReply]).
  *
  * @param processLabel    non-null while a background process (analysis/export) is running
  * @param processFraction 0..1 when the running process reports determinate progress, else null
+ * @param awaitingReply   true when the agent finished with a question and wants a user answer here
+ * @param onReply         invoked with the user's clarification text; the sheet clears its field on send
  */
 @Composable
 fun ActivityLogSheet(
@@ -57,14 +69,22 @@ fun ActivityLogSheet(
     processLabel: String?,
     processFraction: Float?,
     onClear: () -> Unit,
+    awaitingReply: Boolean = false,
+    onReply: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Raise a collapsed sheet to PEEK when new activity arrives, so a running agent / analysis /
-    // export is noticed — but never force an already-expanded sheet back down.
+    // export is noticed — but never force an already-expanded sheet back down. When the agent asks
+    // a clarifying question we go one step further and open to HALF so the reply input is visible.
     val newestId = entries.lastOrNull()?.id ?: 0L
     LaunchedEffect(newestId) {
         if (newestId != 0L && controller.detent == AzSheetDetent.HIDDEN) {
             controller.snapTo(AzSheetDetent.PEEK)
+        }
+    }
+    LaunchedEffect(awaitingReply) {
+        if (awaitingReply && (controller.detent == AzSheetDetent.HIDDEN || controller.detent == AzSheetDetent.PEEK)) {
+            controller.snapTo(AzSheetDetent.HALF)
         }
     }
 
@@ -82,8 +102,9 @@ fun ActivityLogSheet(
         // HALF/FULL show the full feed.
         when (controller.detent) {
             AzSheetDetent.HIDDEN -> Unit
-            AzSheetDetent.PEEK -> PeekTicker(entries, processLabel, processFraction)
-            AzSheetDetent.HALF, AzSheetDetent.FULL -> ExpandedLog(entries, processLabel, processFraction, onClear)
+            AzSheetDetent.PEEK -> PeekTicker(entries, processLabel, processFraction, awaitingReply)
+            AzSheetDetent.HALF, AzSheetDetent.FULL ->
+                ExpandedLog(entries, processLabel, processFraction, onClear, awaitingReply, onReply)
         }
     }
 }
@@ -93,6 +114,7 @@ private fun PeekTicker(
     entries: List<ActivityLog.Entry>,
     processLabel: String?,
     processFraction: Float?,
+    awaitingReply: Boolean,
 ) {
     val latest = entries.lastOrNull()
     Row(
@@ -110,9 +132,18 @@ private fun PeekTicker(
             }
             Spacer(Modifier.width(8.dp))
         }
-        val text = processLabel ?: latest?.text ?: "No activity yet."
+        // Awaiting a clarification reply takes precedence over the latest chat line — the user
+        // needs to know to expand and answer. When both a process and a question are somehow
+        // active (rare), the process line still shows so progress isn't hidden.
+        val text = when {
+            processLabel != null -> processLabel
+            awaitingReply -> "Tap to answer the AI's question…"
+            latest != null -> latest.text
+            else -> "No activity yet."
+        }
         val color = when {
             processLabel != null -> Neutral300
+            awaitingReply -> Red500
             latest != null -> levelColor(latest.level)
             else -> Neutral500
         }
@@ -130,6 +161,8 @@ private fun ExpandedLog(
     processLabel: String?,
     processFraction: Float?,
     onClear: () -> Unit,
+    awaitingReply: Boolean,
+    onReply: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -161,14 +194,15 @@ private fun ExpandedLog(
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Neutral800))
         if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text("No activity yet.", color = Neutral500, fontSize = 12.sp)
             }
         } else {
             // reverseLayout keeps the newest entry pinned to the bottom (visible) without any
-            // manual scroll bookkeeping; older lines scroll up out of view.
+            // manual scroll bookkeeping; older lines scroll up out of view. Weight lets the reply
+            // row (below) share the sheet's height when it's shown.
             LazyColumn(
-                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
                 reverseLayout = true,
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
@@ -184,6 +218,61 @@ private fun ExpandedLog(
                 }
             }
         }
+        if (awaitingReply) {
+            ReplyRow(onSend = onReply)
+        }
+    }
+}
+
+/**
+ * Inline reply field: shown only while the agent has finished its turn with a clarifying question.
+ * Dismisses the keyboard and clears focus on send (same rule as the tool-strip prompt), so the sheet
+ * doesn't sit behind a stuck IME after answering.
+ */
+@Composable
+private fun ReplyRow(onSend: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val submit: () -> Unit = {
+        val t = text.trim()
+        if (t.isNotEmpty()) {
+            keyboard?.hide()
+            focusManager.clearFocus()
+            text = ""
+            onSend(t)
+        }
+    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Neutral800))
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { v ->
+                // Soft-keyboard Enter arrives as '\n'; strip it and treat as a submit.
+                val submitNow = v.contains('\n')
+                text = v.replace("\n", "")
+                if (submitNow) submit()
+            },
+            modifier = Modifier.weight(1f),
+            placeholder = { Text("Answer the AI…", color = Neutral500, fontSize = 12.sp) },
+            textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
+            maxLines = 4,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { submit() }),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "Send",
+            color = Red500,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clickable(onClick = submit)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        )
     }
 }
 

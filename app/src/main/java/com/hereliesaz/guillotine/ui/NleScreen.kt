@@ -405,6 +405,17 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             processLabel = processLabel,
             processFraction = processFraction,
             onClear = { ActivityLog.clear() },
+            awaitingReply = assistantState.awaitingReply,
+            // Route the clarification reply back into the agent as a follow-up run: the ViewModel
+            // synthesizes an "original request + question + reply" continuation prompt so any
+            // backend picks up where it left off without needing message-log state.
+            onReply = { t ->
+                assistantVm.sendReply(
+                    t,
+                    sharedMcpTools,
+                    com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools),
+                )
+            },
         )
         } // editor + sheet Box
 

@@ -68,7 +68,13 @@ internal val AGENT_SYSTEM_PROMPT = """
     "Keep only X" = analyze_clip for X — analysis removes the non-matching ranges and the cut is applied
     automatically. Clip ids always come from get_timeline / get_clip — never invent them. Keep calling
     tools until the instruction is satisfied, then give a single short sentence summarizing what you
-    changed. Do not ask the user questions; act on reasonable defaults.
+    changed.
+
+    Prefer to act on reasonable defaults rather than pause to ask. Only ask a clarifying question when
+    the instruction is genuinely ambiguous and no reasonable default exists (e.g. "shorten the video"
+    without a target length, or two clips both matching "the intro"). When you do ask, end your turn
+    with a single sentence ending in "?" and stop — the user's answer will come back as a new turn
+    with the original request and your question quoted for context, so continue from there.
 """.trimIndent()
 
 /** Result of executing one tool: the JSON to feed back to the model, plus an error flag. */
