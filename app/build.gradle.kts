@@ -42,15 +42,10 @@ val verMajor = versionProps.getProperty("versionMajor", "1").trim().toIntOrNull(
 val verMinor = versionProps.getProperty("versionMinor", "0").trim().toIntOrNull() ?: 0
 
 fun runGit(vararg args: String): String? = runCatching {
-    val proc = ProcessBuilder(listOf("git", *args))
-        .directory(rootProject.rootDir)
-        .redirectErrorStream(true)
-        .start()
-    if (!proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
-        proc.destroyForcibly()
-        return@runCatching null
-    }
-    proc.inputStream.bufferedReader().readText().trim().takeIf { it.isNotEmpty() && proc.exitValue() == 0 }
+    providers.exec {
+        commandLine("git", *args)
+        workingDir = rootProject.rootDir
+    }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
 }.getOrNull()
 
 // Total commit count on HEAD — monotonic per push. On a shallow checkout returns something small
