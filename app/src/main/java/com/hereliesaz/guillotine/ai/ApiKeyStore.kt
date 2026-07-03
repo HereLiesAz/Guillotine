@@ -109,6 +109,13 @@ data class AiSettings(
     val speechModelPath: String = "",
     /** Optional on-device LLM `.task` model path — the assistant's offline brain (else a cloud key). */
     val agentModelPath: String = "",
+    /**
+     * Bound on [FrameAnalysisCache] — how many per-frame vision results (per signal) to keep in RAM
+     * for the "rescan the same clip with a different prompt" fast path. Higher = more scans stay
+     * near-instant but a bit more memory; 0 disables the cache entirely. Applied at runtime via
+     * `FrameAnalysisCache.setMaxEntries` when settings load or change.
+     */
+    val frameAnalysisCacheSize: Int = FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
 ) {
     fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
     /** The effective model id for [p]: the user's override if set, else the code default. */
@@ -154,6 +161,9 @@ class ApiKeyStore(context: Context) {
             ?.takeIf { it.isNotBlank() } ?: ImageGen.LeonardoDefaultModel,
         speechModelPath = prefs.getString(KEY_SPEECH, "").orEmpty(),
         agentModelPath = prefs.getString(KEY_AGENT_MODEL, "").orEmpty(),
+        frameAnalysisCacheSize = prefs
+            .getInt(KEY_FRAME_CACHE_SIZE, FrameAnalysisCache.DEFAULT_MAX_ENTRIES)
+            .coerceIn(FrameAnalysisCache.MIN_MAX_ENTRIES, FrameAnalysisCache.MAX_MAX_ENTRIES),
     )
 
     suspend fun save(settings: AiSettings) {
@@ -168,6 +178,7 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_LEONARDO_MODEL, settings.leonardoModel)
                 putString(KEY_SPEECH, settings.speechModelPath)
                 putString(KEY_AGENT_MODEL, settings.agentModelPath)
+                putInt(KEY_FRAME_CACHE_SIZE, settings.frameAnalysisCacheSize)
             }.apply()
         }
         _settings.value = settings
@@ -183,6 +194,7 @@ class ApiKeyStore(context: Context) {
         const val KEY_LEONARDO_MODEL = "leonardo_model"
         const val KEY_SPEECH = "speech_model_path"
         const val KEY_AGENT_MODEL = "agent_model_path"
+        const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"

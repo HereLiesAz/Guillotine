@@ -34,10 +34,12 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,13 +51,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
+import com.hereliesaz.guillotine.ai.FrameAnalysisCache
 import com.hereliesaz.guillotine.ai.ImageGen
+import kotlin.math.roundToInt
 import com.hereliesaz.guillotine.ai.ModelCatalog
 import com.hereliesaz.guillotine.ai.agent.BundledModelExtractor
 import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
@@ -96,6 +101,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
     var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
+    var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     var crashRelayUrl by remember { mutableStateOf(com.hereliesaz.guillotine.crash.CrashConfig.relayUrl(context)) }
@@ -218,6 +224,37 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             )
                         }
                     }
+
+                    // Frame-analysis cache: how many per-frame ML Kit results (per signal — object
+                    // labels + scene labels) to keep in RAM so rescanning the same clip with a
+                    // different prompt reuses last time's work instead of re-decoding + re-running
+                    // vision. Applied at runtime via FrameAnalysisCache.setMaxEntries.
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Frame-analysis cache", color = Neutral400, fontSize = 12.sp)
+                        Text(
+                            when (frameAnalysisCacheSize) {
+                                0 -> "Off"
+                                else -> "$frameAnalysisCacheSize frames"
+                            },
+                            color = Neutral500, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                    Slider(
+                        value = frameAnalysisCacheSize.toFloat(),
+                        // roundToInt (not toInt) — toInt truncates, so a stop that lands at 1024.0f
+                        // but is stored as 1023.9999f would jitter down to 1023.
+                        onValueChange = { frameAnalysisCacheSize = it.roundToInt() },
+                        valueRange = FrameAnalysisCache.MIN_MAX_ENTRIES.toFloat()..FrameAnalysisCache.MAX_MAX_ENTRIES.toFloat(),
+                        // steps = intermediate stops (Compose's contract), so 31 here → 33 total
+                        // positions (min + 31 intermediates + max) at exactly 1024-frame intervals.
+                        steps = 31,
+                    )
+                    Text(
+                        "How many per-frame vision results to keep so rescans of the same clip are near-" +
+                            "instant. Default ${FrameAnalysisCache.DEFAULT_MAX_ENTRIES}. Higher = more scans " +
+                            "stay fast but a bit more memory. 0 disables the cache.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
 
                     // Assistant brain: the command bar uses the selected provider's key when set,
                     // else this on-device LLM. Lets the AI drive the editor fully offline.
@@ -366,6 +403,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             leonardoModel = leonardoModel,
                             speechModelPath = speechModelPath.trim(),
                             agentModelPath = agentModelPath.trim(),
+                            frameAnalysisCacheSize = frameAnalysisCacheSize,
                         ),
                     )
                 },
