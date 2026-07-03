@@ -74,9 +74,11 @@ private const val PLAY_DRIFT_TOLERANCE_MS = 300L
  * Each layer crossfades its own overlapping clips and, for background-removed
  * clips, renders an on-device matte cutout so lower tracks show through.
  *
- * Audio is separate and unified: a single muted picture path plus one [audioPlayer]
- * that sources ALL audio (including a video clip's own sound via its linked audio
- * clip) through the gain/pan/normalize pipeline — so preview audio can never double.
+ * Audio is separate: video layers are muted (picture only), and there is **one audio player per
+ * audio track** (see [AudioTrackLayer]). Multiple audio tracks (music + voiceover + effects) mix
+ * through Android's audio layer instead of only playing the topmost one, and a video's own sound
+ * still plays via its linked shadow audio clip. Within a single audio track only one clip is
+ * played at a time (audio doesn't crossfade here), so preview audio still can't double.
  */
 @Composable
 fun PreviewPlayer(
@@ -87,71 +89,16 @@ fun PreviewPlayer(
 ) {
     val context = LocalContext.current
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
-    // Live gain+pan processor so preview can boost (normalize) and pan, which ExoPlayer.volume can't.
-    val audioGain = remember { LiveAudioProcessor() }
-    val audioPlayer = remember {
-        ExoPlayer.Builder(context)
-            .setRenderersFactory(com.hereliesaz.guillotine.media.previewRenderersFactory(context, audioGain))
-            .build()
-    }
-    DisposableEffect(Unit) {
-        onDispose { audioPlayer.release() }
-    }
 
     val now = state.currentTimeMs
     // Disabled/hidden tracks drop out entirely.
     val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
 
-    // The preview's video layers are muted (picture only), so ALL preview audio is played here —
-    // including a video clip's own sound, via its linked audio clip — through the gain/pan/normalize
-    // pipeline. One audio source, so preview audio can never double.
-    val activeAudio = TimelineMath.topActiveClip(
-        clips, ClipType.AUDIO, now, state.document.audioTracks,
-    )
+    // Audio wiring is per-track (see AudioTrackLayer): each audio track owns its own ExoPlayer
+    // and the tracks mix through Android's audio layer, so parallel audio (music + voiceover, etc.)
+    // all plays. Video layers are muted (picture only) so preview audio only comes from here.
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
-    val audioTrack = activeAudio?.let { state.document.trackSettingsFor(it.trackId) }
-    val audioMedia = activeAudio?.let { state.document.mediaFor(it) }
-
-    val audioVolume = if (audioTrack?.muted == true) 0f else (activeAudio?.let {
-        TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
-    } ?: 0f) * (audioTrack?.volume ?: 1f)
-    val audioPan = activeAudio?.let {
-        TimelineMath.valueAt(it, KeyframeProperty.PAN, now - it.startTimeMs, it.filters.pan)
-    } ?: 0f
-
-    // Peak-normalize gain (async; reuse the cached waveform decoder), matching the export. 1 = off.
-    val audioNorm by produceState(1f, audioMedia?.id, activeAudio?.filters?.normalize) {
-        value = if (activeAudio?.filters?.normalize == true && audioMedia != null) {
-            com.hereliesaz.guillotine.media.MediaPreview.waveform(context, audioMedia.uri)
-                ?.let { com.hereliesaz.guillotine.media.MediaPreview.normalizeGain(it) } ?: 1f
-        } else {
-            1f
-        }
-    }
-
-    // ---- audio player wiring ----
-    LaunchedEffect(audioMedia?.id) {
-        val clip = activeAudio
-        if (audioMedia == null || clip == null) {
-            audioPlayer.stop()
-            audioPlayer.clearMediaItems()
-        } else {
-            audioPlayer.setMediaItem(buildExoItem(audioMedia.uri, audioMedia.kind, clip.durationMs))
-            audioPlayer.prepare()
-            audioPlayer.seekTo(TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0))
-        }
-    }
-    LaunchedEffect(audioVolume, audioNorm, audioPan) {
-        audioPlayer.volume = 1f
-        audioGain.gain = (audioVolume * audioNorm).coerceAtLeast(0f)
-        audioGain.pan = audioPan.coerceIn(-1f, 1f)
-    }
-    LaunchedEffect(state.playbackRate) { audioPlayer.setPlaybackSpeed(state.playbackRate) }
-    LaunchedEffect(state.isPlaying, audioMedia?.id) {
-        audioPlayer.playWhenReady = state.isPlaying && audioMedia != null
-    }
-    syncPosition(audioPlayer, activeAudio, now, state.isPlaying)
 
     // ---- surface ----
     val aspectMod = when (state.document.settings.aspectRatio) {
@@ -197,6 +144,22 @@ fun PreviewPlayer(
                     isPlaying = state.isPlaying,
                     playbackRate = state.playbackRate,
                     aspectMod = aspectMod,
+                )
+            }
+        }
+        // One ExoPlayer per audio track so multiple audio tracks (music + voiceover, etc.) mix
+        // instead of only playing the topmost one. Each layer releases its player when its track
+        // leaves composition, so deleting a track is clean.
+        state.document.audioTracks.forEach { trackId ->
+            key(trackId) {
+                AudioTrackLayer(
+                    trackId = trackId,
+                    clips = clips,
+                    trackSettings = state.document.trackSettingsFor(trackId),
+                    mediaFor = state.document::mediaFor,
+                    now = now,
+                    isPlaying = state.isPlaying,
+                    playbackRate = state.playbackRate,
                 )
             }
         }
@@ -409,6 +372,82 @@ private fun wireVideoPlayer(
 }
 
 /** Build a Media3 item; images become timed image items so one path handles all kinds. */
+/**
+ * One audio track's playback layer: owns a single ExoPlayer + LiveAudioProcessor for this track,
+ * plays whichever of the track's clips is active (if any) through the gain/pan/normalize pipeline,
+ * and releases the player when the track leaves composition (parity with [VideoTrackLayer]). The
+ * multi-audio path is just several of these composed in parallel — Android's audio layer mixes
+ * them so music + voiceover + effects all play together instead of only the topmost track.
+ */
+@Composable
+private fun AudioTrackLayer(
+    trackId: String,
+    clips: List<TimelineClip>,
+    trackSettings: com.hereliesaz.guillotine.model.TrackSettings,
+    mediaFor: (TimelineClip) -> MediaItem?,
+    now: Long,
+    isPlaying: Boolean,
+    playbackRate: Float,
+) {
+    val context = LocalContext.current
+    val gain = remember { LiveAudioProcessor() }
+    val player = remember {
+        ExoPlayer.Builder(context)
+            .setRenderersFactory(com.hereliesaz.guillotine.media.previewRenderersFactory(context, gain))
+            .build()
+    }
+    DisposableEffect(Unit) {
+        onDispose { player.release() }
+    }
+
+    // The one active clip on THIS track. If multiple overlap (rare for audio; we don't crossfade
+    // audio here), pick the earliest starter — deterministic and mirrors the single-clip path.
+    val active = clips
+        .filter { it.type == ClipType.AUDIO && it.trackId == trackId }
+        .filter { now >= it.startTimeMs && now < it.endTimeMs }
+        .minByOrNull { it.startTimeMs }
+    val media = active?.let(mediaFor)
+
+    val volume = if (trackSettings.muted) 0f else (active?.let {
+        TimelineMath.valueAt(it, KeyframeProperty.VOLUME, now - it.startTimeMs, it.filters.volume)
+    } ?: 0f) * trackSettings.volume
+    val pan = active?.let {
+        TimelineMath.valueAt(it, KeyframeProperty.PAN, now - it.startTimeMs, it.filters.pan)
+    } ?: 0f
+
+    // Peak-normalize gain (async; reuse the cached waveform decoder), matching the export. 1 = off.
+    val norm by produceState(1f, media?.id, active?.filters?.normalize) {
+        value = if (active?.filters?.normalize == true && media != null) {
+            com.hereliesaz.guillotine.media.MediaPreview.waveform(context, media.uri)
+                ?.let { com.hereliesaz.guillotine.media.MediaPreview.normalizeGain(it) } ?: 1f
+        } else {
+            1f
+        }
+    }
+
+    LaunchedEffect(media?.id) {
+        val clip = active
+        if (media == null || clip == null) {
+            player.stop()
+            player.clearMediaItems()
+        } else {
+            player.setMediaItem(buildExoItem(media.uri, media.kind, clip.durationMs))
+            player.prepare()
+            player.seekTo(TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0))
+        }
+    }
+    LaunchedEffect(volume, norm, pan) {
+        player.volume = 1f
+        gain.gain = (volume * norm).coerceAtLeast(0f)
+        gain.pan = pan.coerceIn(-1f, 1f)
+    }
+    LaunchedEffect(playbackRate) { player.setPlaybackSpeed(playbackRate) }
+    LaunchedEffect(isPlaying, media?.id) {
+        player.playWhenReady = isPlaying && media != null
+    }
+    syncPosition(player, active, now, isPlaying)
+}
+
 private fun buildExoItem(uri: String, kind: MediaKind, durationMs: Long): ExoMediaItem {
     val builder = ExoMediaItem.Builder().setUri(Uri.parse(uri))
     if (kind == MediaKind.IMAGE) {

@@ -575,7 +575,7 @@ private fun TopBar(
             azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp, showFooter = true)
             azItem("Import media") { onImport() }
             azItem("Generate image") { onGenerate() }
-            azItem("Name project") { onNameProject() }
+            azItem("Save") { onNameProject() }
             azItem("Open project file\u2026") { onOpenProject() }
             azItem("Export video") { onExport() }
             azDivider()
@@ -598,13 +598,16 @@ private fun TopBar(
     }
 }
 
-/** Simple dialog to name the (always-autosaved) project. */
+/**
+ * "Save": name the (always-autosaved) project. The project is continuously autosaved regardless —
+ * this dialog only sets its user-facing name.
+ */
 @Composable
 private fun NameProjectDialog(current: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf(current) }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Name project", color = White) },
+        title = { Text("Save project", color = White) },
         text = {
             OutlinedTextField(
                 value = name,
