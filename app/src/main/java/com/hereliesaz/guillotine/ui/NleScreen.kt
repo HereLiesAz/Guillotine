@@ -815,10 +815,12 @@ private fun EditorToolStrip(
                         if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
                         if (submitNow) submit()
                     },
-                    // Deliberately NOT disabled while the agent is running: disabling a focused
-                    // TextField while the IME is up orphans the keyboard and the back button can't
-                    // dismiss it (feels like a freeze). AssistantViewModel.run already guards against
-                    // overlapping submits (`if (running) return`), so leaving this enabled is safe.
+                    // `readOnly` (not `enabled=false`) while the agent is running: keeps the field
+                    // enabled and focusable so the IME stays owned by it — disabling a focused
+                    // TextField orphans the keyboard and back-press can't dismiss it (feels like a
+                    // freeze) — while still blocking mid-run keystrokes and accidental re-submits.
+                    // AssistantViewModel.run also guards overlaps (`if (running) return`).
+                    readOnly = assistant.running,
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged { promptFocused = it.isFocused }
