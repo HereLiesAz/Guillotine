@@ -162,6 +162,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             if (err != null) { ActivityLog.error(err); vm.clearError() }
         }
     }
+    // Push the user-configurable frame-analysis cache bound to FrameAnalysisCache. Keyed on the
+    // value so it re-applies whenever Settings saves a new size. First fire, on cold start, seeds
+    // the cache from persisted settings before any scan runs.
+    androidx.compose.runtime.LaunchedEffect(settings.frameAnalysisCacheSize) {
+        com.hereliesaz.guillotine.ai.FrameAnalysisCache.setMaxEntries(settings.frameAnalysisCacheSize)
+    }
 
     var showOnboarding by remember { mutableStateOf(!keyStore.onboardingDone) }
     var showSettings by remember { mutableStateOf(false) }

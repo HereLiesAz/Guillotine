@@ -25,11 +25,30 @@ package com.hereliesaz.guillotine.ai
  * single-slot (guarded by OperationController) contention is a non-issue in practice.
  */
 object FrameAnalysisCache {
-    /** Enough for ~13 minutes of 3-fps sampling per signal — well past typical single-scan needs. */
-    private const val MAX_ENTRIES = 4096
+    /** Default cap — ~13 minutes of 3-fps sampling per signal. Settings can override at runtime. */
+    const val DEFAULT_MAX_ENTRIES = 4096
 
-    private val objectLabels: MutableMap<String, Set<String>> = boundedLru(MAX_ENTRIES)
-    private val sceneLabels: MutableMap<String, List<Pair<String, Float>>> = boundedLru(MAX_ENTRIES)
+    /** Reasonable UI range for the Settings slider. 0 effectively disables the cache. */
+    const val MIN_MAX_ENTRIES = 0
+    const val MAX_MAX_ENTRIES = 32_768
+
+    /**
+     * Live cap read on every eviction check. `@Volatile` — the setter can fire from the settings
+     * scope while a scan is running on another dispatcher; a write here is visible on the next
+     * `removeEldestEntry` call, which trims the cache naturally as new entries arrive rather than
+     * eagerly (so the setter stays cheap). Set to 0 to effectively disable: every put becomes its
+     * own eldest and is immediately evicted, so the cache stays empty.
+     */
+    @Volatile
+    private var maxEntries: Int = DEFAULT_MAX_ENTRIES
+
+    private val objectLabels: MutableMap<String, Set<String>> = boundedLru()
+    private val sceneLabels: MutableMap<String, List<Pair<String, Float>>> = boundedLru()
+
+    /** Apply a new cap. Takes effect on the next put/get (trim happens as entries arrive). */
+    fun setMaxEntries(n: Int) {
+        maxEntries = n.coerceIn(MIN_MAX_ENTRIES, MAX_MAX_ENTRIES)
+    }
 
     @Synchronized
     fun objectLabels(uri: String, atMs: Long, compute: () -> Set<String>): Set<String> {
@@ -62,8 +81,10 @@ object FrameAnalysisCache {
 
     private fun keyOf(uri: String, atMs: Long): String = "$uri@$atMs"
 
-    private fun <K, V> boundedLru(maxEntries: Int): MutableMap<K, V> =
+    private fun <K, V> boundedLru(): MutableMap<K, V> =
         object : LinkedHashMap<K, V>(64, 0.75f, /* accessOrder = */ true) {
+            // Read the volatile cap on every check so runtime setMaxEntries() calls take effect
+            // without recreating the map.
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean =
                 size > maxEntries
         }
