@@ -55,6 +55,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -128,6 +129,29 @@ private fun TimelineLanes(
     // Live, group-aware drag offset: while a clip is dragged, every clip in its group reads this and
     // moves together (snapped) — so the whole group tracks the cursor, not just the grabbed clip.
     var groupDrag by remember { mutableStateOf<GroupDrag?>(null) }
+
+    // Zoom-around-playhead: any pps change (pinch, Ctrl+scroll, TopBar buttons, addMedia fit-all)
+    // must keep the playhead pinned to the same on-screen X — otherwise the frame you were looking
+    // at slides out from under your finger. Tracked as an effect on pps, not baked into individual
+    // callers, so every path that changes pps gets this behaviour for free.
+    //
+    // The scroll delta is derived from the ratio (newPps - lastPps): a playhead sitting at t seconds
+    // now occupies t·pps pixels on the surface, so shifting scroll by t·(newPps - lastPps) keeps it
+    // at the same viewport-relative offset.
+    //
+    // withFrameNanos before scroll.scrollTo lets the layout pass with the new pps commit first —
+    // otherwise scroll.maxValue is stale from the previous width and the scroll clamps to the wrong
+    // value on zoom-in. roundToInt (not toInt) so a shift of e.g. -0.9 doesn't truncate to 0.
+    var lastZoomedPps by remember { mutableFloatStateOf(pps) }
+    LaunchedEffect(pps) {
+        if (pps == lastZoomedPps) return@LaunchedEffect
+        val playheadMs = vm.uiState.value.currentTimeMs
+        val shift = playheadMs / 1000f * (pps - lastZoomedPps)
+        val target = (scroll.value + shift).roundToInt().coerceAtLeast(0)
+        lastZoomedPps = pps
+        androidx.compose.runtime.withFrameNanos {}
+        scroll.scrollTo(target)
+    }
 
     fun msToDp(ms: Long) = with(density) { (ms / 1000f * pps).toDp() }
     val totalMs = state.document.totalDurationMs
@@ -221,8 +245,17 @@ private fun TimelineLanes(
                 },
         ) {
             Column(Modifier.fillMaxSize()) {
-                Ruler(totalMs, pps, contentWidth)
-                Column(Modifier.weight(1f).verticalScroll(vScroll)) {
+                Ruler(vm, totalMs, pps, contentWidth)
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(vScroll)
+                        // Report the lanes viewport height in dp so vm.fitAllToViewport() can
+                        // divide it across the tracks. Reported on every measure — cheap.
+                        .onSizeChanged { size ->
+                            vm.setTimelineLanesHeightDp(with(density) { size.height.toDp().value })
+                        },
+                ) {
                     state.document.videoTracks.forEach { trackId ->
                         Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
                     }
@@ -393,13 +426,32 @@ private fun TrackAction(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Ruler(totalMs: Long, pps: Float, contentWidth: androidx.compose.ui.unit.Dp) {
+private fun Ruler(vm: EditorViewModel, totalMs: Long, pps: Float, contentWidth: androidx.compose.ui.unit.Dp) {
     val tickColor = Neutral700
     Canvas(
         Modifier
             .width(contentWidth)
             .height(RULER_HEIGHT)
-            .background(Neutral950),
+            .background(Neutral950)
+            // Scrub-anywhere: tap or drag anywhere along the ruler to move the playhead. The Ruler
+            // lives inside the horizontally-scrolled surface, so `offset.x` and `change.position.x`
+            // are already timeline-content pixels — no scroll-value math needed.
+            .pointerInput(pps) {
+                detectTapGestures { off ->
+                    vm.seekTo((off.x / pps * 1000f).toLong().coerceAtLeast(0))
+                }
+            }
+            .pointerInput(pps) {
+                detectDragGestures(
+                    onDragStart = { off ->
+                        vm.seekTo((off.x / pps * 1000f).toLong().coerceAtLeast(0))
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        vm.seekTo((change.position.x / pps * 1000f).toLong().coerceAtLeast(0))
+                    },
+                )
+            },
     ) {
         val totalSec = (totalMs / 1000f) + 4f
         var s = 0
