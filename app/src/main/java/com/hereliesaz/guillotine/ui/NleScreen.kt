@@ -42,6 +42,8 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -363,6 +365,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             state = state,
             onUndo = vm::undo,
             onRedo = vm::redo,
+            onZoomIn = vm::zoomIn,
+            onZoomOut = vm::zoomOut,
             onImport = { importTargetTrack = null; importLauncher() },
             onGenerate = { showGenerate = true },
             onNameProject = { showNameDialog = true },
@@ -560,12 +564,14 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
 }
 
-/** Slim top bar: AzDropdownMenu trigger icon + project name + undo/redo. */
+/** Slim top bar: AzDropdownMenu trigger icon + project name + zoom + undo/redo. */
 @Composable
 private fun TopBar(
     state: EditorUiState,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
     onImport: () -> Unit,
     onGenerate: () -> Unit,
     onNameProject: () -> Unit,
@@ -609,6 +615,8 @@ private fun TopBar(
             color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
         )
         Spacer(Modifier.weight(1f))
+        IconToolButton(Icons.Filled.ZoomOut, "Zoom out", onClick = onZoomOut)
+        IconToolButton(Icons.Filled.ZoomIn, "Zoom in", onClick = onZoomIn)
         IconToolButton(Icons.Filled.Undo, "Undo", enabled = state.canUndo, onClick = onUndo)
         IconToolButton(Icons.Filled.Redo, "Redo", enabled = state.canRedo, onClick = onRedo)
         IconToolButton(Icons.Filled.HelpOutline, "Help", onClick = onHelp)

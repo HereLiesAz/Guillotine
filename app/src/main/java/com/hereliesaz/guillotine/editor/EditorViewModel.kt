@@ -87,7 +87,15 @@ class EditorViewModel : ViewModel() {
         past.addLast(current)
         if (past.size > HISTORY_LIMIT) past.removeFirst()
         future.clear()
-        _uiState.update { it.copy(document = next, canUndo = past.isNotEmpty(), canRedo = false) }
+        // Zoom is view state, not content — preserve the live UI zoom on the new document so undo/redo
+        // never restores an old zoom the user has since changed.
+        _uiState.update {
+            it.copy(
+                document = next.copy(pixelsPerSecond = it.pixelsPerSecond),
+                canUndo = past.isNotEmpty(),
+                canRedo = false,
+            )
+        }
     }
 
     fun undo() {
@@ -95,8 +103,10 @@ class EditorViewModel : ViewModel() {
         val prev = past.removeLast()
         future.addLast(document)
         _uiState.update {
+            // Restore content, but keep the current UI zoom (undo shouldn't change how you're looking
+            // at the timeline, only what's on it).
             it.copy(
-                document = prev,
+                document = prev.copy(pixelsPerSecond = it.pixelsPerSecond),
                 selectedClipIds = it.selectedClipIds.filter { id -> prev.clips.any { c -> c.id == id } },
                 canUndo = past.isNotEmpty(),
                 canRedo = true,
@@ -109,7 +119,11 @@ class EditorViewModel : ViewModel() {
         val next = future.removeLast()
         past.addLast(document)
         _uiState.update {
-            it.copy(document = next, canUndo = true, canRedo = future.isNotEmpty())
+            it.copy(
+                document = next.copy(pixelsPerSecond = it.pixelsPerSecond),
+                canUndo = true,
+                canRedo = future.isNotEmpty(),
+            )
         }
     }
 
@@ -164,6 +178,10 @@ class EditorViewModel : ViewModel() {
                 clips = doc.clips + newClips,
             )
         }
+        // Reset the horizontal zoom so every clip is visible after an import — the natural default
+        // when the timeline's content just changed. Runs after mutateDocument so totalDurationMs
+        // reflects the new clips.
+        fitZoomToTimeline()
     }
 
     private fun videoClip(m: MediaItem, startMs: Long, trackId: String = "V1") = TimelineClip(
@@ -1121,16 +1139,54 @@ class EditorViewModel : ViewModel() {
     fun setPlaybackRate(rate: Float) = _uiState.update { it.copy(playbackRate = rate) }
     /** Visible width (px) of the timeline lanes area; feeds the dynamic zoom-out limit. */
     private var timelineViewportPx = 0f
-    fun setTimelineViewportPx(px: Float) { timelineViewportPx = px }
+    fun setTimelineViewportPx(px: Float) {
+        val prev = timelineViewportPx
+        timelineViewportPx = px
+        // First measurement of the viewport for a project with no persisted zoom: snap to fit-all
+        // so a freshly-loaded project starts with every clip visible. Subsequent viewport reports
+        // (rotation, split-screen resize) don't re-fit — we don't want to clobber a user's zoom.
+        if (prev == 0f && px > 0f && document.pixelsPerSecond == null && document.totalDurationMs > 0) {
+            fitZoomToTimeline()
+        }
+    }
 
     fun setZoom(pxPerSec: Float) {
+        val clamped = clampPps(pxPerSec)
+        // Update BOTH the UI zoom AND the document's persisted zoom in one shot — writing
+        // pixelsPerSecond onto document without going through mutateDocument keeps it out of undo
+        // history (zoom is view state) while still letting autosave persist it.
+        _uiState.update {
+            it.copy(
+                pixelsPerSecond = clamped,
+                document = it.document.copy(pixelsPerSecond = clamped),
+            )
+        }
+    }
+
+    /** Zoom step for the TopBar buttons — ~40% in per tap, ~30% out. */
+    fun zoomIn() = setZoom(_uiState.value.pixelsPerSecond * 1.4f)
+    fun zoomOut() = setZoom(_uiState.value.pixelsPerSecond * 0.7f)
+
+    /**
+     * Fit-all zoom: pick a pixels-per-second so the whole timeline fits comfortably in the visible
+     * width (85% of the viewport, leaving a little breathing room on the right). No-op until the
+     * viewport width has been reported by the UI ([setTimelineViewportPx]) and there's actually
+     * content to fit — if either is missing, keep the current zoom.
+     */
+    fun fitZoomToTimeline() {
+        val totalSec = document.totalDurationMs / 1000f
+        if (totalSec <= 0f || timelineViewportPx <= 0f) return
+        setZoom((timelineViewportPx * 0.85f) / totalSec)
+    }
+
+    private fun clampPps(pxPerSec: Float): Float {
         val maxPps = 500f
         val totalSec = document.totalDurationMs / 1000f
         // Zoom-out limit: the whole project fits within 2/3 of the visible timeline width.
         val minPps = if (totalSec > 0f && timelineViewportPx > 0f) {
             ((timelineViewportPx * 2f / 3f) / totalSec).coerceIn(0.1f, maxPps)
         } else 2f
-        _uiState.update { it.copy(pixelsPerSecond = pxPerSec.coerceIn(minPps, maxPps)) }
+        return pxPerSec.coerceIn(minPps, maxPps)
     }
 
     /**
@@ -1231,9 +1287,18 @@ class EditorViewModel : ViewModel() {
                 isPlaying = false,
                 selectedClipIds = emptyList(),
                 promptHistory = doc.promptHistory, // restore the project's prompt history
+                // Resume at the project's saved zoom. If nothing was persisted (new project /
+                // legacy file), keep the current live pps — fitZoomToTimeline() will apply once
+                // the viewport is measured (see setTimelineViewportPx below).
+                pixelsPerSecond = doc.pixelsPerSecond ?: it.pixelsPerSecond,
                 canUndo = false,
                 canRedo = false,
             )
+        }
+        // If the loaded project doesn't have a persisted zoom, snap to fit-all once the viewport
+        // is known (either now, if it's already been reported, or lazily via the setter below).
+        if (doc.pixelsPerSecond == null && timelineViewportPx > 0f) {
+            fitZoomToTimeline()
         }
     }
 }

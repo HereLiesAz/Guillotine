@@ -211,6 +211,13 @@ data class Document(
     val settings: GlobalSettings = GlobalSettings(),
     /** Recent AI prompts used in this project (most-recent first); inline hint + history dropdown. */
     val promptHistory: List<String> = emptyList(),
+    /**
+     * Persisted horizontal zoom (pixels per second) so a project resumes at the user's last zoom
+     * level. Null on a fresh project — the editor picks a fit-all default at load time. NOT
+     * undoable: [EditorViewModel] treats writes to this field as transient view state and
+     * preserves the live UI zoom across undo/redo instead of restoring stale values from history.
+     */
+    val pixelsPerSecond: Float? = null,
 ) {
     /** End of the last clip on the timeline, in milliseconds. */
     val totalDurationMs: Long
