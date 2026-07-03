@@ -1149,6 +1149,28 @@ class EditorViewModel : ViewModel() {
             fitZoomToTimeline()
         }
     }
+    /** Visible height (dp) of the timeline lanes area; feeds the vertical half of fit-all. */
+    private var timelineLanesHeightDp = 0f
+    fun setTimelineLanesHeightDp(dp: Float) { timelineLanesHeightDp = dp }
+
+    /**
+     * Fit every clip on every track onto the visible timeline — horizontally (zoom-to-fit the whole
+     * duration in the width) and vertically (give every track an equal share of the lanes height,
+     * clamped to [MIN_TRACK_HEIGHT]..[MAX_TRACK_HEIGHT] so tracks stay usable). No-op until both
+     * viewport dimensions have been reported by the UI.
+     */
+    fun fitAllToViewport() {
+        fitZoomToTimeline()
+        val laneH = timelineLanesHeightDp
+        val ids = document.videoTracks + document.audioTracks
+        if (laneH <= 0f || ids.isEmpty()) return
+        val per = (laneH / ids.size).coerceIn(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT)
+        _uiState.update { st ->
+            val hm = st.trackHeights.toMutableMap()
+            ids.forEach { hm[it] = per }
+            st.copy(trackHeights = hm)
+        }
+    }
 
     fun setZoom(pxPerSec: Float) {
         val clamped = clampPps(pxPerSec)

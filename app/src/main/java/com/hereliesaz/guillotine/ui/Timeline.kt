@@ -55,6 +55,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -245,7 +246,16 @@ private fun TimelineLanes(
         ) {
             Column(Modifier.fillMaxSize()) {
                 Ruler(vm, totalMs, pps, contentWidth)
-                Column(Modifier.weight(1f).verticalScroll(vScroll)) {
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(vScroll)
+                        // Report the lanes viewport height in dp so vm.fitAllToViewport() can
+                        // divide it across the tracks. Reported on every measure — cheap.
+                        .onSizeChanged { size ->
+                            vm.setTimelineLanesHeightDp(with(density) { size.height.toDp().value })
+                        },
+                ) {
                     state.document.videoTracks.forEach { trackId ->
                         Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
                     }

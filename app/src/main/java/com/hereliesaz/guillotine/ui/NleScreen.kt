@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -83,6 +85,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -367,6 +370,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onRedo = vm::redo,
             onZoomIn = vm::zoomIn,
             onZoomOut = vm::zoomOut,
+            onFitAll = vm::fitAllToViewport,
             onImport = { importTargetTrack = null; importLauncher() },
             onGenerate = { showGenerate = true },
             onNameProject = { showNameDialog = true },
@@ -572,6 +576,7 @@ private fun TopBar(
     onRedo: () -> Unit,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
+    onFitAll: () -> Unit,
     onImport: () -> Unit,
     onGenerate: () -> Unit,
     onNameProject: () -> Unit,
@@ -613,13 +618,26 @@ private fun TopBar(
         Text(
             state.document.name.ifBlank { "Untitled project" },
             color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            // Cap the name so a long project title can't push the button row off the screen; the
+            // weighted spacer below still absorbs any leftover room on wider displays.
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 220.dp),
         )
         Spacer(Modifier.weight(1f))
-        IconToolButton(Icons.Filled.ZoomOut, "Zoom out", onClick = onZoomOut)
-        IconToolButton(Icons.Filled.ZoomIn, "Zoom in", onClick = onZoomIn)
-        IconToolButton(Icons.Filled.Undo, "Undo", enabled = state.canUndo, onClick = onUndo)
-        IconToolButton(Icons.Filled.Redo, "Redo", enabled = state.canRedo, onClick = onRedo)
-        IconToolButton(Icons.Filled.HelpOutline, "Help", onClick = onHelp)
+        // Right-side toolbar in its own horizontal scroll. On wide screens all six icons fit
+        // straight through; on narrow screens (phone in portrait) the row is constrained by the
+        // parent's remaining width and scrolls internally instead of being clipped or overflowing.
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconToolButton(Icons.Filled.FitScreen, "Fit all", onClick = onFitAll)
+            IconToolButton(Icons.Filled.ZoomOut, "Zoom out", onClick = onZoomOut)
+            IconToolButton(Icons.Filled.ZoomIn, "Zoom in", onClick = onZoomIn)
+            IconToolButton(Icons.Filled.Undo, "Undo", enabled = state.canUndo, onClick = onUndo)
+            IconToolButton(Icons.Filled.Redo, "Redo", enabled = state.canRedo, onClick = onRedo)
+            IconToolButton(Icons.Filled.HelpOutline, "Help", onClick = onHelp)
+        }
     }
 }
 
