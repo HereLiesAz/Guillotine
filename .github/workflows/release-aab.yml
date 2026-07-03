@@ -134,8 +134,9 @@ jobs:
 
       # publish_play.py exits 0 = every track ok, 2 = internal published but ≥1
       # other track failed (versionCode still consumed by Play), 1 = nothing published.
-      # We don't `set -e` here so we can inspect the exit code and decide whether the
-      # version bump must still be persisted.
+      # GitHub Actions runs bash with `-eo pipefail`, so we have to disable errexit
+      # around the python call to actually reach `$?` — otherwise `-e` kills the step
+      # on exit 2 before we can record it and the persist step below never fires.
       - name: Publish to Google Play (internal completed + alpha/beta/production drafts)
         id: publish
         if: ${{ inputs.publish != 'false' }}
@@ -150,11 +151,13 @@ jobs:
           printf '%s' "$PLAY_SERVICE_ACCOUNT_JSON" > "$SA_JSON"
           trap 'rm -f "$SA_JSON"' EXIT
           AAB="$(ls app/build/outputs/bundle/release/*.aab | head -n1)"
+          set +e
           python .github/scripts/publish_play.py \
             --package com.hereliesaz.guillotine \
             --aab "$AAB" \
             --sa-json "$SA_JSON"
           CODE=$?
+          set -e
           echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
           if [ "$CODE" = "1" ]; then
             exit 1
