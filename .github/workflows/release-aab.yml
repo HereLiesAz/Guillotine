@@ -21,6 +21,13 @@ name: Release AAB to Play
 #      it "Release to testing tracks" (and Production if you intend to publish there).
 #   3. FIRST UPLOAD MUST BE MANUAL: Google's API cannot create the very first release for a new app.
 #      Upload one AAB by hand in the Play Console once; after that this workflow can publish.
+#   4. Create at least one release in each of the alpha (closed testing), beta (open testing), and
+#      production tracks by hand — the Play API can only add releases to tracks that already exist.
+#
+# Publishing rollout: one AAB, one Play Edit, four tracks. `internal` goes live (status=completed);
+# `alpha`/`beta`/`production` are staged as drafts, ready to promote by hand in the Play Console.
+# Implemented in `.github/scripts/publish_play.py` because Play rejects re-uploading the same
+# versionCode, so a single Edit is the only way to hand one bundle to multiple tracks.
 #
 # versionCode comes from version.properties, which the build auto-increments. CI commits that bump
 # back after a successful publish (see the "Persist the version bump" step) so the next push starts
@@ -33,15 +40,9 @@ on:
       - version.properties
   workflow_dispatch:
     inputs:
-      track:
-        description: "Play track to publish to"
-        type: choice
-        default: internal
-        options: [internal, alpha, beta, production]
-      status:
-        default: completed
       publish:
         default: true
+        description: "Push the AAB to Play (false = build only)"
 
 # Serialize Play publishes across ALL refs: the Play API allows only one open Edit per app, so two
 # release-aab runs publishing at once (e.g. a merge to main overlapping a branch push) collide with
@@ -118,15 +119,35 @@ jobs:
 
       # Publish runs by default (including on push) so a build that doesn't actually push FAILS the job —
       # a green check means it reached Play. Skip only by explicitly dispatching with publish: false.
-      - name: Publish to Google Play
+      #
+      # One AAB, four tracks, one Edit: internal goes live (status=completed) so testers see it
+      # immediately; alpha (closed testing), beta (open testing), and production are staged as
+      # drafts, ready to promote by hand in the Play Console. `.github/scripts/publish_play.py`
+      # opens a single Edit, uploads once, releases to all four tracks, and commits — because
+      # Play rejects re-uploading the same versionCode, this is the only way to hand one bundle
+      # to multiple tracks in one shot.
+      - name: Set up Python
         if: ${{ inputs.publish != 'false' }}
-        uses: r0adkll/upload-google-play@v1
+        uses: actions/setup-python@v6
         with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: com.hereliesaz.guillotine
-          releaseFiles: app/build/outputs/bundle/release/*.aab
-          track: ${{ inputs.track || 'internal' }}
-          status: ${{ inputs.status || 'completed' }}
+          python-version: '3.12'
+
+      - name: Publish to Google Play (internal completed + alpha/beta/production drafts)
+        if: ${{ inputs.publish != 'false' }}
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -e
+          python -m pip install --quiet google-api-python-client==2.147.0 google-auth==2.35.0
+          # Keep the service-account JSON off disk except while the script needs it.
+          SA_JSON="$(mktemp)"
+          printf '%s' "$PLAY_SERVICE_ACCOUNT_JSON" > "$SA_JSON"
+          trap 'rm -f "$SA_JSON"' EXIT
+          AAB="$(ls app/build/outputs/bundle/release/*.aab | head -n1)"
+          python .github/scripts/publish_play.py \
+            --package com.hereliesaz.guillotine \
+            --aab "$AAB" \
+            --sa-json "$SA_JSON"
 
       # Persist the versionCode the build just published. The build auto-increments
       # version.properties on disk but CI would otherwise discard it, so every push
