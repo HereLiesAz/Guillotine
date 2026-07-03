@@ -29,15 +29,12 @@ name: Release AAB to Play
 # Implemented in `.github/scripts/publish_play.py` because Play rejects re-uploading the same
 # versionCode, so a single Edit is the only way to hand one bundle to multiple tracks.
 #
-# versionCode comes from version.properties, which the build auto-increments. CI commits that bump
-# back after a successful publish (see the "Persist the version bump" step) so the next push starts
-# from the just-published code and Play never sees a duplicate versionCode. The bump commit only
-# touches version.properties, and the push trigger below ignores that path so it doesn't re-run.
+# versionCode is derived from `git rev-list --count HEAD` inside `app/build.gradle.kts` — every commit
+# advances it automatically, nothing is written back to the repo during a build. That means CI needs a
+# full-depth checkout (see `fetch-depth: 0` below) to see the whole commit history.
 
 on:
   push:
-    paths-ignore:
-      - version.properties
   workflow_dispatch:
     inputs:
       publish:
@@ -55,8 +52,6 @@ concurrency:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # push the version-bump commit back
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -103,7 +98,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          # version.properties auto-increments inside the build — no version override is passed.
+          # versionCode = VERSION_CODE_OFFSET + git rev-list --count HEAD (see app/build.gradle.kts).
           ./gradlew bundleRelease \
             -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.jks \
             -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
@@ -136,7 +131,8 @@ jobs:
       # other track failed (versionCode still consumed by Play), 1 = nothing published.
       # GitHub Actions runs bash with `-eo pipefail`, so we have to disable errexit
       # around the python call to actually reach `$?` — otherwise `-e` kills the step
-      # on exit 2 before we can record it and the persist step below never fires.
+      # on exit 2 before we can capture the code for the "Fail if any track was not
+      # staged" step below.
       - name: Publish to Google Play (internal completed + alpha/beta/production drafts)
         id: publish
         if: ${{ inputs.publish != 'false' }}
@@ -163,45 +159,9 @@ jobs:
             exit 1
           fi
 
-      # Persist the versionCode the build just published. The build auto-increments
-      # version.properties on disk but CI would otherwise discard it, so every push
-      # rebuilt the same code and Play rejected the duplicate. Committing it back means
-      # the next push starts from the just-published code. The push ignores version.properties
-      # (see `on.push.paths-ignore`), so this commit does not trigger another build.
-      #
-      # Runs on exit 0 (full success) OR exit 2 (internal published but ≥1 other track
-      # failed) — Play has consumed the versionCode either way, so the next build MUST
-      # start from the next number regardless of whether alpha/beta/production landed.
-      - name: Persist the version bump
-        if: >-
-          github.event_name == 'push' &&
-          (steps.publish.outputs.exit_code == '0' || steps.publish.outputs.exit_code == '2')
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add version.properties
-          if git diff --cached --quiet; then
-            echo "version.properties unchanged — nothing to commit."
-            exit 0
-          fi
-          git commit -m "ci: persist auto-incremented versionCode [skip ci]"
-          # Retry to absorb a race with a concurrent push to the same branch.
-          for attempt in 1 2 3; do
-            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-              echo "Persisted version bump."
-              exit 0
-            fi
-            echo "Push failed (attempt $attempt); rebasing and retrying…"
-            git pull --rebase origin "${GITHUB_REF_NAME}" || true
-            sleep $((attempt * 5))
-          done
-          echo "::error::Could not persist the version bump; the next build may collide."
-          exit 1
-
-      # Turn the job red on partial success so the missing tracks aren't invisible.
-      # Runs AFTER the persist step above, so the versionCode bump is safely committed
-      # first — the user sees a red X + the ::warning:: from publish_play.py telling
-      # them which tracks need setup, without losing the internal publish's version bump.
+      # Turn the job red on partial success so real Play failures stay visible.
+      # (versionCode advances with every commit via git-count, so a red X here does
+      # not strand the counter — the next push naturally reads a fresh number.)
       - name: Fail the job if any track was not staged
         if: steps.publish.outputs.exit_code == '2'
         run: |
