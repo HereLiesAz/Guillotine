@@ -13,43 +13,65 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// ---- Four-part version: Major.Minor.Patch.Build (from version.properties) ----
-//   • Major  — bumped by hand (edit versionMajor).
-//   • Minor  — bumped by hand (edit versionMinor).
-//   • Patch  — auto-increments on every artifact build; RESETS to 0 the first build after Minor changes.
-//   • Build  — auto-increments on every artifact build and NEVER resets ⇒ the monotonic versionCode.
-// version.properties is the ONE source of truth and is auto-incremented on EVERY build — no override,
-// no opt-out, no way to skip it. There is deliberately no -PversionBuild/-PversionPatch property.
+// ---- Four-part version: Major.Minor.Patch.Build ----
+//   • Major / Minor — hand-edited in version.properties.
+//   • Patch — the number of commits on this branch since the last time versionMinor changed
+//             (auto-derived from git; resets to 0 the first commit after a Minor bump).
+//   • Build — the total commit count on this branch, plus a fixed offset that absorbs the gap
+//             between where the old file-based counter left off and where git-count is today
+//             (see [VERSION_CODE_OFFSET]). This is the monotonic versionCode.
+//
+// Nothing is auto-incremented on disk. Every commit advances the counter automatically because
+// `git rev-list --count HEAD` is monotonic; a failed CI run can no longer strand a bump the way
+// the old "increment the file → persist back after Play accepts" flow could.
+//
+// The counter comes entirely from `git`, so a shallow checkout (fetch-depth: 1) would break it —
+// every workflow that builds does a full-depth checkout (`fetch-depth: 0`).
+
+// Bridge from the old file-based counter (which last landed at versionBuild=291) to git rev-count
+// (which is currently 228 for this branch). 100 + 228 = 328 keeps the versionCode strictly above
+// the last value Play saw (291). This offset is a constant — DO NOT change it after the first
+// build that uses it, or Play will reject the next upload as non-monotonic.
+val VERSION_CODE_OFFSET = 100
+
 val versionPropsFile = rootProject.file("version.properties")
 val versionProps = Properties().apply {
     if (versionPropsFile.exists()) versionPropsFile.inputStream().use { load(it) }
 }
-// trim().toIntOrNull(): Major/Minor are hand-edited, so a stray space/typo must not crash the build.
 val verMajor = versionProps.getProperty("versionMajor", "1").trim().toIntOrNull() ?: 1
 val verMinor = versionProps.getProperty("versionMinor", "0").trim().toIntOrNull() ?: 0
-var verPatch = versionProps.getProperty("versionPatch", "0").trim().toIntOrNull() ?: 0
-var verBuild = versionProps.getProperty("versionBuild", "0").trim().toIntOrNull() ?: 0
-val patchBaseMinor = versionProps.getProperty("versionPatchBaseMinor", verMinor.toString()).trim().toIntOrNull() ?: verMinor
-// "Every build" — any task that compiles/assembles/bundles/installs/builds (apk or aab, debug or
-// release, an explicit compile task, or the aggregate build). Pure config/sync tasks (clean, tasks, IDE
-// sync) are excluded so merely opening the project doesn't churn the file.
-val isBuildTask = gradle.startParameter.taskNames.any { name ->
-    listOf("assemble", "bundle", "install", "compile", "build").any { name.contains(it, ignoreCase = true) }
-}
-// MANDATORY: increment on every build. Patch resets to 0 the first build after Minor changes; Build
-// never resets (so it is a monotonic versionCode). The write runs in the configuration phase because
-// versionCode/Name must resolve before any task runs.
-if (isBuildTask) {
-    verPatch = if (patchBaseMinor != verMinor) 0 else verPatch + 1 // reset on minor bump, else ++
-    verBuild += 1 // never resets
-    versionProps.setProperty("versionPatch", verPatch.toString())
-    versionProps.setProperty("versionBuild", verBuild.toString())
-    versionProps.setProperty("versionPatchBaseMinor", verMinor.toString())
-    versionPropsFile.outputStream().use {
-        versionProps.store(it, "Auto-incremented by build (patch resets on minor, build never)")
+
+fun runGit(vararg args: String): String? = runCatching {
+    val proc = ProcessBuilder(listOf("git", *args))
+        .directory(rootProject.rootDir)
+        .redirectErrorStream(true)
+        .start()
+    if (!proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+        proc.destroyForcibly()
+        return@runCatching null
     }
+    proc.inputStream.bufferedReader().readText().trim().takeIf { it.isNotEmpty() && proc.exitValue() == 0 }
+}.getOrNull()
+
+// Total commit count on HEAD — monotonic per push. On a shallow checkout returns something small
+// but consistent for that checkout; CI does full-depth so this is the real number in real builds.
+val gitCommitCount = runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0
+
+// Commits since the commit that most recently touched `versionMinor=` in version.properties.
+// This is what makes Patch reset to 0 on a Minor bump: bumping Minor is a fresh commit, so the
+// range HEAD..that-commit is 0 immediately after. `git blame` fingers the commit; `rev-list
+// --count` counts commits from it to HEAD (exclusive of the commit itself).
+val patchCommits: Int = run {
+    val blame = runGit("blame", "-l", "-L", "/versionMinor=/,+1", "version.properties")
+        ?: return@run 0
+    val sha = blame.substringBefore(' ').trimStart('^').takeIf { it.length >= 7 } ?: return@run 0
+    runGit("rev-list", "--count", "$sha..HEAD")?.toIntOrNull() ?: 0
 }
-// Android requires versionCode >= 1; a non-build evaluation (verBuild could be 0) must not yield 0.
+
+val verPatch = patchCommits
+val verBuild = VERSION_CODE_OFFSET + gitCommitCount
+
+// Android requires versionCode >= 1; a shallow/broken git checkout could yield 0.
 val computedVersionCode = maxOf(1, verBuild)
 val computedVersionName = "$verMajor.$verMinor.$verPatch.$verBuild"
 
