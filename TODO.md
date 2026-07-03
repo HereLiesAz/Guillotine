@@ -2,6 +2,15 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Frame-analysis cache for reference-mode analyze
+The standard `analyze` path now caches per-frame ObjectVision labels and ImageLabeler results in
+`FrameAnalysisCache`, so rescanning the same clip with a different prompt reuses last time's work.
+`analyzeWithReference` (used by `analyze_clip_with_reference`) still recomputes per frame because
+its match compares each candidate detection's embedding against a runtime reference — the result
+isn't a function of the frame alone. Cache the detection LIST (Detections including boxes/scores)
+per (uri, atMs) so at least the ObjectVision.detect call is skipped on repeat scans; the embedding
+step stays uncached.
+
 ## Multi-track audio in the exporter
 Preview now plays parallel audio tracks (music + voiceover + effects mix through Android's audio
 layer, one ExoPlayer per audio track). The exporter still builds a **single** `audioSeq` and sorts
