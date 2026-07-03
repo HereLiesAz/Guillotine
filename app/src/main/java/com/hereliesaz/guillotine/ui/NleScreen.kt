@@ -488,19 +488,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 )
             },
             confirmButton = {
-                Text(
-                    "New", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable {
+                androidx.compose.material3.TextButton(
+                    onClick = {
                         vm.loadDocument(com.hereliesaz.guillotine.model.Document())
                         showNewProjectConfirm = false
-                    }.padding(12.dp),
-                )
+                    },
+                ) {
+                    Text("New", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
             },
             dismissButton = {
-                Text(
-                    "Cancel", color = Neutral400, fontSize = 14.sp,
-                    modifier = Modifier.clickable { showNewProjectConfirm = false }.padding(12.dp),
-                )
+                androidx.compose.material3.TextButton(
+                    onClick = { showNewProjectConfirm = false },
+                ) {
+                    Text("Cancel", color = Neutral400, fontSize = 14.sp)
+                }
             },
             containerColor = Neutral900,
         )
@@ -697,16 +699,14 @@ private fun NameProjectDialog(current: String, onConfirm: (String) -> Unit, onDi
             )
         },
         confirmButton = {
-            Text(
-                "Save", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clickable { onConfirm(name) }.padding(12.dp),
-            )
+            androidx.compose.material3.TextButton(onClick = { onConfirm(name) }) {
+                Text("Save", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
         },
         dismissButton = {
-            Text(
-                "Cancel", color = Neutral400, fontSize = 14.sp,
-                modifier = Modifier.clickable(onClick = onDismiss).padding(12.dp),
-            )
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Neutral400, fontSize = 14.sp)
+            }
         },
         containerColor = Neutral900,
     )
