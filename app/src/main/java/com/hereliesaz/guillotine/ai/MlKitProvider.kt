@@ -66,12 +66,18 @@ class MlKitProvider : ClipAnalyzer {
         // (too-small objects aren't top labels either) and only burns time per frame — skip it.
         val useFallback = objectVision?.available != true || intent.terms.any { !ObjectVision.coversTerm(it) }
 
-        val match: (Bitmap) -> Boolean = { bmp -> qualifies(bmp, intent, labeler, faceDetector, objectVision, useFallback) }
+        val uriStr = mediaUri.toString()
+        // The (uri, atMs) tuple lets qualifies() consult FrameAnalysisCache so a rescan of the same
+        // clip (different prompt, or the same one after a settings change) doesn't redo the ML Kit
+        // work per frame. For a still image, atMs is 0 — one entry, fine.
+        val match: (Long, Bitmap) -> Boolean = { atMs, bmp ->
+            qualifies(uriStr, atMs, bmp, intent, labeler, faceDetector, objectVision, useFallback)
+        }
         try {
             if (kind == MediaKind.IMAGE) {
                 val bmp = decodeImage(context, mediaUri)
                     ?: throw IllegalStateException("Could not read image for on-device vision.")
-                val matched = match(bmp)
+                val matched = match(0L, bmp)
                 bmp.recycle()
                 val action = if (matched == intent.keepMatches) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, if (matched) "match" else "no match"))
@@ -117,8 +123,13 @@ class MlKitProvider : ClipAnalyzer {
                 }
             } else null
 
-            val match: (Bitmap) -> Boolean = if (refEmbedding != null) {
-                { bmp ->
+            // Reference mode's per-frame work embeds each candidate detection against the ref, so
+            // the result depends on the runtime reference and isn't a property of the frame alone —
+            // not cached here. The generic-class fallback below is cache-friendly, so we route it
+            // through the same object-labels cache as the standard analyze() path.
+            val uriStr = mediaUri.toString()
+            val match: (Long, Bitmap) -> Boolean = if (refEmbedding != null) {
+                { _, bmp ->
                     objectVision.detect(bmp).filter { matchesTerm(it.label) }.any { d ->
                         val c = crop(bmp, d.box) ?: return@any false
                         try {
@@ -130,12 +141,16 @@ class MlKitProvider : ClipAnalyzer {
                     }
                 }
             } else {
-                // No usable reference embedding — fall back to generic class detection.
-                { bmp -> objectVision.available && objectVision.labels(bmp).any { matchesTerm(it) } }
+                // No usable reference embedding — fall back to generic class detection, cached.
+                { atMs, bmp ->
+                    objectVision.available && FrameAnalysisCache
+                        .objectLabels(uriStr, atMs) { objectVision.labels(bmp) }
+                        .any { matchesTerm(it) }
+                }
             }
 
             if (kind == MediaKind.IMAGE) {
-                val matched = match(reference)
+                val matched = match(0L, reference)
                 val action = if (matched == parsed.keepMatches) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, if (matched) "match" else "no match"))
             } else {
@@ -164,7 +179,7 @@ class MlKitProvider : ClipAnalyzer {
         keepMatches: Boolean,
         onProgress: (AnalysisProgress) -> Unit,
         checkpoint: () -> Unit,
-        match: (Bitmap) -> Boolean,
+        match: (atMs: Long, bmp: Bitmap) -> Boolean,
     ): List<EditSegment> {
         val retriever = MediaMetadataRetriever()
         val matched = mutableListOf<LongRange>()
@@ -201,7 +216,7 @@ class MlKitProvider : ClipAnalyzer {
                 checkpoint() // pause/cancel hook (blocks while paused, throws on cancel)
                 val bmp = retriever.getFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (bmp != null) {
-                    if (match(bmp)) {
+                    if (match(t, bmp)) {
                         matched += (t - halfMs).coerceAtLeast(0L)..(t + halfMs).coerceAtMost(dur)
                         matchCount++
                     }
@@ -229,6 +244,8 @@ class MlKitProvider : ClipAnalyzer {
     }
 
     private fun qualifies(
+        uri: String,
+        atMs: Long,
         bmp: Bitmap,
         intent: Intent,
         labeler: com.google.mlkit.vision.label.ImageLabeler,
@@ -236,24 +253,31 @@ class MlKitProvider : ClipAnalyzer {
         objectVision: ObjectVision?,
         useFallback: Boolean,
     ): Boolean {
+        // Face detection isn't cached — it's fast and only runs when the prompt asks for faces.
         if (intent.useFaces && faceDetector != null) {
             val image = InputImage.fromBitmap(bmp, 0)
             return Tasks.await(faceDetector.process(image)).isNotEmpty()
         }
-        // Primary signal: precise COCO object detection (catches non-prominent / partial objects).
+        // Primary signal: precise COCO object detection. Cached per (uri, atMs) so a rescan of the
+        // same clip with a different prompt reuses last time's labels — the ML Kit call is skipped
+        // entirely on a hit and only the string-membership check re-runs (essentially free).
         if (objectVision != null && objectVision.available) {
-            if (objectVision.labels(bmp).any { o -> intent.terms.any { t -> o.contains(t) || t.contains(o) } }) {
+            val ovLabels = FrameAnalysisCache.objectLabels(uri, atMs) { objectVision.labels(bmp) }
+            if (ovLabels.any { o -> intent.terms.any { t -> o.contains(t) || t.contains(o) } }) {
                 return true
             }
         }
         if (!useFallback) return false
-        // Fallback: whole-image scene/object labeling for terms the COCO detector doesn't cover.
-        val image = InputImage.fromBitmap(bmp, 0)
-        val labels = Tasks.await(labeler.process(image))
-        return labels.any { l ->
-            l.confidence >= 0.5f && intent.terms.any { t ->
-                val text = l.text.lowercase()
-                text.contains(t) || t.contains(text)
+        // Fallback: whole-image scene labeling. Also cached, and snapshotted as (text, confidence)
+        // pairs so the cache doesn't retain refs to the labeler (which is closed at end-of-scan).
+        val scene = FrameAnalysisCache.sceneLabels(uri, atMs) {
+            val image = InputImage.fromBitmap(bmp, 0)
+            Tasks.await(labeler.process(image)).map { it.text to it.confidence }
+        }
+        return scene.any { (text, confidence) ->
+            confidence >= 0.5f && intent.terms.any { t ->
+                val lower = text.lowercase()
+                lower.contains(t) || t.contains(lower)
             }
         }
     }
