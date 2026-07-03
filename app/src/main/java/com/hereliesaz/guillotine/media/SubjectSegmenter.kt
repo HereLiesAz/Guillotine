@@ -45,6 +45,11 @@ object SubjectSegmenter {
             null
         } finally {
             segmenter.close()
+            // applyMask returns a fresh ARGB bitmap; the source frame is never needed after this
+            // and applyMask only recycled it when it had to *scale* first (frame.width != mask.width).
+            // So on the same-size path, `frame` used to leak until GC. Recycle it here in all cases —
+            // by this point applyMask has fully consumed its pixels into `out`.
+            runCatching { frame.recycle() }
         }
     }
 

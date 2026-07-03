@@ -51,7 +51,10 @@ object McpDispatcher {
                             put("type", "text"); put("text", res.toString(2))
                         }))
                     })
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
+                    // Catch Throwable, not Exception — tool implementations can surface native
+                    // Errors (UnsatisfiedLinkError from ML Kit, OOM on a large frame decode) and
+                    // the "never throws" contract must hold for those too.
                     jsonRpcResult(req.id, JSONObject().apply {
                         put("content", org.json.JSONArray().put(JSONObject().apply {
                             put("type", "text"); put("text", "Error: ${e.message}")
@@ -80,7 +83,10 @@ object McpDispatcher {
                             put("text", content.toString(2))
                         }))
                     })
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
+                    // Catch Throwable, not Exception — tool implementations can surface native
+                    // Errors (UnsatisfiedLinkError from ML Kit, OOM on a large frame decode) and
+                    // the "never throws" contract must hold for those too.
                     jsonRpcError(req.id, -32602, "Resource error: ${e.message}")
                 }
             }

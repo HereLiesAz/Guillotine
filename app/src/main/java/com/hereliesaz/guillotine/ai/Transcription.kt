@@ -44,29 +44,35 @@ object Transcription {
                 doOutput = true
                 setChunkedStreamingMode(2 * 1024 * 1024) // stream in 2 MB chunks to avoid OOM
             }
-            DataOutputStream(conn.outputStream).use { out ->
-                fun field(name: String, value: String) {
+            val (ok, body) = try {
+                DataOutputStream(conn.outputStream).use { out ->
+                    fun field(name: String, value: String) {
+                        out.writeBytes("--$boundary\r\n")
+                        out.writeBytes("Content-Disposition: form-data; name=\"$name\"\r\n\r\n")
+                        out.writeBytes("$value\r\n")
+                    }
+                    field("model", "whisper-1")
+                    field("response_format", "verbose_json")
                     out.writeBytes("--$boundary\r\n")
-                    out.writeBytes("Content-Disposition: form-data; name=\"$name\"\r\n\r\n")
-                    out.writeBytes("$value\r\n")
+                    out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"audio.mp4\"\r\n")
+                    out.writeBytes("Content-Type: application/octet-stream\r\n\r\n")
+                    // Stream the source straight through rather than buffering the whole file in memory.
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        val buf = ByteArray(64 * 1024)
+                        var n: Int
+                        while (input.read(buf).also { n = it } != -1) out.write(buf, 0, n)
+                    } ?: throw IllegalStateException("Could not read media for transcription.")
+                    out.writeBytes("\r\n--$boundary--\r\n")
                 }
-                field("model", "whisper-1")
-                field("response_format", "verbose_json")
-                out.writeBytes("--$boundary\r\n")
-                out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"audio.mp4\"\r\n")
-                out.writeBytes("Content-Type: application/octet-stream\r\n\r\n")
-                // Stream the source straight through rather than buffering the whole file in memory.
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    val buf = ByteArray(64 * 1024)
-                    var n: Int
-                    while (input.read(buf).also { n = it } != -1) out.write(buf, 0, n)
-                } ?: throw IllegalStateException("Could not read media for transcription.")
-                out.writeBytes("\r\n--$boundary--\r\n")
+                val ok = conn.responseCode in 200..299
+                val body = (if (ok) conn.inputStream else conn.errorStream)
+                    ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+                ok to body
+            } finally {
+                // Always release the connection — the old code called disconnect() only on the
+                // happy path, so a throw from the multipart write (e.g. null input stream) leaked it.
+                conn.disconnect()
             }
-            val ok = conn.responseCode in 200..299
-            val body = (if (ok) conn.inputStream else conn.errorStream)
-                ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
-            conn.disconnect()
             if (!ok) throw IllegalStateException("Transcription failed (${conn.responseCode}): ${body.take(300)}")
 
             val json = JSONObject(body)

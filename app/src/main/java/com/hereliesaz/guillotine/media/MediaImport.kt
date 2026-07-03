@@ -64,6 +64,13 @@ object MediaImport {
             }
         }
 
+        // Reject unreadable / bogus media that the retriever couldn't measure. Before this, an
+        // unreadable file with a null/0 duration was still imported as a 0-duration VIDEO clip —
+        // it would land on the timeline as an invisible zero-width blip and confuse every downstream
+        // operation. Images legitimately have durationMs == 0 here; the editor's addMedia gives them
+        // a default display duration when they become clips.
+        if (kind != MediaKind.IMAGE && durationMs <= 0L) return null
+
         return MediaItem(
             id = newId(),
             uri = uri.toString(),
