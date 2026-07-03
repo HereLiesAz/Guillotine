@@ -45,13 +45,21 @@ class LiveAudioProcessor : BaseAudioProcessor() {
         val p = pan
         val leftFactor = (if (p <= 0f) 1f else 1f - p) * g
         val rightFactor = (if (p >= 0f) 1f else 1f + p) * g
-        val stereo = channelCount >= 2
+        val stereo = channelCount == 2
         // Frame-based loop so a trailing partial frame can't underflow getShort().
         val bytesPerFrame = 2 * channelCount.coerceAtLeast(1)
         val frames = bytes / bytesPerFrame
         for (f in 0 until frames) {
             for (c in 0 until channelCount) {
-                val factor = if (stereo) (if (c == 0) leftFactor else rightFactor) else g
+                // Left/right pan factors are only meaningful for 2ch stereo. Mono and multichannel
+                // (5.1, 7.1) apply gain only — Media3's channel-mixer downstream is what actually
+                // sorts multichannel routing to the output. Before this, "stereo = channelCount >= 2"
+                // treated channel 0 of 5.1 as left and everything else as right, mispanning surrounds.
+                val factor = when {
+                    !stereo -> g
+                    c == 0 -> leftFactor
+                    else -> rightFactor
+                }
                 val scaled = (inputBuffer.short * factor).toInt().coerceIn(-32768, 32767)
                 out.putShort(scaled.toShort())
             }

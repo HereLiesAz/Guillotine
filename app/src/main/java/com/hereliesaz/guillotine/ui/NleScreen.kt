@@ -185,6 +185,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showAiComparison by remember { mutableStateOf(false) }
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
+    var showNewProjectConfirm by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
@@ -374,6 +375,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onImport = { importTargetTrack = null; importLauncher() },
             onGenerate = { showGenerate = true },
             onNameProject = { showNameDialog = true },
+            onNewProject = { showNewProjectConfirm = true },
             onOpenProject = { openLauncher() },
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
@@ -471,6 +473,38 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             current = state.document.name,
             onConfirm = { vm.setProjectName(it); showNameDialog = false },
             onDismiss = { showNameDialog = false },
+        )
+    }
+    if (showNewProjectConfirm) {
+        // "New" replaces the autosaved document with a fresh one; confirm before doing that.
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showNewProjectConfirm = false },
+            title = { Text("Start a new project?", color = White) },
+            text = {
+                Text(
+                    "Your current project will be replaced by an empty one and this will overwrite " +
+                        "the autosave. Export any work you want to keep first (menu → Render).",
+                    color = Neutral400, fontSize = 12.sp,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        vm.loadDocument(com.hereliesaz.guillotine.model.Document())
+                        showNewProjectConfirm = false
+                    },
+                ) {
+                    Text("New", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { showNewProjectConfirm = false },
+                ) {
+                    Text("Cancel", color = Neutral400, fontSize = 14.sp)
+                }
+            },
+            containerColor = Neutral900,
         )
     }
     if (showGenerate) {
@@ -580,6 +614,7 @@ private fun TopBar(
     onImport: () -> Unit,
     onGenerate: () -> Unit,
     onNameProject: () -> Unit,
+    onNewProject: () -> Unit,
     onOpenProject: () -> Unit,
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
@@ -601,19 +636,22 @@ private fun TopBar(
             // opens the in-app markdown reader, which auto-discovers the repo's root + docs/ .md
             // files (a .azignore at the repo root excludes dev-only docs from that list).
             azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp, showFooter = true)
-            azItem("Import media") { onImport() }
-            azItem("Generate image") { onGenerate() }
+            azItem("New") { onNewProject() }
+            azItem("Open") { onOpenProject() }
             azItem("Save") { onNameProject() }
-            azItem("Open project file\u2026") { onOpenProject() }
-            azItem("Export video") { onExport() }
+            azItem("Import") { onImport() }
+            azItem("Generate") { onGenerate() }
+            azItem("Render") { onExport() }
             azDivider()
-            azItem("Project settings") { onProjectSettings() }
+            azItem("Project") { onProjectSettings() }
             azItem("Settings") { onSettings() }
-            azItem("Compare AI providers") { onAiComparison() }
-            azDivider()
+            azItem("Compare AI") { onAiComparison() }
             azItem("Tutorial") { onTutorial() }
             azItem("FAQ") { onFaq() }
-            azItem("Icon key") { onHelp() }
+            azItem("Icon Key") { onHelp() }
+            // Trailing divider before the AzNavRail footer (About / Feedback / @HereLiesAz). The
+            // footer may draw its own separator on top \u2014 remove this line if that looks doubled.
+            azDivider()
         }
         Text(
             state.document.name.ifBlank { "Untitled project" },
@@ -661,16 +699,14 @@ private fun NameProjectDialog(current: String, onConfirm: (String) -> Unit, onDi
             )
         },
         confirmButton = {
-            Text(
-                "Save", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clickable { onConfirm(name) }.padding(12.dp),
-            )
+            androidx.compose.material3.TextButton(onClick = { onConfirm(name) }) {
+                Text("Save", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
         },
         dismissButton = {
-            Text(
-                "Cancel", color = Neutral400, fontSize = 14.sp,
-                modifier = Modifier.clickable(onClick = onDismiss).padding(12.dp),
-            )
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Neutral400, fontSize = 14.sp)
+            }
         },
         containerColor = Neutral900,
     )

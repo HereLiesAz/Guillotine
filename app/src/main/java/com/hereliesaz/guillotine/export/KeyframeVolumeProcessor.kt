@@ -77,4 +77,14 @@ class KeyframeVolumeProcessor(
     override fun onReset() {
         framesProcessed = 0L
     }
+
+    /**
+     * Called on a seek / stream discontinuity: the sample cursor jumps but our clip-local time
+     * counter must reset too, otherwise the next queueInput would interpolate keyframes for a time
+     * that no longer matches where we're reading from and the gain/pan would desync visibly.
+     * Base class doesn't clear it — [onReset] only fires on hard resets, not flushes.
+     */
+    override fun onFlush() {
+        framesProcessed = 0L
+    }
 }

@@ -123,22 +123,26 @@ class MlKitProvider : ClipAnalyzer {
                 }
             } else null
 
-            // Reference mode's per-frame work embeds each candidate detection against the ref, so
-            // the result depends on the runtime reference and isn't a property of the frame alone —
-            // not cached here. The generic-class fallback below is cache-friendly, so we route it
-            // through the same object-labels cache as the standard analyze() path.
+            // Reference mode embeds each candidate detection against the ref, so the *similarity*
+            // result depends on the runtime reference and isn't a property of the frame alone — not
+            // cached. But the underlying `objectVision.detect(bmp)` IS a property of the frame, so
+            // it's routed through FrameAnalysisCache: a rescan against a different reference reuses
+            // every prior detect() call, only the embedding+similarity re-runs. The generic-class
+            // fallback below uses the same object-labels cache as the standard analyze() path.
             val uriStr = mediaUri.toString()
             val match: (Long, Bitmap) -> Boolean = if (refEmbedding != null) {
-                { _, bmp ->
-                    objectVision.detect(bmp).filter { matchesTerm(it.label) }.any { d ->
-                        val c = crop(bmp, d.box) ?: return@any false
-                        try {
-                            val e = embed.embed(c) ?: return@any false
-                            embed.similarity(refEmbedding, e) >= REF_THRESHOLD
-                        } finally {
-                            if (c !== bmp) c.recycle() // free each crop — a long scan makes hundreds
+                { atMs, bmp ->
+                    FrameAnalysisCache.detections(uriStr, atMs) { objectVision.detect(bmp) }
+                        .filter { matchesTerm(it.label) }
+                        .any { d ->
+                            val c = crop(bmp, d.box) ?: return@any false
+                            try {
+                                val e = embed.embed(c) ?: return@any false
+                                embed.similarity(refEmbedding, e) >= REF_THRESHOLD
+                            } finally {
+                                if (c !== bmp) c.recycle() // free each crop — a long scan makes hundreds
+                            }
                         }
-                    }
                 }
             } else {
                 // No usable reference embedding — fall back to generic class detection, cached.

@@ -21,17 +21,20 @@ class MatteOverlay(
     private val timelineStartMs: Long,
 ) : BitmapOverlay() {
 
-    private val blank: Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     private val settings = StaticOverlaySettings.Builder().build()
 
     override fun getBitmap(presentationTimeUs: Long): Bitmap {
         val timelineMs = timelineStartMs + presentationTimeUs / 1000
-        return mattes[timelineMs / CACHE_MS] ?: blank
+        return mattes[timelineMs / CACHE_MS] ?: SHARED_BLANK
     }
 
     override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings = settings
 
     companion object {
         const val CACHE_MS = 100L
+        // One shared placeholder for every MatteOverlay instance: a fresh 1×1 was allocated per
+        // instance and never recycled, so a long export with many overlay-owning items leaked
+        // one bitmap each. Static and immutable — the encoder only reads it.
+        private val SHARED_BLANK: Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     }
 }

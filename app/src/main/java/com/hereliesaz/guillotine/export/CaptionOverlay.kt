@@ -40,12 +40,17 @@ class CaptionOverlay(
         return if (clip.text.isNotBlank() && t >= clip.startTimeMs && t < clip.endTimeMs) styled else empty
     }
 
-    override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings =
-        StaticOverlaySettings.Builder()
-            .setScale(clip.scale, clip.scale)
-            .setRotationDegrees(clip.rotation)
-            .setBackgroundFrameAnchor(clip.offsetX.coerceIn(-1f, 1f), (-clip.offsetY).coerceIn(-1f, 1f))
-            .build()
+    // Cached once — the settings are constant for a caption (they only depend on immutable clip
+    // properties). The base [getOverlaySettings] used to build a fresh StaticOverlaySettings on
+    // every frame, which meant GC churn on the render thread; MatteOverlay already caches, so
+    // this brings CaptionOverlay in line.
+    private val cachedSettings: StaticOverlaySettings = StaticOverlaySettings.Builder()
+        .setScale(clip.scale, clip.scale)
+        .setRotationDegrees(clip.rotation)
+        .setBackgroundFrameAnchor(clip.offsetX.coerceIn(-1f, 1f), (-clip.offsetY).coerceIn(-1f, 1f))
+        .build()
+
+    override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings = cachedSettings
 
     private fun typefaceName(f: TextFont): String = when (f) {
         TextFont.SANS -> "sans-serif"

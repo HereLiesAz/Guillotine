@@ -129,14 +129,19 @@ class McpTools(
 
     private fun getTimeline(): JSONObject {
         val doc = vm.uiState.value.document
+        val now = vm.uiState.value.currentTimeMs
         return JSONObject().apply {
             put("name", doc.name)
             put("totalDurationMs", doc.totalDurationMs)
-            put("currentTimeMs", vm.uiState.value.currentTimeMs)
+            put("currentTimeMs", now)
             put("videoTracks", JSONArray(doc.videoTracks))
             put("audioTracks", JSONArray(doc.audioTracks))
             put("clipCount", doc.clips.size)
             put("clips", JSONArray().apply { doc.clips.forEach { put(clipJson(it)) } })
+            put(
+                "humanSummary",
+                "Read timeline: ${doc.clips.size} clip(s), ${msFmt(doc.totalDurationMs)} total, playhead ${msFmt(now)}.",
+            )
         }
     }
 
@@ -149,12 +154,24 @@ class McpTools(
             if (media != null) {
                 put("mediaName", media.name); put("mediaKind", media.kind.name); put("mediaUri", media.uri)
             }
+            put(
+                "humanSummary",
+                buildString {
+                    append("Read clip \"${media?.name ?: clip.id.take(6)}\": ${msFmt(clip.durationMs)}")
+                    if (clip.edits.isNotEmpty()) append(", ${clip.edits.size} edit(s)")
+                    if (clip.prompt.isNotBlank()) append(", prompt \"${clip.prompt.take(60)}\"")
+                    append(".")
+                },
+            )
         }
     }
 
     private fun setPrompt(clipId: String, prompt: String): JSONObject {
         vm.updateClip(clipId) { it.copy(prompt = prompt) }
-        return JSONObject().apply { put("ok", true); put("clipId", clipId); put("prompt", prompt) }
+        return JSONObject().apply {
+            put("ok", true); put("clipId", clipId); put("prompt", prompt)
+            put("humanSummary", "Set clip prompt to \"${prompt.take(80)}\".")
+        }
     }
 
     private fun analyzeClip(clipId: String): JSONObject {
@@ -179,39 +196,82 @@ class McpTools(
      */
     private fun analyzeResult(clipId: String, edits: List<EditSegment>): JSONObject {
         val cutApplied = edits.any { it.action == EditAction.REMOVE }
+        val removedMs = edits.filter { it.action == EditAction.REMOVE }.sumOf { it.endMs - it.startMs }
+        val keptCount = edits.count { it.action == EditAction.KEEP }
+        val removedCount = edits.count { it.action == EditAction.REMOVE }
         if (cutApplied) vm.applyCuts(clipId, edits)
+        val newClipCount = vm.uiState.value.document.clips.size
+        val newTotal = vm.uiState.value.document.totalDurationMs
         return JSONObject().apply {
             put("ok", true); put("clipId", clipId); put("segmentsFound", edits.size)
             put("segments", segmentsJson(edits))
             put("cutApplied", cutApplied)
-            put("clipCount", vm.uiState.value.document.clips.size)
-            put("totalDurationMs", vm.uiState.value.document.totalDurationMs)
+            put("clipCount", newClipCount)
+            put("totalDurationMs", newTotal)
+            put(
+                "humanSummary",
+                when {
+                    edits.isEmpty() -> "No frames matched — nothing to cut."
+                    !cutApplied -> "Matched $keptCount kept range(s); no cuts needed."
+                    else ->
+                        "Cut $removedCount range(s) (${msFmt(removedMs)}), kept $keptCount. " +
+                            "Timeline now $newClipCount clip(s), ${msFmt(newTotal)} total."
+                },
+            )
         }
     }
 
     private fun selectClip(clipId: String): JSONObject {
         vm.selectClip(clipId.ifBlank { null })
-        return JSONObject().apply { put("ok", true) }
+        val summary = if (clipId.isBlank()) "Cleared selection." else run {
+            val doc = vm.uiState.value.document
+            val cl = doc.clips.firstOrNull { it.id == clipId }
+            val name = cl?.let { doc.mediaFor(it)?.name } ?: clipId.take(6)
+            "Selected clip \"$name\"."
+        }
+        return JSONObject().apply { put("ok", true); put("humanSummary", summary) }
     }
 
     private fun splitClipTool(clipId: String, atMs: Long): JSONObject {
         vm.splitClip(clipId, atMs)
-        return ok().put("clipCount", vm.uiState.value.document.clips.size)
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("clipCount", n)
+            put("humanSummary", "Split clip at ${msFmt(atMs)}. Timeline now $n clip(s).")
+        }
     }
 
     private fun segmentClipTool(clipId: String): JSONObject {
         vm.segmentClip(clipId)
-        return ok().put("clipCount", vm.uiState.value.document.clips.size)
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("clipCount", n)
+            put("humanSummary", "Segmented clip at every edit boundary (all pieces kept). Timeline now $n clip(s).")
+        }
     }
 
     private fun deleteClipTool(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val name = doc.clips.firstOrNull { it.id == clipId }?.let { doc.mediaFor(it)?.name } ?: clipId.take(6)
         vm.deleteClip(clipId)
-        return ok().put("clipCount", vm.uiState.value.document.clips.size)
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("clipCount", n)
+            put("humanSummary", "Deleted clip \"$name\". $n clip(s) remain.")
+        }
     }
 
     private fun rippleDeleteRangeTool(startMs: Long, endMs: Long): JSONObject {
         vm.rippleDeleteRange(startMs, endMs)
-        return ok().put("totalDurationMs", vm.uiState.value.document.totalDurationMs)
+        val total = vm.uiState.value.document.totalDurationMs
+        return ok().apply {
+            put("totalDurationMs", total)
+            put(
+                "humanSummary",
+                "Rippled out ${msFmt(startMs)}–${msFmt(endMs)} (${msFmt(endMs - startMs)}) across all tracks. " +
+                    "Timeline now ${msFmt(total)}.",
+            )
+        }
     }
 
     private fun analyzeClipWithReference(clipId: String): JSONObject {
@@ -262,20 +322,25 @@ class McpTools(
                 )
             }.filter { it.action == EditAction.REMOVE }
             if (removes.isEmpty()) {
-                JSONObject().apply { put("ok", true); put("replaced", 0); put("note", "No matching object to remove.") }
+                JSONObject().apply {
+                    put("ok", true); put("replaced", 0); put("note", "No matching object to remove.")
+                    put("humanSummary", "No \"${clip.prompt}\" found in the clip — nothing generated.")
+                }
             } else {
                 // 2. For each segment: on-device mask from a representative frame -> cloud inpaint -> media.
-                val replacements = runBlocking {
-                    removes.mapIndexedNotNull { idx, seg ->
-                        sink.checkpointBlocking()
-                        sink.report(idx.toFloat() / removes.size, "Removing ${clip.prompt}… ${idx + 1}/${removes.size}")
-                        val frame = grabFrame(Uri.parse(media.uri), (seg.startMs + seg.endMs) / 2)
-                            ?: return@mapIndexedNotNull null
-                        try {
-                            val boxes = com.hereliesaz.guillotine.ai.ObjectVision(context).use { ov ->
-                                ov.detect(frame).filter { matchesPrompt(clip.prompt, it.label) }.map { it.box }
-                            }
-                            if (boxes.isEmpty()) return@mapIndexedNotNull null
+                // Hoist ObjectVision out of the segment loop — before, we `new`d + `use`d it per
+                // segment, reloading the EfficientDet .tflite model each time. Once per run is
+                // enough; the model owns no per-segment state.
+                val replacements = com.hereliesaz.guillotine.ai.ObjectVision(context).use { ov ->
+                    runBlocking {
+                        removes.mapIndexedNotNull { idx, seg ->
+                            sink.checkpointBlocking()
+                            sink.report(idx.toFloat() / removes.size, "Removing ${clip.prompt}… ${idx + 1}/${removes.size}")
+                            val frame = grabFrame(Uri.parse(media.uri), (seg.startMs + seg.endMs) / 2)
+                                ?: return@mapIndexedNotNull null
+                            try {
+                                val boxes = ov.detect(frame).filter { matchesPrompt(clip.prompt, it.label) }.map { it.box }
+                                if (boxes.isEmpty()) return@mapIndexedNotNull null
                             val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, boxes)
                             try {
                                 val uri = runCatching {
@@ -299,13 +364,20 @@ class McpTools(
                             frame.recycle()
                         }
                     }
+                    }
                 }
                 if (replacements.isEmpty()) throw IllegalStateException("Generation produced no usable replacements.")
                 vm.replaceSegmentsWithGenerated(clipId, replacements)
+                val replacedMs = replacements.sumOf { (it.relEndMs - it.relStartMs).coerceAtLeast(0L) }
                 JSONObject().apply {
                     put("ok", true); put("replaced", replacements.size)
                     put("clipCount", vm.uiState.value.document.clips.size)
                     put("totalDurationMs", vm.uiState.value.document.totalDurationMs)
+                    put(
+                        "humanSummary",
+                        "Erased \"${clip.prompt}\" from ${replacements.size} segment(s) (${msFmt(replacedMs)}) " +
+                            "with inpainted replacements — clip length unchanged.",
+                    )
                 }
             }
         }
@@ -339,6 +411,8 @@ class McpTools(
             ?: return JSONObject().put("error", "Could not extract the current preview frame.")
         try {
             val detections = com.hereliesaz.guillotine.ai.ObjectVision(context).use { ov -> ov.detect(frame) }
+            val sorted = detections.sortedByDescending { it.score }
+            val topDesc = sorted.take(3).joinToString(", ") { "${it.label} (${(it.score * 100).toInt()}%)" }
             return JSONObject().apply {
                 put("clipId", clip.id)
                 put("timelineMs", now)
@@ -346,7 +420,7 @@ class McpTools(
                 put("frameWidth", frame.width)
                 put("frameHeight", frame.height)
                 put("objects", JSONArray().apply {
-                    detections.sortedByDescending { it.score }.forEach { d ->
+                    sorted.forEach { d ->
                         put(JSONObject().apply {
                             put("label", d.label)
                             put("confidence", (d.score * 100).toInt())
@@ -359,6 +433,12 @@ class McpTools(
                         })
                     }
                 })
+                put(
+                    "humanSummary",
+                    if (sorted.isEmpty()) "Scanned the current frame — no recognisable objects."
+                    else "Scanned the current frame — ${sorted.size} object(s): $topDesc" +
+                        if (sorted.size > 3) ", …" else ".",
+                )
             }
         } finally {
             runCatching { frame.recycle() }
@@ -378,6 +458,13 @@ class McpTools(
     }
 
     private fun ok() = JSONObject().put("ok", true)
+
+    /** Human duration: seconds under a minute (`4.3s`), M:SS otherwise (`1:04`). Used in humanSummary. */
+    private fun msFmt(ms: Long): String {
+        val abs = ms.coerceAtLeast(0L)
+        return if (abs < 60_000L) String.format(java.util.Locale.US, "%.1fs", abs / 1000.0)
+        else String.format(java.util.Locale.US, "%d:%02d", abs / 60_000L, (abs % 60_000L) / 1000L)
+    }
 
     // ---- helpers -------------------------------------------------------------
 

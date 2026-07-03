@@ -167,11 +167,16 @@ object VideoEffects {
     }
 
     /** Animates the frame's alpha from the clip's OPACITY keyframes (1 = opaque). */
-    private class KeyframeAlpha(private val clip: TimelineClip, private val startMs: Long) : RgbMatrix {
+    private class KeyframeAlpha(clip: TimelineClip, private val startMs: Long) : RgbMatrix {
         // Column-major identity; element[15] is the alpha→alpha factor, updated per frame.
         private val m = floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f)
+        // Pre-filtered/sorted once so getMatrix (per frame) stays allocation-free — the sibling
+        // KeyframeColorMatrix/KeyframeTransform classes already do this. Doing it inside
+        // TimelineMath.valueAt on every frame allocated a fresh filtered list per render tick.
+        private val kfs = clip.keyframes
+            .filter { it.property == KeyframeProperty.OPACITY }.sortedBy { it.timeMs }
         override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
-            m[15] = TimelineMath.valueAt(clip, KeyframeProperty.OPACITY, startMs + presentationTimeUs / 1000, 1f)
+            m[15] = TimelineMath.interpolateSorted(kfs, startMs + presentationTimeUs / 1000, 1f)
                 .coerceIn(0f, 1f)
             return m
         }

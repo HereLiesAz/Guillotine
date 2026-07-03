@@ -85,9 +85,15 @@ internal val AGENT_SYSTEM_PROMPT = """
 internal data class ToolOutcome(val json: JSONObject, val isError: Boolean) {
     fun content(): String = json.toString()
 
-    /** A short, human-readable summary for the status line. */
+    /**
+     * A short, human-readable summary for the bottom-sheet log. Prefers the tool's own
+     * [humanSummary] — every tool populates it with a plain-English description of what it did
+     * (counts, ranges, decisions) so the user sees the model's work, not raw JSON. The other
+     * branches are a legacy fallback for tools that predate humanSummary or return raw JSON.
+     */
     fun summary(): String = when {
         isError -> json.optString("error", "error")
+        json.has("humanSummary") -> json.optString("humanSummary")
         json.has("segmentsFound") -> "${json.optInt("segmentsFound")} segments"
         json.has("segmentsApplied") -> "${json.optInt("segmentsApplied")} applied"
         json.has("clipCount") -> "${json.optInt("clipCount")} clips"

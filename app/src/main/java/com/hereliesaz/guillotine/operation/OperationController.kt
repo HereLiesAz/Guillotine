@@ -107,8 +107,14 @@ object OperationController {
         onComplete: () -> Unit = {},
         block: suspend (Sink) -> Unit,
     ): Boolean {
-        if (_state.value != null) return false
-        begin(context, kind, label, pausable)
+        // Atomic busy-check + slot-claim. StateFlow.compareAndSet returns false if the current
+        // value isn't null (already claimed) — two near-simultaneous start() calls used to both
+        // pass the plain `_state.value != null` check before either called begin(), so both
+        // proceeded and clobbered each other's state.
+        if (!_state.compareAndSet(expect = null, update = OperationState(kind, label, progress = null, paused = false, pausable = pausable))) {
+            return false
+        }
+        begin(context, kind, label, pausable, alreadyClaimed = true)
         val sink = Sink()
         job = scope.launch {
             try {
@@ -138,8 +144,14 @@ object OperationController {
         pausable: Boolean,
         block: (Sink) -> T,
     ): T {
-        check(_state.value == null) { "Another operation is already running." }
-        begin(context, kind, label, pausable)
+        // Same atomic slot-claim as start(). check() throws if another op already owns the slot.
+        check(
+            _state.compareAndSet(
+                expect = null,
+                update = OperationState(kind, label, progress = null, paused = false, pausable = pausable),
+            ),
+        ) { "Another operation is already running." }
+        begin(context, kind, label, pausable, alreadyClaimed = true)
         job = null // blocking; cancel via the `cancelled` flag observed in checkpointBlocking
         try {
             return block(Sink())
@@ -148,10 +160,14 @@ object OperationController {
         }
     }
 
-    private fun begin(context: Context, kind: OperationKind, label: String, pausable: Boolean) {
+    private fun begin(context: Context, kind: OperationKind, label: String, pausable: Boolean, alreadyClaimed: Boolean = false) {
         paused = false
         cancelled = false
-        _state.value = OperationState(kind, label, progress = null, paused = false, pausable = pausable)
+        // Skip when the caller already claimed the slot via compareAndSet — otherwise a
+        // concurrent state observer would see the "empty" transition here.
+        if (!alreadyClaimed) {
+            _state.value = OperationState(kind, label, progress = null, paused = false, pausable = pausable)
+        }
         val app = context.applicationContext
         // Starting a foreground service from the background throws on API 31+ (e.g. an external MCP
         // tool triggering generative removal while the app is backgrounded). Don't crash — the

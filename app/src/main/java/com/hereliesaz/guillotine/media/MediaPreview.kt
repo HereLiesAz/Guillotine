@@ -67,7 +67,11 @@ object MediaPreview {
     /** Stereo (L/R) peak envelopes of [buckets] each across the clip's audio track, or null. */
     suspend fun waveform(context: Context, uri: String, buckets: Int = 240): Waveform? =
         withContext(Dispatchers.IO) {
-            waves.get(uri)?.let { return@withContext it }
+            // The cache key MUST include `buckets` — the returned envelope arrays are sized to it,
+            // and callers that pass a non-default bucket count would otherwise get the previous
+            // caller's differently-sized arrays back (silent corruption on the rendered waveform).
+            val cacheKey = "$uri@$buckets"
+            waves.get(cacheKey)?.let { return@withContext it }
             // The decode loop calls this; throwing on cancellation lets it propagate properly
             // (don't swallow CancellationException — only turn real decode failures into null).
             val result = try {
@@ -79,7 +83,7 @@ object MediaPreview {
             } catch (_: Throwable) {
                 null
             }
-            result?.let { waves.put(uri, it) }
+            result?.let { waves.put(cacheKey, it) }
             result
         }
 

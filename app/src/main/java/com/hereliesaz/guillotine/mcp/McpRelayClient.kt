@@ -51,9 +51,12 @@ class McpRelayClient(
             runCatching { ws?.close(1000, "client stopping") }
             ws = null
         }
-        // OkHttp owns its own dispatcher threads + connection pool; release them so a client
-        // recreated on a config change doesn't leak them.
-        client.dispatcher.executorService.shutdown()
+        // Evict the pooled connections (idempotent) so the socket to the relay closes cleanly, but
+        // do NOT shut down the dispatcher's executor — the executor is shared across the OkHttp
+        // client and would leave any later start() (or any other caller sharing the same client)
+        // with an already-shutdown pool that rejects new tasks. This class is designed to be
+        // recreated on config change; NleScreen's DisposableEffect calls stop() → drops the
+        // instance → a fresh one is built with a fresh OkHttp on the next `start()`.
         client.connectionPool.evictAll()
         scope.cancel()
     }

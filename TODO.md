@@ -2,37 +2,15 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
-## Frame-analysis cache for reference-mode analyze
-The standard `analyze` path now caches per-frame ObjectVision labels and ImageLabeler results in
-`FrameAnalysisCache`, so rescanning the same clip with a different prompt reuses last time's work.
-`analyzeWithReference` (used by `analyze_clip_with_reference`) still recomputes per frame because
-its match compares each candidate detection's embedding against a runtime reference — the result
-isn't a function of the frame alone. Cache the detection LIST (Detections including boxes/scores)
-per (uri, atMs) so at least the ObjectVision.detect call is skipped on repeat scans; the embedding
-step stays uncached.
-
 ## Audit follow-ups (deferred — need a device or a design call)
-Surfaced by a codebase audit; the clear, safe bugs were fixed. These were left because they need
-on-device verification, are perf-only churn on the render thread, or are design decisions:
+Surfaced by a codebase audit. Everything that was a clear, safe bug has been fixed. The rest was
+left because it needs on-device verification or is a design decision:
 - **Export: background-removed video clips contribute no audio** (`Exporter.kt` — foreground/bg-removed
   clips are added only as the matte overlay, never as sequence items, and aren't in `audioClips`).
   Confirm whether a bg-removed clip's own audio should still export, then include it if so.
 - **Keyframed opacity / export crossfade via `RgbMatrix[15]`** (`VideoEffects.kt` `FadeInAlpha`/
   `KeyframeAlpha`): verify on-device that writing only the alpha term actually changes output alpha —
   if not, opacity keyframes and dissolves are silent no-ops.
-- **Render-thread allocation churn**: `KeyframeAlpha` re-filters keyframes every frame (siblings
-  pre-sort); `CaptionOverlay.getOverlaySettings` rebuilds `StaticOverlaySettings` per frame
-  (`MatteOverlay` caches); `MatteOverlay` blank 1×1 bitmap never recycled. Pre-compute like the
-  sibling classes once the compositor is being tuned on-device.
-- **`remove_object_generative` reloads the EfficientDet model per segment** (`McpTools.kt`): hoist the
-  `ObjectVision` instance out of the per-segment loop.
-- **Minor robustness**: `McpDispatcher` catches `Exception` not `Throwable` (native `Error`s escape the
-  "never throws" contract); `McpRelayClient.stop()` shuts down the shared OkHttp executor (safe only if
-  the client is always recreated); `OperationController.start()` busy-check is not atomic;
-  `Transcription.whisper` leaks the `HttpURLConnection` on the null-input path; `SubjectSegmenter` doesn't
-  recycle the source frame when sizes match; `KeyframeVolumeProcessor` doesn't override `onFlush` (seek
-  desync); `PreviewAudio` pans >2-channel audio as if stereo; `MediaImport` imports an unreadable file as
-  a 0-duration VIDEO; waveform cache key omits `buckets`.
 
 ## Needs an on-device verification pass (built; untestable in CI)
 Implemented but never run on a device — confirm and tune:
