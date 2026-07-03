@@ -357,43 +357,52 @@ object Exporter {
         }
         if (videoSequences.isEmpty()) return null
 
-        val audioClips = document.clips
-            // Skip linked shadow clips — that audio is rendered by their video clip already.
+        // Audio: one EditedMediaItemSequence PER audio track so parallel tracks (music + voiceover +
+        // effects) actually MIX at render — a Composition's sequences play concurrently and their
+        // audio is mixed by Media3. Before this we built a single time-sorted sequence, which
+        // concatenated overlapping-in-time clips from different tracks (only one won at any moment).
+        // Linked shadow clips (a video's own sound displayed on an audio track) still filter out —
+        // that audio is carried by the video sequence itself, so including the shadow would double it.
+        val audioByTrack: Map<String, List<TimelineClip>> = document.clips
             .filter { it.type == ClipType.AUDIO && it.linkedClipId == null && it.trackId !in disabled }
             .sortedBy { it.startTimeMs }
-        val audioSeq = EditedMediaItemSequence.Builder()
-        var audioCursor = audioClips.firstOrNull()?.startTimeMs ?: 0L
-        var addedAudio = false
-        audioClips.forEach { clip ->
-            val media = document.mediaFor(clip) ?: return@forEach
-            val gap = clip.startTimeMs - audioCursor
-            if (gap > 0) { audioSeq.addGap(gap * 1000); audioCursor += gap }
-            for (range in TimelineMath.keptRanges(clip)) {
-                val startMs = range.first
-                val endMs = range.last + 1
-                if (endMs <= startMs) continue
-                val clipLocalStart = startMs - clip.trimStartMs
-                val mediaItem = ExoMediaItem.Builder()
-                    .setUri(Uri.parse(media.uri))
-                    .setClippingConfiguration(
-                        ExoMediaItem.ClippingConfiguration.Builder()
-                            .setStartPositionMs(startMs)
-                            .setEndPositionMs(endMs)
+            .groupBy { it.trackId }
+        val audioSequences: List<EditedMediaItemSequence> = audioByTrack.mapNotNull { (_, clips) ->
+            val seq = EditedMediaItemSequence.Builder()
+            var cursor = clips.firstOrNull()?.startTimeMs ?: return@mapNotNull null
+            var addedAny = false
+            clips.forEach { clip ->
+                val media = document.mediaFor(clip) ?: return@forEach
+                val gap = clip.startTimeMs - cursor
+                if (gap > 0) { seq.addGap(gap * 1000); cursor += gap }
+                for (range in TimelineMath.keptRanges(clip)) {
+                    val startMs = range.first
+                    val endMs = range.last + 1
+                    if (endMs <= startMs) continue
+                    val clipLocalStart = startMs - clip.trimStartMs
+                    val mediaItem = ExoMediaItem.Builder()
+                        .setUri(Uri.parse(media.uri))
+                        .setClippingConfiguration(
+                            ExoMediaItem.ClippingConfiguration.Builder()
+                                .setStartPositionMs(startMs)
+                                .setEndPositionMs(endMs)
+                                .build(),
+                        )
+                        .build()
+                    seq.addItem(
+                        EditedMediaItem.Builder(mediaItem)
+                            .setRemoveVideo(true)
+                            .setEffects(Effects(audioFor(clip, clipLocalStart), emptyList()))
                             .build(),
                     )
-                    .build()
-                audioSeq.addItem(
-                    EditedMediaItem.Builder(mediaItem)
-                        .setRemoveVideo(true)
-                        .setEffects(Effects(audioFor(clip, clipLocalStart), emptyList()))
-                        .build(),
-                )
-                addedAudio = true; audioCursor += (endMs - startMs)
+                    addedAny = true; cursor += (endMs - startMs)
+                }
             }
+            if (addedAny) seq.build() else null
         }
 
         val sequences = videoSequences.toMutableList()
-        if (addedAudio) sequences += audioSeq.build()
+        sequences.addAll(audioSequences)
         val composition = Composition.Builder(sequences)
         // Advanced path: the background-removal subjects (matte) + captions composite over the FINAL
         // stacked video, so a bg-removed clip on an upper track shows the lower tracks through its matte,
