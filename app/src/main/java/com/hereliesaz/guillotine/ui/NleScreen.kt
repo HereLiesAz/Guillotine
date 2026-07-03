@@ -64,6 +64,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -693,6 +695,11 @@ private fun EditorToolStrip(
     onHelp: () -> Unit,
 ) {
     val selected = state.selectedClips
+    // Dismiss the soft keyboard AND drop focus on submit — without this the IME stays up after
+    // send/enter, and the disabled state below (when the agent starts running) can leave the IME
+    // orphaned so the back button won't dismiss it (reads as a "freeze").
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     // The single AI prompt field does both jobs:
     //  • a clip/group is selected  -> the text is an analysis prompt for it; run on-device analysis
     //    (free, no LLM brain needed) — exactly as before.
@@ -700,6 +707,10 @@ private fun EditorToolStrip(
     //    drives the whole editor through the MCP tools (this is what the old assistant bar did).
     // Used by both the Enter key and the AI button.
     val submit: () -> Unit = submit@{
+        // Always dismiss the IME on submit (even for a no-op blank send), so the field never
+        // sits behind a stuck keyboard.
+        keyboard?.hide()
+        focusManager.clearFocus()
         if (selected.isEmpty()) {
             val text = assistant.input.ifBlank { state.lastPrompt }
             if (text.isNotBlank()) { vm.rememberPrompt(text); onAgentRun(text) }
@@ -804,7 +815,10 @@ private fun EditorToolStrip(
                         if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
                         if (submitNow) submit()
                     },
-                    enabled = !assistant.running,
+                    // Deliberately NOT disabled while the agent is running: disabling a focused
+                    // TextField while the IME is up orphans the keyboard and the back button can't
+                    // dismiss it (feels like a freeze). AssistantViewModel.run already guards against
+                    // overlapping submits (`if (running) return`), so leaving this enabled is safe.
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged { promptFocused = it.isFocused }
