@@ -117,6 +117,37 @@ jobs:
           path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
+      # Persist the versionCode bump RIGHT NOW — before we even talk to Play. The
+      # build already incremented version.properties on disk; if anything downstream
+      # (network, auth, precondition, timeout) fails, the next attempt MUST see a
+      # fresh number rather than reuse this one and collide. Committing before publish
+      # means the counter always moves forward regardless of what happens next. The
+      # push ignores version.properties (see `on.push.paths-ignore`) so this commit
+      # does not itself trigger another build.
+      - name: Persist the version bump
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version.properties
+          if git diff --cached --quiet; then
+            echo "version.properties unchanged — nothing to commit."
+            exit 0
+          fi
+          git commit -m "ci: persist auto-incremented versionCode [skip ci]"
+          # Retry to absorb a race with a concurrent push to the same branch.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "Persisted version bump."
+              exit 0
+            fi
+            echo "Push failed (attempt $attempt); rebasing and retrying…"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            sleep $((attempt * 5))
+          done
+          echo "::error::Could not persist the version bump; the next build may collide."
+          exit 1
+
       # Publish runs by default (including on push) so a build that doesn't actually push FAILS the job —
       # a green check means it reached Play. Skip only by explicitly dispatching with publish: false.
       #
@@ -163,45 +194,9 @@ jobs:
             exit 1
           fi
 
-      # Persist the versionCode the build just published. The build auto-increments
-      # version.properties on disk but CI would otherwise discard it, so every push
-      # rebuilt the same code and Play rejected the duplicate. Committing it back means
-      # the next push starts from the just-published code. The push ignores version.properties
-      # (see `on.push.paths-ignore`), so this commit does not trigger another build.
-      #
-      # Runs on exit 0 (full success) OR exit 2 (internal published but ≥1 other track
-      # failed) — Play has consumed the versionCode either way, so the next build MUST
-      # start from the next number regardless of whether alpha/beta/production landed.
-      - name: Persist the version bump
-        if: >-
-          github.event_name == 'push' &&
-          (steps.publish.outputs.exit_code == '0' || steps.publish.outputs.exit_code == '2')
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add version.properties
-          if git diff --cached --quiet; then
-            echo "version.properties unchanged — nothing to commit."
-            exit 0
-          fi
-          git commit -m "ci: persist auto-incremented versionCode [skip ci]"
-          # Retry to absorb a race with a concurrent push to the same branch.
-          for attempt in 1 2 3; do
-            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-              echo "Persisted version bump."
-              exit 0
-            fi
-            echo "Push failed (attempt $attempt); rebasing and retrying…"
-            git pull --rebase origin "${GITHUB_REF_NAME}" || true
-            sleep $((attempt * 5))
-          done
-          echo "::error::Could not persist the version bump; the next build may collide."
-          exit 1
-
-      # Turn the job red on partial success so the missing tracks aren't invisible.
-      # Runs AFTER the persist step above, so the versionCode bump is safely committed
-      # first — the user sees a red X + the ::warning:: from publish_play.py telling
-      # them which tracks need setup, without losing the internal publish's version bump.
+      # Turn the job red on partial success so real Play failures stay visible.
+      # (The versionCode bump was already persisted before publish, so a red X here
+      # does NOT strand the counter — the next build reads the incremented value.)
       - name: Fail the job if any track was not staged
         if: steps.publish.outputs.exit_code == '2'
         run: |
