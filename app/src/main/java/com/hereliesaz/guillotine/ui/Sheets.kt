@@ -60,6 +60,7 @@ import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.FrameAnalysisCache
 import com.hereliesaz.guillotine.ai.ImageGen
+import kotlin.math.roundToInt
 import com.hereliesaz.guillotine.ai.ModelCatalog
 import com.hereliesaz.guillotine.ai.agent.BundledModelExtractor
 import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
@@ -240,10 +241,13 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     }
                     Slider(
                         value = frameAnalysisCacheSize.toFloat(),
-                        onValueChange = { frameAnalysisCacheSize = it.toInt() },
+                        // roundToInt (not toInt) — toInt truncates, so a stop that lands at 1024.0f
+                        // but is stored as 1023.9999f would jitter down to 1023.
+                        onValueChange = { frameAnalysisCacheSize = it.roundToInt() },
                         valueRange = FrameAnalysisCache.MIN_MAX_ENTRIES.toFloat()..FrameAnalysisCache.MAX_MAX_ENTRIES.toFloat(),
-                        // 33 stops → nice round numbers plus a proper 0 for "off".
-                        steps = 32,
+                        // steps = intermediate stops (Compose's contract), so 31 here → 33 total
+                        // positions (min + 31 intermediates + max) at exactly 1024-frame intervals.
+                        steps = 31,
                     )
                     Text(
                         "How many per-frame vision results to keep so rescans of the same clip are near-" +
