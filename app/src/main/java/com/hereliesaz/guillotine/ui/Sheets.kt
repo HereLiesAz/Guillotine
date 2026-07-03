@@ -177,9 +177,12 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             when (selectedTab) {
                 0 -> { // AI Analyzer
                     Text(
-                        "Analysis always runs on-device — your video never leaves the device. " +
-                            "Pick the AI that controls the editor (used by the assistant bar); it only " +
-                            "sends text, never your media.",
+                        "Analysis always runs on-device — your video never leaves the device. Pick the AI " +
+                            "that drives the editor below. It can reference the current preview frame: " +
+                            "when you say \"this frame\" the AI asks the on-device vision to describe what's " +
+                            "in it, so it knows what to act on. Only text (your prompt, the tool " +
+                            "descriptions this AI needs to see, and the on-device vision's text results) is " +
+                            "sent to the AI — your raw frames or audio never are.",
                         color = Neutral400, fontSize = 12.sp,
                     )
 

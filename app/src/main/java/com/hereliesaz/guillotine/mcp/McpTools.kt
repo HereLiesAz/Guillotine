@@ -75,6 +75,15 @@ class McpTools(
                 "same length (NOT cut shorter). Set the clip's prompt to the object first.",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
         ))
+        put(toolDefinition(
+            "describe_current_frame",
+            "Get an on-device vision description of what's in the current preview frame (the video clip " +
+                "at the playhead). Returns detected objects (label, confidence, pixel bounding box), the " +
+                "clip's id, and the source-media timestamp. The raw frame stays on the device — only the " +
+                "resulting text goes to you. Use whenever the user references 'this frame', 'what's on " +
+                "screen', 'the current thing', or otherwise points at the current preview.",
+            emptySchema(),
+        ))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -91,6 +100,7 @@ class McpTools(
         "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
         "analyze_clip_with_reference" -> analyzeClipWithReference(args.getString("clip_id"))
         "remove_object_generative" -> removeObjectGenerative(args.getString("clip_id"))
+        "describe_current_frame" -> describeCurrentFrame()
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -306,6 +316,53 @@ class McpTools(
         return label in p || p.contains(label) ||
             label.split(" ").any { it.length > 2 && p.contains(it) } ||
             p.split(" ").any { it.length > 2 && label.contains(it) }
+    }
+
+    /**
+     * On-device vision on the video clip at the playhead. The raw bitmap is decoded, run through
+     * [ObjectVision] (COCO-labelled detection with bounding boxes), and recycled here — only the
+     * resulting text descriptions leave this method, so the AI can "reference" the current preview
+     * frame (know what's in it, where it is on screen) without any pixel data going to the cloud.
+     */
+    private fun describeCurrentFrame(): JSONObject {
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips,
+            com.hereliesaz.guillotine.model.ClipType.VIDEO,
+            now,
+        ) ?: return JSONObject().put("error", "No video clip at the current playhead.")
+        val media = st.document.mediaFor(clip)
+            ?: return JSONObject().put("error", "Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: return JSONObject().put("error", "Could not extract the current preview frame.")
+        try {
+            val detections = com.hereliesaz.guillotine.ai.ObjectVision(context).use { ov -> ov.detect(frame) }
+            return JSONObject().apply {
+                put("clipId", clip.id)
+                put("timelineMs", now)
+                put("sourceMs", sourceMs)
+                put("frameWidth", frame.width)
+                put("frameHeight", frame.height)
+                put("objects", JSONArray().apply {
+                    detections.sortedByDescending { it.score }.forEach { d ->
+                        put(JSONObject().apply {
+                            put("label", d.label)
+                            put("confidence", (d.score * 100).toInt())
+                            put("box", JSONObject().apply {
+                                put("x", d.box.left.toInt())
+                                put("y", d.box.top.toInt())
+                                put("width", d.box.width().toInt())
+                                put("height", d.box.height().toInt())
+                            })
+                        })
+                    }
+                })
+            }
+        } finally {
+            runCatching { frame.recycle() }
+        }
     }
 
     private fun grabFrame(uri: Uri, atMs: Long): android.graphics.Bitmap? {

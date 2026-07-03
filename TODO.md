@@ -2,6 +2,14 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Multi-track audio in the exporter
+Preview now plays parallel audio tracks (music + voiceover + effects mix through Android's audio
+layer, one ExoPlayer per audio track). The exporter still builds a **single** `audioSeq` and sorts
+audio clips by start time, so two overlapping audio clips on different tracks will clash / one will
+win instead of mixing. Fix: build one `EditedMediaItemSequence` per audio track and pass all of
+them to the Transformer (`Composition.Builder(sequences)` mixes them). Match the per-track wiring
+in `AudioTrackLayer` (volume × keyframed volume × normalize × pan) so export matches preview.
+
 ## Audit follow-ups (deferred — need a device or a design call)
 Surfaced by a codebase audit; the clear, safe bugs were fixed. These were left because they need
 on-device verification, are perf-only churn on the render thread, or are design decisions:

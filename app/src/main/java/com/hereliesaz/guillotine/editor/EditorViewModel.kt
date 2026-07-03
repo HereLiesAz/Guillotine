@@ -346,7 +346,13 @@ class EditorViewModel : ViewModel() {
         segmentClip(clip.id)
     }
 
-    /** Segment a specific clip (used by the per-clip tool popups, incl. on a grouped selection). */
+    /**
+     * Segment a specific clip (used by the per-clip tool popups, incl. on a grouped selection). Each
+     * video piece is paired with the matching slice of its linked shadow audio in a fresh 2-member
+     * group — so dragging one piece moves its own audio with it, but sibling pieces stay independent
+     * (segment's whole point is that you can rearrange/delete them one by one, unlike [applyCuts]
+     * which groups all pieces together).
+     */
     fun segmentClip(clipId: String) {
         val clip = document.clips.firstOrNull { it.id == clipId } ?: return
         if (clip.edits.isEmpty()) return
@@ -360,25 +366,50 @@ class EditorViewModel : ViewModel() {
         if (cuts.size <= 2) return // no internal boundary → nothing to segment
 
         mutateDocument { doc ->
-            val pieces = mutableListOf<TimelineClip>()
+            val shadow = doc.clips.firstOrNull { it.linkedClipId == clip.id }
+            val videoPieces = mutableListOf<TimelineClip>()
+            val shadowPieces = mutableListOf<TimelineClip>()
             for (i in 0 until cuts.size - 1) {
                 val relStart = cuts[i]
                 val relEnd = cuts[i + 1]
                 val dur = relEnd - relStart
                 if (dur < MIN_CLIP_DURATION_MS) continue
-                pieces += clip.copy(
+                // A fresh 2-member group per (video, shadow-audio) pair so they stay linked while
+                // sibling pieces remain independent.
+                val pairGroup = if (shadow != null) newId() else null
+                val vid = clip.copy(
                     id = newId(),
                     startTimeMs = clip.startTimeMs + relStart,
                     trimStartMs = clip.trimStartMs + relStart,
                     durationMs = dur,
                     edits = emptyList(),
+                    groupId = pairGroup,
+                    linkedClipId = null,
                     keyframes = clip.keyframes
                         .filter { it.timeMs >= relStart && it.timeMs < relEnd }
                         .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
                 )
+                videoPieces += vid
+                if (shadow != null && pairGroup != null) {
+                    shadowPieces += shadow.copy(
+                        id = newId(),
+                        startTimeMs = shadow.startTimeMs + relStart,
+                        trimStartMs = shadow.trimStartMs + relStart,
+                        durationMs = dur,
+                        edits = emptyList(),
+                        groupId = pairGroup,
+                        // Re-link this slice to its video piece so preview/export still treat it as
+                        // a skipped shadow (the video clip carries the sound).
+                        linkedClipId = vid.id,
+                        keyframes = shadow.keyframes
+                            .filter { it.timeMs >= relStart && it.timeMs < relEnd }
+                            .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                    )
+                }
             }
-            if (pieces.isEmpty()) return@mutateDocument doc
-            doc.copy(clips = doc.clips.flatMap { if (it.id == clip.id) pieces else listOf(it) })
+            if (videoPieces.isEmpty()) return@mutateDocument doc
+            val removed = setOfNotNull(clip.id, shadow?.id)
+            doc.copy(clips = doc.clips.filterNot { it.id in removed } + videoPieces + shadowPieces)
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
     }

@@ -188,6 +188,12 @@ class MlKitProvider : ClipAnalyzer {
             val halfMs = max((EXTEND_FRAMES * frameMs).toLong(), stepMs / 2 + 1)
 
             val totalChecks = (dur / stepMs).coerceAtMost(MAX_CHECKS.toLong())
+            // Report progress in ACTUAL source-frame numbers (fps \u00d7 time), not the sampled-check
+            // count \u2014 the user sees "Frame 45 of 900" for a 30-second 30fps clip instead of the
+            // meaningless-to-them "Scanning frame 3 of 90" (which counted 3-fps samples). The sheet
+            // already shows the percentage on its progress bar, so the text carries only the frame
+            // numbers (no redundant %).
+            val totalFrames = (dur * fps / 1000f).toLong().coerceAtLeast(1L)
             var t = 0L
             var checks = 0
             var matchCount = 0
@@ -202,8 +208,9 @@ class MlKitProvider : ClipAnalyzer {
                     bmp.recycle()
                 }
                 checks++
+                val curFrame = (t * fps / 1000f).toLong().coerceAtMost(totalFrames)
                 onProgress(AnalysisProgress(
-                    "Scanning frame $checks/$totalChecks\u2026",
+                    "Frame $curFrame of $totalFrames",
                     (checks.toFloat() / totalChecks.coerceAtLeast(1)).coerceIn(0f, 1f),
                     matchCount,
                 ))

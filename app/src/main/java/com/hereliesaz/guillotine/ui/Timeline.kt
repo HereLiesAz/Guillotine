@@ -61,6 +61,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
 import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
@@ -421,12 +422,19 @@ private fun Lane(
     onGroupDrag: (GroupDrag?) -> Unit,
 ) {
     val clips = state.document.clips.filter { it.trackId == trackId }
+    // While a drag is in flight, lift the lane containing the grabbed clip(s) above sibling lanes:
+    // the dragged clip is offset in Y by its live drag delta, which pushes its rendered pixels
+    // outside this lane's box — and the next lane down (drawn later in the tracks Column) would
+    // otherwise over-paint that overflow, so a video clip dragged toward the audio row reads as
+    // "the video went behind the audio track". zIndex lifts THIS lane's draw pass above siblings.
+    val dragging = groupDrag != null && clips.any { it.id in groupDrag.ids }
     // No tap handler here: taps on empty lane area fall through to the timeline surface
     // handler (in TimelineLanes), which seeks the playhead and clears the selection.
     Box(
         Modifier
             .fillMaxWidth()
             .height(state.trackHeight(trackId).dp)
+            .zIndex(if (dragging) 1f else 0f)
             .background(Neutral850)
             .border(0.5.dp, Neutral800),
     ) {
