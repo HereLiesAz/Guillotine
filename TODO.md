@@ -2,6 +2,25 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Export parity follow-ups (confirmed by audit)
+Surfaced by a codebase audit comparing the preview and export pipelines in detail. All filters,
+all 12 keyframe properties, background removal, audio effects, multi-track compositing, and
+crossfade are at full parity. The following gaps remain:
+- **Caption background box missing from export:** preview renders a semi-transparent black pill
+  behind text captions (`Modifier.background(…)` in `PreviewPlayer.kt`); export renders bare white
+  text only (`CaptionOverlay.kt` uses `ForegroundColorSpan` + `AbsoluteSizeSpan` with no background
+  shape). Exported captions may be unreadable over light/busy backgrounds.
+- **Caption text size differs:** preview uses `14.sp`; export uses `AbsoluteSizeSpan(64)`. The
+  relative proportions won't match unless compensated.
+- **Quality/FPS settings not wired into export:** `GlobalSettings.quality` and `.fps` exist in the
+  model but `Transformer.Builder` never calls `setVideoFrameRate()` or any resolution/bitrate
+  configuration — they have no effect on the output.
+- **AI edit segments play through in preview:** removed ranges are correctly cut from the export
+  (via `TimelineMath.keptRanges`) but play normally in preview (`syncPosition` does a simple linear
+  seek). May be deliberate (show full source with proposed cuts highlighted).
+- **Project-level crop not shown in preview:** the `Crop` from `GlobalSettings` is applied in export
+  (`VideoEffects.geometry()`) but preview only applies aspect ratio. May be deliberate.
+
 ## Audit follow-ups (deferred — need a device or a design call)
 Surfaced by a codebase audit. Everything that was a clear, safe bug has been fixed. The rest was
 left because it needs on-device verification or is a design decision:

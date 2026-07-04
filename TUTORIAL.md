@@ -34,14 +34,28 @@ Use the **Crop / transform** tool to pinch-scale, drag-place, and twist-rotate a
 
 ## 7. Animate with keyframes
 
-Drop a **keyframe** at the playhead to record a clip's current look, move the playhead, change it, and keyframe again — the value animates between them. Tap a keyframe to select it and toggle its ease; drag the bezier handles in the inspector to shape the curve. Keyframes work for opacity, scale, rotation, crop/placement, color, volume, and pan.
+Drop a **keyframe** at the playhead to record a clip's current look, move the playhead, change it, and keyframe again — the value animates between them. Tap a keyframe to select it and toggle its ease; drag the bezier handles in the inspector to shape the curve. Keyframes work for **12 properties**: opacity, scale, rotation, offset X/Y, brightness, contrast, saturation, hue, sepia, volume, and pan.
 
 ## 8. Add text and captions
 
 Add a **text** clip — a transparent overlay on a video track — and edit its content and font, then size and place it with the crop tool. Or **transcribe** a clip's speech into timed caption clips, on-device (Vosk) or via cloud Whisper. Captions burn into the export.
 
-## 9. Render your video
+For a more dynamic look, ask the AI for **animated captions** (or "kinetic text," "per-syllable animation"). This splits each word into syllables on separate tracks with scale keyframes that grow each syllable as it's spoken — a kinetic typography effect.
+
+## 9. Teach the AI your own editing methods
+
+You can create **user-defined tools** — named editing methods the AI can replay:
+
+- **Write a method:** tell the AI "create a tool called X that does Y, Z" and it saves step-by-step instructions.
+- **Record a method:** tell the AI "record what I do," then edit a clip by hand (split, trim, keyframe, filter changes — everything is captured). Say "save that as X" to store the recorded actions as a reusable tool. Add caveats like "adapt timings to clip length" so the steps generalize to other clips.
+- **Use a method:** say "do X on this clip" and the AI follows the saved instructions using the editor's built-in tools.
+
+## 10. Back up your settings
+
+Open **Settings → Advanced** and tap **Export settings** to save your AI configuration (provider, keys, models, paths) as a JSON file. **Import settings** restores them on this or another device.
+
+## 11. Render your video
 
 When it looks right, open the menu and choose **Export video**. Guillotine renders a real mp4 with Media3: it makes your cuts, composites every track, applies your filters, transforms, background mattes, captions, and audio mix, then saves to your gallery. Long jobs run in the background with a progress notification you can pause, resume, or cancel.
 
-That's the whole loop — import, arrange, cut, enhance, animate, caption, and export. Explore the icon key (the **?** button) any time you forget what a button does.
+That's the whole loop — import, arrange, cut, enhance, animate, caption, teach, and export. Explore the icon key (the **?** button) any time you forget what a button does.
