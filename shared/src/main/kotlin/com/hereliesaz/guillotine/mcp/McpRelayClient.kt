@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit
  * the request's `rid` so the proxy can match responses.
  */
 class McpRelayClient(
-    private val tools: McpTools,
+    private val tools: McpToolsSurface,
     private val tokenProvider: () -> String,
     private val config: RelayConfig,
 ) {

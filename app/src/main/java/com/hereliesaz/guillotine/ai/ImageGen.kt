@@ -23,9 +23,6 @@ object ImageGen {
         }
     }
 
-    /** A Leonardo.ai platform model the user can pick to generate with. */
-    data class LeonardoModel(val id: String, val name: String)
-
     /**
      * Leonardo.ai cloud generation (BYO API key from https://app.leonardo.ai → Settings → API
      * Access). Generation is async: create a job, poll until COMPLETE, then download the first
@@ -214,23 +211,4 @@ object ImageGen {
         }
     }
 
-    /**
-     * Curated Leonardo platform models (id → display name). These are Leonardo's featured
-     * models spanning photoreal, FLUX, anime, and fast/SDXL pipelines; the first is the default.
-     */
-    val LeonardoModels: List<LeonardoModel> = listOf(
-        LeonardoModel("de7d3faf-762f-48e0-b3b7-9d0ac3a3fcf3", "Leonardo Phoenix 1.0"),
-        LeonardoModel("6b645e3a-d64f-4341-a6d8-7a3690fbf042", "Leonardo Phoenix 0.9"),
-        LeonardoModel("b2614463-296c-462a-9586-aafdb8f00e36", "FLUX.1 Dev (Precision)"),
-        LeonardoModel("1dd50843-d653-4516-a8e3-f0238ee453ff", "FLUX.1 Schnell (Speed)"),
-        LeonardoModel("b24e16ff-06e3-43eb-8d33-4416c2d75876", "Leonardo Lightning XL"),
-        LeonardoModel("e71a1c2f-4f80-4800-934f-2c68979d8cc8", "Leonardo Anime XL"),
-        LeonardoModel("aa77f04e-3eec-4034-9c07-d0f619684628", "Leonardo Kino XL (cinematic)"),
-        LeonardoModel("5c232a9e-9061-4777-980a-ddc8e65647c6", "Leonardo Vision XL"),
-        LeonardoModel("1e60896f-3c26-4296-8ecc-53e2afecc132", "Leonardo Diffusion XL"),
-        LeonardoModel("2067ae52-33fd-4a82-bb92-c2c55e7d2786", "AlbedoBase XL"),
-        LeonardoModel("16e7060a-803e-4df3-97ee-edcfa5dc9cc8", "SDXL 1.0"),
-    )
-
-    val LeonardoDefaultModel: String = LeonardoModels.first().id
 }

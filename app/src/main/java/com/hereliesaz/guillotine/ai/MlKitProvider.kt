@@ -162,7 +162,7 @@ class MlKitProvider : ClipAnalyzer {
     }
 
     /** Crop [box] (pixel rect) out of [bmp]; null if the rect is degenerate. */
-    private fun crop(bmp: Bitmap, box: android.graphics.RectF): Bitmap? = runCatching {
+    private fun crop(bmp: Bitmap, box: BoundingBox): Bitmap? = runCatching {
         val l = box.left.toInt().coerceIn(0, bmp.width - 1)
         val t = box.top.toInt().coerceIn(0, bmp.height - 1)
         val r = box.right.toInt().coerceIn(l + 1, bmp.width)

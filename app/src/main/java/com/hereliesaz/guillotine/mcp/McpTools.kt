@@ -25,11 +25,11 @@ class McpTools(
     private val context: Context,
     private val vm: EditorViewModel,
     private val settingsProvider: () -> AiSettings,
-) {
+) : McpToolsSurface {
 
     // ---- tool definitions ---------------------------------------------------
 
-    fun definitions(): JSONArray = JSONArray().apply {
+    override fun definitions(): JSONArray = JSONArray().apply {
         put(toolDefinition("get_timeline", "Get the current timeline state: all clips, tracks, and timing.",
             emptySchema()))
         put(toolDefinition("get_clip", "Get details for a specific clip by ID.",
@@ -158,7 +158,7 @@ class McpTools(
 
     // ---- tool dispatch ------------------------------------------------------
 
-    fun call(name: String, args: JSONObject): JSONObject = when (name) {
+    override fun call(name: String, args: JSONObject): JSONObject = when (name) {
         "get_timeline" -> getTimeline()
         "get_clip" -> getClip(args.getString("clip_id"))
         "set_prompt" -> setPrompt(args.getString("clip_id"), args.getString("prompt"))
@@ -185,7 +185,7 @@ class McpTools(
 
     // ---- resource definitions -----------------------------------------------
 
-    fun resourceDefinitions(): JSONArray = JSONArray().apply {
+    override fun resourceDefinitions(): JSONArray = JSONArray().apply {
         put(JSONObject().apply {
             put("uri", "guillotine://timeline"); put("name", "Timeline")
             put("description", "Current editor timeline state"); put("mimeType", "application/json")
@@ -196,7 +196,7 @@ class McpTools(
         })
     }
 
-    fun readResource(uri: String): JSONObject = when (uri) {
+    override fun readResource(uri: String): JSONObject = when (uri) {
         "guillotine://timeline" -> getTimeline()
         "guillotine://clips" -> JSONObject().apply {
             put("clips", JSONArray().apply { vm.uiState.value.document.clips.forEach { put(clipJson(it)) } })
@@ -420,7 +420,8 @@ class McpTools(
                             try {
                                 val boxes = ov.detect(frame).filter { matchesPrompt(clip.prompt, it.label) }.map { it.box }
                                 if (boxes.isEmpty()) return@mapIndexedNotNull null
-                            val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, boxes)
+                            val rects = boxes.map { android.graphics.RectF(it.left, it.top, it.right, it.bottom) }
+                            val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, rects)
                             try {
                                 val uri = runCatching {
                                     com.hereliesaz.guillotine.ai.ImageGen.Leonardo.inpaint(

@@ -14,10 +14,10 @@ import java.security.MessageDigest
  */
 class McpServer(port: Int = 6274) : NanoHTTPD(port) {
 
-    private var tools: McpTools? = null
+    private var tools: McpToolsSurface? = null
     private var tokenProvider: (() -> String)? = null
 
-    fun startServer(tools: McpTools, tokenProvider: () -> String) {
+    fun startServer(tools: McpToolsSurface, tokenProvider: () -> String) {
         this.tools = tools
         this.tokenProvider = tokenProvider
         start(SOCKET_READ_TIMEOUT, false)

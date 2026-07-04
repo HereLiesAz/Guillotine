@@ -1,6 +1,5 @@
 package com.hereliesaz.guillotine.editor
 
-import androidx.lifecycle.ViewModel
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.EditAction
@@ -74,7 +73,7 @@ private const val SPREAD_X = 0.25f
  * stays consistent; transient view state (playhead, zoom, selection) is updated
  * directly and is not undoable.
  */
-class EditorViewModel : ViewModel() {
+open class EditorViewModel {
 
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()

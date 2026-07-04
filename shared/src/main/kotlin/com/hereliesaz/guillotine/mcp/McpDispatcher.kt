@@ -10,7 +10,7 @@ import org.json.JSONObject
 object McpDispatcher {
 
     /** Parse a JSON-RPC request body and return the JSON-RPC response body. Never throws. */
-    fun handle(tools: McpTools, body: String): String {
+    fun handle(tools: McpToolsSurface, body: String): String {
         val json = runCatching { JSONObject(body) }.getOrNull()
             ?: return jsonRpcError(null, -32700, "Parse error").toString()
         val req = JsonRpcRequest(
@@ -21,7 +21,7 @@ object McpDispatcher {
         return dispatch(tools, req).toString()
     }
 
-    private fun dispatch(tools: McpTools, req: JsonRpcRequest): JSONObject = when (req.method) {
+    private fun dispatch(tools: McpToolsSurface, req: JsonRpcRequest): JSONObject = when (req.method) {
         "initialize" -> jsonRpcResult(req.id, JSONObject().apply {
             put("protocolVersion", "2024-11-05")
             put("capabilities", JSONObject().apply {

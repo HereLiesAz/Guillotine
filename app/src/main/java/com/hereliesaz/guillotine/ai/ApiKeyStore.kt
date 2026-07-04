@@ -11,120 +11,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 /**
- * Which analyzer to use. LOCAL is free and needs no key; the rest are bring-your-own.
- * GEMINI / OPENAI / ANTHROPIC have dedicated clients; the remainder are reached through
- * a generic OpenAI-compatible client (see [meta]).
- */
-enum class AiProviderType { LOCAL, MLKIT, GEMINI, OPENAI, ANTHROPIC, OPENROUTER, GROQ, XAI, MISTRAL }
-
-/** Display + routing info for a provider, including where the user gets an API key. */
-data class ProviderMeta(
-    val label: String,
-    val blurb: String,
-    /** Where to obtain a key. null for LOCAL (no key needed). */
-    val keyUrl: String? = null,
-    /** Chat-completions endpoint for generic OpenAI-compatible providers (else null → dedicated client). */
-    val openAiCompatUrl: String? = null,
-    /** Default (user-editable) model id. null only for LOCAL. */
-    val defaultModel: String? = null,
-)
-
-/**
- * Per-provider metadata. Model ids for the OpenAI-compatible providers are reasonable
- * current defaults and may need bumping as providers rotate their model line-up.
- */
-val AiProviderType.meta: ProviderMeta
-    get() = when (this) {
-        AiProviderType.LOCAL -> ProviderMeta(
-            "Local (free, on-device)",
-            "On-device silence cut. No key, works offline.",
-        )
-        AiProviderType.MLKIT -> ProviderMeta(
-            "On-device vision (free)",
-            "On-device faces & objects, no key — keep/remove by what's on screen.",
-        )
-        AiProviderType.GEMINI -> ProviderMeta(
-            "Gemini",
-            "Google · drives the editor via tools (no video sent).",
-            keyUrl = "https://aistudio.google.com/app/apikey",
-            defaultModel = "gemini-2.5-flash",
-        )
-        AiProviderType.OPENAI -> ProviderMeta(
-            "OpenAI",
-            "GPT · drives the editor via tools (no video sent).",
-            keyUrl = "https://platform.openai.com/api-keys",
-            defaultModel = "gpt-4o",
-        )
-        AiProviderType.ANTHROPIC -> ProviderMeta(
-            "Anthropic",
-            "Claude · drives the editor via tools (no video sent).",
-            keyUrl = "https://console.anthropic.com/settings/keys",
-            defaultModel = "claude-opus-4-8",
-        )
-        AiProviderType.OPENROUTER -> ProviderMeta(
-            "OpenRouter",
-            "One key, many models · drives the editor via tools.",
-            keyUrl = "https://openrouter.ai/keys",
-            openAiCompatUrl = "https://openrouter.ai/api/v1/chat/completions",
-            defaultModel = "openai/gpt-4o-mini",
-        )
-        AiProviderType.GROQ -> ProviderMeta(
-            "Groq",
-            "Fast Llama · drives the editor via tools.",
-            keyUrl = "https://console.groq.com/keys",
-            openAiCompatUrl = "https://api.groq.com/openai/v1/chat/completions",
-            defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct",
-        )
-        AiProviderType.XAI -> ProviderMeta(
-            "xAI (Grok)",
-            "Grok · drives the editor via tools.",
-            keyUrl = "https://console.x.ai",
-            openAiCompatUrl = "https://api.x.ai/v1/chat/completions",
-            defaultModel = "grok-2-vision-1212",
-        )
-        AiProviderType.MISTRAL -> ProviderMeta(
-            "Mistral",
-            "Mistral · drives the editor via tools.",
-            keyUrl = "https://console.mistral.ai/api-keys",
-            openAiCompatUrl = "https://api.mistral.ai/v1/chat/completions",
-            defaultModel = "pixtral-12b-2409",
-        )
-    }
-
-/** Bring-your-own-key providers — those that actually need a key (have a signup URL). */
-val byoProviders: List<AiProviderType> = AiProviderType.values().filter { it.meta.keyUrl != null }
-
-data class AiSettings(
-    // ML Kit is the default: on-device, no key required, real vision (face/label) analysis.
-    val provider: AiProviderType = AiProviderType.MLKIT,
-    /** API keys per provider; LOCAL has none. */
-    val keys: Map<AiProviderType, String> = emptyMap(),
-    /** Optional per-provider model overrides; blank/absent falls back to [ProviderMeta.defaultModel]. */
-    val models: Map<AiProviderType, String> = emptyMap(),
-    /** Optional Leonardo.ai API key for cloud image generation (else free Pollinations). */
-    val leonardoKey: String = "",
-    /** Selected Leonardo platform model id (see ImageGen.LeonardoModels). */
-    val leonardoModel: String = com.hereliesaz.guillotine.ai.ImageGen.LeonardoDefaultModel,
-    /** Optional on-device Vosk speech model directory (else cloud Whisper for transcription). */
-    val speechModelPath: String = "",
-    /** Optional on-device LLM `.task` model path — the assistant's offline brain (else a cloud key). */
-    val agentModelPath: String = "",
-    /**
-     * Bound on [FrameAnalysisCache] — how many per-frame vision results (per signal) to keep in RAM
-     * for the "rescan the same clip with a different prompt" fast path. Higher = more scans stay
-     * near-instant but a bit more memory; 0 disables the cache entirely. Applied at runtime via
-     * `FrameAnalysisCache.setMaxEntries` when settings load or change.
-     */
-    val frameAnalysisCacheSize: Int = FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
-) {
-    fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
-    /** The effective model id for [p]: the user's override if set, else the code default. */
-    fun modelFor(p: AiProviderType): String =
-        models[p]?.takeIf { it.isNotBlank() } ?: p.meta.defaultModel.orEmpty()
-    fun withKey(p: AiProviderType, key: String): AiSettings = copy(keys = keys + (p to key))
-}
-
-/**
  * Persists the chosen provider and the user's own API keys, **encrypted on-device**
  * via Jetpack Security ([EncryptedSharedPreferences] + a Keystore-backed master key).
  * No key is ever required (on-device ML Kit is the default), and keys never leave the
@@ -158,7 +44,7 @@ class ApiKeyStore(context: Context) {
             .filterValues { it.isNotEmpty() },
         leonardoKey = prefs.getString(KEY_LEONARDO_KEY, "").orEmpty(),
         leonardoModel = prefs.getString(KEY_LEONARDO_MODEL, "")
-            ?.takeIf { it.isNotBlank() } ?: ImageGen.LeonardoDefaultModel,
+            ?.takeIf { it.isNotBlank() } ?: LeonardoDefaultModel,
         speechModelPath = prefs.getString(KEY_SPEECH, "").orEmpty(),
         agentModelPath = prefs.getString(KEY_AGENT_MODEL, "").orEmpty(),
         frameAnalysisCacheSize = prefs

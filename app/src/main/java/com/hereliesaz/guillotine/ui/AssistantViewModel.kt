@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hereliesaz.guillotine.ai.agent.AgentBackend
 import com.hereliesaz.guillotine.ai.agent.AgentEvent
-import com.hereliesaz.guillotine.mcp.McpTools
+import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,7 +48,7 @@ class AssistantViewModel : ViewModel() {
      * Run [instruction] with [agent], reporting progress on the status line. A null [agent] means
      * no brain is configured, so we point the user at Settings instead of failing silently.
      */
-    fun run(instruction: String, tools: McpTools, agent: AgentBackend?) =
+    fun run(instruction: String, tools: McpToolsSurface, agent: AgentBackend?) =
         startRun(instruction, tools, agent, logAs = instruction, isReply = false)
 
     /**
@@ -57,7 +57,7 @@ class AssistantViewModel : ViewModel() {
      * agent has full context to resume (the backends are one-shot per [AgentBackend.run], so we
      * synthesize continuity at the prompt layer instead of teaching every backend a message log).
      */
-    fun sendReply(reply: String, tools: McpTools, agent: AgentBackend?) {
+    fun sendReply(reply: String, tools: McpToolsSurface, agent: AgentBackend?) {
         val r = reply.trim()
         if (r.isBlank() || !_state.value.awaitingReply) return
         val prompt = buildString {
@@ -75,7 +75,7 @@ class AssistantViewModel : ViewModel() {
 
     private fun startRun(
         instruction: String,
-        tools: McpTools,
+        tools: McpToolsSurface,
         agent: AgentBackend?,
         logAs: String,
         isReply: Boolean,

@@ -1,6 +1,6 @@
 package com.hereliesaz.guillotine.ai.agent
 
-import com.hereliesaz.guillotine.mcp.McpTools
+import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -23,7 +23,7 @@ class GeminiAgentBackend(
 
     override suspend fun run(
         instruction: String,
-        tools: McpTools,
+        tools: McpToolsSurface,
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         try {

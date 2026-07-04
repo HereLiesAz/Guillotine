@@ -649,7 +649,7 @@ fun GenerateSheet(
     var prompt by remember { mutableStateOf("") }
     val leonardoAvailable = leonardoKey.isNotBlank()
     var useLeonardo by remember { mutableStateOf(leonardoAvailable) }
-    var model by remember { mutableStateOf(leonardoModel.ifBlank { ImageGen.LeonardoDefaultModel }) }
+    var model by remember { mutableStateOf(leonardoModel.ifBlank { com.hereliesaz.guillotine.ai.LeonardoDefaultModel }) }
     var generating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -720,12 +720,12 @@ fun GenerateSheet(
 private fun LeonardoModelDropdown(apiKey: String, selectedId: String, onSelect: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     // Keyed on apiKey so editing the key in the same dialog re-fetches instead of showing a stale list.
-    var live by remember(apiKey) { mutableStateOf<List<ImageGen.LeonardoModel>?>(null) }
+    var live by remember(apiKey) { mutableStateOf<List<com.hereliesaz.guillotine.ai.LeonardoModel>?>(null) }
     var loading by remember(apiKey) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val models = live?.takeIf { it.isNotEmpty() } ?: ImageGen.LeonardoModels
+    val models = live?.takeIf { it.isNotEmpty() } ?: com.hereliesaz.guillotine.ai.LeonardoModels
     val name = models.firstOrNull { it.id == selectedId }?.name
-        ?: ImageGen.LeonardoModels.firstOrNull { it.id == selectedId }?.name ?: "Select a model"
+        ?: com.hereliesaz.guillotine.ai.LeonardoModels.firstOrNull { it.id == selectedId }?.name ?: "Select a model"
     Box {
         DropdownAnchor(name) {
             open = true

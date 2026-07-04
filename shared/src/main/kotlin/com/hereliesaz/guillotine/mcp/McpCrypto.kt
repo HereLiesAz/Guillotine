@@ -1,6 +1,5 @@
 package com.hereliesaz.guillotine.mcp
 
-import android.util.Base64
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -53,6 +52,6 @@ object McpCrypto {
     // and pin the locale so the hex is identical everywhere (and Lint-clean).
     private fun ByteArray.toHex(): String =
         joinToString("") { String.format(java.util.Locale.US, "%02x", it.toInt() and 0xFF) }
-    private fun ByteArray.b64(): String = Base64.encodeToString(this, Base64.NO_WRAP)
-    private fun String.unb64(): ByteArray = Base64.decode(this, Base64.NO_WRAP)
+    private fun ByteArray.b64(): String = java.util.Base64.getEncoder().encodeToString(this)
+    private fun String.unb64(): ByteArray = java.util.Base64.getDecoder().decode(this)
 }

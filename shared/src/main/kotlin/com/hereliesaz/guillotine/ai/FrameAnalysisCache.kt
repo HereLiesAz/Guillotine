@@ -53,7 +53,7 @@ object FrameAnalysisCache {
     private val objectLabels: MutableMap<FrameKey, Set<String>> = boundedLru()
     private val classifierLabels: MutableMap<FrameKey, List<SceneLabel>> = boundedLru()
     private val sceneLabels: MutableMap<FrameKey, List<SceneLabel>> = boundedLru()
-    private val detections: MutableMap<FrameKey, List<ObjectVision.Detection>> = boundedLru()
+    private val detections: MutableMap<FrameKey, List<Detection>> = boundedLru()
 
     /** Apply a new cap. Takes effect on the next put/get (trim happens as entries arrive). */
     fun setMaxEntries(n: Int) {
@@ -92,8 +92,8 @@ object FrameAnalysisCache {
     fun detections(
         uri: String,
         atMs: Long,
-        compute: () -> List<ObjectVision.Detection>,
-    ): List<ObjectVision.Detection> {
+        compute: () -> List<Detection>,
+    ): List<Detection> {
         val key = FrameKey(uri, atMs)
         synchronized(detections) { detections[key]?.let { return it } }
         val v = compute()
