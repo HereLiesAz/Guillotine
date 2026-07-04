@@ -17,15 +17,21 @@ import com.hereliesaz.guillotine.model.MediaKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.max
+import kotlin.math.min
 
 /**
- * Free, on-device vision analyzer (ML Kit) — no key, no network. Matches frames against
+ * Free, on-device vision analyzer — no key, no network. Matches frames against
  * the prompt (face detection when it's about people, else object/scene labeling) and turns
  * matches into keep/remove ranges per the prompt's intent ("keep only…" vs "cut/remove…").
  *
- * To keep it fast it does **not** inspect every frame: it samples at [SAMPLE_FPS] fps and, on a
- * match, claims ±[EXTEND_FRAMES] source frames (at least half a sampling step) around the sampled
- * time so consecutive matches merge into one contiguous cut region.
+ * Detection pipeline (most precise first):
+ *  1. **ObjectVision** (EfficientDet-Lite2) — 80 COCO classes with bounding boxes
+ *  2. **SceneClassifier** (EfficientNet-Lite0 on ImageNet) — ~1000 fine-grained categories
+ *  3. **ML Kit ImageLabeler** — ~400 generic labels (tertiary fallback)
+ *
+ * Uses adaptive sampling: starts at [BASE_SAMPLE_FPS], accelerates through stable regions
+ * (consecutive matches or misses), and does binary-search refinement at transition boundaries
+ * for frame-accurate cut points.
  *
  * Audio can't be transcribed here, so audio clips are routed to the free Local analyzer.
  */
@@ -49,7 +55,6 @@ class MlKitProvider : ClipAnalyzer {
         if (!parsed.useFaces && parsed.terms.isEmpty()) {
             throw IllegalStateException("Tell on-device vision what to look for, e.g. \"keep shots with a face\" or \"cut clips with a phone\".")
         }
-        // Map common words to COCO category names ("phone" -> "cell phone") so object detection matches.
         val intent = parsed.copy(terms = expandTerms(parsed.terms))
 
         val labeler = ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS)
@@ -60,18 +65,14 @@ class MlKitProvider : ClipAnalyzer {
                     .build(),
             )
         } else null
-        // Precise bounding-box COCO detection for object terms (face intents stay on the face detector).
         val objectVision = if (intent.useFaces) null else ObjectVision(context)
-        // When every term is a COCO class the detector owns, the whole-image labeler adds no recall
-        // (too-small objects aren't top labels either) and only burns time per frame — skip it.
-        val useFallback = objectVision?.available != true || intent.terms.any { !ObjectVision.coversTerm(it) }
+        val sceneClassifier = if (intent.useFaces) null else SceneClassifier(context)
+        val useMlKitFallback = objectVision?.available != true &&
+            sceneClassifier?.available != true
 
         val uriStr = mediaUri.toString()
-        // The (uri, atMs) tuple lets qualifies() consult FrameAnalysisCache so a rescan of the same
-        // clip (different prompt, or the same one after a settings change) doesn't redo the ML Kit
-        // work per frame. For a still image, atMs is 0 — one entry, fine.
         val match: (Long, Bitmap) -> Boolean = { atMs, bmp ->
-            qualifies(uriStr, atMs, bmp, intent, labeler, faceDetector, objectVision, useFallback)
+            qualifies(uriStr, atMs, bmp, intent, labeler, faceDetector, objectVision, sceneClassifier, useMlKitFallback)
         }
         try {
             if (kind == MediaKind.IMAGE) {
@@ -88,6 +89,7 @@ class MlKitProvider : ClipAnalyzer {
             labeler.close()
             faceDetector?.close()
             objectVision?.close()
+            sceneClassifier?.close()
         }
     }
 
@@ -123,12 +125,6 @@ class MlKitProvider : ClipAnalyzer {
                 }
             } else null
 
-            // Reference mode embeds each candidate detection against the ref, so the *similarity*
-            // result depends on the runtime reference and isn't a property of the frame alone — not
-            // cached. But the underlying `objectVision.detect(bmp)` IS a property of the frame, so
-            // it's routed through FrameAnalysisCache: a rescan against a different reference reuses
-            // every prior detect() call, only the embedding+similarity re-runs. The generic-class
-            // fallback below uses the same object-labels cache as the standard analyze() path.
             val uriStr = mediaUri.toString()
             val match: (Long, Bitmap) -> Boolean = if (refEmbedding != null) {
                 { atMs, bmp ->
@@ -140,12 +136,11 @@ class MlKitProvider : ClipAnalyzer {
                                 val e = embed.embed(c) ?: return@any false
                                 embed.similarity(refEmbedding, e) >= REF_THRESHOLD
                             } finally {
-                                if (c !== bmp) c.recycle() // free each crop — a long scan makes hundreds
+                                if (c !== bmp) c.recycle()
                             }
                         }
                 }
             } else {
-                // No usable reference embedding — fall back to generic class detection, cached.
                 { atMs, bmp ->
                     objectVision.available && FrameAnalysisCache
                         .objectLabels(uriStr, atMs) { objectVision.labels(bmp) }
@@ -175,7 +170,12 @@ class MlKitProvider : ClipAnalyzer {
         Bitmap.createBitmap(bmp, l, t, r - l, b - t)
     }.getOrNull()
 
-    /** Sample frames at a fixed [SAMPLE_FPS] fps; each match claims ±[EXTEND_FRAMES] frames around it. */
+    /**
+     * Adaptive-rate video scanner. Starts at [BASE_SAMPLE_FPS] and accelerates through stable
+     * regions (consecutive identical results). On a match→miss or miss→match transition it does
+     * a binary search between the two sample points to find the boundary within ±1 base step,
+     * giving frame-accurate cut points without scanning every frame.
+     */
     private fun scanVideo(
         context: Context,
         uri: Uri,
@@ -197,50 +197,82 @@ class MlKitProvider : ClipAnalyzer {
                 ?.toFloatOrNull()?.takeIf { it > 1f } ?: 30f
             val frameMs = 1000f / fps
 
-            // Sample at a fixed 3 fps. Widen the step for very long clips so we never exceed
-            // MAX_CHECKS frame grabs.
-            var stepMs = (1000L / SAMPLE_FPS).coerceAtLeast(1L)
-            if (dur / stepMs > MAX_CHECKS) stepMs = (dur / MAX_CHECKS).coerceAtLeast(1L)
-            // Each match claims ±EXTEND_FRAMES source frames around the sampled time, but at least
-            // half a step so consecutive matches always merge into one contiguous segment (at high fps
-            // ±5 frames is shorter than the 3 fps step, which would otherwise leave gaps).
-            val halfMs = max((EXTEND_FRAMES * frameMs).toLong(), stepMs / 2 + 1)
-
-            val totalChecks = (dur / stepMs).coerceAtMost(MAX_CHECKS.toLong())
-            // Report progress in ACTUAL source-frame numbers (fps \u00d7 time), not the sampled-check
-            // count \u2014 the user sees "Frame 45 of 900" for a 30-second 30fps clip instead of the
-            // meaningless-to-them "Scanning frame 3 of 90" (which counted 3-fps samples). The sheet
-            // already shows the percentage on its progress bar, so the text carries only the frame
-            // numbers (no redundant %).
+            val baseStep = (1000L / BASE_SAMPLE_FPS).coerceAtLeast(1L)
+            val halfMs = max((EXTEND_FRAMES * frameMs).toLong(), baseStep / 2 + 1)
             val totalFrames = (dur * fps / 1000f).toLong().coerceAtLeast(1L)
+
             var t = 0L
             var checks = 0
             var matchCount = 0
-            while (t <= dur && checks < MAX_CHECKS) {
-                checkpoint() // pause/cancel hook (blocks while paused, throws on cancel)
-                val bmp = retriever.getFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                if (bmp != null) {
-                    if (match(t, bmp)) {
-                        matched += (t - halfMs).coerceAtLeast(0L)..(t + halfMs).coerceAtMost(dur)
+            var streak = 0         // consecutive same-result samples
+            var lastResult = false // result of the previous sample
+
+            fun probe(atMs: Long): Boolean? {
+                if (checks >= MAX_CHECKS) return null
+                checkpoint()
+                val bmp = retriever.getFrameAtTime(atMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: return null
+                val result = match(atMs, bmp)
+                bmp.recycle()
+                checks++
+                return result
+            }
+
+            fun reportProgress(atMs: Long) {
+                val curFrame = (atMs * fps / 1000f).toLong().coerceAtMost(totalFrames)
+                val fraction = (atMs.toFloat() / dur).coerceIn(0f, 1f)
+                onProgress(AnalysisProgress("Frame $curFrame of $totalFrames", fraction, matchCount))
+            }
+
+            fun binaryRefine(matchSide: Long, missSide: Long) {
+                var lo = min(matchSide, missSide)
+                var hi = max(matchSide, missSide)
+                while (hi - lo > baseStep && checks < MAX_CHECKS) {
+                    val mid = (lo + hi) / 2
+                    checkpoint()
+                    val midResult = probe(mid) ?: break
+                    if (midResult) {
+                        matched += (mid - halfMs).coerceAtLeast(0L)..(mid + halfMs).coerceAtMost(dur)
                         matchCount++
                     }
-                    bmp.recycle()
+                    if (midResult == (matchSide < missSide)) lo = mid else hi = mid
                 }
-                checks++
-                val curFrame = (t * fps / 1000f).toLong().coerceAtMost(totalFrames)
-                onProgress(AnalysisProgress(
-                    "Frame $curFrame of $totalFrames",
-                    (checks.toFloat() / totalChecks.coerceAtLeast(1)).coerceIn(0f, 1f),
-                    matchCount,
-                ))
-                t += stepMs
+            }
+
+            while (t <= dur && checks < MAX_CHECKS) {
+                val result = probe(t) ?: break
+
+                if (result) {
+                    matched += (t - halfMs).coerceAtLeast(0L)..(t + halfMs).coerceAtMost(dur)
+                    matchCount++
+                }
+
+                if (checks > 1 && result != lastResult) {
+                    binaryRefine(
+                        if (result) t else t - baseStep.coerceAtMost(t),
+                        if (result) t - baseStep.coerceAtMost(t) else t,
+                    )
+                    streak = 0
+                } else {
+                    streak++
+                }
+
+                reportProgress(t)
+                lastResult = result
+
+                // Accelerate through stable regions: after 3+ identical consecutive results,
+                // widen the step up to 4x base. Reset to base step on any transition.
+                val adaptiveStep = when {
+                    streak >= 6 -> baseStep * 4
+                    streak >= 3 -> baseStep * 2
+                    else -> baseStep
+                }
+                t += adaptiveStep
             }
         } catch (c: kotlin.coroutines.cancellation.CancellationException) {
-            // A pause/cancel via checkpoint() must propagate — otherwise cancelling a scan silently
-            // stops early and returns a partial cover as if it had finished normally.
             throw c
         } catch (_: Exception) {
-            // best effort — build a cover from whatever we collected
+            // best effort
         } finally {
             runCatching { retriever.release() }
         }
@@ -255,33 +287,42 @@ class MlKitProvider : ClipAnalyzer {
         labeler: com.google.mlkit.vision.label.ImageLabeler,
         faceDetector: com.google.mlkit.vision.face.FaceDetector?,
         objectVision: ObjectVision?,
-        useFallback: Boolean,
+        sceneClassifier: SceneClassifier?,
+        useMlKitFallback: Boolean,
     ): Boolean {
-        // Face detection isn't cached — it's fast and only runs when the prompt asks for faces.
         if (intent.useFaces && faceDetector != null) {
             val image = InputImage.fromBitmap(bmp, 0)
             return Tasks.await(faceDetector.process(image)).isNotEmpty()
         }
-        // Primary signal: precise COCO object detection. Cached per (uri, atMs) so a rescan of the
-        // same clip with a different prompt reuses last time's labels — the ML Kit call is skipped
-        // entirely on a hit and only the string-membership check re-runs (essentially free).
+        // Tier 1: precise COCO bounding-box detection (EfficientDet-Lite2).
         if (objectVision != null && objectVision.available) {
             val ovLabels = FrameAnalysisCache.objectLabels(uri, atMs) { objectVision.labels(bmp) }
             if (ovLabels.any { o -> intent.terms.any { t -> o.contains(t) || t.contains(o) } }) {
                 return true
             }
         }
-        if (!useFallback) return false
-        // Fallback: whole-image scene labeling. Also cached, and snapshotted as (text, confidence)
-        // pairs so the cache doesn't retain refs to the labeler (which is closed at end-of-scan).
-        val scene = FrameAnalysisCache.sceneLabels(uri, atMs) {
-            val image = InputImage.fromBitmap(bmp, 0)
-            Tasks.await(labeler.process(image)).map { it.text to it.confidence }
+        // Tier 2: fine-grained ImageNet classification (~1000 categories).
+        if (sceneClassifier != null && sceneClassifier.available) {
+            val scene = FrameAnalysisCache.classifierLabels(uri, atMs) { sceneClassifier.classify(bmp) }
+            if (scene.any { label ->
+                    label.confidence >= 0.2f && intent.terms.any { t ->
+                        label.lowerText.contains(t) || t.contains(label.lowerText)
+                    }
+                }) {
+                return true
+            }
         }
-        return scene.any { (text, confidence) ->
-            confidence >= 0.5f && intent.terms.any { t ->
-                val lower = text.lowercase()
-                lower.contains(t) || t.contains(lower)
+        if (!useMlKitFallback) return false
+        // Tier 3: ML Kit generic labels (tertiary fallback when both models unavailable).
+        val mlLabels = FrameAnalysisCache.sceneLabels(uri, atMs) {
+            val image = InputImage.fromBitmap(bmp, 0)
+            Tasks.await(labeler.process(image)).map {
+                FrameAnalysisCache.SceneLabel(it.text, it.text.lowercase(), it.confidence)
+            }
+        }
+        return mlLabels.any { label ->
+            label.confidence >= 0.5f && intent.terms.any { t ->
+                label.lowerText.contains(t) || t.contains(label.lowerText)
             }
         }
     }
@@ -364,15 +405,11 @@ class MlKitProvider : ClipAnalyzer {
     }
 
     private companion object {
-        // Sample the video at a fixed 3 frames/second instead of scanning every frame.
-        const val SAMPLE_FPS = 3
-        // On a match, extend applicability ±5 frames around the sampled time (in source frames).
+        const val BASE_SAMPLE_FPS = 3
         const val EXTEND_FRAMES = 5
         const val MAX_CHECKS = 600
-        // Cosine-similarity cutoff for "same object as the reference" (tune on device).
         const val REF_THRESHOLD = 0.75
 
-        /** Everyday word -> COCO category name. Substring matching covers the rest (e.g. "car"). */
         val ALIASES = mapOf(
             "phone" to "cell phone", "cellphone" to "cell phone", "smartphone" to "cell phone",
             "mobile" to "cell phone", "iphone" to "cell phone", "android" to "cell phone",

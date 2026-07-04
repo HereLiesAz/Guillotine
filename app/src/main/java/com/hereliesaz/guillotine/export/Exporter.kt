@@ -139,8 +139,6 @@ object Exporter {
      * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
      * (which stay in sync across 'remove' cuts via each item's timeline start).
      *
-     * Known limit (verify on device): mixing image clips (no audio) with video clips (audio) in one
-     * sequence may need Transformer's force-audio-track flag — most projects are all-video/all-image.
      */
     private fun buildComposition(
         document: Document,
@@ -404,6 +402,7 @@ object Exporter {
         val sequences = videoSequences.toMutableList()
         sequences.addAll(audioSequences)
         val composition = Composition.Builder(sequences)
+            .experimentalSetForceAudioTrack(true)
         // Advanced path: the background-removal subjects (matte) + captions composite over the FINAL
         // stacked video, so a bg-removed clip on an upper track shows the lower tracks through its matte,
         // and overlays sit on top of every layer and survive gaps in any one track/lane. (The simple

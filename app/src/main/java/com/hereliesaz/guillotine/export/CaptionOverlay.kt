@@ -10,12 +10,18 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.TypefaceSpan
 import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TextOverlay
+import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.TextFont
 import com.hereliesaz.guillotine.model.TimelineClip
+import com.hereliesaz.guillotine.model.TimelineMath
 
 /**
  * Burns a text clip's caption into the export as a timed [TextOverlay]: the styled text
  * shows only during the clip's window and is placed/scaled/rotated by its crop transform.
+ *
+ * When the clip has keyframes, overlay settings are evaluated per-frame so animated scale,
+ * position, rotation, and opacity export correctly. Un-keyframed clips still use a single
+ * cached settings object (no per-frame allocation).
  *
  * One instance is attached per base export item; [timelineStartMs] is that item's start on the
  * original timeline, so `timelineMs = timelineStartMs + presentationTimeUs/1000` stays accurate
@@ -35,22 +41,62 @@ class CaptionOverlay(
         }
     }
 
+    private val hasKeyframes = clip.keyframes.isNotEmpty()
+
+    // Pre-sorted keyframe lists for the hot path (one sort at construction, not per frame).
+    private val scaleKfs = clip.keyframes.filter { it.property == KeyframeProperty.SCALE }.sortedBy { it.timeMs }
+    private val rotKfs = clip.keyframes.filter { it.property == KeyframeProperty.ROTATION }.sortedBy { it.timeMs }
+    private val oxKfs = clip.keyframes.filter { it.property == KeyframeProperty.OFFSET_X }.sortedBy { it.timeMs }
+    private val oyKfs = clip.keyframes.filter { it.property == KeyframeProperty.OFFSET_Y }.sortedBy { it.timeMs }
+    private val opKfs = clip.keyframes.filter { it.property == KeyframeProperty.OPACITY }.sortedBy { it.timeMs }
+
+    // Cached for un-keyframed clips — zero per-frame allocation.
+    private val staticSettings: StaticOverlaySettings? = if (!hasKeyframes) {
+        StaticOverlaySettings.Builder()
+            .setScale(clip.scale, clip.scale)
+            .setRotationDegrees(clip.rotation)
+            .setBackgroundFrameAnchor(clip.offsetX.coerceIn(-1f, 1f), (-clip.offsetY).coerceIn(-1f, 1f))
+            .build()
+    } else null
+
     override fun getText(presentationTimeUs: Long): SpannableString {
         val t = timelineStartMs + presentationTimeUs / 1000
-        return if (clip.text.isNotBlank() && t >= clip.startTimeMs && t < clip.endTimeMs) styled else empty
+        if (clip.text.isBlank() || t < clip.startTimeMs || t >= clip.endTimeMs) return empty
+        if (!hasKeyframes) return styled
+
+        val relMs = (t - clip.startTimeMs).coerceIn(0, clip.durationMs)
+        val opacity = TimelineMath.interpolateSorted(opKfs, relMs, 1f)
+        if (opacity <= 0.01f) return empty
+
+        // Rebuild with alpha when opacity is keyframed
+        if (opKfs.isNotEmpty()) {
+            val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+            val s = SpannableString(clip.text)
+            s.setSpan(ForegroundColorSpan(Color.argb(alpha, 255, 255, 255)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+            s.setSpan(AbsoluteSizeSpan(64), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+            s.setSpan(TypefaceSpan(typefaceName(clip.font)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+            return s
+        }
+        return styled
     }
 
-    // Cached once — the settings are constant for a caption (they only depend on immutable clip
-    // properties). The base [getOverlaySettings] used to build a fresh StaticOverlaySettings on
-    // every frame, which meant GC churn on the render thread; MatteOverlay already caches, so
-    // this brings CaptionOverlay in line.
-    private val cachedSettings: StaticOverlaySettings = StaticOverlaySettings.Builder()
-        .setScale(clip.scale, clip.scale)
-        .setRotationDegrees(clip.rotation)
-        .setBackgroundFrameAnchor(clip.offsetX.coerceIn(-1f, 1f), (-clip.offsetY).coerceIn(-1f, 1f))
-        .build()
+    override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings {
+        staticSettings?.let { return it }
 
-    override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings = cachedSettings
+        val t = timelineStartMs + presentationTimeUs / 1000
+        val relMs = (t - clip.startTimeMs).coerceIn(0, clip.durationMs)
+
+        val scale = TimelineMath.interpolateSorted(scaleKfs, relMs, clip.scale)
+        val rot = TimelineMath.interpolateSorted(rotKfs, relMs, clip.rotation)
+        val ox = TimelineMath.interpolateSorted(oxKfs, relMs, clip.offsetX)
+        val oy = TimelineMath.interpolateSorted(oyKfs, relMs, clip.offsetY)
+
+        return StaticOverlaySettings.Builder()
+            .setScale(scale, scale)
+            .setRotationDegrees(rot)
+            .setBackgroundFrameAnchor(ox.coerceIn(-1f, 1f), (-oy).coerceIn(-1f, 1f))
+            .build()
+    }
 
     private fun typefaceName(f: TextFont): String = when (f) {
         TextFont.SANS -> "sans-serif"

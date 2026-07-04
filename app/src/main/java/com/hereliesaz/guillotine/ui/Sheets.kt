@@ -123,6 +123,39 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var mcpToken by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpAuth.token(context)) }
 
+    // Settings backup/restore via SAF
+    val backupLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            com.hereliesaz.guillotine.data.SettingsBackup.export(
+                context, uri, AiSettings(
+                    provider = provider, keys = keys, models = models,
+                    leonardoKey = leonardoKey.trim(), leonardoModel = leonardoModel,
+                    speechModelPath = speechModelPath.trim(), agentModelPath = agentModelPath.trim(),
+                    frameAnalysisCacheSize = frameAnalysisCacheSize,
+                ),
+            )
+        }
+    }
+    val restoreLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            val restored = com.hereliesaz.guillotine.data.SettingsBackup.`import`(context, uri)
+            provider = restored.provider
+            keys = restored.keys
+            models = restored.models
+            leonardoKey = restored.leonardoKey
+            leonardoModel = restored.leonardoModel
+            speechModelPath = restored.speechModelPath
+            agentModelPath = restored.agentModelPath
+            frameAnalysisCacheSize = restored.frameAnalysisCacheSize
+        }
+    }
+
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("AI Analyzer", "Image Gen", "Transcription", "Advanced")
 
@@ -378,6 +411,19 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "Traffic is end-to-end encrypted; Cloudflare only relays ciphertext.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+
+                    Text("Backup & Restore", color = Neutral400, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text(
+                            "Export settings", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickableText { backupLauncher.launch("guillotine-settings.json") },
+                        )
+                        Text(
+                            "Import settings", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickableText { restoreLauncher.launch(arrayOf("application/json", "*/*")) },
+                        )
+                    }
+                    Text("Export saves all AI settings and user-defined tools to a file. Import restores them (overwriting current settings).", color = Neutral500, fontSize = 10.sp)
                 }
             }
         }

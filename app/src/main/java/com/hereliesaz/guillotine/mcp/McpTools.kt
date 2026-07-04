@@ -84,6 +84,76 @@ class McpTools(
                 "screen', 'the current thing', or otherwise points at the current preview.",
             emptySchema(),
         ))
+        put(toolDefinition(
+            "create_user_tool",
+            "Create a named editing method the user can invoke later by name. The description should " +
+                "be step-by-step instructions for what to do to a clip (using the other tools). If a " +
+                "tool with the same name exists it is overwritten.",
+            objSchema(
+                "name" to stringProp("Short name for the method (e.g. \"comedy zoom\")"),
+                "description" to stringProp("Step-by-step instructions the agent should follow when this tool is invoked"),
+                required = listOf("name", "description"),
+            ),
+        ))
+        put(toolDefinition(
+            "list_user_tools",
+            "List all user-defined editing methods (tools). Returns name + description for each.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "delete_user_tool",
+            "Delete a user-defined editing method by name.",
+            objSchema("name" to stringProp("Name of the tool to delete"), required = listOf("name")),
+        ))
+        put(toolDefinition(
+            "run_user_tool",
+            "Run a user-defined editing method on a clip. Returns the method's step-by-step " +
+                "instructions — execute them using the other tools on the given clip.",
+            objSchema(
+                "name" to stringProp("Name of the user tool to run"),
+                "clip_id" to stringProp("The clip to apply the method to"),
+                required = listOf("name", "clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "start_recording",
+            "Start recording the user's editing actions on a clip. While recording, every edit " +
+                "operation (split, trim, delete, keyframe, filter change, etc.) is captured. " +
+                "Stop with stop_recording to save the recorded actions as a user-defined tool.",
+            objSchema("clip_id" to stringProp("The clip to record actions on"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "stop_recording",
+            "Stop recording and save the captured actions as a user-defined tool. Returns the " +
+                "recorded steps so the user can review them. The user can add caveats or " +
+                "clarifications via create_user_tool afterward.",
+            objSchema(
+                "name" to stringProp("Name for the new tool (e.g. \"dramatic zoom cut\")"),
+                "extra_instructions" to stringProp("Optional caveats or generalizations to append (e.g. \"adapt timings to clip length\")"),
+                required = listOf("name"),
+            ),
+        ))
+        put(toolDefinition(
+            "discard_recording",
+            "Discard the current recording without saving.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "transcribe_clip",
+            "Transcribe a clip's audio (on-device Vosk or cloud Whisper) and add timed caption text " +
+                "clips to the timeline, grouped with the source clip. Each caption appears and disappears " +
+                "in sync with the spoken words.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "animated_transcribe_clip",
+            "Transcribe a clip's audio and create ANIMATED per-syllable captions: each word is split " +
+                "into syllables placed on separate video tracks so they all appear simultaneously, with " +
+                "SCALE keyframes that ramp each syllable from small to large as it is spoken — a " +
+                "\"grow as said\" kinetic typography effect. Use when the user asks for animated, " +
+                "kinetic, per-word, or per-syllable text/captions.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -101,6 +171,15 @@ class McpTools(
         "analyze_clip_with_reference" -> analyzeClipWithReference(args.getString("clip_id"))
         "remove_object_generative" -> removeObjectGenerative(args.getString("clip_id"))
         "describe_current_frame" -> describeCurrentFrame()
+        "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
+        "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
+        "create_user_tool" -> createUserTool(args.getString("name"), args.getString("description"))
+        "list_user_tools" -> listUserTools()
+        "delete_user_tool" -> deleteUserTool(args.getString("name"))
+        "run_user_tool" -> runUserTool(args.getString("name"), args.getString("clip_id"))
+        "start_recording" -> startRecording(args.getString("clip_id"))
+        "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
+        "discard_recording" -> discardRecording()
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -442,6 +521,157 @@ class McpTools(
             }
         } finally {
             runCatching { frame.recycle() }
+        }
+    }
+
+    private fun createUserTool(name: String, description: String): JSONObject {
+        require(name.isNotBlank()) { "Tool name must not be blank." }
+        require(description.isNotBlank()) { "Tool description must not be blank." }
+        val tool = com.hereliesaz.guillotine.data.UserTool(
+            id = com.hereliesaz.guillotine.model.newId(),
+            name = name.trim(),
+            description = description.trim(),
+        )
+        com.hereliesaz.guillotine.data.UserToolStore.add(context, tool)
+        return ok().apply {
+            put("name", tool.name)
+            put("humanSummary", "Saved editing method \"${tool.name}\" — invoke it with run_user_tool.")
+        }
+    }
+
+    private fun listUserTools(): JSONObject {
+        val tools = com.hereliesaz.guillotine.data.UserToolStore.load(context)
+        return JSONObject().apply {
+            put("tools", JSONArray().apply {
+                tools.forEach { t ->
+                    put(JSONObject().apply { put("name", t.name); put("description", t.description) })
+                }
+            })
+            put("count", tools.size)
+            put(
+                "humanSummary",
+                if (tools.isEmpty()) "No user-defined tools saved yet."
+                else "Found ${tools.size} user tool(s): ${tools.joinToString { "\"${it.name}\"" }}.",
+            )
+        }
+    }
+
+    private fun deleteUserTool(name: String): JSONObject {
+        com.hereliesaz.guillotine.data.UserToolStore.remove(context, name.trim())
+        return ok().apply { put("humanSummary", "Deleted user tool \"$name\".") }
+    }
+
+    private fun runUserTool(name: String, clipId: String): JSONObject {
+        val tools = com.hereliesaz.guillotine.data.UserToolStore.load(context)
+        val tool = tools.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) }
+            ?: throw IllegalArgumentException("No user tool named \"$name\". Use list_user_tools to see available ones.")
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        return JSONObject().apply {
+            put("ok", true)
+            put("clipId", clipId)
+            put("toolName", tool.name)
+            put("instructions", tool.description)
+            put(
+                "humanSummary",
+                "Running \"${tool.name}\" on clip — follow the instructions using the other tools.",
+            )
+        }
+    }
+
+    private fun startRecording(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        if (vm.actionRecorder.isRecording) throw IllegalStateException("Already recording. Stop or discard first.")
+        vm.actionRecorder.start(clipId)
+        return ok().apply {
+            put("clipId", clipId)
+            put("humanSummary", "Recording started — editing actions on this clip will be captured.")
+        }
+    }
+
+    private fun stopRecording(name: String, extraInstructions: String): JSONObject {
+        require(name.isNotBlank()) { "Tool name must not be blank." }
+        if (!vm.actionRecorder.isRecording) throw IllegalStateException("Not currently recording.")
+        val actions = vm.actionRecorder.stop()
+        if (actions.isEmpty()) throw IllegalStateException("No actions were recorded.")
+        val autoDesc = vm.actionRecorder.toDescription()
+        val fullDesc = if (extraInstructions.isBlank()) autoDesc else "$autoDesc\n\nNotes: $extraInstructions"
+        val tool = com.hereliesaz.guillotine.data.UserTool(
+            id = com.hereliesaz.guillotine.model.newId(),
+            name = name.trim(),
+            description = fullDesc,
+        )
+        com.hereliesaz.guillotine.data.UserToolStore.add(context, tool)
+        return JSONObject().apply {
+            put("ok", true)
+            put("name", tool.name)
+            put("stepsRecorded", actions.size)
+            put("steps", vm.actionRecorder.toJson())
+            put("description", fullDesc)
+            put("humanSummary", "Saved \"${tool.name}\" with ${actions.size} recorded step(s).")
+        }
+    }
+
+    private fun discardRecording(): JSONObject {
+        vm.actionRecorder.discard()
+        return ok().apply { put("humanSummary", "Recording discarded.") }
+    }
+
+    private fun transcribeClip(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val cues = runBlocking {
+            com.hereliesaz.guillotine.ai.Transcription.transcribe(
+                context, settingsProvider(), Uri.parse(media.uri),
+            )
+        }
+        if (cues.isEmpty()) return ok().apply {
+            put("captions", 0)
+            put("humanSummary", "Transcribed clip — no speech detected.")
+        }
+        vm.addTextClipsFromTranscript(clipId, cues)
+        val n = vm.uiState.value.document.clips.count { it.type == com.hereliesaz.guillotine.model.ClipType.TEXT }
+        return ok().apply {
+            put("captions", cues.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Transcribed and added ${cues.size} caption(s) ($n text clips total).")
+        }
+    }
+
+    private fun animatedTranscribeClip(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val cues = runBlocking {
+            com.hereliesaz.guillotine.ai.Transcription.transcribe(
+                context, settingsProvider(), Uri.parse(media.uri),
+            )
+        }
+        val wordCues = cues.flatMap { it.words }
+        if (wordCues.isEmpty()) return ok().apply {
+            put("words", 0)
+            put("humanSummary", "Transcribed clip — no per-word timing available for animation.")
+        }
+        vm.addAnimatedCaptionsFromTranscript(clipId, wordCues)
+        val n = vm.uiState.value.document.clips.count { it.type == com.hereliesaz.guillotine.model.ClipType.TEXT }
+        val tracks = vm.uiState.value.document.videoTracks.size
+        return ok().apply {
+            put("words", wordCues.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("videoTracks", tracks)
+            put(
+                "humanSummary",
+                "Created animated captions for ${wordCues.size} word(s) — syllables on $tracks video track(s) " +
+                    "with per-syllable scale keyframes ($n text clips total).",
+            )
         }
     }
 

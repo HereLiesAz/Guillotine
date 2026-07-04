@@ -63,6 +63,12 @@ const val MIN_TRACK_HEIGHT = 44f
 const val MAX_TRACK_HEIGHT = 240f
 private const val MAX_PROMPT_HISTORY = 7
 
+/** Animated caption scale range: syllables start at BASE and grow to PEAK when spoken. */
+private const val BASE_SCALE = 0.6f
+private const val PEAK_SCALE = 1.2f
+/** How far apart syllables spread horizontally (fraction of frame width). */
+private const val SPREAD_X = 0.25f
+
 /**
  * Owns all editor state. Content mutations go through [mutateDocument] so undo/redo
  * stays consistent; transient view state (playhead, zoom, selection) is updated
@@ -77,6 +83,23 @@ class EditorViewModel : ViewModel() {
     private val future = ArrayDeque<Document>()
 
     private val document: Document get() = _uiState.value.document
+
+    val actionRecorder = ActionRecorder()
+
+    private fun describeFilterDiff(before: com.hereliesaz.guillotine.model.ClipFilters, after: com.hereliesaz.guillotine.model.ClipFilters): Map<String, Any> = buildMap {
+        if (before.brightness != after.brightness) put("brightness", after.brightness)
+        if (before.contrast != after.contrast) put("contrast", after.contrast)
+        if (before.saturation != after.saturation) put("saturation", after.saturation)
+        if (before.sepia != after.sepia) put("sepia", after.sepia)
+        if (before.blur != after.blur) put("blur", after.blur)
+        if (before.volume != after.volume) put("volume", after.volume)
+        if (before.pan != after.pan) put("pan", after.pan)
+        if (before.normalize != after.normalize) put("normalize", after.normalize)
+        if (before.hueRotate != after.hueRotate) put("hue_rotate", after.hueRotate)
+        if (before.invert != after.invert) put("invert", after.invert)
+        if (before.grayscale != after.grayscale) put("grayscale", after.grayscale)
+        if (before.removeBackground != after.removeBackground) put("remove_background", after.removeBackground)
+    }
 
     // ---- undo/redo plumbing ------------------------------------------------
 
@@ -213,8 +236,17 @@ class EditorViewModel : ViewModel() {
     }
 
     /** Filter edit targeting one specific clip (used by the per-clip tool popups on a group). */
-    fun updateClipFilters(clipId: String, transform: (ClipFilters) -> ClipFilters) =
+    fun updateClipFilters(clipId: String, transform: (ClipFilters) -> ClipFilters) {
+        val before = document.clips.firstOrNull { it.id == clipId }?.filters
         updateClip(clipId) { it.copy(filters = transform(it.filters)) }
+        if (actionRecorder.isRecording && before != null) {
+            val after = document.clips.firstOrNull { it.id == clipId }?.filters ?: return
+            val changes = describeFilterDiff(before, after)
+            if (changes.isNotEmpty()) {
+                actionRecorder.record(RecordedAction("update_filters", mapOf("clip_id" to clipId) + changes, "Adjust filters: ${changes.entries.joinToString { "${it.key}=${it.value}" }}"))
+            }
+        }
+    }
 
     fun updateSelectedFilters(transform: (ClipFilters) -> ClipFilters) {
         val ids = _uiState.value.selectedClipIds.toSet()
@@ -230,6 +262,7 @@ class EditorViewModel : ViewModel() {
         mutateDocument { doc ->
             doc.copy(clips = doc.clips.map { if (it.id in ids) it.copy(prompt = prompt) else it })
         }
+        ids.forEach { id -> actionRecorder.record(RecordedAction("set_prompt", mapOf("clip_id" to id, "prompt" to prompt), "Set prompt: \"$prompt\"")) }
     }
 
     fun deleteSelected() {
@@ -350,6 +383,7 @@ class EditorViewModel : ViewModel() {
             )
             doc.copy(clips = doc.clips.flatMap { if (it.id == clipId) listOf(first, second) else listOf(it) })
         }
+        actionRecorder.record(RecordedAction("split_clip", mapOf("clip_id" to clipId, "at_ms" to timelineMs), "Split clip at ${timelineMs}ms"))
     }
 
     /**
@@ -430,6 +464,7 @@ class EditorViewModel : ViewModel() {
             doc.copy(clips = doc.clips.filterNot { it.id in removed } + videoPieces + shadowPieces)
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
+        actionRecorder.record(RecordedAction("segment_clip", mapOf("clip_id" to clipId), "Segment clip at edit boundaries"))
     }
 
     /** Apply a clip's own keep/remove edits as a real cut. */
@@ -482,6 +517,7 @@ class EditorViewModel : ViewModel() {
             doc.copy(clips = rest + videoPieces + shadowPieces)
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
+        actionRecorder.record(RecordedAction("apply_cuts", mapOf("clip_id" to clipId), "Apply keep/remove cuts"))
     }
 
     /** A generated replacement for a clip-relative range: [relStartMs, relEndMs) -> [media] (e.g. inpaint). */
@@ -604,6 +640,7 @@ class EditorViewModel : ViewModel() {
     fun rippleDeleteRange(startMs: Long, endMs: Long) {
         if (endMs <= startMs) return
         mutateDocument { doc -> doc.copy(clips = doc.clips.flatMap { rippleClip(it, startMs, endMs) }) }
+        actionRecorder.record(RecordedAction("ripple_delete_range", mapOf("start_ms" to startMs, "end_ms" to endMs), "Ripple delete ${startMs}ms–${endMs}ms"))
     }
 
     private fun rippleClip(c: TimelineClip, start: Long, end: Long): List<TimelineClip> {
@@ -685,6 +722,7 @@ class EditorViewModel : ViewModel() {
             doc.copy(clips = doc.clips.filter { it.id !in ids })
         }
         _uiState.update { st -> st.copy(selectedClipIds = st.selectedClipIds.filter { id -> document.clips.any { it.id == id } }) }
+        actionRecorder.record(RecordedAction("delete_clip", mapOf("clip_id" to clipId), "Delete clip"))
     }
 
     private fun trackListFor(doc: Document, type: ClipType): List<String> = when (type) {
@@ -756,6 +794,7 @@ class EditorViewModel : ViewModel() {
                 )
             })
         }
+        actionRecorder.record(RecordedAction("trim_start", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Trim start by ${deltaMs}ms"))
     }
 
     /**
@@ -782,6 +821,7 @@ class EditorViewModel : ViewModel() {
                 }
             })
         }
+        actionRecorder.record(RecordedAction("trim_end", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Trim end by ${deltaMs}ms"))
     }
 
     /** Next non-colliding track id for [prefix] ("V"/"A"): one past the max existing numeric suffix
@@ -906,9 +946,104 @@ class EditorViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Animated captions: each word from [wordCues] is split into syllables, and each syllable
+     * becomes its own text clip on a separate video track so they all display simultaneously.
+     * All syllables of a word share the same start time and duration. Each syllable gets a
+     * SCALE keyframe that ramps from [BASE_SCALE] to [PEAK_SCALE] during its portion of the
+     * word, giving a "grow as spoken" effect.
+     */
+    fun addAnimatedCaptionsFromTranscript(
+        sourceClipId: String,
+        wordCues: List<com.hereliesaz.guillotine.ai.WordCue>,
+    ) {
+        if (wordCues.isEmpty()) return
+        mutateDocument { doc ->
+            val source = doc.clips.firstOrNull { it.id == sourceClipId } ?: return@mutateDocument doc
+            val gid = source.groupId ?: newId()
+            val clipStartSrc = source.trimStartMs
+            val clipEndSrc = source.trimStartMs + source.durationMs
+
+            // Split every word into syllables to find the max syllable count (= tracks needed).
+            data class SyllableWord(
+                val syllables: List<String>,
+                val startMs: Long,
+                val endMs: Long,
+            )
+
+            val words = wordCues.mapNotNull { wc ->
+                val s = wc.startMs.coerceIn(clipStartSrc, clipEndSrc)
+                val e = wc.endMs.coerceIn(clipStartSrc, clipEndSrc)
+                if (e <= s || wc.word.isBlank()) return@mapNotNull null
+                SyllableWord(com.hereliesaz.guillotine.ai.SyllableSplitter.split(wc.word), s, e)
+            }
+            if (words.isEmpty()) return@mutateDocument doc
+
+            val maxSyllables = words.maxOf { it.syllables.size }
+
+            // Ensure we have enough video tracks for the syllables.
+            var tracks = doc.videoTracks.toMutableList()
+            while (tracks.size < maxSyllables) tracks.add("V${tracks.size + 1}")
+            var updatedDoc = doc.copy(videoTracks = tracks)
+
+            val newClips = mutableListOf<TimelineClip>()
+            for (word in words) {
+                val wordDurMs = word.endMs - word.startMs
+                val timelineStart = source.startTimeMs + (word.startMs - clipStartSrc)
+                val syllableCount = word.syllables.size
+
+                // Horizontal offset: spread syllables across the frame center.
+                // Each syllable gets a fraction of the width based on its character count.
+                val totalChars = word.syllables.sumOf { it.length }.coerceAtLeast(1)
+                var charCursor = 0
+
+                for ((si, syllable) in word.syllables.withIndex()) {
+                    val track = tracks[si]
+
+                    // Horizontal position: center the word, offset each syllable proportionally.
+                    val charMid = charCursor + syllable.length / 2f
+                    val ox = ((charMid / totalChars) - 0.5f) * SPREAD_X
+                    charCursor += syllable.length
+
+                    // Syllable timing within the word: evenly divide the word duration.
+                    val syllableStartRel = (si.toLong() * wordDurMs / syllableCount)
+                    val syllableEndRel = ((si + 1).toLong() * wordDurMs / syllableCount)
+
+                    val keyframes = listOf(
+                        Keyframe(newId(), 0, BASE_SCALE, KeyframeProperty.SCALE),
+                        Keyframe(newId(), syllableStartRel, BASE_SCALE, KeyframeProperty.SCALE),
+                        Keyframe(newId(), syllableEndRel, PEAK_SCALE, KeyframeProperty.SCALE),
+                        Keyframe(newId(), wordDurMs, PEAK_SCALE, KeyframeProperty.SCALE),
+                    )
+
+                    newClips += TimelineClip(
+                        id = newId(),
+                        mediaId = "",
+                        type = ClipType.TEXT,
+                        trackId = track,
+                        startTimeMs = timelineStart,
+                        trimStartMs = 0,
+                        durationMs = wordDurMs,
+                        text = syllable,
+                        groupId = gid,
+                        scale = BASE_SCALE,
+                        offsetX = ox,
+                        keyframes = keyframes,
+                    )
+                }
+            }
+
+            val withGroup = updatedDoc.clips.map {
+                if (it.id == sourceClipId) it.copy(groupId = gid) else it
+            }
+            updatedDoc.copy(clips = withGroup + newClips)
+        }
+    }
+
     // ---- keyframes ---------------------------------------------------------
 
     fun addKeyframe(clipId: String, property: KeyframeProperty) {
+        val relMs = (_uiState.value.currentTimeMs - (document.clips.firstOrNull { it.id == clipId }?.startTimeMs ?: 0)).coerceAtLeast(0)
         mutateDocument { doc ->
             doc.copy(clips = doc.clips.map { clip ->
                 if (clip.id != clipId) return@map clip
@@ -924,6 +1059,7 @@ class EditorViewModel : ViewModel() {
                 clip.copy(keyframes = (clip.keyframes + kf).sortedBy { it.timeMs })
             })
         }
+        actionRecorder.record(RecordedAction("add_keyframe", mapOf("clip_id" to clipId, "property" to property.name, "at_rel_ms" to relMs), "Add ${property.name} keyframe at ${relMs}ms"))
     }
 
     private fun easingNow() =

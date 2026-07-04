@@ -725,7 +725,7 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
             color = Neutral400, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
         )
         Spacer(Modifier.weight(1f))
-        val frameMs = 33L // ~1 frame at 30fps
+        val frameMs = Math.round(state.document.settings.frameDurationMs)
         IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
         IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
         IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }

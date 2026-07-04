@@ -192,7 +192,10 @@ data class GlobalSettings(
     val aspectRatio: AspectRatio = AspectRatio.ORIGINAL,
     val quality: Quality = Quality.ORIGINAL,
     val crop: Crop = Crop(),
-)
+    val fps: Int = 30,
+) {
+    val frameDurationMs: Double get() = 1000.0 / fps
+}
 
 /**
  * The full undoable editor document. Transient UI state (playhead, zoom,

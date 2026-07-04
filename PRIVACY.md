@@ -1,6 +1,6 @@
 # Privacy Policy — Guillotine
 
-**Effective date:** 2026-06-28
+**Effective date:** 2026-07-04
 
 Guillotine is an on-device, non-linear video editor for Android, tablets, and Chromebooks.
 This policy explains what the app does and does not do with your data. In short: **Guillotine
@@ -35,8 +35,15 @@ The app stores the following **locally** (in app‑private storage), not on any 
   relay URL (if you set one).
 - **API keys** — encrypted at rest using Android’s Jetpack Security
   (`EncryptedSharedPreferences`, backed by the Android Keystore).
+- **User‑defined editing tools** — named step‑by‑step editing methods you create or record,
+  stored as plain JSON in app‑private storage. These contain only the tool names and parameters
+  (e.g. "split at 3000 ms") — no media data.
+- **Settings backup files** — when you export your AI configuration, the app writes a JSON file
+  to a location you choose via the system file picker. That file includes your encrypted API keys
+  in their stored form. Treat it like a password export.
 
-Uninstalling the app removes this local data.
+Uninstalling the app removes all app‑private local data (projects, settings, keys, and
+user‑defined tools). Backup files you saved outside the app remain where you put them.
 
 ## Third‑party AI services (only when you use them)
 

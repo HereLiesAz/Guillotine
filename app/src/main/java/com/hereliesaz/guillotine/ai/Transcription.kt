@@ -10,8 +10,16 @@ import java.io.DataOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** Per-word timing from Vosk/Whisper. */
+data class WordCue(val word: String, val startMs: Long, val endMs: Long)
+
 /** A timed transcript line: start/end in source-media milliseconds plus the spoken text. */
-data class TranscriptCue(val startMs: Long, val endMs: Long, val text: String)
+data class TranscriptCue(
+    val startMs: Long,
+    val endMs: Long,
+    val text: String,
+    val words: List<WordCue> = emptyList(),
+)
 
 /**
  * Speech-to-text → timed cues, used to generate grouped text/caption clips. Currently backed
