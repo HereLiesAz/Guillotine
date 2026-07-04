@@ -420,7 +420,8 @@ class McpTools(
                             try {
                                 val boxes = ov.detect(frame).filter { matchesPrompt(clip.prompt, it.label) }.map { it.box }
                                 if (boxes.isEmpty()) return@mapIndexedNotNull null
-                            val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, boxes)
+                            val rects = boxes.map { android.graphics.RectF(it.left, it.top, it.right, it.bottom) }
+                            val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, rects)
                             try {
                                 val uri = runCatching {
                                     com.hereliesaz.guillotine.ai.ImageGen.Leonardo.inpaint(
