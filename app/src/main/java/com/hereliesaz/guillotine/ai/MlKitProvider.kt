@@ -276,12 +276,13 @@ class MlKitProvider : ClipAnalyzer {
         // pairs so the cache doesn't retain refs to the labeler (which is closed at end-of-scan).
         val scene = FrameAnalysisCache.sceneLabels(uri, atMs) {
             val image = InputImage.fromBitmap(bmp, 0)
-            Tasks.await(labeler.process(image)).map { it.text to it.confidence }
+            Tasks.await(labeler.process(image)).map {
+                FrameAnalysisCache.SceneLabel(it.text, it.text.lowercase(), it.confidence)
+            }
         }
-        return scene.any { (text, confidence) ->
-            confidence >= 0.5f && intent.terms.any { t ->
-                val lower = text.lowercase()
-                lower.contains(t) || t.contains(lower)
+        return scene.any { label ->
+            label.confidence >= 0.5f && intent.terms.any { t ->
+                label.lowerText.contains(t) || t.contains(label.lowerText)
             }
         }
     }
