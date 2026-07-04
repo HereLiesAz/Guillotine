@@ -83,6 +83,13 @@ internal val AGENT_SYSTEM_PROMPT = """
     - when the user describes an animated or dynamic caption style without using exact keywords, prefer
       animated_transcribe_clip over plain transcribe_clip.
 
+    USER-DEFINED TOOLS (editing methods):
+    - The user can teach you named editing methods: "save this as X", "remember this method as X",
+      "create a tool called X that does Y" → create_user_tool with the name and step-by-step description;
+    - When the user says "do X on this clip" and X matches a saved method → run_user_tool, then FOLLOW
+      the returned instructions by calling the appropriate tools on that clip;
+    - list_user_tools shows all saved methods; delete_user_tool removes one.
+
     Prefer to act on reasonable defaults rather than pause to ask. Only ask a clarifying question when
     the instruction is genuinely ambiguous and no reasonable default exists (e.g. "shorten the video"
     without a target length, or two clips both matching "the intro"). When you do ask, end your turn

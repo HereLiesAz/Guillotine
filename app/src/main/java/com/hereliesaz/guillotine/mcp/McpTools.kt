@@ -85,6 +85,37 @@ class McpTools(
             emptySchema(),
         ))
         put(toolDefinition(
+            "create_user_tool",
+            "Create a named editing method the user can invoke later by name. The description should " +
+                "be step-by-step instructions for what to do to a clip (using the other tools). If a " +
+                "tool with the same name exists it is overwritten.",
+            objSchema(
+                "name" to stringProp("Short name for the method (e.g. \"comedy zoom\")"),
+                "description" to stringProp("Step-by-step instructions the agent should follow when this tool is invoked"),
+                required = listOf("name", "description"),
+            ),
+        ))
+        put(toolDefinition(
+            "list_user_tools",
+            "List all user-defined editing methods (tools). Returns name + description for each.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "delete_user_tool",
+            "Delete a user-defined editing method by name.",
+            objSchema("name" to stringProp("Name of the tool to delete"), required = listOf("name")),
+        ))
+        put(toolDefinition(
+            "run_user_tool",
+            "Run a user-defined editing method on a clip. Returns the method's step-by-step " +
+                "instructions — execute them using the other tools on the given clip.",
+            objSchema(
+                "name" to stringProp("Name of the user tool to run"),
+                "clip_id" to stringProp("The clip to apply the method to"),
+                required = listOf("name", "clip_id"),
+            ),
+        ))
+        put(toolDefinition(
             "transcribe_clip",
             "Transcribe a clip's audio (on-device Vosk or cloud Whisper) and add timed caption text " +
                 "clips to the timeline, grouped with the source clip. Each caption appears and disappears " +
@@ -119,6 +150,10 @@ class McpTools(
         "describe_current_frame" -> describeCurrentFrame()
         "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
         "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
+        "create_user_tool" -> createUserTool(args.getString("name"), args.getString("description"))
+        "list_user_tools" -> listUserTools()
+        "delete_user_tool" -> deleteUserTool(args.getString("name"))
+        "run_user_tool" -> runUserTool(args.getString("name"), args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -460,6 +495,62 @@ class McpTools(
             }
         } finally {
             runCatching { frame.recycle() }
+        }
+    }
+
+    private fun createUserTool(name: String, description: String): JSONObject {
+        require(name.isNotBlank()) { "Tool name must not be blank." }
+        require(description.isNotBlank()) { "Tool description must not be blank." }
+        val tool = com.hereliesaz.guillotine.data.UserTool(
+            id = com.hereliesaz.guillotine.model.newId(),
+            name = name.trim(),
+            description = description.trim(),
+        )
+        com.hereliesaz.guillotine.data.UserToolStore.add(context, tool)
+        return ok().apply {
+            put("name", tool.name)
+            put("humanSummary", "Saved editing method \"${tool.name}\" — invoke it with run_user_tool.")
+        }
+    }
+
+    private fun listUserTools(): JSONObject {
+        val tools = com.hereliesaz.guillotine.data.UserToolStore.load(context)
+        return JSONObject().apply {
+            put("tools", JSONArray().apply {
+                tools.forEach { t ->
+                    put(JSONObject().apply { put("name", t.name); put("description", t.description) })
+                }
+            })
+            put("count", tools.size)
+            put(
+                "humanSummary",
+                if (tools.isEmpty()) "No user-defined tools saved yet."
+                else "Found ${tools.size} user tool(s): ${tools.joinToString { "\"${it.name}\"" }}.",
+            )
+        }
+    }
+
+    private fun deleteUserTool(name: String): JSONObject {
+        com.hereliesaz.guillotine.data.UserToolStore.remove(context, name.trim())
+        return ok().apply { put("humanSummary", "Deleted user tool \"$name\".") }
+    }
+
+    private fun runUserTool(name: String, clipId: String): JSONObject {
+        val tools = com.hereliesaz.guillotine.data.UserToolStore.load(context)
+        val tool = tools.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) }
+            ?: throw IllegalArgumentException("No user tool named \"$name\". Use list_user_tools to see available ones.")
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        return JSONObject().apply {
+            put("ok", true)
+            put("clipId", clipId)
+            put("toolName", tool.name)
+            put("instructions", tool.description)
+            put(
+                "humanSummary",
+                "Running \"${tool.name}\" on clip — follow the instructions using the other tools.",
+            )
         }
     }
 
