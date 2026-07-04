@@ -153,7 +153,8 @@ EDIT_CONFLICT_RETRIES = 3
 
 
 def _is_edit_conflict(exc: Exception) -> bool:
-    return "outside of this Edit" in str(exc)
+    exc_str = str(exc).lower()
+    return "outside of this edit" in exc_str or "edit has expired" in exc_str
 
 
 def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
@@ -195,7 +196,9 @@ def stage_track(session: AuthorizedSession, package: str, track: str, status: st
         except Exception as e:
             delete_edit(session, package, edit_id)
             if _is_edit_conflict(e) and attempt < EDIT_CONFLICT_RETRIES:
-                time.sleep(2 ** attempt)
+                wait = 2 ** attempt
+                print(f"Edit conflict on track {track} (attempt {attempt}/{EDIT_CONFLICT_RETRIES}); retrying in {wait}s…")
+                time.sleep(wait)
                 continue
             raise
 
