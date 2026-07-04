@@ -139,8 +139,6 @@ object Exporter {
      * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
      * (which stay in sync across 'remove' cuts via each item's timeline start).
      *
-     * Known limit (verify on device): mixing image clips (no audio) with video clips (audio) in one
-     * sequence may need Transformer's force-audio-track flag — most projects are all-video/all-image.
      */
     private fun buildComposition(
         document: Document,
@@ -337,7 +335,7 @@ object Exporter {
                     for (lane in 0 until laneCount) {
                         val laneClips = layout.filter { it.second == lane }.map { it.first }
                         if (laneClips.isEmpty()) continue
-                        val seq = EditedMediaItemSequence.Builder()
+                        val seq = EditedMediaItemSequence.Builder().setForceAudioTrack(true)
                         val any = appendVideoItems(
                             seq, laneClips, globalZero, withOverlays = false, fadeFor = { fadeByClip[it.id] },
                         )
@@ -346,7 +344,7 @@ object Exporter {
                 }
             }
         } else {
-            val seq = EditedMediaItemSequence.Builder()
+            val seq = EditedMediaItemSequence.Builder().setForceAudioTrack(true)
             val any = appendVideoItems(
                 seq,
                 baseClips,
@@ -368,7 +366,7 @@ object Exporter {
             .sortedBy { it.startTimeMs }
             .groupBy { it.trackId }
         val audioSequences: List<EditedMediaItemSequence> = audioByTrack.mapNotNull { (_, clips) ->
-            val seq = EditedMediaItemSequence.Builder()
+            val seq = EditedMediaItemSequence.Builder().setForceAudioTrack(true)
             var cursor = clips.firstOrNull()?.startTimeMs ?: return@mapNotNull null
             var addedAny = false
             clips.forEach { clip ->
