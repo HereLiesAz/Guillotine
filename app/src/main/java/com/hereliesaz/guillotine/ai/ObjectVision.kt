@@ -9,9 +9,10 @@ import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import java.io.Closeable
 
 /**
- * On-device COCO object detector (MediaPipe + bundled EfficientDet-Lite0). Unlike whole-image
+ * On-device COCO object detector (MediaPipe + bundled EfficientDet-Lite2). Unlike whole-image
  * labeling, this returns bounding-box detections, so it reliably flags objects that aren't the
- * dominant thing in frame — a phone in someone's hand, a car at the edge, etc.
+ * dominant thing in frame — a phone in someone's hand, a car at the edge, etc. Lite2 trades
+ * ~2x model size over Lite0 for significantly better mAP (33 vs 26 on COCO).
  *
  * Loads a model bundled in app assets (offline, no key/download). If the model or native libs
  * can't load (older device), it degrades to "unavailable" so callers fall back to image labeling
@@ -67,8 +68,8 @@ class ObjectVision(context: Context) : Closeable {
     }
 
     companion object {
-        private const val MODEL_ASSET = "efficientdet_lite0.tflite"
-        private const val SCORE_THRESHOLD = 0.4f
+        private const val MODEL_ASSET = "efficientdet_lite2.tflite"
+        private const val SCORE_THRESHOLD = 0.35f
         private const val MAX_RESULTS = 25
 
         /** The 80 COCO labels this model emits (used to know when the labeler fallback is redundant). */

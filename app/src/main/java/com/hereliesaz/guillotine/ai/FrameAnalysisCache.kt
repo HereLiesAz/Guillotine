@@ -6,8 +6,10 @@ package com.hereliesaz.guillotine.ai
  *
  *  - **Object labels**: the lowercase COCO class names [ObjectVision] found in the frame
  *    (`ObjectVision.labels(bmp)`), independent of any specific prompt.
- *  - **Scene labels**: ML Kit's generic [ImageLabeler] results, snapshotted as [SceneLabel] with
- *    pre-lowercased text so callers never re-allocate lowercase strings on the hot path.
+ *  - **Classifier labels**: [SceneClassifier] (EfficientNet-Lite0 / ImageNet ~1000 classes),
+ *    snapshotted as [SceneLabel] with pre-lowercased text.
+ *  - **Scene labels**: ML Kit's generic [ImageLabeler] results (~400 labels), same [SceneLabel]
+ *    format. Separate cache from classifier labels to avoid cross-contamination.
  *  - **Detections**: full COCO detections with bounding boxes (`ObjectVision.detect(bmp)`), used
  *    by reference-mode analysis to crop each candidate object before embedding. Boxes are read-only
  *    to callers — do not mutate a returned Detection's RectF.
@@ -49,6 +51,7 @@ object FrameAnalysisCache {
     private var maxEntries: Int = DEFAULT_MAX_ENTRIES
 
     private val objectLabels: MutableMap<FrameKey, Set<String>> = boundedLru()
+    private val classifierLabels: MutableMap<FrameKey, List<SceneLabel>> = boundedLru()
     private val sceneLabels: MutableMap<FrameKey, List<SceneLabel>> = boundedLru()
     private val detections: MutableMap<FrameKey, List<ObjectVision.Detection>> = boundedLru()
 
@@ -62,6 +65,17 @@ object FrameAnalysisCache {
         synchronized(objectLabels) { objectLabels[key]?.let { return it } }
         val v = compute()
         synchronized(objectLabels) { return objectLabels.getOrPut(key) { v } }
+    }
+
+    fun classifierLabels(
+        uri: String,
+        atMs: Long,
+        compute: () -> List<SceneLabel>,
+    ): List<SceneLabel> {
+        val key = FrameKey(uri, atMs)
+        synchronized(classifierLabels) { classifierLabels[key]?.let { return it } }
+        val v = compute()
+        synchronized(classifierLabels) { return classifierLabels.getOrPut(key) { v } }
     }
 
     fun sceneLabels(
@@ -89,6 +103,7 @@ object FrameAnalysisCache {
     /** Clear everything — used by tests and by teardown paths that suspect stale entries. */
     fun clear() {
         synchronized(objectLabels) { objectLabels.clear() }
+        synchronized(classifierLabels) { classifierLabels.clear() }
         synchronized(sceneLabels) { sceneLabels.clear() }
         synchronized(detections) { detections.clear() }
     }
