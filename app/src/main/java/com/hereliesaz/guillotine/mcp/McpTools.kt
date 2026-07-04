@@ -84,6 +84,22 @@ class McpTools(
                 "screen', 'the current thing', or otherwise points at the current preview.",
             emptySchema(),
         ))
+        put(toolDefinition(
+            "transcribe_clip",
+            "Transcribe a clip's audio (on-device Vosk or cloud Whisper) and add timed caption text " +
+                "clips to the timeline, grouped with the source clip. Each caption appears and disappears " +
+                "in sync with the spoken words.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "animated_transcribe_clip",
+            "Transcribe a clip's audio and create ANIMATED per-syllable captions: each word is split " +
+                "into syllables placed on separate video tracks so they all appear simultaneously, with " +
+                "SCALE keyframes that ramp each syllable from small to large as it is spoken — a " +
+                "\"grow as said\" kinetic typography effect. Use when the user asks for animated, " +
+                "kinetic, per-word, or per-syllable text/captions.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -101,6 +117,8 @@ class McpTools(
         "analyze_clip_with_reference" -> analyzeClipWithReference(args.getString("clip_id"))
         "remove_object_generative" -> removeObjectGenerative(args.getString("clip_id"))
         "describe_current_frame" -> describeCurrentFrame()
+        "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
+        "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -442,6 +460,61 @@ class McpTools(
             }
         } finally {
             runCatching { frame.recycle() }
+        }
+    }
+
+    private fun transcribeClip(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val cues = runBlocking {
+            com.hereliesaz.guillotine.ai.Transcription.transcribe(
+                context, settingsProvider(), Uri.parse(media.uri),
+            )
+        }
+        if (cues.isEmpty()) return ok().apply {
+            put("captions", 0)
+            put("humanSummary", "Transcribed clip — no speech detected.")
+        }
+        vm.addTextClipsFromTranscript(clipId, cues)
+        val n = vm.uiState.value.document.clips.count { it.type == com.hereliesaz.guillotine.model.ClipType.TEXT }
+        return ok().apply {
+            put("captions", cues.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Transcribed and added ${cues.size} caption(s) ($n text clips total).")
+        }
+    }
+
+    private fun animatedTranscribeClip(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val cues = runBlocking {
+            com.hereliesaz.guillotine.ai.Transcription.transcribe(
+                context, settingsProvider(), Uri.parse(media.uri),
+            )
+        }
+        val wordCues = cues.flatMap { it.words }
+        if (wordCues.isEmpty()) return ok().apply {
+            put("words", 0)
+            put("humanSummary", "Transcribed clip — no per-word timing available for animation.")
+        }
+        vm.addAnimatedCaptionsFromTranscript(clipId, wordCues)
+        val n = vm.uiState.value.document.clips.count { it.type == com.hereliesaz.guillotine.model.ClipType.TEXT }
+        val tracks = vm.uiState.value.document.videoTracks.size
+        return ok().apply {
+            put("words", wordCues.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("videoTracks", tracks)
+            put(
+                "humanSummary",
+                "Created animated captions for ${wordCues.size} word(s) — syllables on $tracks video track(s) " +
+                    "with per-syllable scale keyframes ($n text clips total).",
+            )
         }
     }
 

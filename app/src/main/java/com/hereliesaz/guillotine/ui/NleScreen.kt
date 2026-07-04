@@ -317,22 +317,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         }
     }
 
-    val onAnimatedTranscribe: () -> Unit = onAnimatedTranscribe@{
-        val clip = vm.uiState.value.selectedClips.singleOrNull() ?: return@onAnimatedTranscribe
-        val media = vm.uiState.value.document.mediaFor(clip) ?: return@onAnimatedTranscribe
-        vm.setProcessing(true, null)
-        scope.launch {
-            try {
-                val cues = Transcription.transcribe(context, settings, Uri.parse(media.uri))
-                val wordCues = cues.flatMap { it.words }
-                vm.addAnimatedCaptionsFromTranscript(clip.id, wordCues)
-                vm.setProcessing(false, null)
-            } catch (e: Exception) {
-                vm.setProcessing(false, e.message ?: "Animated transcription failed")
-            }
-        }
-    }
-
     // Playback clock: advances the timeline and skips 'remove' ranges.
     LaunchedEffectPlayback(vm, state.isPlaying)
 
@@ -414,7 +398,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 )
                 TransportControls(vm, state)
             }
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, onAnimatedTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
             PreviewPlayer(
@@ -424,7 +408,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
             )
             TransportControls(vm, state)
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, onAnimatedTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
         } // editor Column
@@ -784,7 +768,6 @@ private fun EditorToolStrip(
     state: EditorUiState,
     onAnalyze: () -> Unit,
     onTranscribe: () -> Unit,
-    onAnimatedTranscribe: () -> Unit,
     providerLabel: String,
     onOpenSettings: () -> Unit,
     assistant: AssistantViewModel.UiState,
@@ -890,7 +873,7 @@ private fun EditorToolStrip(
                 (selected.size > 1 && selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null })
             if (oneUnit) {
                 ToolGroupSeparator()
-                ClipToolButtons(vm, state, onTranscribe, onAnimatedTranscribe)
+                ClipToolButtons(vm, state, onTranscribe)
             }
         }
         // The agent's running status/output now streams into the activity-log bottom sheet; the

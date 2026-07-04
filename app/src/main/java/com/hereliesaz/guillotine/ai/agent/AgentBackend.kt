@@ -74,6 +74,15 @@ internal val AGENT_SYSTEM_PROMPT = """
     tools until the instruction is satisfied, then give a single short sentence summarizing what you
     changed.
 
+    CAPTIONS / TRANSCRIPTION:
+    - "transcribe", "add captions/subtitles" → transcribe_clip: adds timed caption text clips synced to
+      the spoken words;
+    - "animated captions", "kinetic text", "per-word/syllable animation", "grow as said", "words appear
+      as spoken" → animated_transcribe_clip: splits each word into syllables on separate tracks with
+      scale keyframes that grow each syllable as it's spoken — kinetic typography;
+    - when the user describes an animated or dynamic caption style without using exact keywords, prefer
+      animated_transcribe_clip over plain transcribe_clip.
+
     Prefer to act on reasonable defaults rather than pause to ask. Only ask a clarifying question when
     the instruction is genuinely ambiguous and no reasonable default exists (e.g. "shorten the video"
     without a target length, or two clips both matching "the intro"). When you do ask, end your turn
