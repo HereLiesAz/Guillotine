@@ -1,6 +1,6 @@
 package com.hereliesaz.guillotine.ai.agent
 
-import com.hereliesaz.guillotine.mcp.McpTools
+import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import org.json.JSONObject
 
 /**
@@ -37,7 +37,7 @@ interface AgentBackend {
      * Run [instruction] to completion, executing tools via [tools] and reporting progress
      * through [onEvent]. Must not throw: failures are reported as [AgentEvent.Failed].
      */
-    suspend fun run(instruction: String, tools: McpTools, onEvent: (AgentEvent) -> Unit)
+    suspend fun run(instruction: String, tools: McpToolsSurface, onEvent: (AgentEvent) -> Unit)
 }
 
 /** Hard cap on tool round-trips so a confused model can't loop forever / burn tokens. */
@@ -128,7 +128,7 @@ internal data class ToolOutcome(val json: JSONObject, val isError: Boolean) {
 }
 
 /** Execute one MCP tool in-process, capturing thrown errors as a result the model can recover from. */
-internal fun callTool(tools: McpTools, name: String, args: JSONObject): ToolOutcome =
+internal fun callTool(tools: McpToolsSurface, name: String, args: JSONObject): ToolOutcome =
     try {
         ToolOutcome(tools.call(name, args), isError = false)
     } catch (e: Exception) {

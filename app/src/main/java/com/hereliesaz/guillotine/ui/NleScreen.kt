@@ -106,6 +106,7 @@ import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
 import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
+import com.hereliesaz.guillotine.editor.AndroidEditorViewModel
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.export.Exporter
 import com.hereliesaz.guillotine.media.MediaImport
@@ -137,7 +138,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val vm: EditorViewModel = viewModel()
+    val vm: EditorViewModel = viewModel<AndroidEditorViewModel>().editor
     val state by vm.uiState.collectAsState()
     val keyStore = remember { ApiKeyStore(context) }
     val settings by keyStore.settings.collectAsState(initial = AiSettings())

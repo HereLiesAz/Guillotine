@@ -19,7 +19,7 @@ object ModelCatalog {
         withContext(Dispatchers.IO) { runCatching { fetchAnalyzer(provider, apiKey) }.getOrDefault(emptyList()) }
 
     /** Leonardo platform models (id+name); empty → caller falls back to the curated list. */
-    suspend fun leonardoModels(apiKey: String): List<ImageGen.LeonardoModel> =
+    suspend fun leonardoModels(apiKey: String): List<LeonardoModel> =
         withContext(Dispatchers.IO) { runCatching { fetchLeonardo(apiKey) }.getOrDefault(emptyList()) }
 
     private fun fetchAnalyzer(provider: AiProviderType, apiKey: String): List<String> = when (provider) {
@@ -55,13 +55,13 @@ object ModelCatalog {
             .distinct().sorted()
     }
 
-    private fun fetchLeonardo(apiKey: String): List<ImageGen.LeonardoModel> {
+    private fun fetchLeonardo(apiKey: String): List<LeonardoModel> {
         val json = JSONObject(get("https://cloud.leonardo.ai/api/rest/v1/platformModels", bearer(apiKey)))
         val arr = json.optJSONArray("custom_models") ?: json.optJSONArray("models") ?: return emptyList()
         return (0 until arr.length()).mapNotNull {
             val o = arr.optJSONObject(it) ?: return@mapNotNull null
             val id = o.optString("id")
-            if (id.isBlank()) null else ImageGen.LeonardoModel(id, o.optString("name").ifBlank { id })
+            if (id.isBlank()) null else LeonardoModel(id, o.optString("name").ifBlank { id })
         }
     }
 

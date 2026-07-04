@@ -2,7 +2,7 @@ package com.hereliesaz.guillotine.ai.agent
 
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
-import com.hereliesaz.guillotine.mcp.McpTools
+import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,7 +26,7 @@ class OnDeviceAgentBackend(
 
     override suspend fun run(
         instruction: String,
-        tools: McpTools,
+        tools: McpToolsSurface,
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         try {

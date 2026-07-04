@@ -35,9 +35,6 @@ class ObjectVision(context: Context) : Closeable {
     /** Whether the detector loaded; callers can skip object detection cleanly when false. */
     val available: Boolean get() = detector != null
 
-    /** One detected object: lower-cased COCO [label], pixel [box], and confidence [score]. */
-    data class Detection(val label: String, val box: android.graphics.RectF, val score: Float)
-
     /** Detected objects (with boxes) in [bitmap] — used to crop a specific object for reference matching. */
     fun detect(bitmap: Bitmap): List<Detection> {
         val d = detector ?: return emptyList()
@@ -45,7 +42,8 @@ class ObjectVision(context: Context) : Closeable {
             d.detect(BitmapImageBuilder(bitmap).build()).detections().mapNotNull { det ->
                 val cat = det.categories().maxByOrNull { it.score() } ?: return@mapNotNull null
                 val name = cat.categoryName()?.takeIf(String::isNotBlank)?.lowercase() ?: return@mapNotNull null
-                Detection(name, det.boundingBox(), cat.score())
+                val r = det.boundingBox()
+                Detection(name, BoundingBox(r.left, r.top, r.right, r.bottom), cat.score())
             }
         }.getOrDefault(emptyList())
     }

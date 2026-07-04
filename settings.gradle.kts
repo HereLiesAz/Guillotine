@@ -25,4 +25,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Guillotine"
+include(":shared")
 include(":app")

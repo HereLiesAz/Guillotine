@@ -4,7 +4,7 @@ import android.content.Context
 import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.meta
-import com.hereliesaz.guillotine.mcp.McpTools
+import com.hereliesaz.guillotine.mcp.McpToolsSurface
 
 /**
  * Picks the agent "brain" for the current settings, so the in-app AI can actually drive the
@@ -19,7 +19,7 @@ import com.hereliesaz.guillotine.mcp.McpTools
  */
 object McpAgent {
 
-    fun forSettings(context: Context, settings: AiSettings, tools: McpTools): AgentBackend? {
+    fun forSettings(context: Context, settings: AiSettings, tools: McpToolsSurface): AgentBackend? {
         val provider = settings.provider
         val key = settings.keyFor(provider)
         val model = settings.modelFor(provider)

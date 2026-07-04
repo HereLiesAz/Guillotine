@@ -5,17 +5,6 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-/** User settings for the optional encrypted Cloudflare relay. */
-data class RelayConfig(
-    val enabled: Boolean = false,
-    /** The Worker's WebSocket endpoint, e.g. `wss://guillotine-mcp-relay.<you>.workers.dev/relay`. */
-    val workerUrl: String = "",
-    /** Optional shared key that gates use of the Worker itself (stops random abuse of your edge). */
-    val accessKey: String = "",
-) {
-    val isUsable: Boolean get() = enabled && workerUrl.startsWith("wss://", ignoreCase = true)
-}
-
 /**
  * Persists [RelayConfig] encrypted on-device. The Worker URL/access key aren't the end-to-end
  * secret (the MCP token is), but they live alongside it in the same encrypted store for tidiness.
