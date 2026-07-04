@@ -90,6 +90,16 @@ internal val AGENT_SYSTEM_PROMPT = """
       the returned instructions by calling the appropriate tools on that clip;
     - list_user_tools shows all saved methods; delete_user_tool removes one.
 
+    RECORDING EDITING METHODS:
+    - "record what I do", "watch me edit this", "learn from my edits" → start_recording on the target clip;
+    - while recording, every UI action the user performs (split, trim, delete, keyframe, filter change, etc.)
+      is automatically captured — you don't need to do anything, just confirm recording has started;
+    - "save that as X", "stop recording and call it X" → stop_recording with the name; the captured steps
+      become the tool's description automatically;
+    - the user can add caveats ("but adapt timings to clip length", "ignore exact positions") via the
+      extra_instructions parameter of stop_recording, or edit the tool later with create_user_tool;
+    - discard_recording cancels without saving.
+
     Prefer to act on reasonable defaults rather than pause to ask. Only ask a clarifying question when
     the instruction is genuinely ambiguous and no reasonable default exists (e.g. "shorten the video"
     without a target length, or two clips both matching "the intro"). When you do ask, end your turn

@@ -116,6 +116,29 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "start_recording",
+            "Start recording the user's editing actions on a clip. While recording, every edit " +
+                "operation (split, trim, delete, keyframe, filter change, etc.) is captured. " +
+                "Stop with stop_recording to save the recorded actions as a user-defined tool.",
+            objSchema("clip_id" to stringProp("The clip to record actions on"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "stop_recording",
+            "Stop recording and save the captured actions as a user-defined tool. Returns the " +
+                "recorded steps so the user can review them. The user can add caveats or " +
+                "clarifications via create_user_tool afterward.",
+            objSchema(
+                "name" to stringProp("Name for the new tool (e.g. \"dramatic zoom cut\")"),
+                "extra_instructions" to stringProp("Optional caveats or generalizations to append (e.g. \"adapt timings to clip length\")"),
+                required = listOf("name"),
+            ),
+        ))
+        put(toolDefinition(
+            "discard_recording",
+            "Discard the current recording without saving.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
             "transcribe_clip",
             "Transcribe a clip's audio (on-device Vosk or cloud Whisper) and add timed caption text " +
                 "clips to the timeline, grouped with the source clip. Each caption appears and disappears " +
@@ -154,6 +177,9 @@ class McpTools(
         "list_user_tools" -> listUserTools()
         "delete_user_tool" -> deleteUserTool(args.getString("name"))
         "run_user_tool" -> runUserTool(args.getString("name"), args.getString("clip_id"))
+        "start_recording" -> startRecording(args.getString("clip_id"))
+        "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
+        "discard_recording" -> discardRecording()
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -552,6 +578,46 @@ class McpTools(
                 "Running \"${tool.name}\" on clip — follow the instructions using the other tools.",
             )
         }
+    }
+
+    private fun startRecording(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        if (vm.actionRecorder.isRecording) throw IllegalStateException("Already recording. Stop or discard first.")
+        vm.actionRecorder.start(clipId)
+        return ok().apply {
+            put("clipId", clipId)
+            put("humanSummary", "Recording started — editing actions on this clip will be captured.")
+        }
+    }
+
+    private fun stopRecording(name: String, extraInstructions: String): JSONObject {
+        require(name.isNotBlank()) { "Tool name must not be blank." }
+        if (!vm.actionRecorder.isRecording) throw IllegalStateException("Not currently recording.")
+        val actions = vm.actionRecorder.stop()
+        if (actions.isEmpty()) throw IllegalStateException("No actions were recorded.")
+        val autoDesc = vm.actionRecorder.toDescription()
+        val fullDesc = if (extraInstructions.isBlank()) autoDesc else "$autoDesc\n\nNotes: $extraInstructions"
+        val tool = com.hereliesaz.guillotine.data.UserTool(
+            id = com.hereliesaz.guillotine.model.newId(),
+            name = name.trim(),
+            description = fullDesc,
+        )
+        com.hereliesaz.guillotine.data.UserToolStore.add(context, tool)
+        return JSONObject().apply {
+            put("ok", true)
+            put("name", tool.name)
+            put("stepsRecorded", actions.size)
+            put("steps", vm.actionRecorder.toJson())
+            put("description", fullDesc)
+            put("humanSummary", "Saved \"${tool.name}\" with ${actions.size} recorded step(s).")
+        }
+    }
+
+    private fun discardRecording(): JSONObject {
+        vm.actionRecorder.discard()
+        return ok().apply { put("humanSummary", "Recording discarded.") }
     }
 
     private fun transcribeClip(clipId: String): JSONObject {

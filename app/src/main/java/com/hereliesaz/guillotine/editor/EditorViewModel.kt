@@ -84,6 +84,23 @@ class EditorViewModel : ViewModel() {
 
     private val document: Document get() = _uiState.value.document
 
+    val actionRecorder = ActionRecorder()
+
+    private fun describeFilterDiff(before: com.hereliesaz.guillotine.model.ClipFilters, after: com.hereliesaz.guillotine.model.ClipFilters): Map<String, Any> = buildMap {
+        if (before.brightness != after.brightness) put("brightness", after.brightness)
+        if (before.contrast != after.contrast) put("contrast", after.contrast)
+        if (before.saturation != after.saturation) put("saturation", after.saturation)
+        if (before.sepia != after.sepia) put("sepia", after.sepia)
+        if (before.blur != after.blur) put("blur", after.blur)
+        if (before.volume != after.volume) put("volume", after.volume)
+        if (before.pan != after.pan) put("pan", after.pan)
+        if (before.normalize != after.normalize) put("normalize", after.normalize)
+        if (before.hueRotate != after.hueRotate) put("hue_rotate", after.hueRotate)
+        if (before.invert != after.invert) put("invert", after.invert)
+        if (before.grayscale != after.grayscale) put("grayscale", after.grayscale)
+        if (before.removeBackground != after.removeBackground) put("remove_background", after.removeBackground)
+    }
+
     // ---- undo/redo plumbing ------------------------------------------------
 
     private fun mutateDocument(transform: (Document) -> Document) {
@@ -219,8 +236,17 @@ class EditorViewModel : ViewModel() {
     }
 
     /** Filter edit targeting one specific clip (used by the per-clip tool popups on a group). */
-    fun updateClipFilters(clipId: String, transform: (ClipFilters) -> ClipFilters) =
+    fun updateClipFilters(clipId: String, transform: (ClipFilters) -> ClipFilters) {
+        val before = document.clips.firstOrNull { it.id == clipId }?.filters
         updateClip(clipId) { it.copy(filters = transform(it.filters)) }
+        if (actionRecorder.isRecording && before != null) {
+            val after = document.clips.firstOrNull { it.id == clipId }?.filters ?: return
+            val changes = describeFilterDiff(before, after)
+            if (changes.isNotEmpty()) {
+                actionRecorder.record(RecordedAction("update_filters", mapOf("clip_id" to clipId) + changes, "Adjust filters: ${changes.entries.joinToString { "${it.key}=${it.value}" }}"))
+            }
+        }
+    }
 
     fun updateSelectedFilters(transform: (ClipFilters) -> ClipFilters) {
         val ids = _uiState.value.selectedClipIds.toSet()
@@ -236,6 +262,7 @@ class EditorViewModel : ViewModel() {
         mutateDocument { doc ->
             doc.copy(clips = doc.clips.map { if (it.id in ids) it.copy(prompt = prompt) else it })
         }
+        ids.forEach { id -> actionRecorder.record(RecordedAction("set_prompt", mapOf("clip_id" to id, "prompt" to prompt), "Set prompt: \"$prompt\"")) }
     }
 
     fun deleteSelected() {
@@ -356,6 +383,7 @@ class EditorViewModel : ViewModel() {
             )
             doc.copy(clips = doc.clips.flatMap { if (it.id == clipId) listOf(first, second) else listOf(it) })
         }
+        actionRecorder.record(RecordedAction("split_clip", mapOf("clip_id" to clipId, "at_ms" to timelineMs), "Split clip at ${timelineMs}ms"))
     }
 
     /**
@@ -436,6 +464,7 @@ class EditorViewModel : ViewModel() {
             doc.copy(clips = doc.clips.filterNot { it.id in removed } + videoPieces + shadowPieces)
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
+        actionRecorder.record(RecordedAction("segment_clip", mapOf("clip_id" to clipId), "Segment clip at edit boundaries"))
     }
 
     /** Apply a clip's own keep/remove edits as a real cut. */
@@ -488,6 +517,7 @@ class EditorViewModel : ViewModel() {
             doc.copy(clips = rest + videoPieces + shadowPieces)
         }
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
+        actionRecorder.record(RecordedAction("apply_cuts", mapOf("clip_id" to clipId), "Apply keep/remove cuts"))
     }
 
     /** A generated replacement for a clip-relative range: [relStartMs, relEndMs) -> [media] (e.g. inpaint). */
@@ -610,6 +640,7 @@ class EditorViewModel : ViewModel() {
     fun rippleDeleteRange(startMs: Long, endMs: Long) {
         if (endMs <= startMs) return
         mutateDocument { doc -> doc.copy(clips = doc.clips.flatMap { rippleClip(it, startMs, endMs) }) }
+        actionRecorder.record(RecordedAction("ripple_delete_range", mapOf("start_ms" to startMs, "end_ms" to endMs), "Ripple delete ${startMs}ms–${endMs}ms"))
     }
 
     private fun rippleClip(c: TimelineClip, start: Long, end: Long): List<TimelineClip> {
@@ -691,6 +722,7 @@ class EditorViewModel : ViewModel() {
             doc.copy(clips = doc.clips.filter { it.id !in ids })
         }
         _uiState.update { st -> st.copy(selectedClipIds = st.selectedClipIds.filter { id -> document.clips.any { it.id == id } }) }
+        actionRecorder.record(RecordedAction("delete_clip", mapOf("clip_id" to clipId), "Delete clip"))
     }
 
     private fun trackListFor(doc: Document, type: ClipType): List<String> = when (type) {
@@ -762,6 +794,7 @@ class EditorViewModel : ViewModel() {
                 )
             })
         }
+        actionRecorder.record(RecordedAction("trim_start", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Trim start by ${deltaMs}ms"))
     }
 
     /**
@@ -788,6 +821,7 @@ class EditorViewModel : ViewModel() {
                 }
             })
         }
+        actionRecorder.record(RecordedAction("trim_end", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Trim end by ${deltaMs}ms"))
     }
 
     /** Next non-colliding track id for [prefix] ("V"/"A"): one past the max existing numeric suffix
@@ -1009,6 +1043,7 @@ class EditorViewModel : ViewModel() {
     // ---- keyframes ---------------------------------------------------------
 
     fun addKeyframe(clipId: String, property: KeyframeProperty) {
+        val relMs = (_uiState.value.currentTimeMs - (document.clips.firstOrNull { it.id == clipId }?.startTimeMs ?: 0)).coerceAtLeast(0)
         mutateDocument { doc ->
             doc.copy(clips = doc.clips.map { clip ->
                 if (clip.id != clipId) return@map clip
@@ -1024,6 +1059,7 @@ class EditorViewModel : ViewModel() {
                 clip.copy(keyframes = (clip.keyframes + kf).sortedBy { it.timeMs })
             })
         }
+        actionRecorder.record(RecordedAction("add_keyframe", mapOf("clip_id" to clipId, "property" to property.name, "at_rel_ms" to relMs), "Add ${property.name} keyframe at ${relMs}ms"))
     }
 
     private fun easingNow() =
