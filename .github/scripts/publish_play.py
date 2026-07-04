@@ -149,31 +149,55 @@ def upload_bundle(session: AuthorizedSession, package: str, edit_id: str, aab: s
     raise RuntimeError("Upload loop exited without a terminal response.")
 
 
+EDIT_CONFLICT_RETRIES = 3
+
+
+def _is_edit_conflict(exc: Exception) -> bool:
+    return "outside of this Edit" in str(exc)
+
+
 def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
-    """Bootstrap edit: upload bundle + release to internal (completed). Commit."""
-    edit_id = insert_edit(session, package)
-    print(f"Opened edit {edit_id} (upload + internal)")
-    try:
-        version_code = upload_bundle(session, package, edit_id, aab)
-        print(f"Uploaded bundle versionCode={version_code}")
-        update_track(session, package, edit_id, "internal", "completed", version_code)
-        commit_edit(session, package, edit_id)
-        print(f"  internal    → completed (versionCode {version_code} LIVE)")
-        return version_code
-    except Exception:
-        delete_edit(session, package, edit_id)
-        raise
+    """Bootstrap edit: upload bundle + release to internal (completed). Commit.
+
+    Retries on edit conflicts (another edit committed between open and commit).
+    """
+    for attempt in range(1, EDIT_CONFLICT_RETRIES + 1):
+        edit_id = insert_edit(session, package)
+        print(f"Opened edit {edit_id} (upload + internal)")
+        try:
+            version_code = upload_bundle(session, package, edit_id, aab)
+            print(f"Uploaded bundle versionCode={version_code}")
+            update_track(session, package, edit_id, "internal", "completed", version_code)
+            commit_edit(session, package, edit_id)
+            print(f"  internal    → completed (versionCode {version_code} LIVE)")
+            return version_code
+        except Exception as e:
+            delete_edit(session, package, edit_id)
+            if _is_edit_conflict(e) and attempt < EDIT_CONFLICT_RETRIES:
+                wait = 2 ** attempt
+                print(f"Edit conflict (attempt {attempt}/{EDIT_CONFLICT_RETRIES}); retrying in {wait}s…")
+                time.sleep(wait)
+                continue
+            raise
 
 
 def stage_track(session: AuthorizedSession, package: str, track: str, status: str, version_code: int) -> None:
-    """Small edit: reference the already-uploaded versionCode into another track. Commit."""
-    edit_id = insert_edit(session, package)
-    try:
-        update_track(session, package, edit_id, track, status, version_code)
-        commit_edit(session, package, edit_id)
-    except Exception:
-        delete_edit(session, package, edit_id)
-        raise
+    """Small edit: reference the already-uploaded versionCode into another track. Commit.
+
+    Retries on edit conflicts the same way publish_internal does.
+    """
+    for attempt in range(1, EDIT_CONFLICT_RETRIES + 1):
+        edit_id = insert_edit(session, package)
+        try:
+            update_track(session, package, edit_id, track, status, version_code)
+            commit_edit(session, package, edit_id)
+            return
+        except Exception as e:
+            delete_edit(session, package, edit_id)
+            if _is_edit_conflict(e) and attempt < EDIT_CONFLICT_RETRIES:
+                time.sleep(2 ** attempt)
+                continue
+            raise
 
 
 def main() -> int:
