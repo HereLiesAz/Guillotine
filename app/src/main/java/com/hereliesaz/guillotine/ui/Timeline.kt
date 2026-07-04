@@ -90,9 +90,9 @@ import kotlinx.coroutines.delay
 private val HEADER_WIDTH = 56.dp
 private val RULER_HEIGHT = 24.dp
 /** Snap radius (px) when dragging a clip to the playhead / other clip edges / timeline start. */
-private const val SNAP_PX = 12f
+private const val SNAP_PX = 20f
 /** Weaker snap radius (px) for the timeline grid (increment) magnet. */
-private const val SNAP_GRID_PX = 6f
+private const val SNAP_GRID_PX = 8f
 
 /** Live drag offset shared across a clip's group so every member moves together DURING the drag. */
 private data class GroupDrag(val ids: Set<String>, val dx: Float, val dy: Float)
@@ -427,15 +427,14 @@ private fun TrackAction(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun Ruler(vm: EditorViewModel, totalMs: Long, pps: Float, contentWidth: androidx.compose.ui.unit.Dp) {
-    val tickColor = Neutral700
+    val fps = vm.uiState.value.document.settings.fps
+    val majorColor = Neutral500
+    val minorColor = Neutral700
     Canvas(
         Modifier
             .width(contentWidth)
             .height(RULER_HEIGHT)
             .background(Neutral950)
-            // Scrub-anywhere: tap or drag anywhere along the ruler to move the playhead. The Ruler
-            // lives inside the horizontally-scrolled surface, so `offset.x` and `change.position.x`
-            // are already timeline-content pixels — no scroll-value math needed.
             .pointerInput(pps) {
                 detectTapGestures { off ->
                     vm.seekTo((off.x / pps * 1000f).toLong().coerceAtLeast(0))
@@ -453,12 +452,19 @@ private fun Ruler(vm: EditorViewModel, totalMs: Long, pps: Float, contentWidth: 
                 )
             },
     ) {
-        val totalSec = (totalMs / 1000f) + 4f
-        var s = 0
-        while (s <= totalSec) {
-            val x = s * pps
-            drawLine(tickColor, Offset(x, size.height * 0.4f), Offset(x, size.height), strokeWidth = 1f)
-            s++
+        val endMs = totalMs + 4000L
+        val grid = gridIncrementMs(pps, fps)
+        val secondMs = 1000L
+        var ms = 0L
+        while (ms <= endMs) {
+            val x = ms / 1000f * pps
+            val isSecond = ms % secondMs == 0L
+            if (isSecond) {
+                drawLine(majorColor, Offset(x, size.height * 0.2f), Offset(x, size.height), strokeWidth = 1.5f)
+            } else {
+                drawLine(minorColor, Offset(x, size.height * 0.55f), Offset(x, size.height), strokeWidth = 1f)
+            }
+            ms += grid
         }
     }
 }
@@ -823,10 +829,18 @@ private fun groupIdsOf(state: EditorUiState, clip: TimelineClip): Set<String> =
     clip.groupId?.let { g -> state.document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
         ?: setOf(clip.id)
 
-/** A "nice" grid increment (ms) whose on-screen spacing is at least ~44px at the current zoom. */
-private fun gridIncrementMs(pps: Float): Long {
-    val nice = listOf(33L, 50L, 100L, 200L, 500L, 1000L, 2000L, 5000L, 10000L, 30000L, 60000L)
-    return nice.firstOrNull { it / 1000f * pps >= 44f } ?: 60000L
+/**
+ * A "nice" grid increment (ms) whose on-screen spacing is at least ~44px at the current zoom.
+ * The smallest possible unit is one frame at the project's [fps]; the list grows by
+ * frame-count multiples, then whole seconds and beyond so every snap point lands on a
+ * frame boundary.
+ */
+private fun gridIncrementMs(pps: Float, fps: Int = 30): Long {
+    val frameMs = 1000.0 / fps
+    val frameCounts = listOf(1, 2, 5, 10, 15) + listOf(fps / 2, fps, fps * 2, fps * 5,
+        fps * 10, fps * 30, fps * 60).filter { it > 15 }
+    val nice = frameCounts.distinct().sorted().map { n -> Math.round(n * frameMs) }
+    return nice.firstOrNull { it / 1000f * pps >= 44f } ?: nice.last()
 }
 
 /**
@@ -837,6 +851,7 @@ private fun gridIncrementMs(pps: Float): Long {
  * past a magnet keeps going (so you can overlap into a crossfade).
  */
 private fun snappedDeltaMs(state: EditorUiState, clip: TimelineClip, rawDeltaMs: Long, pps: Float): Long {
+    val fps = state.document.settings.fps
     val movingIds = groupIdsOf(state, clip)
     val moving = state.document.clips.filter { it.id in movingIds }
     val floorDelta = -(moving.minOfOrNull { it.startTimeMs } ?: 0L) // earliest member stays >= 0
@@ -862,7 +877,7 @@ private fun snappedDeltaMs(state: EditorUiState, clip: TimelineClip, rawDeltaMs:
     }
     if (bestDist == Long.MAX_VALUE) {
         // Weak: any moving edge to the nearest grid line.
-        val grid = gridIncrementMs(pps)
+        val grid = gridIncrementMs(pps, fps)
         val weak = (SNAP_GRID_PX / pps * 1000f).toLong().coerceAtLeast(1L)
         moving.forEach { m ->
             listOf(m.startTimeMs + rawDeltaMs, m.endTimeMs + rawDeltaMs).forEach { pos ->
