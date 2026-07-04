@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Diamond
@@ -80,6 +81,7 @@ fun ClipToolButtons(
     vm: EditorViewModel,
     state: EditorUiState,
     onTranscribe: () -> Unit,
+    onAnimatedTranscribe: () -> Unit = {},
 ) {
     val sel = state.selectedClips
     if (sel.isEmpty()) return
@@ -101,6 +103,7 @@ fun ClipToolButtons(
     (video ?: processable ?: text)?.let { KeyframesToolButton(vm, it) }
     if (processable != null) {
         TranscribeToolButton(state, onTranscribe)
+        AnimatedTranscribeToolButton(state, onAnimatedTranscribe)
         if (processable.edits.isNotEmpty()) SplitToolButton(vm, processable)
     }
 }
@@ -239,6 +242,11 @@ private fun KeyframesToolButton(vm: EditorViewModel, clip: TimelineClip) {
 @Composable
 private fun TranscribeToolButton(state: EditorUiState, onTranscribe: () -> Unit) {
     IconToolButton(Icons.Filled.Subtitles, "Transcribe → captions", enabled = !state.isProcessing) { onTranscribe() }
+}
+
+@Composable
+private fun AnimatedTranscribeToolButton(state: EditorUiState, onAnimatedTranscribe: () -> Unit) {
+    IconToolButton(Icons.Filled.Animation, "Animated captions", enabled = !state.isProcessing) { onAnimatedTranscribe() }
 }
 
 @Composable

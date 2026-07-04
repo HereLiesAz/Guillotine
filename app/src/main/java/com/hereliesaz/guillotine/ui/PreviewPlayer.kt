@@ -165,10 +165,18 @@ fun PreviewPlayer(
         }
         // Caption/text overlay — each text clip positioned/scaled by its crop transform
         // (offset from center as a fraction of the frame), rendered on top of every video layer.
+        // Keyframed properties are evaluated at the current playhead for animated captions.
         activeText.forEach { t ->
+            val relMs = (now - t.startTimeMs).coerceIn(0, t.durationMs)
+            val scale = TimelineMath.valueAt(t, KeyframeProperty.SCALE, relMs, t.scale)
+            val rotation = TimelineMath.valueAt(t, KeyframeProperty.ROTATION, relMs, t.rotation)
+            val ox = TimelineMath.valueAt(t, KeyframeProperty.OFFSET_X, relMs, t.offsetX)
+            val oy = TimelineMath.valueAt(t, KeyframeProperty.OFFSET_Y, relMs, t.offsetY)
+            val opacity = TimelineMath.valueAt(t, KeyframeProperty.OPACITY, relMs, 1f)
+            val trackOpacity = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)
             Text(
                 t.text,
-                color = White.copy(alpha = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)),
+                color = White.copy(alpha = (opacity * trackOpacity).coerceIn(0f, 1f)),
                 fontSize = 14.sp,
                 fontFamily = t.font.fontFamily(),
                 textAlign = TextAlign.Center,
@@ -176,11 +184,11 @@ fun PreviewPlayer(
                     .align(Alignment.Center)
                     .offset {
                         IntOffset(
-                            (t.offsetX * previewSize.width).roundToInt(),
-                            (t.offsetY * previewSize.height).roundToInt(),
+                            (ox * previewSize.width).roundToInt(),
+                            (oy * previewSize.height).roundToInt(),
                         )
                     }
-                    .graphicsLayer { scaleX = t.scale; scaleY = t.scale; rotationZ = t.rotation }
+                    .graphicsLayer { scaleX = scale; scaleY = scale; rotationZ = rotation }
                     .background(Color.Black.copy(alpha = 0.55f))
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             )

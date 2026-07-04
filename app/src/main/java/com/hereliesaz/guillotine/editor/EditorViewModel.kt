@@ -63,6 +63,12 @@ const val MIN_TRACK_HEIGHT = 44f
 const val MAX_TRACK_HEIGHT = 240f
 private const val MAX_PROMPT_HISTORY = 7
 
+/** Animated caption scale range: syllables start at BASE and grow to PEAK when spoken. */
+private const val BASE_SCALE = 0.6f
+private const val PEAK_SCALE = 1.2f
+/** How far apart syllables spread horizontally (fraction of frame width). */
+private const val SPREAD_X = 0.25f
+
 /**
  * Owns all editor state. Content mutations go through [mutateDocument] so undo/redo
  * stays consistent; transient view state (playhead, zoom, selection) is updated
@@ -903,6 +909,100 @@ class EditorViewModel : ViewModel() {
             if (textClips.isEmpty()) return@mutateDocument doc
             val withGroup = docWithTrack.clips.map { if (it.id == sourceClipId) it.copy(groupId = gid) else it }
             docWithTrack.copy(clips = withGroup + textClips)
+        }
+    }
+
+    /**
+     * Animated captions: each word from [wordCues] is split into syllables, and each syllable
+     * becomes its own text clip on a separate video track so they all display simultaneously.
+     * All syllables of a word share the same start time and duration. Each syllable gets a
+     * SCALE keyframe that ramps from [BASE_SCALE] to [PEAK_SCALE] during its portion of the
+     * word, giving a "grow as spoken" effect.
+     */
+    fun addAnimatedCaptionsFromTranscript(
+        sourceClipId: String,
+        wordCues: List<com.hereliesaz.guillotine.ai.WordCue>,
+    ) {
+        if (wordCues.isEmpty()) return
+        mutateDocument { doc ->
+            val source = doc.clips.firstOrNull { it.id == sourceClipId } ?: return@mutateDocument doc
+            val gid = source.groupId ?: newId()
+            val clipStartSrc = source.trimStartMs
+            val clipEndSrc = source.trimStartMs + source.durationMs
+
+            // Split every word into syllables to find the max syllable count (= tracks needed).
+            data class SyllableWord(
+                val syllables: List<String>,
+                val startMs: Long,
+                val endMs: Long,
+            )
+
+            val words = wordCues.mapNotNull { wc ->
+                val s = wc.startMs.coerceIn(clipStartSrc, clipEndSrc)
+                val e = wc.endMs.coerceIn(clipStartSrc, clipEndSrc)
+                if (e <= s || wc.word.isBlank()) return@mapNotNull null
+                SyllableWord(com.hereliesaz.guillotine.ai.SyllableSplitter.split(wc.word), s, e)
+            }
+            if (words.isEmpty()) return@mutateDocument doc
+
+            val maxSyllables = words.maxOf { it.syllables.size }
+
+            // Ensure we have enough video tracks for the syllables.
+            var tracks = doc.videoTracks.toMutableList()
+            while (tracks.size < maxSyllables) tracks.add("V${tracks.size + 1}")
+            var updatedDoc = doc.copy(videoTracks = tracks)
+
+            val newClips = mutableListOf<TimelineClip>()
+            for (word in words) {
+                val wordDurMs = word.endMs - word.startMs
+                val timelineStart = source.startTimeMs + (word.startMs - clipStartSrc)
+                val syllableCount = word.syllables.size
+
+                // Horizontal offset: spread syllables across the frame center.
+                // Each syllable gets a fraction of the width based on its character count.
+                val totalChars = word.syllables.sumOf { it.length }.coerceAtLeast(1)
+                var charCursor = 0
+
+                for ((si, syllable) in word.syllables.withIndex()) {
+                    val track = tracks[si]
+
+                    // Horizontal position: center the word, offset each syllable proportionally.
+                    val charMid = charCursor + syllable.length / 2f
+                    val ox = ((charMid / totalChars) - 0.5f) * SPREAD_X
+                    charCursor += syllable.length
+
+                    // Syllable timing within the word: evenly divide the word duration.
+                    val syllableStartRel = (si.toLong() * wordDurMs / syllableCount)
+                    val syllableEndRel = ((si + 1).toLong() * wordDurMs / syllableCount)
+
+                    val keyframes = listOf(
+                        Keyframe(newId(), 0, BASE_SCALE, KeyframeProperty.SCALE),
+                        Keyframe(newId(), syllableStartRel, BASE_SCALE, KeyframeProperty.SCALE),
+                        Keyframe(newId(), syllableEndRel, PEAK_SCALE, KeyframeProperty.SCALE),
+                        Keyframe(newId(), wordDurMs, PEAK_SCALE, KeyframeProperty.SCALE),
+                    )
+
+                    newClips += TimelineClip(
+                        id = newId(),
+                        mediaId = "",
+                        type = ClipType.TEXT,
+                        trackId = track,
+                        startTimeMs = timelineStart,
+                        trimStartMs = 0,
+                        durationMs = wordDurMs,
+                        text = syllable,
+                        groupId = gid,
+                        scale = BASE_SCALE,
+                        offsetX = ox,
+                        keyframes = keyframes,
+                    )
+                }
+            }
+
+            val withGroup = updatedDoc.clips.map {
+                if (it.id == sourceClipId) it.copy(groupId = gid) else it
+            }
+            updatedDoc.copy(clips = withGroup + newClips)
         }
     }
 

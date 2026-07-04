@@ -65,15 +65,22 @@ object VoskTranscriber {
         var start = Double.MAX_VALUE
         var end = 0.0
         val sb = StringBuilder()
+        val wordCues = mutableListOf<WordCue>()
         for (k in 0 until arr.length()) {
             val w = arr.getJSONObject(k)
-            start = min(start, w.optDouble("start"))
-            end = max(end, w.optDouble("end"))
-            sb.append(w.optString("word")).append(' ')
+            val ws = w.optDouble("start")
+            val we = w.optDouble("end")
+            val wt = w.optString("word")
+            start = min(start, ws)
+            end = max(end, we)
+            sb.append(wt).append(' ')
+            if (wt.isNotBlank()) {
+                wordCues += WordCue(wt, (ws * 1000).toLong(), (we * 1000).toLong())
+            }
         }
         val text = sb.toString().trim()
         if (text.isEmpty()) return null
-        return TranscriptCue((start * 1000).toLong(), (end * 1000).toLong(), text)
+        return TranscriptCue((start * 1000).toLong(), (end * 1000).toLong(), text, wordCues)
     }
 
     /** Decode the first audio track to 16 kHz mono 16-bit PCM (downmixed + linearly resampled). */
