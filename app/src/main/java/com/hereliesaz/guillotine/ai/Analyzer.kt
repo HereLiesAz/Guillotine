@@ -25,8 +25,15 @@ interface ClipAnalyzer {
  * This is deliberate: cloud AIs (Gemini/OpenAI/Anthropic/…) are *controllers* that drive the
  * editor through the MCP server and only ever exchange text; they never receive clips or frames.
  * So no matter which AI the user selects, the actual keep/remove analysis happens here, locally,
- * with no key and no network: ML Kit vision for video/images, the Local silence heuristic for
- * audio (and for the explicit on-device "Local" choice).
+ * with no key and no network.
+ *
+ * Routing:
+ *  1. Silence/quiet prompts → [LocalHeuristicProvider] (RMS audio level detection)
+ *  2. Speech-content prompts ("says", "mentions", "talking about") → [SpeechContentAnalyzer]
+ *     (transcribes audio via Vosk/Whisper, matches transcript against search terms)
+ *  3. Audio clips without a specific intent → [LocalHeuristicProvider]
+ *  4. Explicit "Local" provider → [LocalHeuristicProvider]
+ *  5. Everything else (video/image) → [MlKitProvider] (on-device vision)
  */
 object Analysis {
     suspend fun run(
@@ -39,15 +46,17 @@ object Analysis {
         onProgress: (AnalysisProgress) -> Unit = {},
         checkpoint: () -> Unit = {},
     ): List<EditSegment> = when {
-        // Audio has no frames to look at — silence detection is the on-device answer.
+        // Silence/quiet request — route to the silence heuristic (works on any media with audio).
+        isSilenceIntent(prompt) ->
+            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
+        // Speech-content request — transcribe audio and match transcript against the prompt.
+        SpeechContentAnalyzer.isSpeechContentIntent(prompt) ->
+            SpeechContentAnalyzer(settings).analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
+        // Audio with no specific intent — silence detection is the default.
         kind == MediaKind.AUDIO ->
             LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
         // Explicit on-device "Local": audio-based silence cut (kept whole for images).
         settings.provider == AiProviderType.LOCAL ->
-            LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
-        // A silence/quiet request on a video is an audio task — ML Kit is vision-only and can't
-        // hear it, so route to the silence heuristic (it decodes the clip's audio track).
-        isSilenceIntent(prompt) ->
             LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
         // Everything else (video/image): free on-device ML Kit face/label vision.
         else ->
