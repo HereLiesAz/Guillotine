@@ -42,9 +42,10 @@ object DesktopExporter {
         config: ExportConfig = ExportConfig(),
         onProgress: (Float) -> Unit = {},
     ): File = withContext(Dispatchers.IO) {
+        val safeName = config.name.replace(Regex("[/\\\\]"), "_").replace("..", "_").ifBlank { "export" }
         val outputDir = File(System.getProperty("user.home"), "Videos/Guillotine")
         outputDir.mkdirs()
-        val outputFile = File(outputDir, "${config.name}.mp4")
+        val outputFile = File(outputDir, "${safeName}.mp4")
 
         val totalDurationMs = document.totalDurationMs
         if (totalDurationMs <= 0) error("Nothing to export")
@@ -189,6 +190,7 @@ object DesktopExporter {
             val grabber = FFmpegFrameGrabber(file)
             grabber.sampleRate = config.sampleRate
             grabber.audioChannels = 2
+            grabber.sampleFormat = avutil.AV_SAMPLE_FMT_S16
             grabber.start()
             try {
                 grabber.timestamp = clip.trimStartMs * 1000L
