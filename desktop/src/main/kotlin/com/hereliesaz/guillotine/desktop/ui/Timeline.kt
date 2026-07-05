@@ -813,10 +813,36 @@ private fun ClipView(
     }
 }
 
-/** Ids of [clip]'s group (or just the clip when ungrouped). */
-private fun groupIdsOf(state: EditorUiState, clip: TimelineClip): Set<String> =
-    clip.groupId?.let { g -> state.document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
-        ?: setOf(clip.id)
+/** Ids that move together: the clip's group, plus all selected clips (and their groups) when the clip is selected. */
+private fun groupIdsOf(state: EditorUiState, clip: TimelineClip): Set<String> {
+    val clipGroupId = clip.groupId
+    val group = if (clipGroupId != null) {
+        val set = LinkedHashSet<String>()
+        for (c in state.document.clips) {
+            if (c.groupId == clipGroupId) set.add(c.id)
+        }
+        set
+    } else {
+        setOf(clip.id)
+    }
+    if (clip.id !in state.selectedClipIds) return group
+    val allIds = LinkedHashSet(group)
+    allIds.addAll(state.selectedClipIds)
+    val groupIds = LinkedHashSet<String>()
+    for (c in state.document.clips) {
+        if (c.id in allIds) {
+            val gId = c.groupId
+            if (gId != null) groupIds.add(gId)
+        }
+    }
+    if (groupIds.isNotEmpty()) {
+        for (c in state.document.clips) {
+            val gId = c.groupId
+            if (gId != null && gId in groupIds) allIds.add(c.id)
+        }
+    }
+    return allIds
+}
 
 /**
  * A "nice" grid increment (ms) whose on-screen spacing is at least ~44px at the current zoom.
