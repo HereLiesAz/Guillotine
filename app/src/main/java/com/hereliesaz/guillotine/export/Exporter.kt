@@ -336,10 +336,14 @@ object Exporter {
                         val laneClips = layout.filter { it.second == lane }.map { it.first }
                         if (laneClips.isEmpty()) continue
                         val seq = EditedMediaItemSequence.Builder()
+                        val startsWithGap = laneClips.minOf { it.startTimeMs } > globalZero
                         val any = appendVideoItems(
                             seq, laneClips, globalZero, withOverlays = false, fadeFor = { fadeByClip[it.id] },
                         )
-                        if (any) add(seq.build())
+                        if (any) {
+                            if (startsWithGap) seq.setForceAudioTrack(true).setForceVideoTrack(true)
+                            add(seq.build())
+                        }
                     }
                 }
             }
