@@ -734,20 +734,40 @@ open class EditorViewModel {
      * group member moves by the same delta/shift (each clamped to its own track list), so
      * grouped clips drag together.
      */
+    private fun dragSetOf(clip: TimelineClip): Set<String> {
+        val clipGroupId = clip.groupId
+        val group = if (clipGroupId != null) {
+            val set = LinkedHashSet<String>()
+            for (c in document.clips) {
+                if (c.groupId == clipGroupId) set.add(c.id)
+            }
+            set
+        } else {
+            setOf(clip.id)
+        }
+        val sel = uiState.value.selectedClipIds
+        if (clip.id !in sel) return group
+        val allIds = LinkedHashSet(group)
+        allIds.addAll(sel)
+        val groupIds = LinkedHashSet<String>()
+        for (c in document.clips) {
+            if (c.id in allIds) {
+                val gId = c.groupId
+                if (gId != null) groupIds.add(gId)
+            }
+        }
+        if (groupIds.isNotEmpty()) {
+            for (c in document.clips) {
+                val gId = c.groupId
+                if (gId != null && gId in groupIds) allIds.add(c.id)
+            }
+        }
+        return allIds
+    }
+
     fun moveClipBy(clipId: String, trackShift: Int, deltaMs: Long) {
         val clip = document.clips.firstOrNull { it.id == clipId } ?: return
-        val sel = uiState.value.selectedClipIds
-        val moveIds = if (clipId in sel) {
-            val allIds = LinkedHashSet(sel)
-            val groupIds = document.clips.filter { it.id in allIds }.mapNotNull { it.groupId }.toSet()
-            if (groupIds.isNotEmpty()) {
-                document.clips.forEach { if (it.groupId in groupIds) allIds.add(it.id) }
-            }
-            allIds
-        } else {
-            clip.groupId?.let { g -> document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
-                ?: setOf(clipId)
-        }
+        val moveIds = dragSetOf(clip)
         mutateDocument { doc ->
             doc.copy(clips = doc.clips.map { c ->
                 if (c.id !in moveIds) return@map c
@@ -858,18 +878,7 @@ open class EditorViewModel {
      */
     fun addEdgeTrackAndMoveClip(clipId: String, atTop: Boolean, deltaMs: Long) {
         val clip = document.clips.firstOrNull { it.id == clipId } ?: return
-        val sel = uiState.value.selectedClipIds
-        val shiftIds = if (clipId in sel) {
-            val allIds = LinkedHashSet(sel)
-            val groupIds = document.clips.filter { it.id in allIds }.mapNotNull { it.groupId }.toSet()
-            if (groupIds.isNotEmpty()) {
-                document.clips.forEach { if (it.groupId in groupIds) allIds.add(it.id) }
-            }
-            allIds
-        } else {
-            clip.groupId?.let { g -> document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
-                ?: setOf(clipId)
-        }
+        val shiftIds = dragSetOf(clip)
         mutateDocument { doc ->
             val isAudio = clip.type == ClipType.AUDIO
             val tracks = if (isAudio) doc.audioTracks else doc.videoTracks

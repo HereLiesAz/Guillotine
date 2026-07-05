@@ -815,14 +815,31 @@ private fun ClipView(
 
 /** Ids that move together: the clip's group, plus all selected clips (and their groups) when the clip is selected. */
 private fun groupIdsOf(state: EditorUiState, clip: TimelineClip): Set<String> {
-    val group = clip.groupId?.let { g -> state.document.clips.filter { it.groupId == g }.map { it.id }.toSet() }
-        ?: setOf(clip.id)
+    val clipGroupId = clip.groupId
+    val group = if (clipGroupId != null) {
+        val set = LinkedHashSet<String>()
+        for (c in state.document.clips) {
+            if (c.groupId == clipGroupId) set.add(c.id)
+        }
+        set
+    } else {
+        setOf(clip.id)
+    }
     if (clip.id !in state.selectedClipIds) return group
     val allIds = LinkedHashSet(group)
     allIds.addAll(state.selectedClipIds)
-    val groupIds = state.document.clips.filter { it.id in allIds }.mapNotNull { it.groupId }.toSet()
+    val groupIds = LinkedHashSet<String>()
+    for (c in state.document.clips) {
+        if (c.id in allIds) {
+            val gId = c.groupId
+            if (gId != null) groupIds.add(gId)
+        }
+    }
     if (groupIds.isNotEmpty()) {
-        state.document.clips.forEach { if (it.groupId in groupIds) allIds.add(it.id) }
+        for (c in state.document.clips) {
+            val gId = c.groupId
+            if (gId != null && gId in groupIds) allIds.add(c.id)
+        }
     }
     return allIds
 }
