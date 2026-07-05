@@ -39,6 +39,7 @@ okhttp = "5.4.0"
 junit = "4.13.2"
 json = "20260522"
 composeMultiplatform = "1.8.1"
+javacv = "1.5.11"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -79,6 +80,7 @@ nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 json = { group = "org.json", name = "json", version.ref = "json" }
+javacv-platform = { group = "org.bytedeco", name = "javacv-platform", version.ref = "javacv" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

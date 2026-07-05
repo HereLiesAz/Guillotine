@@ -176,9 +176,18 @@ fun NleScreen(
     // Which track an import should land on (set by a track header's "Import"; null = default).
     var importTargetTrack by remember { mutableStateOf<String?>(null) }
 
-    // TODO: Media import requires desktop media probing which is not yet available.
-    val importLauncher = rememberMediaImportLauncher { _ ->
-        ActivityLog.info("Media import is not yet available on desktop.")
+    val importLauncher = rememberMediaImportLauncher { files ->
+        scope.launch {
+            val items = withContext(Dispatchers.IO) {
+                files.mapNotNull { com.hereliesaz.guillotine.desktop.media.DesktopMediaImport.probe(it) }
+            }
+            if (items.isEmpty()) {
+                ActivityLog.info("No supported media found in selected files.")
+            } else {
+                vm.addMedia(items, importTargetTrack)
+                ActivityLog.info("Imported ${items.size} clip(s).")
+            }
+        }
     }
     val onImportToTrack: (String) -> Unit = { track ->
         importTargetTrack = track; importLauncher()
@@ -442,9 +451,28 @@ fun NleScreen(
             progress = exportProgress,
             doneMessage = exportDone,
             errorMessage = exportError,
-            onStart = { _ ->
-                // TODO: Export not yet available on desktop.
-                exportError = "Export is not yet available on desktop."
+            onStart = { name ->
+                exporting = true
+                exportProgress = 0f
+                exportError = null
+                exportDone = null
+                scope.launch {
+                    try {
+                        val config = com.hereliesaz.guillotine.desktop.media.DesktopExporter.ExportConfig(name = name)
+                        val file = com.hereliesaz.guillotine.desktop.media.DesktopExporter.export(
+                            document = vm.uiState.value.document,
+                            config = config,
+                            onProgress = { exportProgress = it },
+                        )
+                        exportDone = "Saved to ${file.absolutePath}"
+                        ActivityLog.info("Export complete: ${file.absolutePath}")
+                    } catch (e: Exception) {
+                        exportError = e.message ?: "Export failed"
+                        ActivityLog.error("Export failed: ${e.message}")
+                    } finally {
+                        exporting = false
+                    }
+                }
             },
             onDismiss = { if (!exporting) showExport = false },
         )
