@@ -906,14 +906,53 @@ private fun nextKeyframe(clip: TimelineClip, kf: Keyframe): Keyframe? {
     return sameProp.getOrNull(sameProp.indexOf(kf) + 1)
 }
 
-/** Video/image clip background: a dark placeholder box (no on-device thumbnail on desktop). */
+/** Video/image clip background: thumbnail extracted via FFmpegFrameGrabber. */
 @Composable
 private fun ClipThumbnail(uri: String, kind: com.hereliesaz.guillotine.model.MediaKind, atMs: Long) {
-    Box(Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)).background(Neutral800.copy(alpha = 0.55f)))
+    val thumb by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, uri, atMs) {
+        value = com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder.thumbnail(uri, kind, atMs)
+    }
+    Box(Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)).background(Neutral800.copy(alpha = 0.55f))) {
+        thumb?.let {
+            androidx.compose.foundation.Image(
+                bitmap = it,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
 }
 
-/** Audio clip background: placeholder (no on-device waveform decoding on desktop). */
+/** Audio clip background: waveform decoded via FFmpegFrameGrabber and drawn as peak bars. */
 @Composable
 private fun ClipWaveform(uri: String) {
-    Box(Modifier.fillMaxSize().padding(horizontal = 2.dp))
+    val waveform by androidx.compose.runtime.produceState<com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder.Waveform?>(null, uri) {
+        value = com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder.waveform(uri)
+    }
+    Canvas(Modifier.fillMaxSize().padding(horizontal = 2.dp)) {
+        val wf = waveform ?: return@Canvas
+        val buckets = wf.left.size
+        if (buckets == 0) return@Canvas
+        val barW = size.width / buckets
+        val halfH = size.height / 2f
+        val gain = com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder.normalizeGain(wf)
+        for (i in 0 until buckets) {
+            val lH = (wf.left[i] * gain).coerceAtMost(1f) * halfH
+            val rH = (wf.right[i] * gain).coerceAtMost(1f) * halfH
+            val x = i * barW
+            // Left channel: top half (draws upward from center)
+            drawRect(
+                color = Neutral400,
+                topLeft = androidx.compose.ui.geometry.Offset(x, halfH - lH),
+                size = androidx.compose.ui.geometry.Size(barW.coerceAtLeast(1f), lH),
+            )
+            // Right channel: bottom half (draws downward from center)
+            drawRect(
+                color = Neutral500,
+                topLeft = androidx.compose.ui.geometry.Offset(x, halfH),
+                size = androidx.compose.ui.geometry.Size(barW.coerceAtLeast(1f), rH),
+            )
+        }
+    }
 }

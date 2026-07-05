@@ -337,13 +337,13 @@ fun ExportSheet(
                         singleLine = true,
                     )
                     Text("Duration: ${"%.1f".format(totalDurationMs / 1000f)}s", color = Neutral500, fontSize = 11.sp)
-                    Text("Export is not yet available on desktop.", color = Neutral500, fontSize = 11.sp)
+                    Text("Output: H.264 + AAC in MP4, 1920x1080 @ 30fps", color = Neutral500, fontSize = 11.sp)
                     errorMessage?.let { Text(it, color = Red500, fontSize = 11.sp) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cancel", color = Neutral400, fontSize = 12.sp, modifier = Modifier.padding(end = 16.dp).clickable(onClick = onDismiss))
                         Button(
                             onClick = { onStart(name) },
-                            enabled = false,
+                            enabled = name.isNotBlank(),
                             colors = ButtonDefaults.buttonColors(containerColor = Red500),
                         ) {
                             Text("Start render", fontSize = 12.sp, color = White)
