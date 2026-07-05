@@ -114,7 +114,7 @@ object DesktopMediaDecoder {
 
             val deadline = System.nanoTime() + MAX_DECODE_SECS * 1_000_000_000L
             while (true) {
-                ensureActive()
+                kotlin.coroutines.coroutineContext.ensureActive()
                 if (System.nanoTime() > deadline) break
                 val frame = grabber.grabSamples() ?: break
                 val samples = frame.samples ?: continue
