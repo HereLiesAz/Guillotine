@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
@@ -335,15 +336,13 @@ object Exporter {
                     for (lane in 0 until laneCount) {
                         val laneClips = layout.filter { it.second == lane }.map { it.first }
                         if (laneClips.isEmpty()) continue
-                        val startsWithGap = laneClips.minOf { it.startTimeMs } > globalZero
-                        val seq = EditedMediaItemSequence.Builder()
+                        val startsWithGap = laneClips.first().startTimeMs > globalZero
+                        val trackTypes = if (startsWithGap) setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO) else emptySet()
+                        val seq = EditedMediaItemSequence.Builder(trackTypes)
                         val any = appendVideoItems(
                             seq, laneClips, globalZero, withOverlays = false, fadeFor = { fadeByClip[it.id] },
                         )
-                        if (any) {
-                            if (startsWithGap) seq.setForceAudioTrack(true).setForceVideoTrack(true)
-                            add(seq.build())
-                        }
+                        if (any) add(seq.build())
                     }
                 }
             }
