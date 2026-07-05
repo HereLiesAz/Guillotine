@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +28,7 @@ import kotlin.math.hypot
 @Composable
 fun CurveEditor(value: CubicBezier, onChange: (CubicBezier) -> Unit, modifier: Modifier = Modifier) {
     var active by remember { mutableIntStateOf(-1) }
+    val currentValue by rememberUpdatedState(value)
 
     Canvas(
         modifier
@@ -36,8 +38,8 @@ fun CurveEditor(value: CubicBezier, onChange: (CubicBezier) -> Unit, modifier: M
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { pos ->
-                        val p1 = Offset(value.x1 * size.width, (1 - value.y1) * size.height)
-                        val p2 = Offset(value.x2 * size.width, (1 - value.y2) * size.height)
+                        val p1 = Offset(currentValue.x1 * size.width, (1 - currentValue.y1) * size.height)
+                        val p2 = Offset(currentValue.x2 * size.width, (1 - currentValue.y2) * size.height)
                         active = if (hypot(pos.x - p1.x, pos.y - p1.y) <= hypot(pos.x - p2.x, pos.y - p2.y)) 1 else 2
                     },
                     onDragEnd = { active = -1 },
@@ -45,8 +47,8 @@ fun CurveEditor(value: CubicBezier, onChange: (CubicBezier) -> Unit, modifier: M
                         change.consume()
                         val nx = (change.position.x / size.width).coerceIn(0f, 1f)
                         val ny = (1f - change.position.y / size.height).coerceIn(-0.5f, 1.5f)
-                        if (active == 1) onChange(value.copy(x1 = nx, y1 = ny))
-                        else if (active == 2) onChange(value.copy(x2 = nx, y2 = ny))
+                        if (active == 1) onChange(currentValue.copy(x1 = nx, y1 = ny))
+                        else if (active == 2) onChange(currentValue.copy(x2 = nx, y2 = ny))
                     },
                 )
             },

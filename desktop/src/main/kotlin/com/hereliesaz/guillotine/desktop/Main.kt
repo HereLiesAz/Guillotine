@@ -32,7 +32,7 @@ fun main() = application {
     DisposableEffect(Unit) {
         onDispose {
             runCatching { DesktopProjectAutosave.save(editor.uiState.value.document) }
-            runCatching { server.stop() }
+            runCatching { server.stopServer() }
         }
     }
 

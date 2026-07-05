@@ -23,6 +23,8 @@ class McpServer(port: Int = 6274) : NanoHTTPD(port) {
         start(SOCKET_READ_TIMEOUT, false)
     }
 
+    fun stopServer() = stop()
+
     override fun serve(session: IHTTPSession): Response = when {
         session.uri == "/health" && session.method == Method.GET ->
             ok("""{"status":"ok"}""")

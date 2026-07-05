@@ -49,7 +49,6 @@ import androidx.compose.ui.window.Dialog
 import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.FrameAnalysisCache
-import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.guillotine.ai.LeonardoDefaultModel
 import com.hereliesaz.guillotine.ai.LeonardoModel
 import com.hereliesaz.guillotine.ai.LeonardoModels
@@ -418,7 +417,9 @@ fun GenerateSheet(
                                     }
                                 }
                             } else {
-                                onGenerateFree(ImageGen.Pollinations.url(prompt), "Generated: ${prompt.take(20)}")
+                                val encoded = java.net.URLEncoder.encode(prompt.trim(), "UTF-8")
+                                val url = "https://image.pollinations.ai/prompt/$encoded?width=1280&height=720&nologo=true"
+                                onGenerateFree(url, "Generated: ${prompt.take(20)}")
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Red500),

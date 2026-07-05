@@ -117,11 +117,9 @@ class DesktopKeyStore {
     }
 
     private fun derivePassword(): String {
-        val host = runCatching {
-            java.net.InetAddress.getLocalHost().hostName
-        }.getOrDefault("desktop")
         val user = System.getProperty("user.name", "user")
         val arch = System.getProperty("os.arch", "unknown")
-        return "guillotine-$host-$user-$arch"
+        val home = System.getProperty("user.home", "")
+        return "guillotine-$user-$arch-$home"
     }
 }
