@@ -661,7 +661,7 @@ private fun GenCategorySection(
                 Box(
                     Modifier.size(8.dp).clip(RoundedCornerShape(4.dp))
                         .background(if (configured) Red500 else Neutral700),
-                )
+                ) {}
                 Column(Modifier.padding(start = 8.dp).weight(1f)) {
                     Text(meta.label, color = White, fontSize = 13.sp)
                     Text(meta.blurb, color = Neutral500, fontSize = 11.sp)
