@@ -16,6 +16,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.concurrent.TimeUnit
+import com.hereliesaz.guillotine.ui.ActivityLog
 
 /**
  * Downloads a recommended on-device model in the background and reports progress. A process-level
@@ -81,7 +82,9 @@ object ModelDownloadManager {
     fun start(context: Context, model: OnDeviceModel) {
         if (job?.isActive == true) return
         val url = model.downloadUrl ?: run {
-            _state.value = DownloadState.Failed(model.id, "This model must be downloaded from Hugging Face.")
+            val msg = "This model must be downloaded from Hugging Face."
+            _state.value = DownloadState.Failed(model.id, msg)
+            ActivityLog.error("Model download for \"${model.id}\" failed — $msg")
             return
         }
         val dir = modelsDir(context)
@@ -149,7 +152,10 @@ object ModelDownloadManager {
                     _state.value = DownloadState.Idle
                     throw e
                 }
-                _state.value = DownloadState.Failed(model.id, e.message ?: "Download failed.")
+                val msg = e.message ?: "${e.javaClass.simpleName} (no detail)"
+                _state.value = DownloadState.Failed(model.id, msg)
+                // Mirror to ActivityLog so the failure survives closing the model-picker sheet.
+                ActivityLog.error("Model download for \"${model.id}\" failed — $msg")
             } finally {
                 job = null
             }

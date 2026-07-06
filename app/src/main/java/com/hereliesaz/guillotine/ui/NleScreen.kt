@@ -380,7 +380,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onOpenProject = { openLauncher() },
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
-            onSettings = { showSettings = true },
             onAiComparison = { showAiComparison = true },
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
@@ -528,6 +527,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             totalDurationMs = state.document.totalDurationMs,
             isExporting = exporting,
             progress = exportProgress,
+            exportPhase = state.exportPhase,
             doneMessage = exportDone,
             errorMessage = exportError,
             onStart = { name ->
@@ -542,18 +542,29 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 val startedExport = OperationController.start(
                     context, OperationKind.EXPORT, "Exporting…", pausable = false,
                     onError = { e ->
-                        exportError = e.message ?: "Export failed"; exporting = false
-                        ActivityLog.error(e.message ?: "Export failed")
+                        val detail = Exporter.describeExportError(e)
+                        exportError = detail; exporting = false
+                        vm.setExportPhase(null)
+                        ActivityLog.error(detail)
                     },
                     onComplete = {
                         exportDone = "Saved to Movies/Guillotine."; exporting = false
+                        vm.setExportPhase(null)
                         ActivityLog.success("Exported to Movies/Guillotine.")
                     },
                 ) { sink ->
-                    Exporter.export(context, vm.uiState.value.document, name) { p ->
-                        scope.launch { exportProgress = p } // hop to the main thread for Compose state
-                        sink.report(p, "Exporting…")
-                    }
+                    Exporter.export(
+                        context,
+                        vm.uiState.value.document,
+                        name,
+                        onProgress = { p ->
+                            scope.launch { exportProgress = p } // hop to the main thread for Compose state
+                            sink.report(p, "Exporting…")
+                        },
+                        onPhase = { phase ->
+                            scope.launch { vm.setExportPhase(phase) }
+                        },
+                    )
                 }
                 if (!startedExport) { exportError = "Another operation is already running."; exporting = false }
             },
@@ -619,7 +630,6 @@ private fun TopBar(
     onOpenProject: () -> Unit,
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
-    onSettings: () -> Unit,
     onAiComparison: () -> Unit,
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
@@ -645,7 +655,6 @@ private fun TopBar(
             azItem("Render") { onExport() }
             azDivider()
             azItem("Project") { onProjectSettings() }
-            azItem("Settings") { onSettings() }
             azItem("Compare AI") { onAiComparison() }
             azItem("Tutorial") { onTutorial() }
             azItem("FAQ") { onFaq() }
