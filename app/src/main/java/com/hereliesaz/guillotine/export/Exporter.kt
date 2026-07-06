@@ -78,18 +78,30 @@ object Exporter {
         val normalizeCount = document.clips.count { it.filters.normalize }
         if (normalizeCount > 0) phase("Analyzing audio levels for $normalizeCount clip(s)…")
         val normalizeGains = withContext(Dispatchers.IO) {
-            runCatching { computeNormalizeGains(context, document) }
-                .onFailure { ActivityLog.error("Normalize scan failed: ${describeCauseChain(it)}") }
-                .getOrDefault(emptyMap())
+            // Deliberately NOT runCatching — that swallows CancellationException and would
+            // silently let the export continue after the user hit Cancel. Only catch non-CE errors.
+            try {
+                computeNormalizeGains(context, document)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Throwable) {
+                ActivityLog.error("Normalize scan failed (continuing without): ${describeCauseChain(e)}")
+                emptyMap()
+            }
         }
 
         // Background-removal mattes are segmented off the main thread up front (not per render frame).
         val matteCandidates = document.clips.count { it.type == ClipType.VIDEO && it.filters.removeBackground }
         if (matteCandidates > 0) phase("Precomputing subject mattes for $matteCandidates clip(s)…")
         val mattes = withContext(Dispatchers.IO) {
-            runCatching { precomputeMattes(context, document) }
-                .onFailure { ActivityLog.error("Matte precompute failed: ${describeCauseChain(it)}") }
-                .getOrDefault(emptyMap())
+            try {
+                precomputeMattes(context, document)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Throwable) {
+                ActivityLog.error("Matte precompute failed (continuing without): ${describeCauseChain(e)}")
+                emptyMap()
+            }
         }
 
         try {

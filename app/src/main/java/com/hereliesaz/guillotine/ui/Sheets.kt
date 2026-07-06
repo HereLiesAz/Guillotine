@@ -655,19 +655,25 @@ fun ExportSheet(
                                 )
                             }
                             Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+                                // clickable-before-padding so the padding is part of the touch target
+                                // (a 10.sp "Show details" tap area would be uncomfortably tiny otherwise).
                                 Text(
                                     if (errorExpanded) "Hide details" else "Show details",
                                     color = Neutral400,
                                     fontSize = 10.sp,
-                                    modifier = Modifier.padding(end = 12.dp).clickableText { errorExpanded = !errorExpanded },
+                                    modifier = Modifier
+                                        .clickableText { errorExpanded = !errorExpanded }
+                                        .padding(end = 12.dp),
                                 )
                                 Text(
                                     "Copy",
                                     color = Neutral400,
                                     fontSize = 10.sp,
-                                    modifier = Modifier.clickableText {
-                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg))
-                                    },
+                                    modifier = Modifier
+                                        .clickableText {
+                                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg))
+                                        }
+                                        .padding(4.dp),
                                 )
                             }
                         }
