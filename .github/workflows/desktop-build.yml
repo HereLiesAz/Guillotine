@@ -64,9 +64,30 @@ jobs:
         shell: bash
         run: ./gradlew :desktop:${{ matrix.task }} --build-cache --stacktrace
 
-      - name: Upload ${{ matrix.artifact }}
+      # actions/upload-artifact@v7 has no built-in retry. GitHub's blob-storage FinalizeArtifact
+      # call flakes with ECONNRESET on the ~100-MB DMG once every few days — the whole file has
+      # already streamed up, only the final commit call fails. overwrite: true lets a retry
+      # cleanly replace the artifact instead of colliding with the partial one.
+      - name: Upload ${{ matrix.artifact }} (attempt 1)
+        id: upload1
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.path }}
           if-no-files-found: error
+          overwrite: true
+
+      - name: Pause before retry
+        if: steps.upload1.outcome == 'failure'
+        shell: bash
+        run: sleep 20
+
+      - name: Upload ${{ matrix.artifact }} (retry)
+        if: steps.upload1.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error
+          overwrite: true
