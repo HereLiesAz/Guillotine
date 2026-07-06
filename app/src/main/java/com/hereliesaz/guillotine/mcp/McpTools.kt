@@ -246,6 +246,22 @@ class McpTools(
             ),
         ))
 
+        // ---- shot / scene detection (on-device, no model) ----
+        put(toolDefinition(
+            "detect_scenes",
+            "Detect visual scene/shot cuts in a clip on-device (colour-histogram content difference — no " +
+                "model or key needed) and, by default, split the clip at each cut so every shot is its own " +
+                "piece. Use for \"detect scenes\", \"split into shots\", \"auto-chapter this\", \"cut at " +
+                "every scene change\". sensitivity 0–1 (higher finds more cuts). Pass split=false to only " +
+                "report the cut timestamps.",
+            objSchema(
+                "clip_id" to stringProp("The clip to scan"),
+                "sensitivity" to numberProp("0–1, higher = more cuts (default 0.5)"),
+                "split" to boolProp("Split the clip at each scene cut (default true)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
             "generate_image",
@@ -362,6 +378,7 @@ class McpTools(
         "apply_on_beat" -> applyOnBeat(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.getString("effect"), args.optString("mode", "downbeats"))
         "align_clips_to_beats" -> alignClipsToBeats(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "beats"))
         "find_highlights" -> findHighlights(args.getString("clip_id"), args.optDouble("threshold", 0.3).toFloat(), args.optBoolean("split", true))
+        "detect_scenes" -> detectScenes(args.getString("clip_id"), args.optDouble("sensitivity", 0.5).toFloat(), args.optBoolean("split", true))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -888,6 +905,97 @@ class McpTools(
             put("clipCount", vm.uiState.value.document.clips.size)
             put("humanSummary", "Found ${ranges.size} highlight moment(s) — $topLabels.$splitInfo")
         }
+    }
+
+    // ---- shot / scene detection (on-device, no model) -----------------------
+
+    /**
+     * Detect visual scene/shot cuts in a clip by sampling frames and comparing colour histograms
+     * (a classic content-difference cut detector — no model needed). Where consecutive frames differ
+     * more than [sensitivity] allows, that's a cut. When [split], the clip is cut at each boundary so
+     * every shot becomes its own piece (auto-chaptering / scene segmentation).
+     */
+    private fun detectScenes(clipId: String, sensitivity: Float, split: Boolean): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val durationMs = clip.durationMs
+        require(durationMs > 0) { "Clip has no duration to scan." }
+        // Sample ~every 0.4 s, but cap total samples (~600) so a long clip stays fast.
+        val sampleMs = maxOf(400L, durationMs / 600L)
+        // Higher sensitivity → lower distance threshold → more cuts. L1 distance over a normalized
+        // 64-bin RGB histogram ranges 0..2; hard cuts are typically ~0.7–1.5.
+        val threshold = (1.15f - 0.7f * sensitivity.coerceIn(0f, 1f))
+        val boundaries = sortedSetOf<Long>()
+        var found = 0
+        val r = android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(context, Uri.parse(media.uri))
+            var prev: FloatArray? = null
+            var srcMs = clip.trimStartMs
+            val endSrc = clip.trimStartMs + durationMs
+            while (srcMs <= endSrc) {
+                val bmp = runCatching {
+                    r.getFrameAtTime(srcMs * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                }.getOrNull()
+                if (bmp != null) {
+                    val hist = sceneHistogram(bmp)
+                    bmp.recycle()
+                    val p = prev
+                    if (p != null && l1(p, hist) >= threshold) {
+                        val tl = clip.startTimeMs + (srcMs - clip.trimStartMs)
+                        if (tl > clip.startTimeMs && tl < clip.endTimeMs) { boundaries += tl; found++ }
+                    }
+                    prev = hist
+                }
+                srcMs += sampleMs
+            }
+        } finally {
+            runCatching { r.release() }
+        }
+        var splitInfo = ""
+        if (split && boundaries.isNotEmpty()) {
+            vm.splitClipAt(clipId, boundaries.toList())
+            splitInfo = " Split into ${boundaries.size + 1} shots."
+        }
+        return ok().apply {
+            put("sceneCuts", found)
+            put("cutsMs", JSONArray(boundaries.toList()))
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put(
+                "humanSummary",
+                if (found == 0) "No distinct scene cuts detected (try higher sensitivity)."
+                else "Detected $found scene cut(s).$splitInfo",
+            )
+        }
+    }
+
+    /** Normalized 64-bin (4×4×4) RGB colour histogram of a small downscale of [bmp]. */
+    private fun sceneHistogram(bmp: android.graphics.Bitmap): FloatArray {
+        val n = 32
+        val small = android.graphics.Bitmap.createScaledBitmap(bmp, n, n, true)
+        val px = IntArray(n * n)
+        small.getPixels(px, 0, n, 0, 0, n, n)
+        if (small != bmp) small.recycle()
+        val hist = FloatArray(64)
+        for (p in px) {
+            val r = (p shr 16) and 0xFF
+            val g = (p shr 8) and 0xFF
+            val b = p and 0xFF
+            val bin = (r shr 6) * 16 + (g shr 6) * 4 + (b shr 6)
+            hist[bin] += 1f
+        }
+        val total = (n * n).toFloat()
+        for (i in hist.indices) hist[i] /= total
+        return hist
+    }
+
+    /** L1 (sum of absolute differences) distance between two same-length histograms. */
+    private fun l1(a: FloatArray, b: FloatArray): Float {
+        var s = 0f
+        for (i in a.indices) s += kotlin.math.abs(a[i] - b[i])
+        return s
     }
 
     // ---- on-device image effects (TFLite) ----------------------------------
