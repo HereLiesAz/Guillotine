@@ -5,7 +5,9 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -15,7 +17,10 @@ import java.nio.ByteOrder
  * vocals are usually panned dead-center, so `L − R` cancels them and leaves the stereo-spread
  * instruments. Works only on genuinely stereo audio (a mono track has no center to cancel). Not a true
  * ML stem split (that needs a Spleeter model) — a lightweight, on-device instrumental extractor.
- * On-device only — audio never leaves the device.
+ *
+ * Samples are streamed straight to the output WAV (O(1) memory: a full song is ~15M samples, so buffering
+ * them would risk OOM). We write a placeholder header, stream the PCM, then patch the header with the
+ * real sizes. On-device only — audio never leaves the device.
  */
 object VocalIsolator {
 
@@ -47,7 +52,14 @@ object VocalIsolator {
         val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
         extractor.selectTrack(trackIndex)
 
-        val out = ShortArray(1 shl 20).let { ArrayList<Short>(1 shl 20) }
+        val outFile = File(outWavPath)
+        val bos = try {
+            BufferedOutputStream(FileOutputStream(outFile))
+        } catch (_: Exception) {
+            extractor.release(); return null
+        }
+
+        var total = 0L
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var outputDone = false
@@ -56,6 +68,7 @@ object VocalIsolator {
         var right = 0
         var codec: MediaCodec? = null
         try {
+            bos.write(ByteArray(44)) // placeholder header, patched after we know the size
             val dec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
                 .also { codec = it }
             dec.configure(format, null, null, 0)
@@ -89,7 +102,10 @@ object VocalIsolator {
                             chan++
                             if (chan >= channels) {
                                 // (L - R) / 2 cancels center-panned vocals; extra channels are ignored.
-                                out.add(((left - right) / 2).coerceIn(-32768, 32767).toShort())
+                                val v = ((left - right) / 2).coerceIn(-32768, 32767)
+                                bos.write(v and 0xFF)
+                                bos.write((v shr 8) and 0xFF)
+                                total++
                                 chan = 0
                             }
                         }
@@ -102,36 +118,33 @@ object VocalIsolator {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
             runCatching { extractor.release() }
+            runCatching { bos.close() }
         }
-        if (out.isEmpty()) return null
-        writeWavMono16(File(outWavPath), out, sampleRate)
-        return out.size * 1000L / sampleRate
+        if (total == 0L) { runCatching { outFile.delete() }; return null }
+        patchWavHeader(outFile, total, sampleRate)
+        return total * 1000L / sampleRate
     }
 
-    /** Write [samples] (16-bit mono PCM) to a standard WAV file at [sampleRate]. */
-    private fun writeWavMono16(file: File, samples: List<Short>, sampleRate: Int) {
-        val dataSize = samples.size * 2
-        val byteRate = sampleRate * 2
+    /** Overwrite the 44-byte placeholder with a real mono 16-bit PCM WAV header for [samples] frames. */
+    private fun patchWavHeader(file: File, samples: Long, sampleRate: Int) {
+        val dataSize = (samples * 2).toInt()
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+        header.put("RIFF".toByteArray(Charsets.US_ASCII))
+        header.putInt(36 + dataSize)
+        header.put("WAVE".toByteArray(Charsets.US_ASCII))
+        header.put("fmt ".toByteArray(Charsets.US_ASCII))
+        header.putInt(16)            // PCM fmt chunk size
+        header.putShort(1)           // audio format = PCM
+        header.putShort(1)           // channels = mono
+        header.putInt(sampleRate)
+        header.putInt(sampleRate * 2) // byte rate (mono * 16-bit)
+        header.putShort(2)           // block align
+        header.putShort(16)          // bits per sample
+        header.put("data".toByteArray(Charsets.US_ASCII))
+        header.putInt(dataSize)
         RandomAccessFile(file, "rw").use { raf ->
-            raf.setLength(0)
-            val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-            header.put("RIFF".toByteArray(Charsets.US_ASCII))
-            header.putInt(36 + dataSize)
-            header.put("WAVE".toByteArray(Charsets.US_ASCII))
-            header.put("fmt ".toByteArray(Charsets.US_ASCII))
-            header.putInt(16)            // PCM fmt chunk size
-            header.putShort(1)           // audio format = PCM
-            header.putShort(1)           // channels = mono
-            header.putInt(sampleRate)
-            header.putInt(byteRate)
-            header.putShort(2)           // block align (mono * 16-bit)
-            header.putShort(16)          // bits per sample
-            header.put("data".toByteArray(Charsets.US_ASCII))
-            header.putInt(dataSize)
+            raf.seek(0)
             raf.write(header.array())
-            val body = ByteBuffer.allocate(dataSize).order(ByteOrder.LITTLE_ENDIAN)
-            for (s in samples) body.putShort(s)
-            raf.write(body.array())
         }
     }
 }
