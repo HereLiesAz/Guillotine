@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -840,7 +841,12 @@ private fun EditorToolStrip(
                 if (!hasClip && assistant.running) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Red500)
                 } else {
-                    ToolbarButton(if (hasClip) "AI" else "AI ▸", tint = Red500, onClick = submit)
+                    IconToolButton(
+                        Icons.Filled.Send,
+                        if (hasClip) "Apply prompt to selected clip" else "Send prompt to AI",
+                        active = true,
+                        onClick = submit,
+                    )
                 }
                 // Shows which engine the AI button uses; tap to change it in Settings.
                 Text(

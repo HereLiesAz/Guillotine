@@ -5,9 +5,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -97,6 +101,9 @@ private const val SNAP_GRID_PX = 8f
 /** Live drag offset shared across a clip's group so every member moves together DURING the drag. */
 private data class GroupDrag(val ids: Set<String>, val dx: Float, val dy: Float)
 
+/** Which axis a two-finger pinch is currently locked to. Null until first significant motion. */
+private enum class ZoomAxis { HORIZONTAL, VERTICAL }
+
 /**
  * Full timeline panel: scrollable multi-track lanes with playhead. The editing
  * tools (select/split/zoom/etc.) and the AI prompt live in the shared
@@ -129,27 +136,36 @@ private fun TimelineLanes(
     // Live, group-aware drag offset: while a clip is dragged, every clip in its group reads this and
     // moves together (snapped) — so the whole group tracks the cursor, not just the grabbed clip.
     var groupDrag by remember { mutableStateOf<GroupDrag?>(null) }
+    // Visible timeline width in px, updated whenever the horizontally-scrolled BoxWithConstraints
+    // (re)measures. Read from the pps-change effect to clamp the playhead into view.
+    var viewportWidthPx by remember { mutableIntStateOf(0) }
 
     // Zoom-around-playhead: any pps change (pinch, Ctrl+scroll, TopBar buttons, addMedia fit-all)
-    // must keep the playhead pinned to the same on-screen X — otherwise the frame you were looking
-    // at slides out from under your finger. Tracked as an effect on pps, not baked into individual
-    // callers, so every path that changes pps gets this behaviour for free.
+    // solves for a scroll that KEEPS THE PLAYHEAD AT THE SAME ON-SCREEN X. Zoom is precision — the
+    // frame under the user's fingers must not slide out from under them.
     //
-    // The scroll delta is derived from the ratio (newPps - lastPps): a playhead sitting at t seconds
-    // now occupies t·pps pixels on the surface, so shifting scroll by t·(newPps - lastPps) keeps it
-    // at the same viewport-relative offset.
+    // We compute the playhead's pre-zoom viewport-X and preserve it: after the new pps takes effect,
+    // scroll to (newPlayheadPx − anchorViewportX). If the playhead was already visible, its on-screen
+    // position doesn't change at all. If it was scrolled off-screen we CLAMP the anchor into
+    // [0, viewport] so the zoom always leaves the playhead at the nearest visible edge — the "stays
+    // in the viewport" guarantee — rather than shifting it further off-screen with each zoom step.
     //
     // withFrameNanos before scroll.scrollTo lets the layout pass with the new pps commit first —
-    // otherwise scroll.maxValue is stale from the previous width and the scroll clamps to the wrong
-    // value on zoom-in. roundToInt (not toInt) so a shift of e.g. -0.9 doesn't truncate to 0.
+    // otherwise scroll.maxValue is stale from the previous width and the scroll clamps wrong on
+    // zoom-in. roundToInt (not toInt) so a target of e.g. −0.9 doesn't truncate to 0.
     var lastZoomedPps by remember { mutableFloatStateOf(pps) }
     LaunchedEffect(pps) {
         if (pps == lastZoomedPps) return@LaunchedEffect
         val playheadMs = vm.uiState.value.currentTimeMs
-        val shift = playheadMs / 1000f * (pps - lastZoomedPps)
-        val target = (scroll.value + shift).roundToInt().coerceAtLeast(0)
+        val oldPlayheadPx = playheadMs / 1000f * lastZoomedPps
+        val vp = viewportWidthPx
+        val rawViewportX = oldPlayheadPx - scroll.value
+        val anchorViewportX =
+            if (vp > 0) rawViewportX.coerceIn(0f, vp.toFloat()) else rawViewportX
         lastZoomedPps = pps
         androidx.compose.runtime.withFrameNanos {}
+        val newPlayheadPx = playheadMs / 1000f * pps
+        val target = (newPlayheadPx - anchorViewportX).roundToInt().coerceAtLeast(0)
         scroll.scrollTo(target)
     }
 
@@ -164,35 +180,58 @@ private fun TimelineLanes(
     val zoomModifier = Modifier
         .pointerInput(Unit) {
             // Single-axis pinch: one gesture changes EITHER width (pixels/second) OR track
-            // height, never both. We pick whichever axis the fingers moved more this event,
-            // so a mostly-horizontal pinch zooms width and a mostly-vertical one zooms height.
+            // height, never both. Picking the axis PER EVENT (as we used to) meant a
+            // slightly-diagonal pinch flipped axes mid-gesture and both wound up scaled.
+            // Now we lock the axis on the first significant motion and keep it locked
+            // until fewer than two fingers are down (gesture end).
             awaitPointerEventScope {
+                var lockedAxis: ZoomAxis? = null
+                val axisLockThresholdPx = 8f
                 while (true) {
                     // Initial pass: claim two-finger pinch before the nested scroll/clip
                     // children can consume the drag (that's why vertical zoom didn't work).
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     val pts = event.changes.filter { it.pressed }
-                    if (pts.size >= 2) {
-                        val a = pts[0]
-                        val b = pts[1]
-                        val curH = kotlin.math.abs(a.position.x - b.position.x)
-                        val curV = kotlin.math.abs(a.position.y - b.position.y)
-                        val prevH = kotlin.math.abs(a.previousPosition.x - b.previousPosition.x)
-                        val prevV = kotlin.math.abs(a.previousPosition.y - b.previousPosition.y)
-                        val dH = kotlin.math.abs(curH - prevH)
-                        val dV = kotlin.math.abs(curV - prevV)
-                        var acted = false
-                        if (dH >= dV) {
+                    if (pts.size < 2) {
+                        // Gesture ended (release or lifted below two fingers) — unlock so
+                        // the next pinch is free to pick its own axis.
+                        lockedAxis = null
+                        continue
+                    }
+                    val a = pts[0]
+                    val b = pts[1]
+                    val curH = kotlin.math.abs(a.position.x - b.position.x)
+                    val curV = kotlin.math.abs(a.position.y - b.position.y)
+                    val prevH = kotlin.math.abs(a.previousPosition.x - b.previousPosition.x)
+                    val prevV = kotlin.math.abs(a.previousPosition.y - b.previousPosition.y)
+                    val dH = kotlin.math.abs(curH - prevH)
+                    val dV = kotlin.math.abs(curV - prevV)
+                    if (lockedAxis == null) {
+                        // First significant motion decides — need at least axisLockThresholdPx
+                        // of change so a stationary two-finger touch doesn't lock on noise.
+                        lockedAxis = when {
+                            dH >= axisLockThresholdPx && dH > dV -> ZoomAxis.HORIZONTAL
+                            dV >= axisLockThresholdPx && dV > dH -> ZoomAxis.VERTICAL
+                            else -> null
+                        }
+                    }
+                    var acted = false
+                    when (lockedAxis) {
+                        ZoomAxis.HORIZONTAL -> {
                             if (prevH > 1f && curH > 1f && curH != prevH) {
-                                vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH)); acted = true
-                            }
-                        } else {
-                            if (prevV > 1f && curV > 1f && curV != prevV) {
-                                vm.scaleTrackHeight(curV / prevV); acted = true
+                                vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH))
+                                acted = true
                             }
                         }
-                        if (acted) pts.forEach { it.consume() }
+                        ZoomAxis.VERTICAL -> {
+                            if (prevV > 1f && curV > 1f && curV != prevV) {
+                                vm.scaleTrackHeight(curV / prevV)
+                                acted = true
+                            }
+                        }
+                        null -> {}
                     }
+                    if (acted) pts.forEach { it.consume() }
                 }
             }
         }
@@ -229,7 +268,10 @@ private fun TimelineLanes(
         // Report the visible lanes width so the view model can cap zoom-out at "whole project
         // fits in 2/3 of the timeline".
         val viewportPx = with(density) { maxWidth.toPx() }
-        androidx.compose.runtime.LaunchedEffect(viewportPx) { vm.setTimelineViewportPx(viewportPx) }
+        androidx.compose.runtime.LaunchedEffect(viewportPx) {
+            vm.setTimelineViewportPx(viewportPx)
+            viewportWidthPx = viewportPx.roundToInt()
+        }
         Box(
             Modifier
                 .fillMaxSize()
@@ -241,6 +283,38 @@ private fun TimelineLanes(
                     detectTapGestures { offset ->
                         vm.clearSelection()
                         vm.seekTo((offset.x / pps * 1000f).toLong())
+                    }
+                }
+                // Playhead drag: grab the red line anywhere along its height (not just from
+                // the ruler strip). Gate by proximity: if the initial down is within ±16 dp of
+                // the playhead's surface X, we own this pointer and seek as it drags. Otherwise
+                // we bail out immediately, so clip taps/long-presses under the playhead still
+                // reach their own detectors (Compose hit-testing wouldn't propagate through a
+                // covering sibling Box, so we handle the drag from the parent surface instead).
+                //
+                // startMs + (x − downX) rather than accumulating dragAmount keeps the math local
+                // to positions the pointer scope already gives us — no per-event delta lookups.
+                .pointerInput(pps, state.currentTimeMs) {
+                    val hitRadiusPx = 16.dp.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val playheadPx = state.currentTimeMs / 1000f * pps
+                        if (kotlin.math.abs(down.position.x - playheadPx) > hitRadiusPx) {
+                            return@awaitEachGesture
+                        }
+                        val startMs = vm.uiState.value.currentTimeMs
+                        val downX = down.position.x
+                        val seekTo: (Float) -> Unit = { x ->
+                            val newMs = (startMs + ((x - downX) / pps * 1000f).toLong())
+                                .coerceAtLeast(0L)
+                            vm.seekTo(newMs)
+                        }
+                        val slop = awaitTouchSlopOrCancellation(down.id) { change, _ ->
+                            change.consume(); seekTo(change.position.x)
+                        } ?: return@awaitEachGesture
+                        drag(slop.id) { change ->
+                            change.consume(); seekTo(change.position.x)
+                        }
                     }
                 },
         ) {
@@ -264,7 +338,9 @@ private fun TimelineLanes(
                     }
                 }
             }
-            // Playhead overlay spanning the visible lanes.
+            // Playhead overlay spanning the visible lanes. Drag is captured on the parent
+            // surface (see .pointerInput above) so the hit region isn't a covering sibling —
+            // Compose wouldn't propagate through it to underlying clips.
             Box(
                 Modifier
                     .offset(x = msToDp(state.currentTimeMs))
