@@ -145,6 +145,12 @@ val AGENT_SYSTEM_PROMPT = """
       an audio clip. Needs the TTS voice in Settings → AI Analyzer → Speech (TTS); if it isn't set the tool
       returns an error naming the setting — relay it, don't retry.
 
+    KARAOKE / REMOVE VOCALS (on-device, no model):
+    - "remove the vocals", "make a karaoke / instrumental version", "strip the singing", "backing track"
+      → remove_vocals on the clip. It cancels center-panned vocals from the STEREO audio and adds the
+      instrumental as a new audio clip. It needs a stereo track (errors on mono) and is a lightweight
+      instrumental extractor, not a full multi-stem split.
+
     GENERATING MEDIA (images / video / music):
     - "generate/make/create an image of X", "add a picture of X" → generate_image with the prompt;
     - "generate/make a video/clip of X", "add b-roll of X" → generate_video;
