@@ -19,8 +19,18 @@ object CrashConfig {
     private const val PREFS = "guillotine_crash"
     private const val KEY_RELAY = "relay_url"
 
-    fun relayUrl(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_RELAY, "").orEmpty()
+    /**
+     * The relay endpoint used for both automatic crash reports and manual "Report" button posts.
+     * User setting wins so anyone can point at their own fork of the Worker; otherwise falls back
+     * to the BuildConfig-embedded default so end users don't need any configuration OR a GH
+     * account for the Report button to file issues on the maintainer's repo.
+     */
+    fun relayUrl(context: Context): String {
+        val userSet = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_RELAY, "").orEmpty()
+        return if (userSet.isNotBlank()) userSet
+        else com.hereliesaz.guillotine.BuildConfig.DEFAULT_CRASH_RELAY_URL
+    }
 
     fun setRelayUrl(context: Context, url: String) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_RELAY, url.trim()).apply()
@@ -116,7 +126,38 @@ object CrashReporter {
         process.inputStream.bufferedReader().use(BufferedReader::readText).takeLast(20_000)
     }.getOrDefault("(logcat unavailable)")
 
-    private fun post(relayUrl: String, title: String, body: String): Boolean {
+    /**
+     * File an issue via the relay without waiting for an actual crash — used by the manual
+     * Report button on the ExportSheet, and any future in-app "send feedback" flow. Runs the
+     * POST off the main thread and calls [onResult] with true on success (relay accepted the
+     * report) or false when the relay isn't configured or the request failed. Callers should
+     * still fall back to opening a GitHub issue URL in the browser on failure so bug reporting
+     * still works when the app is offline or the relay is down.
+     */
+    fun reportManual(
+        context: Context,
+        title: String,
+        body: String,
+        labels: List<String> = listOf("bug"),
+        onResult: (Boolean) -> Unit,
+    ) {
+        val relay = CrashConfig.relayUrl(context.applicationContext)
+        if (relay.isBlank()) {
+            onResult(false)
+            return
+        }
+        thread(isDaemon = true) {
+            val ok = runCatching { post(relay, title, body, labels) }.getOrDefault(false)
+            onResult(ok)
+        }
+    }
+
+    private fun post(
+        relayUrl: String,
+        title: String,
+        body: String,
+        labels: List<String> = emptyList(),
+    ): Boolean {
         // The report bundles a stack trace and recent logcat — never send it in the clear.
         if (!relayUrl.startsWith("https://", ignoreCase = true)) return false
         val conn = (URL(relayUrl).openConnection() as HttpURLConnection).apply {
@@ -130,6 +171,9 @@ object CrashReporter {
             val payload = org.json.JSONObject().apply {
                 put("title", title)
                 put("body", body)
+                if (labels.isNotEmpty()) {
+                    put("labels", org.json.JSONArray().apply { labels.forEach { put(it) } })
+                }
             }
             conn.outputStream.use { it.write(payload.toString().toByteArray()) }
             conn.responseCode in 200..299

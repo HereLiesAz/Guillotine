@@ -668,26 +668,48 @@ fun ExportSheet(
                                         .clickableText { errorExpanded = !errorExpanded }
                                         .padding(end = 12.dp),
                                 )
-                                // Open a pre-filled GitHub issue in the browser instead of dropping
-                                // the diagnostic on the clipboard and hoping the user files it.
-                                // The URL carries the title/body already; sender just hits Submit.
+                                // Report path — try the Cloudflare Worker relay first so end users
+                                // without a GH account still land a real issue. Falls back to
+                                // opening the pre-filled GitHub URL in the browser when the relay
+                                // is unconfigured/offline; last-ditch drops the diagnostic on the
+                                // clipboard so nothing is ever silently lost.
                                 Text(
                                     "Report",
                                     color = Neutral400,
                                     fontSize = 10.sp,
                                     modifier = Modifier
                                         .clickableText {
-                                            val url = com.hereliesaz.guillotine.export.Exporter.buildIssueUrl(context, msg)
-                                            runCatching {
-                                                val intent = android.content.Intent(
-                                                    android.content.Intent.ACTION_VIEW,
-                                                    android.net.Uri.parse(url),
-                                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                context.startActivity(intent)
-                                            }.onFailure {
-                                                // Fallback: copy to clipboard so the user still has
-                                                // something to paste if no browser handles the URL.
-                                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg))
+                                            val report = com.hereliesaz.guillotine.export.Exporter
+                                                .buildIssueReport(context, msg)
+                                            ActivityLog.info("Reporting failure…")
+                                            com.hereliesaz.guillotine.crash.CrashReporter.reportManual(
+                                                context, report.title, report.body,
+                                                labels = listOf("bug", "export"),
+                                            ) { ok ->
+                                                if (ok) {
+                                                    ActivityLog.success("Reported. Thanks!")
+                                                } else {
+                                                    // Fallback: open the pre-filled issue URL —
+                                                    // the user still needs a GH account for this
+                                                    // path but the diagnostic is ready to submit.
+                                                    val url = com.hereliesaz.guillotine.export
+                                                        .Exporter.buildIssueUrl(report)
+                                                    runCatching {
+                                                        val intent = android.content.Intent(
+                                                            android.content.Intent.ACTION_VIEW,
+                                                            android.net.Uri.parse(url),
+                                                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                        context.startActivity(intent)
+                                                    }.onFailure {
+                                                        clipboard.setText(
+                                                            androidx.compose.ui.text.AnnotatedString(msg),
+                                                        )
+                                                        ActivityLog.error(
+                                                            "Couldn't reach the relay or a browser; " +
+                                                                "diagnostic copied to clipboard.",
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                         .padding(4.dp),

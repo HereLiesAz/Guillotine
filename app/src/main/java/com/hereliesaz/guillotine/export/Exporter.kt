@@ -232,11 +232,14 @@ object Exporter {
         return out.toString()
     }
 
+    /** Bundle carrying a filed-ready issue: title + fully-populated body. */
+    data class IssueReport(val title: String, val body: String)
+
     /**
-     * Build a pre-filled GitHub issue URL so "Report" in the ExportSheet can open the browser
-     * straight to a new issue with the diagnostic already in the body. Sender still hits "Submit."
+     * Assemble the title + body for an export failure. Used by both the relay POST (so the
+     * Worker can file the issue automatically) and the browser fallback (URL below).
      */
-    fun buildIssueUrl(context: Context, diagnostic: String): String {
+    fun buildIssueReport(context: Context, diagnostic: String): IssueReport {
         val body = buildString {
             appendLine("**What I was doing:** exporting my project.")
             appendLine()
@@ -252,10 +255,20 @@ object Exporter {
             appendLine("```")
         }
         val title = "Export failed: " + diagnostic.lineSequence().firstOrNull().orEmpty().take(80)
+        return IssueReport(title, body)
+    }
+
+    /**
+     * Pre-filled GitHub issue URL for the fallback path — when the relay is offline or the
+     * app couldn't reach it, we still open the browser with the title/body ready so the user
+     * only has to hit Submit (assuming they have a GH account). Preferred path is
+     * [reportManual] via the Cloudflare Worker, which needs no account on the user side.
+     */
+    fun buildIssueUrl(report: IssueReport): String {
         val enc: (String) -> String = { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
         return "https://github.com/HereLiesAz/Guillotine/issues/new" +
-            "?title=" + enc(title) +
-            "&body=" + enc(body) +
+            "?title=" + enc(report.title) +
+            "&body=" + enc(report.body) +
             "&labels=" + enc("bug,export")
     }
 
@@ -471,8 +484,15 @@ object Exporter {
                         val laneClips = layout.filter { it.second == lane }.map { it.first }
                         if (laneClips.isEmpty()) continue
                         val startsWithGap = laneClips.first().startTimeMs > globalZero
-                        val trackTypes = if (startsWithGap) setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO) else emptySet()
-                        val seq = EditedMediaItemSequence.Builder(trackTypes)
+                        // Media3's Builder(Set<@C.TrackType Integer>) constructor checkState-throws on
+                        // an empty set — that constructor is specifically for FORCING tracks when the
+                        // sequence starts with a gap. When it doesn't, use the no-arg builder instead.
+                        // (Issue #114.)
+                        val seq = if (startsWithGap) {
+                            EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO))
+                        } else {
+                            EditedMediaItemSequence.Builder()
+                        }
                         val any = appendVideoItems(
                             seq, laneClips, globalZero, withOverlays = false, fadeFor = { fadeByClip[it.id] },
                         )
