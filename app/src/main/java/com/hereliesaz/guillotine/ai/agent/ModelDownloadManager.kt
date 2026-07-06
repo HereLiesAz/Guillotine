@@ -48,13 +48,21 @@ object ModelDownloadManager {
 
     @Volatile private var job: Job? = null
 
-    /** Directory holding downloaded `.task` models (app-specific, permission-free). */
-    fun modelsDir(context: Context): File =
-        File(context.getExternalFilesDir(null) ?: context.filesDir, "llm-models").apply { mkdirs() }
+    /** Directory holding downloaded models for a category (app-specific, permission-free). The LLM
+     *  dir keeps its historical name so existing downloads are still found. */
+    fun modelsDir(context: Context, category: ModelCategory = ModelCategory.ASSISTANT_LLM): File {
+        val name = when (category) {
+            ModelCategory.ASSISTANT_LLM -> "llm-models"
+            ModelCategory.RECOGNITION -> "recognition-models"
+            ModelCategory.FACE -> "face-models"
+            else -> "${category.name.lowercase()}-models"
+        }
+        return File(context.getExternalFilesDir(null) ?: context.filesDir, name).apply { mkdirs() }
+    }
 
     /** Absolute path of [model] if it's fully downloaded (present at its expected size), else null. */
     fun installedPath(context: Context, model: OnDeviceModel): String? =
-        File(modelsDir(context), model.fileName)
+        File(modelsDir(context, model.category), model.fileName)
             .takeIf { it.isFile && it.length() == model.sizeBytes }
             ?.absolutePath
 
@@ -63,8 +71,24 @@ object ModelDownloadManager {
      * Lets the picker offer "Resume" instead of "Download" and show how far along it is.
      */
     fun partialBytes(context: Context, model: OnDeviceModel): Long =
-        File(modelsDir(context), "${model.fileName}.part")
+        File(modelsDir(context, model.category), "${model.fileName}.part")
             .takeIf { it.isFile }?.length()?.coerceAtMost(model.sizeBytes) ?: 0L
+
+    /**
+     * Remove [model] from the device — the finished file and any partial `.part`. Cancels the download
+     * first if this model is currently in flight. Frees the storage; the row reverts to "Download".
+     */
+    fun delete(context: Context, model: OnDeviceModel) {
+        if ((_state.value as? DownloadState.Downloading)?.modelId == model.id) cancel()
+        val dir = modelsDir(context, model.category)
+        runCatching { File(dir, model.fileName).delete() }
+        runCatching { File(dir, "${model.fileName}.part").delete() }
+        // If a terminal state was pinned to this model, clear it so the UI refreshes cleanly.
+        val s = _state.value
+        if ((s as? DownloadState.Done)?.modelId == model.id || (s as? DownloadState.Failed)?.modelId == model.id) {
+            _state.value = DownloadState.Idle
+        }
+    }
 
     /**
      * Stop the in-flight download. The partial `.part` file is **kept** so a later [start] for the
@@ -87,7 +111,7 @@ object ModelDownloadManager {
             ActivityLog.error("Model download for \"${model.id}\" failed — $msg")
             return
         }
-        val dir = modelsDir(context)
+        val dir = modelsDir(context, model.category)
         val finalFile = File(dir, model.fileName)
         val partFile = File(dir, "${model.fileName}.part")
 

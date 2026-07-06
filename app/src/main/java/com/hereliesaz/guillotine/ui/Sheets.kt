@@ -65,7 +65,9 @@ import com.hereliesaz.guillotine.ai.ModelCatalog
 import com.hereliesaz.guillotine.ai.agent.BundledModelExtractor
 import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
 import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
+import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_FACE_MODELS
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
+import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_RECOGNITION_MODELS
 import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.ai.gen.GenKind
 import com.hereliesaz.guillotine.ai.gen.GenProviderType
@@ -323,8 +325,10 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "they download straight to this device (Wi-Fi recommended).",
                         color = Neutral500, fontSize = 10.sp,
                     )
-                    RecommendedModels(
+                    ModelPicker(
                         context = context,
+                        title = "Assistant models — download, use, or remove",
+                        models = RECOMMENDED_ON_DEVICE_MODELS,
                         selectedPath = agentModelPath,
                         onUse = { agentModelPath = it },
                     )
@@ -346,6 +350,13 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "(MobileCLIP-S0, EfficientNet-Lite0) for sharper instance matching.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+                    ModelPicker(
+                        context = context,
+                        title = "Recognition models — download, use, or remove",
+                        models = RECOMMENDED_RECOGNITION_MODELS,
+                        selectedPath = idEmbedModelPath,
+                        onUse = { idEmbedModelPath = it },
+                    )
                     Text("Face model — for identifying a specific person (optional)", color = Neutral400, fontSize = 12.sp)
                     OutlinedTextField(
                         value = faceEmbedModelPath,
@@ -359,6 +370,13 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         "When set, teaching a person uses face recognition (ML Kit face detect + this model). " +
                             "Blank = fall back to the general recognition model.",
                         color = Neutral500, fontSize = 10.sp,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "Face models — download, use, or remove",
+                        models = RECOMMENDED_FACE_MODELS,
+                        selectedPath = faceEmbedModelPath,
+                        onUse = { faceEmbedModelPath = it },
                     )
                 }
                 1 -> { // Generation (image / video / music)
@@ -538,25 +556,31 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
  * and a Hugging Face link-out for gated ones. Observes the process-level [ModelDownloadManager].
  */
 @Composable
-private fun RecommendedModels(
+private fun ModelPicker(
     context: android.content.Context,
+    title: String,
+    models: List<OnDeviceModel>,
     selectedPath: String,
     onUse: (String) -> Unit,
 ) {
+    if (models.isEmpty()) return
     val state by ModelDownloadManager.state.collectAsState()
     val uriHandler = LocalUriHandler.current
 
-    // Ensure the bundled model is extracted so installedPath picks it up.
+    // Ensure the bundled model is extracted so installedPath picks it up (only relevant when this
+    // group actually contains a bundled model).
     var bundledReady by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            BundledModelExtractor.ensureExtracted(context)
+        if (models.any { it.bundled }) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                BundledModelExtractor.ensureExtracted(context)
+            }
         }
         bundledReady = true
     }
 
-    Text("Recommended on-device models", color = Neutral400, fontSize = 12.sp)
-    RECOMMENDED_ON_DEVICE_MODELS.forEach { model ->
+    Text(title, color = Neutral400, fontSize = 12.sp)
+    models.forEach { model ->
         // Keyed on bundledReady so the bundled model flips to "Installed" once extraction finishes
         // (without this the row never refreshes after the LaunchedEffect completes).
         val installed = remember(state, bundledReady, model.id) {
@@ -580,14 +604,23 @@ private fun RecommendedModels(
                     Text(model.label, color = White, fontSize = 12.sp)
                     Text("${model.sizeLabel} · ${model.license}", color = Neutral500, fontSize = 10.sp)
                 }
-                when {
-                    inUse -> Text("In use", color = Neutral500, fontSize = 11.sp)
-                    installed != null -> ActionText("✓ Installed · Use") { onUse(installed) }
-                    downloading != null -> ActionText("Cancel") { ModelDownloadManager.cancel() }
-                    model.bundled -> {} // bundled but not yet extracted; will appear once ready
-                    model.gated -> ActionText("Get ↗") { uriHandler.openUri(model.repoUrl) }
-                    partial > 0 -> ActionText("Resume") { ModelDownloadManager.start(context, model) }
-                    else -> ActionText("Download") { ModelDownloadManager.start(context, model) }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        inUse -> Text("In use", color = Neutral500, fontSize = 11.sp)
+                        installed != null -> ActionText("✓ Use") { onUse(installed) }
+                        downloading != null -> ActionText("Cancel") { ModelDownloadManager.cancel() }
+                        model.bundled -> {} // bundled but not yet extracted; will appear once ready
+                        model.gated -> ActionText("Get ↗") { uriHandler.openUri(model.repoUrl) }
+                        partial > 0 -> ActionText("Resume") { ModelDownloadManager.start(context, model) }
+                        else -> ActionText("Download") { ModelDownloadManager.start(context, model) }
+                    }
+                    // Remove anything actually on disk (finished or a paused partial); bundled can't be removed.
+                    if (!model.bundled && downloading == null && (installed != null || partial > 0)) {
+                        ActionText("Remove") {
+                            ModelDownloadManager.delete(context, model)
+                            if (installed != null && installed == selectedPath) onUse("")
+                        }
+                    }
                 }
             }
             if (downloading != null) {
@@ -617,10 +650,11 @@ private fun RecommendedModels(
         }
     }
 
-    // A freshly finished download becomes the assistant brain automatically (applies on Save).
+    // A freshly finished download from THIS group is auto-selected (applies on Save). Guard on the
+    // model id so a recognition-model download doesn't get adopted as the assistant path, etc.
     val done = state as? ModelDownloadManager.DownloadState.Done
     androidx.compose.runtime.LaunchedEffect(done?.path) {
-        if (done != null && done.path != selectedPath) onUse(done.path)
+        if (done != null && models.any { it.id == done.modelId } && done.path != selectedPath) onUse(done.path)
     }
 }
 
