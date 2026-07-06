@@ -65,6 +65,26 @@ upgradeable to a TFLite-exported BeatNet/TempoCNN or aubio/Essentia via NDK.
 | Captioning / VLM | SmolVLM 256M/500M, Moondream 0.5B, Florence-2, **Gemma 3n** | Apache/MIT | Lightest true on-device VLMs; or reuse Gemma 3n. |
 | Auto-reframe | MediaPipe AutoFlip + saliency (BASNet/U²-Net) | Apache/MIT | Smart vertical crop tracking the subject. |
 
+### 1.3b Recognition / ID embedding models ("is this the same specific thing?")
+
+The "teach a thing by pointing at it" feature embeds a crop and matches by cosine. The
+embedder is pluggable (Settings → recognition model); the default is MobileNet-V3-small.
+MediaPipe ImageEmbedder loads any **CNN** TFLite with a single image input **and
+`NormalizationOptions` metadata**; **ViTs (DINOv2/CLIP) don't convert cleanly to TFLite**
+and need ONNX Runtime instead.
+
+| Model | Size | Quality vs MobileNetV3 | License | Runtime |
+|---|---|---|---|---|
+| **MobileCLIP-S0** (image tower) | ~11 M, 512-d | Big instance-matching jump | Apple AMLR (non-permissive) | TFLite w/ metadata → **MediaPipe** ✅ |
+| **EfficientNet-Lite0** | ~4.7 M | Modest, safe | Apache-2.0 | TFLite → MediaPipe ✅ |
+| **OSNet** (re-ID) | ~2.2 M, 512-d | Instance-trained (person/vehicle) | MIT | TFLite w/ metadata → MediaPipe ✅ |
+| **DINOv2 ViT-S/14** | ~22 M, 384-d | Best generic instance features | Apache-2.0 | **ONNX Runtime Mobile** ❌ (ViT) |
+
+**Faces (person identity):** ML Kit face detect + a face embedder beats a generic one.
+**MobileFaceNet-512** (~1–4 MB, MIT community weights) is the safe default; **EdgeFace-XS**
+(Idiap research license) is higher accuracy. Guillotine routes person concepts through the
+face path when a face model is configured (Settings → face model).
+
 ### 1.4 Speech (ASR + TTS)
 
 | Tool | Task | License | Notes |

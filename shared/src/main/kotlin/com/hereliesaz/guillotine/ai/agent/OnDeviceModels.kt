@@ -8,6 +8,22 @@ package com.hereliesaz.guillotine.ai.agent
  * Sizes/filenames verified against the litert-community repos. Direct download follows HF's
  * `resolve/main/<file>?download=true`, which 302s ungated files to a public CDN (no auth needed).
  */
+/**
+ * Which on-device runtime a model plugs into — drives where it's stored, how "Use" wires it, and
+ * which group it appears under in the Model Manager. Only categories with a working runtime are shown
+ * today; the rest are reserved for the roadmap features that add their engines.
+ */
+enum class ModelCategory {
+    /** MediaPipe LlmInference `.task`/`.litertlm` — the assistant brain. */
+    ASSISTANT_LLM,
+    /** MediaPipe ImageEmbedder `.tflite` — "is this the same thing?" recognition. */
+    RECOGNITION,
+    /** Face-embedding `.tflite` — identifying a specific person. */
+    FACE,
+    // --- reserved for upcoming runtimes (not yet shown in the picker) ---
+    ASR, TTS, DEPTH, SUPERRES, STYLE, STEM, VLM,
+}
+
 data class OnDeviceModel(
     val id: String,
     val label: String,
@@ -26,6 +42,8 @@ data class OnDeviceModel(
     val limitations: String = "",
     /** True if the model ships inside the APK and is extracted on first launch. */
     val bundled: Boolean = false,
+    /** Which runtime this model is for (drives storage dir + how "Use" wires it). */
+    val category: ModelCategory = ModelCategory.ASSISTANT_LLM,
 ) {
     /** Human-readable size, e.g. "1.46 GB" or "167 MB". */
     val sizeLabel: String get() {
@@ -109,3 +127,23 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         limitations = "Requires a free Hugging Face sign-in to download (Gemma license).",
     ),
 )
+
+/**
+ * Recommended general image-embedding models for recognition ("is this the same specific thing?").
+ * These are MediaPipe ImageEmbedder-compatible `.tflite` files; "Use" sets `idEmbedModelPath`.
+ * Populated with verified Hugging Face downloads.
+ */
+val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = emptyList()
+
+/**
+ * Recommended face-embedding models for identifying a specific person. "Use" sets `faceEmbedModelPath`.
+ */
+val RECOMMENDED_FACE_MODELS: List<OnDeviceModel> = emptyList()
+
+/** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
+fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
+    ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
+    ModelCategory.RECOGNITION -> RECOMMENDED_RECOGNITION_MODELS
+    ModelCategory.FACE -> RECOMMENDED_FACE_MODELS
+    else -> emptyList()
+}

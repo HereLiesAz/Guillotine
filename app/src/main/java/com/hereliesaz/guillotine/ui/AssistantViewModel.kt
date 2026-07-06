@@ -5,11 +5,14 @@ import androidx.lifecycle.viewModelScope
 import com.hereliesaz.guillotine.ai.agent.AgentBackend
 import com.hereliesaz.guillotine.ai.agent.AgentEvent
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 /**
  * State + driver for the assistant command bar. Owns its own small UI state (kept separate from
@@ -101,7 +104,11 @@ class AssistantViewModel : ViewModel() {
         }
         viewModelScope.launch {
             try {
-                agent.run(instruction, tools) { event -> apply(event) }
+                // On a fresh prompt (not a clarification reply), if the wording points at the current
+                // preview, attach the on-device frame description so the agent doesn't have to guess —
+                // and doesn't have to remember to look — regardless of how capable the model is.
+                val finalInstruction = if (isReply) instruction else augmentWithPreview(instruction, tools)
+                agent.run(finalInstruction, tools) { event -> apply(event) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e // let cancellation propagate cleanly instead of showing a false error
             } catch (e: Exception) {
@@ -109,6 +116,62 @@ class AssistantViewModel : ViewModel() {
             } finally {
                 _state.update { if (it.running) it.copy(running = false) else it }
             }
+        }
+    }
+
+    /**
+     * True when the user's wording looks like it points at the current preview frame. Strong phrases
+     * ("on screen", "this frame", "what is this") always count; a bare deictic ("this"/"that"/"it")
+     * counts only when the user isn't clearly talking about a timeline element ("this clip") — so
+     * "cut this clip" is left alone while "cut this" / "remove that" is treated as a preview reference.
+     */
+    private fun referencesPreview(text: String): Boolean {
+        val t = " ${text.lowercase(java.util.Locale.ROOT)} "
+        val strong = listOf(
+            "on screen", "on-screen", "on the screen", "in the frame", "in frame", "current frame",
+            "this frame", "that frame", "in the preview", "on the preview", "right here",
+            "what's this", "what is this", "what's that", "what is that", "this thing", "that thing",
+            "this object", "that object", "the thing here", "am i looking at", "highlighted",
+        )
+        if (strong.any { t.contains(it) }) return true
+        return DEICTIC_REGEX.containsMatchIn(t) && !TIMELINE_NOUN_REGEX.containsMatchIn(t)
+    }
+
+    /**
+     * If [instruction] references the preview, run describe_current_frame on-device and append a short
+     * CONTEXT note (the frame's detected objects + how to act on them) so the agent can resolve what the
+     * user is pointing at. Best-effort: on any error, or when the playhead isn't over a video clip, the
+     * instruction is returned unchanged.
+     */
+    private suspend fun augmentWithPreview(instruction: String, tools: McpToolsSurface): String {
+        if (!referencesPreview(instruction)) return instruction
+        val result = withContext(Dispatchers.IO) {
+            runCatching { tools.call("describe_current_frame", JSONObject()) }.getOrNull()
+        } ?: return instruction
+        if (result.has("error")) return instruction
+        return try {
+            val clipId = result.optString("clipId")
+            val objects = result.optJSONArray("objects")
+            val objList = buildString {
+                if (objects != null) for (i in 0 until objects.length()) {
+                    val o = objects.optJSONObject(i) ?: continue
+                    if (isNotEmpty()) append(", ")
+                    append(o.optString("label")).append(" (").append(o.optInt("confidence")).append("%)")
+                }
+            }
+            instruction + buildString {
+                append("\n\n[CONTEXT — the user's wording may refer to the current preview frame. ")
+                append("On-device vision of the frame at the playhead")
+                if (clipId.isNotBlank()) append(" (clip $clipId)")
+                append(": ")
+                append(if (objList.isBlank()) "no recognisable objects." else "$objList.")
+                append(" If they're asking WHAT is on screen, answer from this. If they're pointing at a ")
+                append("specific object to ACT on, set_prompt that object on the clip then use ")
+                append("analyze_clip_with_reference (it tracks THAT instance). If you can't tell whether they ")
+                append("mean an on-screen object or a whole clip, ask one short question.]")
+            }
+        } catch (e: Exception) {
+            instruction
         }
     }
 
@@ -150,5 +213,11 @@ class AssistantViewModel : ViewModel() {
                 is AgentEvent.Failed -> st.copy(status = event.message, running = false, isError = true)
             }
         }
+    }
+
+    private companion object {
+        // Compiled once — cheap, but avoids rebuilding on every prompt.
+        val DEICTIC_REGEX = Regex("\\b(this|that|these|those|it)\\b")
+        val TIMELINE_NOUN_REGEX = Regex("\\b(clip|clips|track|tracks|timeline|selection|layer|layers)\\b")
     }
 }

@@ -18,6 +18,8 @@ data class SettingsBundle(
     val leonardoModel: String = "",
     val speechModelPath: String = "",
     val agentModelPath: String = "",
+    val idEmbedModelPath: String = "",
+    val faceEmbedModelPath: String = "",
     val frameAnalysisCacheSize: Int = 200,
     val genKeys: Map<String, String> = emptyMap(),
     val genModels: Map<String, String> = emptyMap(),
@@ -43,6 +45,8 @@ object SettingsBackup {
             leonardoModel = settings.leonardoModel,
             speechModelPath = settings.speechModelPath,
             agentModelPath = settings.agentModelPath,
+            idEmbedModelPath = settings.idEmbedModelPath,
+            faceEmbedModelPath = settings.faceEmbedModelPath,
             frameAnalysisCacheSize = settings.frameAnalysisCacheSize,
             genKeys = settings.genKeys.mapKeys { it.key.name },
             genModels = settings.genModels.mapKeys { it.key.name },
@@ -73,6 +77,8 @@ object SettingsBackup {
             leonardoModel = bundle.leonardoModel,
             speechModelPath = bundle.speechModelPath,
             agentModelPath = bundle.agentModelPath,
+            idEmbedModelPath = bundle.idEmbedModelPath,
+            faceEmbedModelPath = bundle.faceEmbedModelPath,
             frameAnalysisCacheSize = bundle.frameAnalysisCacheSize,
             genKeys = bundle.genKeys.mapNotNull { (k, v) ->
                 runCatching { GenProviderType.valueOf(k) to v }.getOrNull()

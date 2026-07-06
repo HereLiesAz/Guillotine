@@ -15,13 +15,28 @@ import java.io.Closeable
  * same-class detections in every frame by cosine similarity. Loads a model bundled in assets (offline);
  * degrades to "unavailable" if it can't load so callers fall back to plain class matching.
  */
-class ImageEmbed(context: Context) : Closeable {
+class ImageEmbed(context: Context, modelPath: String? = null) : Closeable {
 
     private val embedder: ImageEmbedder? = runCatching {
+        // A user-configured model file (a stronger embedder like MobileCLIP-S0 / EfficientNet-Lite0)
+        // takes precedence; otherwise the bundled MobileNet-V3-small asset. Any MediaPipe
+        // ImageEmbedder-compatible .tflite (single image input + NormalizationOptions metadata) works.
+        // External files are loaded via a byte buffer (setModelAssetPath is assets-only).
+        val base = BaseOptions.builder().apply {
+            val f = modelPath?.trim().orEmpty().takeIf { it.isNotEmpty() }?.let { java.io.File(it) }
+            if (f != null && f.exists()) {
+                val bytes = f.readBytes()
+                val buf = java.nio.ByteBuffer.allocateDirect(bytes.size)
+                buf.put(bytes); buf.rewind()
+                setModelAssetBuffer(buf)
+            } else {
+                setModelAssetPath(MODEL_ASSET)
+            }
+        }.build()
         ImageEmbedder.createFromOptions(
             context,
             ImageEmbedder.ImageEmbedderOptions.builder()
-                .setBaseOptions(BaseOptions.builder().setModelAssetPath(MODEL_ASSET).build())
+                .setBaseOptions(base)
                 .setRunningMode(RunningMode.IMAGE)
                 .setL2Normalize(true)
                 .setQuantize(false)
