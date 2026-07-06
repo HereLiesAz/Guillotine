@@ -161,17 +161,19 @@ val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
         limitations = "Slightly larger/slower than the default.",
         category = ModelCategory.RECOGNITION,
     ),
+    // (EfficientNet-Lite0 was dropped: the only public tflite is an image *classifier*, which MediaPipe's
+    // ImageEmbedder rejects/mis-uses. MobileNet-V3-Small/Large are the official embedder models.)
     OnDeviceModel(
-        id = "efficientnet-lite0-embed",
-        label = "EfficientNet-Lite0 — higher-quality features",
-        fileName = "efficientnet_lite0.tflite",
-        sizeBytes = 18_582_189L,
+        id = "mobilenet-v3-small-embed",
+        label = "MobileNet-V3 Small — the default embedder",
+        fileName = "mobilenet_v3_small.tflite",
+        sizeBytes = 4_117_670L,
         license = "Apache-2.0",
         gated = false,
         repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder",
-        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/float32/1/efficientnet_lite0.tflite",
-        abilities = "Richer features for instance matching, MediaPipe-compatible (metadata included).",
-        limitations = "~18 MB; a bit slower per frame than MobileNet.",
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/mobilenet_v3_small.tflite",
+        abilities = "The lightweight reference embedder (same family as the bundled default) — handy if you want an explicit copy on disk.",
+        limitations = "Lower quality than MobileNet-V3-Large.",
         category = ModelCategory.RECOGNITION,
     ),
 )
