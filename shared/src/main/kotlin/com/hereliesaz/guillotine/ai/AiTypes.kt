@@ -1,5 +1,10 @@
 package com.hereliesaz.guillotine.ai
 
+import com.hereliesaz.guillotine.ai.gen.GenKind
+import com.hereliesaz.guillotine.ai.gen.GenProviderType
+import com.hereliesaz.guillotine.ai.gen.meta
+import com.hereliesaz.guillotine.ai.gen.providersFor
+
 enum class AiProviderType { LOCAL, MLKIT, GEMINI, OPENAI, ANTHROPIC, OPENROUTER, GROQ, XAI, MISTRAL }
 
 data class ProviderMeta(
@@ -97,9 +102,50 @@ data class AiSettings(
     val speechModelPath: String = "",
     val agentModelPath: String = "",
     val frameAnalysisCacheSize: Int = FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
+    /** Bring-your-own keys for image/video/music generation providers. */
+    val genKeys: Map<GenProviderType, String> = emptyMap(),
+    /** Chosen model id per generation provider (blank → provider default). */
+    val genModels: Map<GenProviderType, String> = emptyMap(),
+    /** Provider-specific extra (e.g. a Suno/Udio wrapper base URL). */
+    val genExtras: Map<GenProviderType, String> = emptyMap(),
+    /** Preferred provider per category, remembered across sessions. */
+    val genDefaults: Map<GenKind, GenProviderType> = emptyMap(),
 ) {
     fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
     fun modelFor(p: AiProviderType): String =
         models[p]?.takeIf { it.isNotBlank() } ?: p.meta.defaultModel.orEmpty()
     fun withKey(p: AiProviderType, key: String): AiSettings = copy(keys = keys + (p to key))
+
+    // ---- generation providers (image / video / music) ----------------------
+
+    /** The user's key for a generation provider (Leonardo falls back to the legacy field). */
+    fun genKeyFor(p: GenProviderType): String = when (p) {
+        GenProviderType.LEONARDO -> genKeys[p]?.takeIf { it.isNotBlank() } ?: leonardoKey
+        else -> genKeys[p].orEmpty()
+    }
+
+    fun genModelFor(p: GenProviderType): String {
+        genModels[p]?.takeIf { it.isNotBlank() }?.let { return it }
+        return if (p == GenProviderType.LEONARDO) leonardoModel else p.meta.defaultModel.orEmpty()
+    }
+
+    fun genExtraFor(p: GenProviderType): String = genExtras[p].orEmpty()
+
+    /** True once the provider is usable (keyless, or a key is configured). */
+    fun genProviderAvailable(p: GenProviderType): Boolean =
+        !p.meta.needsKey || genKeyFor(p).isNotBlank()
+
+    /** Configured providers for a category — the gate for what the app offers. */
+    fun availableGenProviders(kind: GenKind): List<GenProviderType> =
+        providersFor(kind).filter { genProviderAvailable(it) }
+
+    /** A whole category is offered only when at least one of its providers is configured. */
+    fun isKindOffered(kind: GenKind): Boolean = availableGenProviders(kind).isNotEmpty()
+
+    /** The provider to use for a category by default (remembered pick, else first available). */
+    fun defaultGenProvider(kind: GenKind): GenProviderType? =
+        genDefaults[kind]?.takeIf { it in availableGenProviders(kind) }
+            ?: availableGenProviders(kind).firstOrNull()
+
+    fun withGenKey(p: GenProviderType, key: String): AiSettings = copy(genKeys = genKeys + (p to key))
 }

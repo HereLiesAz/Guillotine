@@ -4,12 +4,19 @@ import android.content.Context
 import android.net.Uri
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
+import com.hereliesaz.guillotine.ai.BeatAnalyzer
 import com.hereliesaz.guillotine.ai.MlKitProvider
+import com.hereliesaz.guillotine.ai.gen.GenController
+import com.hereliesaz.guillotine.ai.gen.GenKind
+import com.hereliesaz.guillotine.ai.gen.GenProviderType
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.model.CubicBezier
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.EditSegment
+import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
+import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.newId
 import com.hereliesaz.guillotine.operation.OperationController
 import com.hereliesaz.guillotine.operation.OperationKind
@@ -154,6 +161,84 @@ class McpTools(
                 "kinetic, per-word, or per-syllable text/captions.",
             objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
         ))
+
+        // ---- generative media (cloud, BYO key; key-gated at call time) ----
+        put(toolDefinition(
+            "generate_image",
+            "Generate a NEW image from a text prompt using the user's configured image provider and add " +
+                "it to the timeline as an image clip. Optionally pass provider/model to pick among " +
+                "configured providers. If no image provider is configured it returns an error telling " +
+                "the user to add a key in Settings — relay that, don't retry.",
+            objSchema(
+                "prompt" to stringProp("What to generate"),
+                "provider" to stringProp("Optional provider id (e.g. OPENAI_IMAGE, BFL_FLUX, FAL)"),
+                "model" to stringProp("Optional model id"),
+                required = listOf("prompt"),
+            ),
+        ))
+        put(toolDefinition(
+            "generate_video",
+            "Generate a NEW video clip from a text prompt (cloud, BYO key) and add it to the timeline. " +
+                "Async — may take a while. Optional provider/model/duration_sec.",
+            objSchema(
+                "prompt" to stringProp(), "provider" to stringProp(), "model" to stringProp(),
+                "duration_sec" to intProp("Requested length in seconds"),
+                required = listOf("prompt"),
+            ),
+        ))
+        put(toolDefinition(
+            "generate_music",
+            "Generate NEW music (or a sound effect) from a text prompt (cloud, BYO key) and add it to " +
+                "the timeline as an audio clip. Describe mood/genre/length in the prompt. Optional " +
+                "provider/model/duration_sec.",
+            objSchema(
+                "prompt" to stringProp(), "provider" to stringProp(), "model" to stringProp(),
+                "duration_sec" to intProp("Requested length in seconds"),
+                required = listOf("prompt"),
+            ),
+        ))
+
+        // ---- rhythm / edit-to-the-beat ----
+        put(toolDefinition(
+            "get_beat_map",
+            "Analyze an AUDIO clip ON-DEVICE and return its tempo (bpm) plus beat, downbeat, and onset " +
+                "timestamps (in source ms). Call this before cut_to_beats / apply_on_beat.",
+            objSchema("audio_clip_id" to stringProp("The audio/music clip to analyze"), required = listOf("audio_clip_id")),
+        ))
+        put(toolDefinition(
+            "cut_to_beats",
+            "Split a VIDEO clip at the beats of an AUDIO clip so it cuts in time with the music (all " +
+                "footage is kept — nothing deleted). mode = beats | downbeats | onsets (downbeats is a " +
+                "good punchy default). every_n keeps only every Nth point (e.g. 2 = every other beat).",
+            objSchema(
+                "video_clip_id" to stringProp(), "audio_clip_id" to stringProp(),
+                "mode" to stringProp("beats | downbeats | onsets"),
+                "every_n" to intProp("Keep every Nth point (default 1)"),
+                required = listOf("video_clip_id", "audio_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_on_beat",
+            "Add on-beat motion to a VIDEO clip synced to an AUDIO clip: effect = zoom (scale punch-in) " +
+                "| flash (brightness pop) | shake (position jitter), placed as keyframes on each beat/" +
+                "downbeat/onset. Great combined with cut_to_beats for a music-video feel.",
+            objSchema(
+                "video_clip_id" to stringProp(), "audio_clip_id" to stringProp(),
+                "effect" to stringProp("zoom | flash | shake"),
+                "mode" to stringProp("beats | downbeats | onsets"),
+                required = listOf("video_clip_id", "audio_clip_id", "effect"),
+            ),
+        ))
+        put(toolDefinition(
+            "align_clips_to_beats",
+            "Snap the START of every clip on a track to the nearest beat of an AUDIO clip — assemble a " +
+                "montage locked to the music. mode = beats | downbeats | onsets.",
+            objSchema(
+                "track_id" to stringProp(), "audio_clip_id" to stringProp(),
+                "mode" to stringProp("beats | downbeats | onsets"),
+                required = listOf("track_id", "audio_clip_id"),
+            ),
+        ))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -180,6 +265,13 @@ class McpTools(
         "start_recording" -> startRecording(args.getString("clip_id"))
         "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
         "discard_recording" -> discardRecording()
+        "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
+        "generate_video" -> generateMedia(GenKind.VIDEO, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
+        "generate_music" -> generateMedia(GenKind.MUSIC, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
+        "get_beat_map" -> getBeatMap(args.getString("audio_clip_id"))
+        "cut_to_beats" -> cutToBeats(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("every_n", 1))
+        "apply_on_beat" -> applyOnBeat(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.getString("effect"), args.optString("mode", "downbeats"))
+        "align_clips_to_beats" -> alignClipsToBeats(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "beats"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -460,6 +552,167 @@ class McpTools(
                     )
                 }
             }
+        }
+    }
+
+    // ---- generative media ---------------------------------------------------
+
+    private fun generateMedia(
+        kind: GenKind,
+        prompt: String,
+        provider: String,
+        model: String,
+        durationSec: Int?,
+    ): JSONObject {
+        val settings = settingsProvider()
+        require(prompt.isNotBlank()) { "Enter a prompt to generate." }
+        val providerType = provider.takeIf { it.isNotBlank() }
+            ?.let { runCatching { GenProviderType.valueOf(it.uppercase()) }.getOrNull() }
+        val label = when (kind) { GenKind.IMAGE -> "image"; GenKind.VIDEO -> "video"; GenKind.MUSIC -> "music" }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Generating $label…", pausable = true,
+        ) { sink ->
+            val item = runBlocking {
+                GenController.generate(
+                    context, settings, kind, prompt,
+                    providerOverride = providerType,
+                    modelOverride = model.takeIf { it.isNotBlank() },
+                    durationSec = durationSec ?: if (kind == GenKind.IMAGE) 0 else 8,
+                    onProgress = { p -> if (p != null) sink.report(p, "Generating $label…") },
+                    checkpoint = { sink.checkpointBlocking() },
+                )
+            }
+            vm.addMedia(listOf(item))
+            ok().apply {
+                put("mediaKind", item.kind.name)
+                put("durationMs", item.durationMs)
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Generated a $label and added it to the timeline.")
+            }
+        }
+    }
+
+    // ---- rhythm / edit-to-the-beat ------------------------------------------
+
+    private fun getBeatMap(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        return JSONObject().apply {
+            put("ok", true); put("clipId", clipId); put("bpm", map.bpm)
+            put("beatCount", map.beatsMs.size)
+            put("beatsMs", JSONArray(map.beatsMs))
+            put("downbeatsMs", JSONArray(map.downbeatsMs))
+            put("onsetCount", map.onsetsMs.size)
+            put(
+                "humanSummary",
+                "Analyzed rhythm: ~${map.bpm.toInt()} BPM, ${map.beatsMs.size} beats, ${map.downbeatsMs.size} downbeats.",
+            )
+        }
+    }
+
+    /** Map an audio clip's beat times (source ms) to timeline positions, keeping only those on-clip. */
+    private fun beatTimelinePositions(
+        audioClip: TimelineClip,
+        beatMap: com.hereliesaz.guillotine.model.BeatMap,
+        mode: String,
+        everyN: Int,
+    ): List<Long> {
+        val src = beatMap.points(mode)
+        val picked = if (everyN > 1) src.filterIndexed { i, _ -> i % everyN == 0 } else src
+        return picked
+            .map { audioClip.startTimeMs + (it - audioClip.trimStartMs) }
+            .filter { it in audioClip.startTimeMs..audioClip.endTimeMs }
+    }
+
+    private fun cutToBeats(videoClipId: String, audioClipId: String, mode: String, everyN: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        val video = doc.clips.firstOrNull { it.id == videoClipId }
+            ?: throw IllegalArgumentException("Video clip not found: $videoClipId")
+        val audio = doc.clips.firstOrNull { it.id == audioClipId }
+            ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
+        val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
+        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val cuts = beatTimelinePositions(audio, map, mode, everyN.coerceAtLeast(1))
+            .filter { it > video.startTimeMs && it < video.endTimeMs }
+        if (cuts.isEmpty()) {
+            return JSONObject().apply {
+                put("ok", true); put("cuts", 0)
+                put("humanSummary", "No $mode fell within the video clip — nothing cut.")
+            }
+        }
+        vm.splitClipAt(videoClipId, cuts)
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("bpm", map.bpm); put("cuts", cuts.size); put("clipCount", n)
+            put("humanSummary", "Cut the video on ${cuts.size} $mode (~${map.bpm.toInt()} BPM). Timeline now $n clip(s).")
+        }
+    }
+
+    private fun applyOnBeat(videoClipId: String, audioClipId: String, effect: String, mode: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val video = doc.clips.firstOrNull { it.id == videoClipId }
+            ?: throw IllegalArgumentException("Video clip not found: $videoClipId")
+        val audio = doc.clips.firstOrNull { it.id == audioClipId }
+            ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
+        val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
+        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val positions = beatTimelinePositions(audio, map, mode, 1)
+            .filter { it in video.startTimeMs..video.endTimeMs }
+        if (positions.isEmpty()) {
+            return JSONObject().apply {
+                put("ok", true); put("beats", 0)
+                put("humanSummary", "No $mode within the clip — nothing applied.")
+            }
+        }
+        val half = 90L
+        val ease = CubicBezier()
+        val (property, peak, baseline) = when (effect.lowercase().trim()) {
+            "flash", "brightness" -> Triple(KeyframeProperty.BRIGHTNESS, 1.6f, 1.0f)
+            "shake", "jitter" -> Triple(KeyframeProperty.OFFSET_X, 0.04f, 0.0f)
+            else -> Triple(KeyframeProperty.SCALE, 1.12f, 1.0f) // zoom
+        }
+        val points = mutableListOf<Triple<Long, Float, CubicBezier>>()
+        positions.forEach { pos ->
+            val rel = pos - video.startTimeMs
+            points += Triple(rel - half, baseline, ease)
+            points += Triple(rel, peak, ease)
+            points += Triple(rel + half, baseline, ease)
+        }
+        vm.insertKeyframes(videoClipId, property, points)
+        return ok().apply {
+            put("beats", positions.size)
+            put("humanSummary", "Added $effect on ${positions.size} $mode.")
+        }
+    }
+
+    private fun alignClipsToBeats(trackId: String, audioClipId: String, mode: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val audio = doc.clips.firstOrNull { it.id == audioClipId }
+            ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
+        val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
+        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val beats = beatTimelinePositions(audio, map, mode, 1)
+        if (beats.isEmpty()) {
+            return JSONObject().apply {
+                put("ok", true); put("moved", 0)
+                put("humanSummary", "No $mode found — nothing aligned.")
+            }
+        }
+        val clips = doc.clips.filter { it.trackId == trackId }.sortedBy { it.startTimeMs }
+        var moved = 0
+        clips.forEach { c ->
+            val nearest = beats.minByOrNull { kotlin.math.abs(it - c.startTimeMs) } ?: return@forEach
+            if (nearest != c.startTimeMs) {
+                vm.updateClip(c.id) { it.copy(startTimeMs = nearest) }
+                moved++
+            }
+        }
+        return ok().apply {
+            put("moved", moved)
+            put("humanSummary", "Snapped $moved clip(s) on $trackId to the nearest $mode.")
         }
     }
 
