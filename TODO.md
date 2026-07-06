@@ -51,22 +51,18 @@ Implemented but never run on a device — confirm and tune:
   a checkpoint to resume analysis/generative after relaunch (and a resumable/segmented export) is open.
 - **Pausable export**: Media3's `Transformer` can't pause an encode, so export is cancel-only.
 
-## Windows & Linux desktop builds (Compose Multiplatform)
-Ship native desktop apps reusing the existing Kotlin/Compose code.
+## Desktop follow-ups (v1 ships unsigned, single-arch)
 
-- Restructure to KMP/CMP: `commonMain` (UI + domain), `androidMain`, `desktopMain`.
-- Reusable as-is: Compose UI, `EditorViewModel`/StateFlow, `Document` model + serialization,
-  autosave, prompt history, timeline math/snapping, and all cloud AI (Leonardo/OpenAI/etc.
-  + `ModelCatalog` — they use `java.net`, which is pure JVM).
-- Needs desktop `expect`/`actual` implementations (Android keeps its current code):
-  - Preview playback: ExoPlayer → VLCJ or JavaCV/FFmpeg
-  - Export/encode: Media3 Transformer → FFmpeg (JavaCV/bytedeco bundles native libs)
-  - Thumbnails / waveforms / metadata: MediaMetadataRetriever/MediaExtractor → FFmpeg/JavaCV
-  - On-device vision + background removal: ML Kit → ONNX Runtime, or omit on desktop (cloud BYO still works)
-  - Speech-to-text: Vosk (already has desktop JVM builds)
-  - File pick/save: SAF + MediaStore → java file dialogs + `java.io.File`
-  - Secret storage: EncryptedSharedPreferences → java prefs / OS keystore
-- Packaging: Compose Desktop `nativeDistributions { targetFormats(Msi, Exe, Deb, AppImage) }`;
-  build on `windows-latest` / `ubuntu-latest` in CI next to the APK.
-- Caveats: the media engine is ~80% of the effort; Expressive components (material3 1.5.0-alpha)
-  may lag in Compose Multiplatform → desktop may need a non-Expressive fallback theme.
+The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the CI matrix in
+`.github/workflows/release-desktop.yml`. Remaining polish:
+
+- **Signing / notarization** — macOS Developer ID (Apple Developer account required), Windows
+  code signing (CA certificate required). Without these, users see a "unknown developer" warning
+  on first launch.
+- **Universal macOS binary** — `macos-latest` gives us Apple Silicon; Intel Macs need a second
+  runner (or `lipo`-ing two builds).
+- **AppImage / Flatpak / Snap** — `.deb` covers the mainstream case; broader Linux coverage is
+  open.
+- **Auto-update framework** — currently users download new releases from GitHub Releases by hand.
+- **On-device vision on desktop** — currently omitted (ML Kit is Android-only). Cloud BYO still
+  works; ONNX Runtime port is open.

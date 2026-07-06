@@ -2,12 +2,18 @@
 
 **Effective date:** 2026-07-04
 
-Guillotine is an on-device, non-linear video editor for Android, tablets, and Chromebooks.
-This policy explains what the app does and does not do with your data. In short: **Guillotine
-has no servers of its own, no account system, and no first‑party analytics.** Your media and
-projects stay on your device unless *you* choose to use a third‑party AI service. The app does
-show ads via **Google AdMob** (see “Advertising” below), and it uses your device’s advertising
-identifier for that purpose.
+Guillotine is an on-device, non-linear video editor for Android, tablets, Chromebooks, and native
+desktop apps for macOS, Windows, and Linux. This policy explains what the app does and does not
+do with your data. In short: **Guillotine has no servers of its own, no account system, and no
+first‑party analytics.** Your media and projects stay on your device unless *you* choose to use
+a third‑party AI service. The **Android** app also shows ads via **Google AdMob** (see
+“Advertising” below), and it uses your device’s advertising identifier for that purpose. The
+**desktop** apps do not show ads and do not include the AdMob SDK.
+
+If you tap the **Report** button in the Export dialog after a render failure, the app opens your
+default browser at `github.com/HereLiesAz/Guillotine/issues/new` with a pre-filled title and body
+(device model, app version, diagnostic stack trace). No data leaves the device until you submit
+the issue on GitHub — the app itself does not upload anything.
 
 ## The short version
 
