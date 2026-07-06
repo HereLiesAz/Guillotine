@@ -183,6 +183,109 @@ class MlKitProvider : ClipAnalyzer {
         }
     }
 
+    /**
+     * Capture an on-device fingerprint (image embedding) of the thing the user is pointing at in
+     * [frame], to teach a [com.hereliesaz.guillotine.model.LearnedConcept]. If [term] names a kind of
+     * object ("dog"), the matching detection is used; otherwise the largest detection; failing any
+     * detection, the centre of the frame. Returns the L2-normalized vector, or null if the on-device
+     * embedder isn't available.
+     */
+    fun captureReferenceEmbedding(context: Context, frame: Bitmap, term: String?): FloatArray? {
+        val ov = ObjectVision(context)
+        val embed = ImageEmbed(context)
+        try {
+            if (!embed.available) return null
+            val dets = runCatching { ov.detect(frame) }.getOrDefault(emptyList())
+            val terms = term?.takeIf { it.isNotBlank() }?.let { expandTerms(parseIntent(it).terms) } ?: emptyList()
+            val box = when {
+                terms.isNotEmpty() -> dets
+                    .filter { d -> terms.any { it.contains(d.label) || d.label.contains(it) } }
+                    .maxByOrNull { it.score }?.box
+                else -> dets.maxByOrNull { it.box.width() * it.box.height() }?.box
+            }
+            val cropBmp = if (box != null) crop(frame, box) else centerCrop(frame)
+            return cropBmp?.let { c ->
+                try { embed.embed(c)?.floatEmbedding() } finally { if (c !== frame) c.recycle() }
+            }
+        } finally {
+            ov.close()
+            embed.close()
+        }
+    }
+
+    /**
+     * Keep/remove a clip by a learned concept: a frame matches when any of its objects is close (cosine
+     * similarity ≥ [REF_THRESHOLD]) to ANY of the concept's [examples]. [terms] (if any) narrow which
+     * detections are compared. Reuses the same adaptive scanner as the other analyzers.
+     */
+    suspend fun analyzeWithConcept(
+        context: Context,
+        mediaUri: Uri,
+        kind: MediaKind,
+        durationMs: Long,
+        examples: List<FloatArray>,
+        terms: List<String>,
+        keepMatches: Boolean,
+        onProgress: (AnalysisProgress) -> Unit = {},
+        checkpoint: () -> Unit = {},
+    ): List<EditSegment> = withContext(Dispatchers.IO) {
+        require(kind != MediaKind.AUDIO) { "Learned-thing matching needs a video or image clip." }
+        require(examples.isNotEmpty()) { "Point the thing out in a frame first (add_reference)." }
+        val ov = ObjectVision(context)
+        val embed = ImageEmbed(context)
+        try {
+            val uriStr = mediaUri.toString()
+            val match: (Long, Bitmap) -> Verdict = { atMs, bmp ->
+                val dets = FrameAnalysisCache.detections(uriStr, atMs) { ov.detect(bmp) }
+                val relevant = if (terms.isNotEmpty()) {
+                    dets.filter { d -> terms.any { it.contains(d.label) || d.label.contains(it) } }
+                } else dets
+                var hitLabel: String? = null
+                val hit = embed.available && relevant.any { d ->
+                    val c = crop(bmp, d.box) ?: return@any false
+                    try {
+                        val v = embed.embed(c)?.floatEmbedding() ?: return@any false
+                        val best = examples.maxOf { cosine(it, v) }
+                        if (best >= REF_THRESHOLD) { hitLabel = d.label; true } else false
+                    } finally {
+                        if (c !== bmp) c.recycle()
+                    }
+                }
+                Verdict(hit, relevant.map { it.label }.distinct().take(5), hitLabel)
+            }
+            if (kind == MediaKind.IMAGE) {
+                val bmp = decodeImage(context, mediaUri)
+                    ?: throw IllegalStateException("Could not read image.")
+                val v = match(0L, bmp)
+                bmp.recycle()
+                val keep = v.matched == keepMatches
+                listOf(EditSegment(0, durationMs, if (keep) EditAction.KEEP else EditAction.REMOVE, v.term ?: "no match"))
+            } else {
+                scanVideo(context, mediaUri, durationMs, keepMatches, onProgress, checkpoint, match)
+            }
+        } finally {
+            ov.close()
+            embed.close()
+        }
+    }
+
+    /** Cosine similarity of two L2-normalized vectors = their dot product. 0 on size mismatch. */
+    private fun cosine(a: FloatArray, b: FloatArray): Double {
+        if (a.size != b.size) return 0.0
+        var dot = 0.0
+        for (i in a.indices) dot += (a[i] * b[i]).toDouble()
+        return dot
+    }
+
+    /** Central 60% crop — fallback when no object was detected at the pointed frame. */
+    private fun centerCrop(bmp: Bitmap): Bitmap? = runCatching {
+        val w = (bmp.width * 0.6f).toInt().coerceAtLeast(1)
+        val h = (bmp.height * 0.6f).toInt().coerceAtLeast(1)
+        val x = ((bmp.width - w) / 2).coerceAtLeast(0)
+        val y = ((bmp.height - h) / 2).coerceAtLeast(0)
+        Bitmap.createBitmap(bmp, x, y, w, h)
+    }.getOrNull()
+
     /** Crop [box] (pixel rect) out of [bmp]; null if the rect is degenerate. */
     private fun crop(bmp: Bitmap, box: BoundingBox): Bitmap? = runCatching {
         val l = box.left.toInt().coerceIn(0, bmp.width - 1)

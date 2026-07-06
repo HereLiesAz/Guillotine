@@ -83,6 +83,20 @@ val AGENT_SYSTEM_PROMPT = """
     - If you genuinely cannot tell whether the user means an object visible in the current frame or a whole
       clip (or which clip), ask ONE short question ending in "?" and stop — do not guess.
 
+    TEACHING A SPECIFIC THING (few-shot, on-device — "learn to recognise this"):
+    - When the user points out a specific object or person to remember, and especially across more than one
+      frame ("this is my dog Rex", "remember this mug", "here's Rex again"), call add_reference with a short
+      name each time they point it out — pass `term` (the kind of thing, e.g. "dog") when they say it. Every
+      call adds another example and makes recognition more robust, so encourage a couple of examples from
+      different frames. It fingerprints what's in the CURRENT frame, so make sure the playhead is on a frame
+      that shows the thing (ask the user to scrub to one if needed).
+    - When they then want to keep or cut by that learned thing ("keep only the shots with Rex", "cut
+      everything with my mug"), call analyze_clip_with_concept with the clip id and the name:
+      keep_only=true keeps only the frames containing it, keep_only=false removes them. It tracks THAT
+      specific instance, not just any object of the same kind.
+    - list_concepts shows what's been taught; delete_concept forgets one. Prefer analyze_clip_with_concept
+      over analyze_clip whenever the user taught the thing by pointing at it.
+
     CAPTIONS / TRANSCRIPTION:
     - "transcribe", "add captions/subtitles" → transcribe_clip: adds timed caption text clips synced to
       the spoken words;

@@ -18,6 +18,7 @@ import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.newId
+import com.hereliesaz.guillotine.data.LearnedConceptStore
 import com.hereliesaz.guillotine.operation.OperationController
 import com.hereliesaz.guillotine.operation.OperationKind
 import com.hereliesaz.guillotine.ui.ActivityLog
@@ -163,6 +164,47 @@ class McpTools(
             objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
         ))
 
+        // ---- teach a specific thing by pointing at it (few-shot, on-device) ----
+        put(toolDefinition(
+            "add_reference",
+            "Teach the app a SPECIFIC thing by pointing at it in the CURRENT preview frame: captures an " +
+                "on-device fingerprint of what's there and adds it as an example of a named concept. Call " +
+                "it once per frame the user points the thing out in (\"this is my dog Rex\", \"here he is " +
+                "again\") — more examples = more robust recognition. Pass `term` (the kind of thing, e.g. " +
+                "\"dog\") if the user said it, to help pick the right object in the frame.",
+            objSchema(
+                "name" to stringProp("Short name for the thing, e.g. \"Rex\""),
+                "term" to stringProp("Optional kind of object, e.g. \"dog\", \"mug\""),
+                required = listOf("name"),
+            ),
+        ))
+        put(toolDefinition(
+            "list_concepts",
+            "List the things the user has taught by pointing them out (learned concepts): name + how many " +
+                "examples each has.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "delete_concept",
+            "Forget a learned thing by name.",
+            objSchema("name" to stringProp(), required = listOf("name")),
+        ))
+        put(toolDefinition(
+            "analyze_clip_with_concept",
+            "Keep or cut a clip by a LEARNED thing (taught via add_reference): finds frames containing that " +
+                "specific instance and cuts for real. keep_only=true keeps ONLY the frames with it (removes " +
+                "the rest — \"keep only shots with Rex\"); keep_only=false removes the frames with it (\"cut " +
+                "everything with Rex\"). Prefer this over analyze_clip when the user taught the thing by " +
+                "pointing at it.",
+            objSchema(
+                "clip_id" to stringProp(), "name" to stringProp("The learned thing's name"),
+                "keep_only" to JSONObject().apply {
+                    put("type", "boolean"); put("description", "Keep only frames with it (else remove them)")
+                },
+                required = listOf("clip_id", "name"),
+            ),
+        ))
+
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
             "generate_image",
@@ -266,6 +308,10 @@ class McpTools(
         "start_recording" -> startRecording(args.getString("clip_id"))
         "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
         "discard_recording" -> discardRecording()
+        "add_reference" -> addReference(args.getString("name"), args.optString("term"))
+        "list_concepts" -> listConcepts()
+        "delete_concept" -> deleteConcept(args.getString("name"))
+        "analyze_clip_with_concept" -> analyzeClipWithConcept(args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false))
         "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
         "generate_video" -> generateMedia(GenKind.VIDEO, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
         "generate_music" -> generateMedia(GenKind.MUSIC, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
@@ -730,6 +776,83 @@ class McpTools(
             put("moved", moved)
             put("humanSummary", "Snapped $moved clip(s) on $trackId to the nearest $mode.")
         }
+    }
+
+    // ---- learned concepts (teach a specific thing by pointing at it) --------
+
+    private fun addReference(name: String, term: String): JSONObject {
+        require(name.isNotBlank()) { "Give the thing a name, e.g. \"Rex\"." }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+        ) ?: throw IllegalStateException("No video clip at the playhead to capture from. Scrub to the thing first.")
+        val media = st.document.mediaFor(clip)
+            ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: throw IllegalStateException("Could not read the current frame.")
+        val vec = try {
+            MlKitProvider().captureReferenceEmbedding(context, frame, term.ifBlank { null })
+        } finally {
+            frame.recycle()
+        } ?: throw IllegalStateException(
+            "Couldn't capture a fingerprint here — the on-device embedder is unavailable or there was nothing to capture.",
+        )
+        val terms = if (term.isBlank()) emptyList() else listOf(term.trim().lowercase())
+        val concept = LearnedConceptStore.addExample(context, name, terms, vec)
+        return ok().apply {
+            put("name", concept.name); put("exampleCount", concept.exampleCount)
+            put(
+                "humanSummary",
+                "Learned an example of \"${concept.name}\" (${concept.exampleCount} example(s) so far). " +
+                    "Point it out in another frame to make it more reliable, then keep/cut by it.",
+            )
+        }
+    }
+
+    private fun listConcepts(): JSONObject {
+        val concepts = LearnedConceptStore.load(context)
+        return JSONObject().apply {
+            put("ok", true)
+            put("concepts", JSONArray().apply {
+                concepts.forEach {
+                    put(JSONObject().apply {
+                        put("name", it.name); put("exampleCount", it.exampleCount)
+                        if (it.terms.isNotEmpty()) put("terms", JSONArray(it.terms))
+                    })
+                }
+            })
+            put(
+                "humanSummary",
+                if (concepts.isEmpty()) "Nothing learned yet — point something out with add_reference."
+                else "Learned things: " + concepts.joinToString { "${it.name} (${it.exampleCount})" } + ".",
+            )
+        }
+    }
+
+    private fun deleteConcept(name: String): JSONObject {
+        LearnedConceptStore.remove(context, name)
+        return ok().apply { put("humanSummary", "Forgot \"$name\".") }
+    }
+
+    private fun analyzeClipWithConcept(clipId: String, name: String, keepOnly: Boolean): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val concept = LearnedConceptStore.get(context, name)
+            ?: throw IllegalStateException("No learned thing called \"$name\". Point it out first with add_reference.")
+        require(concept.examples.isNotEmpty()) { "\"$name\" has no examples yet — point it out with add_reference." }
+        val examples = concept.examples.map { it.toFloatArray() }
+        val edits = runBlocking {
+            MlKitProvider().analyzeWithConcept(
+                context, Uri.parse(media.uri), media.kind, clip.durationMs,
+                examples, concept.terms, keepMatches = keepOnly,
+                onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
+            )
+        }
+        return analyzeResult(clipId, edits)
     }
 
     private fun matchesPrompt(prompt: String, label: String): Boolean {
