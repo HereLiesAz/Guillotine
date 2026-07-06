@@ -5,6 +5,7 @@ import android.net.Uri
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.BeatAnalyzer
+import com.hereliesaz.guillotine.ai.FaceEmbed
 import com.hereliesaz.guillotine.ai.MlKitProvider
 import com.hereliesaz.guillotine.ai.gen.GenController
 import com.hereliesaz.guillotine.ai.gen.GenKind
@@ -171,10 +172,15 @@ class McpTools(
                 "on-device fingerprint of what's there and adds it as an example of a named concept. Call " +
                 "it once per frame the user points the thing out in (\"this is my dog Rex\", \"here he is " +
                 "again\") — more examples = more robust recognition. Pass `term` (the kind of thing, e.g. " +
-                "\"dog\") if the user said it, to help pick the right object in the frame.",
+                "\"dog\") if the user said it, to help pick the right object in the frame. Set " +
+                "negative=true for a NON-example (\"this frame does NOT have Rex\", \"that's a different " +
+                "dog\") — it fingerprints the same-kind look-alikes so recognition can reject them.",
             objSchema(
                 "name" to stringProp("Short name for the thing, e.g. \"Rex\""),
                 "term" to stringProp("Optional kind of object, e.g. \"dog\", \"mug\""),
+                "negative" to JSONObject().apply {
+                    put("type", "boolean"); put("description", "True if this frame does NOT contain the thing (a look-alike to reject)")
+                },
                 required = listOf("name"),
             ),
         ))
@@ -308,7 +314,7 @@ class McpTools(
         "start_recording" -> startRecording(args.getString("clip_id"))
         "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
         "discard_recording" -> discardRecording()
-        "add_reference" -> addReference(args.getString("name"), args.optString("term"))
+        "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
         "list_concepts" -> listConcepts()
         "delete_concept" -> deleteConcept(args.getString("name"))
         "analyze_clip_with_concept" -> analyzeClipWithConcept(args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false))
@@ -521,6 +527,7 @@ class McpTools(
         val edits = runBlocking {
             MlKitProvider().analyzeWithReference(
                 context, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs, reference,
+                embedModelPath = settingsProvider().idEmbedModelPath,
                 onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
             )
         }
@@ -780,8 +787,9 @@ class McpTools(
 
     // ---- learned concepts (teach a specific thing by pointing at it) --------
 
-    private fun addReference(name: String, term: String): JSONObject {
+    private fun addReference(name: String, term: String, negative: Boolean): JSONObject {
         require(name.isNotBlank()) { "Give the thing a name, e.g. \"Rex\"." }
+        val settings = settingsProvider()
         val st = vm.uiState.value
         val now = st.currentTimeMs
         val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
@@ -792,23 +800,53 @@ class McpTools(
         val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
         val frame = grabFrame(Uri.parse(media.uri), sourceMs)
             ?: throw IllegalStateException("Could not read the current frame.")
-        val vec = try {
-            MlKitProvider().captureReferenceEmbedding(context, frame, term.ifBlank { null })
+        // A person concept (by name/term, or if the existing concept is one, or a face is present) uses
+        // the face-recognition route; otherwise the general object embedder.
+        val existing = LearnedConceptStore.get(context, name)
+        val isFace = existing?.isFace == true || isPersonWord(name) || isPersonWord(term) ||
+            (term.isBlank() && FaceEmbed.hasFace(context, frame))
+        val prov = MlKitProvider()
+        val terms = if (term.isBlank()) emptyList() else listOf(term.trim().lowercase())
+        val concept = try {
+            if (negative) {
+                val vecs = prov.captureNegativeEmbeddings(
+                    context, frame, term.ifBlank { null }, isFace, settings.idEmbedModelPath, settings.faceEmbedModelPath,
+                )
+                if (vecs.isEmpty()) throw IllegalStateException(
+                    "Nothing to learn as a non-example here — scrub to a frame that shows a look-alike.",
+                )
+                LearnedConceptStore.addNegatives(context, name, terms, vecs, isFace)
+            } else {
+                val vec = prov.captureReferenceEmbedding(
+                    context, frame, term.ifBlank { null }, isFace, settings.idEmbedModelPath, settings.faceEmbedModelPath,
+                ) ?: throw IllegalStateException(
+                    "Couldn't capture a fingerprint here — the on-device embedder is unavailable or there was nothing to capture.",
+                )
+                LearnedConceptStore.addExample(context, name, terms, vec, isFace)
+            }
         } finally {
             frame.recycle()
-        } ?: throw IllegalStateException(
-            "Couldn't capture a fingerprint here — the on-device embedder is unavailable or there was nothing to capture.",
-        )
-        val terms = if (term.isBlank()) emptyList() else listOf(term.trim().lowercase())
-        val concept = LearnedConceptStore.addExample(context, name, terms, vec)
+        }
         return ok().apply {
-            put("name", concept.name); put("exampleCount", concept.exampleCount)
+            put("name", concept.name)
+            put("exampleCount", concept.exampleCount); put("negativeCount", concept.negativeCount)
+            put("isFace", concept.isFace)
             put(
                 "humanSummary",
-                "Learned an example of \"${concept.name}\" (${concept.exampleCount} example(s) so far). " +
-                    "Point it out in another frame to make it more reliable, then keep/cut by it.",
+                if (negative) {
+                    "Noted a non-example for \"${concept.name}\" (${concept.negativeCount} now) — helps reject look-alikes."
+                } else {
+                    "Learned an example of \"${concept.name}\" (${concept.exampleCount} example(s) so far). " +
+                        "Point it out in another frame to make it more reliable, then keep/cut by it."
+                },
             )
         }
+    }
+
+    private fun isPersonWord(s: String): Boolean {
+        val p = s.lowercase()
+        return listOf("face", "person", "people", "someone", "somebody", "man", "woman", "boy", "girl", "guy", "kid", "child")
+            .any { p.contains(it) }
     }
 
     private fun listConcepts(): JSONObject {
@@ -844,11 +882,14 @@ class McpTools(
         val concept = LearnedConceptStore.get(context, name)
             ?: throw IllegalStateException("No learned thing called \"$name\". Point it out first with add_reference.")
         require(concept.examples.isNotEmpty()) { "\"$name\" has no examples yet — point it out with add_reference." }
+        val settings = settingsProvider()
         val examples = concept.examples.map { it.toFloatArray() }
+        val negatives = concept.negatives.map { it.toFloatArray() }
         val edits = runBlocking {
             MlKitProvider().analyzeWithConcept(
                 context, Uri.parse(media.uri), media.kind, clip.durationMs,
-                examples, concept.terms, keepMatches = keepOnly,
+                examples, negatives, concept.terms, concept.isFace, keepMatches = keepOnly,
+                embedModelPath = settings.idEmbedModelPath, faceModelPath = settings.faceEmbedModelPath,
                 onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
             )
         }

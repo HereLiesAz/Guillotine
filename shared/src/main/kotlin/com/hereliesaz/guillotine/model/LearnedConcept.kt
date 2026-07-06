@@ -14,6 +14,12 @@ data class LearnedConcept(
     val name: String,
     val terms: List<String> = emptyList(),
     val examples: List<List<Float>> = emptyList(),
+    /** "This is NOT it" examples — same-kind look-alikes; a frame matches only when it's closer to a
+     *  positive than to any negative, so near-duplicates are rejected. */
+    val negatives: List<List<Float>> = emptyList(),
+    /** True when this concept is a person — recognition then uses the face-embedding route. */
+    val isFace: Boolean = false,
 ) {
     val exampleCount: Int get() = examples.size
+    val negativeCount: Int get() = negatives.size
 }

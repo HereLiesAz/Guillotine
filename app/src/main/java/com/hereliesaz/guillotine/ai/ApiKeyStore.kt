@@ -49,6 +49,8 @@ class ApiKeyStore(context: Context) {
             ?.takeIf { it.isNotBlank() } ?: LeonardoDefaultModel,
         speechModelPath = prefs.getString(KEY_SPEECH, "").orEmpty(),
         agentModelPath = prefs.getString(KEY_AGENT_MODEL, "").orEmpty(),
+        idEmbedModelPath = prefs.getString(KEY_ID_EMBED, "").orEmpty(),
+        faceEmbedModelPath = prefs.getString(KEY_FACE_EMBED, "").orEmpty(),
         frameAnalysisCacheSize = prefs
             .getInt(KEY_FRAME_CACHE_SIZE, FrameAnalysisCache.DEFAULT_MAX_ENTRIES)
             .coerceIn(FrameAnalysisCache.MIN_MAX_ENTRIES, FrameAnalysisCache.MAX_MAX_ENTRIES),
@@ -77,6 +79,8 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_LEONARDO_MODEL, settings.leonardoModel)
                 putString(KEY_SPEECH, settings.speechModelPath)
                 putString(KEY_AGENT_MODEL, settings.agentModelPath)
+                putString(KEY_ID_EMBED, settings.idEmbedModelPath)
+                putString(KEY_FACE_EMBED, settings.faceEmbedModelPath)
                 putInt(KEY_FRAME_CACHE_SIZE, settings.frameAnalysisCacheSize)
                 GenProviderType.entries.forEach {
                     putString(genKeyPref(it), settings.genKeys[it].orEmpty())
@@ -102,6 +106,8 @@ class ApiKeyStore(context: Context) {
         const val KEY_LEONARDO_MODEL = "leonardo_model"
         const val KEY_SPEECH = "speech_model_path"
         const val KEY_AGENT_MODEL = "agent_model_path"
+        const val KEY_ID_EMBED = "id_embed_model_path"
+        const val KEY_FACE_EMBED = "face_embed_model_path"
         const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
         fun keyPref(p: AiProviderType) = "key_${p.name}"

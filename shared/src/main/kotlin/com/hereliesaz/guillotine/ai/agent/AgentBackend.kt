@@ -90,6 +90,10 @@ val AGENT_SYSTEM_PROMPT = """
       call adds another example and makes recognition more robust, so encourage a couple of examples from
       different frames. It fingerprints what's in the CURRENT frame, so make sure the playhead is on a frame
       that shows the thing (ask the user to scrub to one if needed).
+    - NEGATIVE examples sharpen it too: when the user shows a frame that does NOT contain the thing, or a
+      look-alike that ISN'T it ("this frame doesn't have Rex", "that's a different dog", "not this one"),
+      call add_reference with the same name and negative=true. A couple of negatives help reject
+      near-duplicates (e.g. other dogs that aren't Rex).
     - When they then want to keep or cut by that learned thing ("keep only the shots with Rex", "cut
       everything with my mug"), call analyze_clip_with_concept with the clip id and the name:
       keep_only=true keeps only the frames containing it, keep_only=false removes them. It tracks THAT

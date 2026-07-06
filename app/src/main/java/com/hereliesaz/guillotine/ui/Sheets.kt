@@ -105,6 +105,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
     var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
+    var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
+    var faceEmbedModelPath by remember { mutableStateOf(current.faceEmbedModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -141,6 +143,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     provider = provider, keys = keys, models = models,
                     leonardoKey = leonardoKey.trim(), leonardoModel = leonardoModel,
                     speechModelPath = speechModelPath.trim(), agentModelPath = agentModelPath.trim(),
+                    idEmbedModelPath = idEmbedModelPath.trim(), faceEmbedModelPath = faceEmbedModelPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -161,6 +164,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             leonardoModel = restored.leonardoModel
             speechModelPath = restored.speechModelPath
             agentModelPath = restored.agentModelPath
+            idEmbedModelPath = restored.idEmbedModelPath
+            faceEmbedModelPath = restored.faceEmbedModelPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -323,6 +328,38 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = agentModelPath,
                         onUse = { agentModelPath = it },
                     )
+
+                    // Recognition ("is this the same thing?") embedder. Blank = bundled MobileNet-V3-small.
+                    // A stronger MediaPipe-ImageEmbedder-compatible .tflite (e.g. MobileCLIP-S0,
+                    // EfficientNet-Lite0) markedly improves "teach a specific thing" matching.
+                    Text("Recognition model — for \"teach a specific thing\" (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = idEmbedModelPath,
+                        onValueChange = { idEmbedModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Image-embedding model path (.tflite)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Blank = bundled MobileNet-V3-small. Drop in a stronger MediaPipe-compatible embedder " +
+                            "(MobileCLIP-S0, EfficientNet-Lite0) for sharper instance matching.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    Text("Face model — for identifying a specific person (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = faceEmbedModelPath,
+                        onValueChange = { faceEmbedModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Face-embedding model path (.tflite)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "When set, teaching a person uses face recognition (ML Kit face detect + this model). " +
+                            "Blank = fall back to the general recognition model.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -479,6 +516,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             leonardoModel = leonardoModel,
                             speechModelPath = speechModelPath.trim(),
                             agentModelPath = agentModelPath.trim(),
+                            idEmbedModelPath = idEmbedModelPath.trim(),
+                            faceEmbedModelPath = faceEmbedModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,

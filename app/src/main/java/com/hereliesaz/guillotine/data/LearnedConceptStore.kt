@@ -33,18 +33,40 @@ object LearnedConceptStore {
     fun get(context: Context, name: String): LearnedConcept? =
         load(context).firstOrNull { it.name.equals(name.trim(), ignoreCase = true) }
 
-    /** Append one example (and merge any new [terms]) to the named concept, creating it if new. */
-    fun addExample(context: Context, name: String, terms: List<String>, vector: FloatArray): LearnedConcept {
+    /** Append one positive example (and merge any new [terms]/[isFace]) to the named concept. */
+    fun addExample(
+        context: Context,
+        name: String,
+        terms: List<String>,
+        vector: FloatArray,
+        isFace: Boolean = false,
+    ): LearnedConcept = mutate(context, name, terms, isFace) { it.copy(examples = it.examples + listOf(vector.toList())) }
+
+    /** Append "not it" examples (same-kind look-alikes) to the named concept. */
+    fun addNegatives(
+        context: Context,
+        name: String,
+        terms: List<String>,
+        vectors: List<FloatArray>,
+        isFace: Boolean = false,
+    ): LearnedConcept = mutate(context, name, terms, isFace) {
+        it.copy(negatives = it.negatives + vectors.map { v -> v.toList() })
+    }
+
+    private fun mutate(
+        context: Context,
+        name: String,
+        terms: List<String>,
+        isFace: Boolean,
+        transform: (LearnedConcept) -> LearnedConcept,
+    ): LearnedConcept {
         val n = name.trim()
         val all = load(context).toMutableList()
         val idx = all.indexOfFirst { it.name.equals(n, ignoreCase = true) }
-        val vec = vector.toList()
-        val updated = if (idx >= 0) {
-            val c = all[idx]
-            c.copy(terms = (c.terms + terms).distinct(), examples = c.examples + listOf(vec))
-        } else {
-            LearnedConcept(n, terms.distinct(), listOf(vec))
-        }
+        val base = if (idx >= 0) all[idx] else LearnedConcept(n)
+        val updated = transform(
+            base.copy(terms = (base.terms + terms).distinct(), isFace = base.isFace || isFace),
+        )
         if (idx >= 0) all[idx] = updated else all.add(updated)
         save(context, all)
         return updated

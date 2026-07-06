@@ -102,6 +102,11 @@ data class AiSettings(
     val speechModelPath: String = "",
     val agentModelPath: String = "",
     val frameAnalysisCacheSize: Int = FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
+    /** Optional stronger on-device image-embedding model (recognition / "same thing?" matching);
+     *  blank = the bundled MobileNet-V3-small. */
+    val idEmbedModelPath: String = "",
+    /** Optional on-device face-embedding model used when recognising a specific person. */
+    val faceEmbedModelPath: String = "",
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */

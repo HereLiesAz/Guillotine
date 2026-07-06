@@ -124,6 +124,7 @@ class MlKitProvider : ClipAnalyzer {
         prompt: String,
         durationMs: Long,
         reference: Bitmap,
+        embedModelPath: String? = null,
         onProgress: (AnalysisProgress) -> Unit = {},
         checkpoint: () -> Unit = {},
     ): List<EditSegment> = withContext(Dispatchers.IO) {
@@ -131,7 +132,7 @@ class MlKitProvider : ClipAnalyzer {
         val parsed = parseIntent(prompt)
         val terms = expandTerms(parsed.terms)
         val objectVision = ObjectVision(context)
-        val embed = ImageEmbed(context)
+        val embed = ImageEmbed(context, embedModelPath?.takeIf { it.isNotBlank() })
         try {
             fun matchesTerm(label: String) = terms.any { it.contains(label) || label.contains(it) }
             val refBox = objectVision.detect(reference)
@@ -190,11 +191,61 @@ class MlKitProvider : ClipAnalyzer {
      * detection, the centre of the frame. Returns the L2-normalized vector, or null if the on-device
      * embedder isn't available.
      */
-    fun captureReferenceEmbedding(context: Context, frame: Bitmap, term: String?): FloatArray? {
-        val ov = ObjectVision(context)
-        val embed = ImageEmbed(context)
+    fun captureReferenceEmbedding(
+        context: Context,
+        frame: Bitmap,
+        term: String?,
+        isFace: Boolean = false,
+        embedModelPath: String? = null,
+        faceModelPath: String? = null,
+    ): FloatArray? {
+        val embed = ImageEmbed(context, embedderModel(isFace, embedModelPath, faceModelPath))
         try {
             if (!embed.available) return null
+            val cropBmp = pickCrop(context, frame, term, isFace)
+            return cropBmp?.let { c ->
+                try { embed.embed(c)?.floatEmbedding() } finally { if (c !== frame) c.recycle() }
+            }
+        } finally {
+            embed.close()
+        }
+    }
+
+    /**
+     * Fingerprint the "not it" look-alikes in [frame] (same-kind objects, or faces for a person
+     * concept), so recognition can reject near-duplicates. Returns up to a handful of vectors.
+     */
+    fun captureNegativeEmbeddings(
+        context: Context,
+        frame: Bitmap,
+        term: String?,
+        isFace: Boolean = false,
+        embedModelPath: String? = null,
+        faceModelPath: String? = null,
+    ): List<FloatArray> {
+        val embed = ImageEmbed(context, embedderModel(isFace, embedModelPath, faceModelPath))
+        try {
+            if (!embed.available) return emptyList()
+            val crops = collectCrops(context, frame, term, isFace).ifEmpty { listOfNotNull(centerCrop(frame)) }
+            val keep = crops.take(5)
+            crops.drop(5).forEach { if (it !== frame) it.recycle() }
+            return keep.mapNotNull { c ->
+                try { embed.embed(c)?.floatEmbedding() } finally { if (c !== frame) c.recycle() }
+            }
+        } finally {
+            embed.close()
+        }
+    }
+
+    /** The single best crop to fingerprint as a positive: largest face, or the term/largest object. */
+    private fun pickCrop(context: Context, frame: Bitmap, term: String?, isFace: Boolean): Bitmap? {
+        if (isFace) {
+            val faces = FaceEmbed.detectFaces(context, frame)
+            faces.drop(1).forEach { it.recycle() } // keep only the largest
+            return faces.firstOrNull() ?: centerCrop(frame)
+        }
+        val ov = ObjectVision(context)
+        return try {
             val dets = runCatching { ov.detect(frame) }.getOrDefault(emptyList())
             val terms = term?.takeIf { it.isNotBlank() }?.let { expandTerms(parseIntent(it).terms) } ?: emptyList()
             val box = when {
@@ -203,14 +254,34 @@ class MlKitProvider : ClipAnalyzer {
                     .maxByOrNull { it.score }?.box
                 else -> dets.maxByOrNull { it.box.width() * it.box.height() }?.box
             }
-            val cropBmp = if (box != null) crop(frame, box) else centerCrop(frame)
-            return cropBmp?.let { c ->
-                try { embed.embed(c)?.floatEmbedding() } finally { if (c !== frame) c.recycle() }
-            }
+            if (box != null) crop(frame, box) else centerCrop(frame)
         } finally {
             ov.close()
-            embed.close()
         }
+    }
+
+    /** All candidate crops in [frame] (faces, or same-kind objects) — for negatives. */
+    private fun collectCrops(context: Context, frame: Bitmap, term: String?, isFace: Boolean): List<Bitmap> {
+        if (isFace) return FaceEmbed.detectFaces(context, frame)
+        val ov = ObjectVision(context)
+        return try {
+            val dets = runCatching { ov.detect(frame) }.getOrDefault(emptyList())
+            val terms = term?.takeIf { it.isNotBlank() }?.let { expandTerms(parseIntent(it).terms) } ?: emptyList()
+            val chosen = if (terms.isNotEmpty()) {
+                dets.filter { d -> terms.any { it.contains(d.label) || d.label.contains(it) } }
+            } else dets
+            chosen.sortedByDescending { it.score }.take(5).mapNotNull { crop(frame, it.box) }
+        } finally {
+            ov.close()
+        }
+    }
+
+    /** Which embedding model to use: the face model for person concepts (falling back to the general
+     *  model), else the general model (null → the bundled default). */
+    private fun embedderModel(isFace: Boolean, embedModelPath: String?, faceModelPath: String?): String? {
+        val face = faceModelPath?.takeIf { it.isNotBlank() }
+        val general = embedModelPath?.takeIf { it.isNotBlank() }
+        return if (isFace) face ?: general else general
     }
 
     /**
@@ -224,34 +295,49 @@ class MlKitProvider : ClipAnalyzer {
         kind: MediaKind,
         durationMs: Long,
         examples: List<FloatArray>,
+        negatives: List<FloatArray>,
         terms: List<String>,
+        isFace: Boolean,
         keepMatches: Boolean,
+        embedModelPath: String? = null,
+        faceModelPath: String? = null,
         onProgress: (AnalysisProgress) -> Unit = {},
         checkpoint: () -> Unit = {},
     ): List<EditSegment> = withContext(Dispatchers.IO) {
         require(kind != MediaKind.AUDIO) { "Learned-thing matching needs a video or image clip." }
         require(examples.isNotEmpty()) { "Point the thing out in a frame first (add_reference)." }
-        val ov = ObjectVision(context)
-        val embed = ImageEmbed(context)
+        val ov = if (isFace) null else ObjectVision(context)
+        val embed = ImageEmbed(context, embedderModel(isFace, embedModelPath, faceModelPath))
         try {
             val uriStr = mediaUri.toString()
             val match: (Long, Bitmap) -> Verdict = { atMs, bmp ->
-                val dets = FrameAnalysisCache.detections(uriStr, atMs) { ov.detect(bmp) }
-                val relevant = if (terms.isNotEmpty()) {
-                    dets.filter { d -> terms.any { it.contains(d.label) || d.label.contains(it) } }
-                } else dets
-                var hitLabel: String? = null
-                val hit = embed.available && relevant.any { d ->
-                    val c = crop(bmp, d.box) ?: return@any false
-                    try {
-                        val v = embed.embed(c)?.floatEmbedding() ?: return@any false
-                        val best = examples.maxOf { cosine(it, v) }
-                        if (best >= REF_THRESHOLD) { hitLabel = d.label; true } else false
-                    } finally {
-                        if (c !== bmp) c.recycle()
-                    }
+                // Candidate (crop, label) pairs: faces for a person concept, else same-kind objects.
+                val crops: List<Pair<Bitmap, String>> = if (isFace) {
+                    FaceEmbed.detectFaces(context, bmp).map { it to "face" }
+                } else {
+                    val dets = FrameAnalysisCache.detections(uriStr, atMs) { ov!!.detect(bmp) }
+                    val relevant = if (terms.isNotEmpty()) {
+                        dets.filter { d -> terms.any { it.contains(d.label) || d.label.contains(it) } }
+                    } else dets
+                    relevant.mapNotNull { d -> crop(bmp, d.box)?.let { it to d.label } }
                 }
-                Verdict(hit, relevant.map { it.label }.distinct().take(5), hitLabel)
+                try {
+                    var hitLabel: String? = null
+                    val hit = embed.available && crops.any { (c, label) ->
+                        val v = embed.embed(c)?.floatEmbedding() ?: return@any false
+                        val bestPos = examples.maxOf { cosine(it, v) }
+                        // Nearest-prototype: match only when closer to a positive than to any negative,
+                        // so a same-kind look-alike (near a negative) is rejected.
+                        val bestNeg = if (negatives.isEmpty()) -1.0 else negatives.maxOf { cosine(it, v) }
+                        (bestPos >= REF_THRESHOLD && bestPos >= bestNeg).also { if (it) hitLabel = label }
+                    }
+                    val labels = if (isFace) {
+                        if (crops.isNotEmpty()) listOf("face") else emptyList()
+                    } else crops.map { it.second }.distinct().take(5)
+                    Verdict(hit, labels, hitLabel)
+                } finally {
+                    crops.forEach { (c, _) -> if (c !== bmp) c.recycle() }
+                }
             }
             if (kind == MediaKind.IMAGE) {
                 val bmp = decodeImage(context, mediaUri)
@@ -264,7 +350,7 @@ class MlKitProvider : ClipAnalyzer {
                 scanVideo(context, mediaUri, durationMs, keepMatches, onProgress, checkpoint, match)
             }
         } finally {
-            ov.close()
+            ov?.close()
             embed.close()
         }
     }
