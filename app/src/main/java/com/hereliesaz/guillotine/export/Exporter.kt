@@ -445,6 +445,24 @@ object Exporter {
             0L
         }
 
+        // Whether the composition has any real audio source. Video sequences declare an AUDIO
+        // trackType only when this is true — otherwise Media3 would synthesise a silent audio
+        // track and inflate the export for no gain. Standalone audio tracks with all-muted clips
+        // still count (the muxer would still carry the track); only the disabled tracks are
+        // dropped. Kept as a var-free expression so buildComposition stays a pure function.
+        val hasAudio = document.clips.any { c ->
+            c.trackId !in disabled && when (c.type) {
+                ClipType.AUDIO -> true
+                ClipType.VIDEO -> document.mediaFor(c)?.hasAudio == true
+                else -> false
+            }
+        }
+        val videoTrackTypes: Set<Int> = if (hasAudio) {
+            setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO)
+        } else {
+            setOf(C.TRACK_TYPE_VIDEO)
+        }
+
         // Split a track's opaque clips into lanes so overlapping clips land on different sequences and
         // can crossfade. Each lane's running end time is tracked independently; a clip is placed on the
         // lowest lane that is FREE at its start AND above the top (highest) lane it overlaps — a fresh
@@ -485,14 +503,12 @@ object Exporter {
                         if (laneClips.isEmpty()) continue
                         // Every sequence must declare its track types explicitly. The deprecated
                         // no-arg Builder() defaults trackTypes to {TRACK_TYPE_NONE} (-2), which
-                        // Media3's Composition.build() then unions with TRACK_TYPE_AUDIO when
-                        // finalising — the resulting {NONE, AUDIO} set trips the "must only contain
-                        // AUDIO and/or VIDEO" precondition on the internal re-wrap constructor.
-                        // Declaring AUDIO + VIDEO up front lets Media3 synthesise silent audio for
-                        // video-only lanes and avoids the wrap altogether.
-                        val seq = EditedMediaItemSequence.Builder(
-                            setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO),
-                        )
+                        // Media3's Composition.build() unions with TRACK_TYPE_AUDIO when force-
+                        // audio is on — the {NONE, AUDIO} set trips "must only contain AUDIO
+                        // and/or VIDEO" on the internal re-wrap. videoTrackTypes above adds AUDIO
+                        // only when the project actually has audio, so an audio-less project
+                        // exports without a synthesised silent track.
+                        val seq = EditedMediaItemSequence.Builder(videoTrackTypes)
                         val any = appendVideoItems(
                             seq, laneClips, globalZero, withOverlays = false, fadeFor = { fadeByClip[it.id] },
                         )
@@ -501,9 +517,7 @@ object Exporter {
                 }
             }
         } else {
-            val seq = EditedMediaItemSequence.Builder(
-                setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO),
-            )
+            val seq = EditedMediaItemSequence.Builder(videoTrackTypes)
             val any = appendVideoItems(
                 seq,
                 baseClips,
