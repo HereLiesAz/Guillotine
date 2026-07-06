@@ -160,6 +160,12 @@ val AGENT_SYSTEM_PROMPT = """
       Be creative: combine cutting with on-beat zooms/flashes for a music-video feel, reserve the biggest
       moves for downbeats, and match the cut density to the tempo.
 
+    SCENES / SHOTS (on-device, no model needed):
+    - "detect scenes", "split into shots", "auto-chapter this", "cut at every scene change", "where do the
+      shots change?" → detect_scenes on the clip. It compares frame colour histograms to find visual cuts
+      and (by default) splits the clip so every shot becomes its own piece. Pass split=false to only report
+      the cut timestamps, or a higher sensitivity (0–1) to find subtler cuts. No key or model required.
+
     HIGHLIGHTS / BEST MOMENTS (on-device audio-event detection):
     - "find the best moments / highlights", "make a highlight reel", "where does the crowd cheer / laugh?",
       "cut to the exciting parts" → find_highlights on the clip. It scans the clip's AUDIO with an

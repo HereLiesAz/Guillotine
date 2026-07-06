@@ -61,7 +61,7 @@ upgradeable to a TFLite-exported BeatNet/TempoCNN or aubio/Essentia via NDK.
 | Super-resolution | **Real-ESRGAN ×4 v3** (3.5 MB) — **shipped** (one-tap download) | BSD-3 | Tile-by-tile (128²→512²); heavy for video, fine for stills. |
 | Style transfer | Magenta Arbitrary Stylization TFLite | Apache-2.0 | Real-time capable, but the official model is **two-input** (content+style) so it doesn't fit the single-image `TfliteImageModel` — left as a bring-your-own-path option. |
 | Optical flow | OpenCV (Farnebäck/DIS) or RAFT | BSD | Classical runs easily; RAFT heavy. |
-| Shot detection | Histogram diff (in-code) or TransNetV2 | MIT | Cheap content-difference on-device. |
+| Shot detection | **Histogram diff (in-code)** — **shipped** (`detect_scenes`) or TransNetV2 | MIT | Cheap content-difference on-device; splits a clip into shots / chapters. |
 | Captioning / VLM | SmolVLM 256M/500M, Moondream 0.5B, Florence-2, **Gemma 3n** | Apache/MIT | Lightest true on-device VLMs; or reuse Gemma 3n. |
 | Auto-reframe | MediaPipe AutoFlip + saliency (BASNet/U²-Net) | Apache/MIT | Smart vertical crop tracking the subject. |
 
@@ -189,7 +189,8 @@ Each item is feasible on the current stack or a model listed above.
 **Workflow & product**
 21. Script-to-video and storyboard-to-video: prompt → generated clips + TTS + music
     + captions → a rough cut the user refines.
-22. Auto-chaptering / scene detection → timeline markers + YouTube chapters.
+22. Auto-chaptering / scene detection → timeline markers + YouTube chapters. **(shipped —
+    `detect_scenes` splits a clip into shots on-device)**
 23. Platform export presets (TikTok/Reels/Shorts) with safe-zones + direct share.
 24. Kinetic-caption & meme templates, emoji reactions timed to speech.
 25. Teachable-tool marketplace — share user-defined AI editing tools.
