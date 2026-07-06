@@ -483,16 +483,16 @@ object Exporter {
                     for (lane in 0 until laneCount) {
                         val laneClips = layout.filter { it.second == lane }.map { it.first }
                         if (laneClips.isEmpty()) continue
-                        val startsWithGap = laneClips.first().startTimeMs > globalZero
-                        // Media3's Builder(Set<@C.TrackType Integer>) constructor checkState-throws on
-                        // an empty set — that constructor is specifically for FORCING tracks when the
-                        // sequence starts with a gap. When it doesn't, use the no-arg builder instead.
-                        // (Issue #114.)
-                        val seq = if (startsWithGap) {
-                            EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO))
-                        } else {
-                            EditedMediaItemSequence.Builder()
-                        }
+                        // Every sequence must declare its track types explicitly. The deprecated
+                        // no-arg Builder() defaults trackTypes to {TRACK_TYPE_NONE} (-2), which
+                        // Media3's Composition.build() then unions with TRACK_TYPE_AUDIO when
+                        // finalising — the resulting {NONE, AUDIO} set trips the "must only contain
+                        // AUDIO and/or VIDEO" precondition on the internal re-wrap constructor.
+                        // Declaring AUDIO + VIDEO up front lets Media3 synthesise silent audio for
+                        // video-only lanes and avoids the wrap altogether.
+                        val seq = EditedMediaItemSequence.Builder(
+                            setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO),
+                        )
                         val any = appendVideoItems(
                             seq, laneClips, globalZero, withOverlays = false, fadeFor = { fadeByClip[it.id] },
                         )
@@ -501,7 +501,9 @@ object Exporter {
                 }
             }
         } else {
-            val seq = EditedMediaItemSequence.Builder()
+            val seq = EditedMediaItemSequence.Builder(
+                setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO),
+            )
             val any = appendVideoItems(
                 seq,
                 baseClips,
@@ -523,7 +525,10 @@ object Exporter {
             .sortedBy { it.startTimeMs }
             .groupBy { it.trackId }
         val audioSequences: List<EditedMediaItemSequence> = audioByTrack.mapNotNull { (_, clips) ->
-            val seq = EditedMediaItemSequence.Builder()
+            // Audio-only sequences: declare TRACK_TYPE_AUDIO explicitly so Composition.build()'s
+            // force-audio re-wrap doesn't union with the deprecated no-arg default
+            // {TRACK_TYPE_NONE} and blow up the precondition on the wrap constructor.
+            val seq = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
             var cursor = clips.firstOrNull()?.startTimeMs ?: return@mapNotNull null
             var addedAny = false
             clips.forEach { clip ->
@@ -558,8 +563,12 @@ object Exporter {
 
         val sequences = videoSequences.toMutableList()
         sequences.addAll(audioSequences)
+        // With every sequence declaring its own trackTypes above, the force-audio wrap is not
+        // only unnecessary but actively destructive — it would union AUDIO into a video-only
+        // sequence's {VIDEO} set and re-wrap through the internal constructor, which no longer
+        // accepts the mixed shape in 1.10.1. Media3 synthesises silent audio on its own when a
+        // sequence declares AUDIO but has no audio items.
         val composition = Composition.Builder(sequences)
-            .experimentalSetForceAudioTrack(true)
         // Advanced path: the background-removal subjects (matte) + captions composite over the FINAL
         // stacked video, so a bg-removed clip on an upper track shows the lower tracks through its matte,
         // and overlays sit on top of every layer and survive gaps in any one track/lane. (The simple
