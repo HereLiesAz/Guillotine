@@ -471,8 +471,15 @@ object Exporter {
                         val laneClips = layout.filter { it.second == lane }.map { it.first }
                         if (laneClips.isEmpty()) continue
                         val startsWithGap = laneClips.first().startTimeMs > globalZero
-                        val trackTypes = if (startsWithGap) setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO) else emptySet()
-                        val seq = EditedMediaItemSequence.Builder(trackTypes)
+                        // Media3's Builder(Set<@C.TrackType Integer>) constructor checkState-throws on
+                        // an empty set — that constructor is specifically for FORCING tracks when the
+                        // sequence starts with a gap. When it doesn't, use the no-arg builder instead.
+                        // (Issue #114.)
+                        val seq = if (startsWithGap) {
+                            EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO))
+                        } else {
+                            EditedMediaItemSequence.Builder()
+                        }
                         val any = appendVideoItems(
                             seq, laneClips, globalZero, withOverlays = false, fadeFor = { fadeByClip[it.id] },
                         )
