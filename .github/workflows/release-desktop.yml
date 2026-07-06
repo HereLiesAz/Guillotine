@@ -1,17 +1,26 @@
 name: Release Desktop Installers
 
-# On every push of a tag matching v* (e.g. v1.0.0, v1.0.0-rc1), build native installers on
-# all three OSes and attach them to the matching GitHub Release. Also supports manual
-# dispatch against an existing release for re-uploads / hotfixes.
+# Piggy-back on the existing Android release tags — `release-apk.yml` and `merged-build.yml`
+# force-push `latest-release-v<MAJOR>.<MINOR>` and `latest-debug-v<MAJOR>.<MINOR>` respectively,
+# each creating (or updating) a GitHub Release with the APK/AAB. This workflow attaches the
+# matching desktop installers to the SAME release, so a v0.9 tag ends up with the Android
+# artifacts + macOS DMG + Windows MSI + Linux DEB in one place.
+#
+# Force-pushing an existing tag still fires push:tags — softprops/action-gh-release@v2 upserts,
+# so re-runs cleanly replace the installers on the release.
+#
+# `v*` is kept for future proper semver releases; `latest-release-v*` is the current cadence.
 
 on:
   push:
     tags:
       - 'v*'
+      - 'latest-release-v*'
+      - 'latest-debug-v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to attach installers to (e.g. v1.0.0)'
+        description: 'Existing tag to attach installers to (e.g. latest-release-v0.9)'
         required: true
 
 concurrency:
