@@ -50,10 +50,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -642,6 +644,11 @@ private fun TopBar(
         // AzNavRail 10.19 DSL: the standalone AzDropdownMenu's trigger is the app icon, styled
         // via azConfig (no icon/tint/alignment params anymore). design = MENU gives full-width
         // rows; items auto-close (closeOnClick defaults true - no dismiss() in 10.7).
+        // AzDivider() uses LocalContentColor.current for its line — override to the app accent
+        // so the group separator matches item text instead of appearing as a white bar. Items
+        // resolve their own color via `takeOrElse { MaterialTheme.colorScheme.primary }` and
+        // aren't affected by this override.
+        CompositionLocalProvider(LocalContentColor provides Red500) {
         AzDropdownMenu {
             // showFooter=true: the AzNavRail footer adds About / Feedback / @HereLiesAz. "About"
             // opens the in-app markdown reader, which auto-discovers the repo's root + docs/ .md
@@ -659,9 +666,10 @@ private fun TopBar(
             azItem("Tutorial") { onTutorial() }
             azItem("FAQ") { onFaq() }
             azItem("Icon Key") { onHelp() }
-            // Trailing divider before the AzNavRail footer (About / Feedback / @HereLiesAz). The
-            // footer may draw its own separator on top \u2014 remove this line if that looks doubled.
-            azDivider()
+            // AzNavRail draws its own primary-tinted divider above the footer (About / Feedback /
+            // @HereLiesAz) automatically when showFooter = true \u2014 an explicit azDivider() here
+            // would double up as two white/red lines. Let the library handle it.
+        }
         }
         Text(
             state.document.name.ifBlank { "Untitled project" },
