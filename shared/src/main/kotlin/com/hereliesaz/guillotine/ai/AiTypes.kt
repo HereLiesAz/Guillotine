@@ -109,6 +109,8 @@ data class AiSettings(
     val faceEmbedModelPath: String = "",
     /** Paths to on-device TFLite image-effect models, keyed by effect ("superres"/"style"/"depth"). */
     val effectModelPaths: Map<String, String> = emptyMap(),
+    /** Optional on-device YAMNet audio-event `.tflite` for highlight detection; blank = feature off. */
+    val audioEventModelPath: String = "",
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */

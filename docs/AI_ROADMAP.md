@@ -44,7 +44,7 @@ standout because it is natively multimodal.
 | **aubio** | Onset, beat, tempo/BPM, pitch | GPL-3.0 (copyleft) | C lib, cross-compiles to NDK. Lightweight, real-time. |
 | **Essentia** | Beat tracking, BPM, key/scale, onset + **TempoCNN** TFLite | AGPL-3.0 / commercial | Official Android build; richest analysis toolkit. |
 | **madmom / BeatNet** | SOTA DL beat/downbeat tracking | BSD / MIT | Python/PyTorch — export to ONNX/TFLite for on-device. Best offline accuracy. |
-| **TensorFlow YAMNet** | 521-class audio events (speech, music, applause…) | Apache-2.0, ~4 MB TFLite | Official example. Auto-tagging, not beat detection. |
+| **TensorFlow YAMNet** — **shipped** (one-tap download) | 521-class audio events (speech, music, applause…) | Apache-2.0, ~4 MB TFLite | Powers `find_highlights`: on-device best-moment / highlight-reel detection (applause, cheering, laughter, music, crowd). Runs via a raw TFLite `Interpreter`. |
 | **Spotify BasicPitch** | Audio → MIDI / polyphonic pitch | Apache-2.0 | Ships TFLite/ONNX — on-device friendly. Melody/key extraction. |
 | **Spleeter / Demucs** | Stem separation (vocals/drums/bass) | MIT | Spleeter → TFLite feasible; Demucs heavier (better as desktop/cloud). |
 
@@ -183,7 +183,8 @@ Each item is feasible on the current stack or a model listed above.
     generate a thumbnail from the best frame.
 19. Semantic footage search ("find all clips with a dog/sunset/red car") via the
     existing on-device image embeddings.
-20. Audio-event & highlight detection (YAMNet) → auto-trailer / best-moments reel.
+20. Audio-event & highlight detection (YAMNet) → auto-trailer / best-moments reel. **(shipped —
+    `find_highlights`)**
 
 **Workflow & product**
 21. Script-to-video and storyboard-to-video: prompt → generated clips + TTS + music

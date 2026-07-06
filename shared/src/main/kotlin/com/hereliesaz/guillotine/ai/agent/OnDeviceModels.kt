@@ -20,8 +20,14 @@ enum class ModelCategory {
     RECOGNITION,
     /** Face-embedding `.tflite` — identifying a specific person. */
     FACE,
+    /** Depth-estimation `.tflite` (image→image) for the "depth this frame" effect. */
+    DEPTH,
+    /** Super-resolution `.tflite` (image→image) for the "upscale this frame" effect. */
+    SUPERRES,
+    /** YAMNet audio-event `.tflite` — highlight / best-moment detection from a clip's audio. */
+    AUDIO_EVENT,
     // --- reserved for upcoming runtimes (not yet shown in the picker) ---
-    ASR, TTS, DEPTH, SUPERRES, STYLE, STEM, VLM,
+    ASR, TTS, STYLE, STEM, VLM,
 }
 
 data class OnDeviceModel(
@@ -232,6 +238,28 @@ val RECOMMENDED_SUPERRES_MODELS: List<OnDeviceModel> = listOf(
 // single-image-in/out TfliteImageModel runtime. Users can still point the style path at a compatible
 // single-input model of their own.
 
+/**
+ * Recommended audio-event `.tflite` for highlight detection. "Use" sets `audioEventModelPath`. This is
+ * the standard TF-Hub YAMNet classification export: a fixed 15600-sample (0.975 s @ 16 kHz) waveform in →
+ * `[1,521]` AudioSet class scores out. `find_highlights` runs it frame-by-frame to locate exciting
+ * moments (applause, cheering, laughter, music…).
+ */
+val RECOMMENDED_AUDIO_EVENT_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "yamnet-classification",
+        label = "YAMNet — audio-event highlights",
+        fileName = "lite-model_yamnet_classification_tflite_1.tflite",
+        sizeBytes = 4_126_810L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("thelou1s/yamnet"),
+        downloadUrl = hfResolve("thelou1s/yamnet", "lite-model_yamnet_classification_tflite_1.tflite"),
+        abilities = "Detects 521 audio events on-device. Powers \"find the highlights / best moments\" — applause, cheering, laughter, music, screaming, crowd.",
+        limitations = "Tags sound, not beats; a noisy mix can blur events. ~1s time resolution.",
+        category = ModelCategory.AUDIO_EVENT,
+    ),
+)
+
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
@@ -239,5 +267,6 @@ fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (c
     ModelCategory.FACE -> RECOMMENDED_FACE_MODELS
     ModelCategory.DEPTH -> RECOMMENDED_DEPTH_MODELS
     ModelCategory.SUPERRES -> RECOMMENDED_SUPERRES_MODELS
+    ModelCategory.AUDIO_EVENT -> RECOMMENDED_AUDIO_EVENT_MODELS
     else -> emptyList()
 }

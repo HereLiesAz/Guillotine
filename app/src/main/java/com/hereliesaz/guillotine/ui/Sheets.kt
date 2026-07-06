@@ -112,6 +112,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
     var faceEmbedModelPath by remember { mutableStateOf(current.faceEmbedModelPath) }
     var effectModelPaths by remember { mutableStateOf(current.effectModelPaths) }
+    var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -150,6 +151,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     speechModelPath = speechModelPath.trim(), agentModelPath = agentModelPath.trim(),
                     idEmbedModelPath = idEmbedModelPath.trim(), faceEmbedModelPath = faceEmbedModelPath.trim(),
                     effectModelPaths = effectModelPaths,
+                    audioEventModelPath = audioEventModelPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -173,6 +175,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             idEmbedModelPath = restored.idEmbedModelPath
             faceEmbedModelPath = restored.faceEmbedModelPath
             effectModelPaths = restored.effectModelPaths
+            audioEventModelPath = restored.audioEventModelPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -416,6 +419,29 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "assistant to \"upscale / stylize / depth this frame\".",
                         color = Neutral500, fontSize = 10.sp,
                     )
+
+                    // On-device audio-event model (YAMNet) for highlight detection.
+                    Text("Audio highlights — on-device YAMNet (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = audioEventModelPath,
+                        onValueChange = { audioEventModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("YAMNet audio-event model path (.tflite)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Lets the assistant \"find the highlights / best moments\" by detecting applause, " +
+                            "cheering, laughter, music and crowd noise in a clip's audio.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "Audio-event models — download, use, or remove",
+                        models = recommendedModelsFor(ModelCategory.AUDIO_EVENT),
+                        selectedPath = audioEventModelPath,
+                        onUse = { audioEventModelPath = it },
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -575,6 +601,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             idEmbedModelPath = idEmbedModelPath.trim(),
                             faceEmbedModelPath = faceEmbedModelPath.trim(),
                             effectModelPaths = effectModelPaths.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
+                            audioEventModelPath = audioEventModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,
