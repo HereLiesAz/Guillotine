@@ -5,9 +5,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -280,6 +284,38 @@ private fun TimelineLanes(
                         vm.clearSelection()
                         vm.seekTo((offset.x / pps * 1000f).toLong())
                     }
+                }
+                // Playhead drag: grab the red line anywhere along its height (not just from
+                // the ruler strip). Gate by proximity: if the initial down is within ±16 dp of
+                // the playhead's surface X, we own this pointer and seek as it drags. Otherwise
+                // we bail out immediately, so clip taps/long-presses under the playhead still
+                // reach their own detectors (Compose hit-testing wouldn't propagate through a
+                // covering sibling Box, so we handle the drag from the parent surface instead).
+                //
+                // startMs + (x − downX) rather than accumulating dragAmount keeps the math local
+                // to positions the pointer scope already gives us — no per-event delta lookups.
+                .pointerInput(pps, state.currentTimeMs) {
+                    val hitRadiusPx = 16.dp.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val playheadPx = state.currentTimeMs / 1000f * pps
+                        if (kotlin.math.abs(down.position.x - playheadPx) > hitRadiusPx) {
+                            return@awaitEachGesture
+                        }
+                        val startMs = vm.uiState.value.currentTimeMs
+                        val downX = down.position.x
+                        val seekTo: (Float) -> Unit = { x ->
+                            val newMs = (startMs + ((x - downX) / pps * 1000f).toLong())
+                                .coerceAtLeast(0L)
+                            vm.seekTo(newMs)
+                        }
+                        val slop = awaitTouchSlopOrCancellation(down.id) { change, _ ->
+                            change.consume(); seekTo(change.position.x)
+                        } ?: return@awaitEachGesture
+                        drag(slop.id) { change ->
+                            change.consume(); seekTo(change.position.x)
+                        }
+                    }
                 },
         ) {
             Column(Modifier.fillMaxSize()) {
@@ -302,45 +338,15 @@ private fun TimelineLanes(
                     }
                 }
             }
-            // Playhead overlay spanning the visible lanes.
+            // Playhead overlay spanning the visible lanes. Drag is captured on the parent
+            // surface (see .pointerInput above) so the hit region isn't a covering sibling —
+            // Compose wouldn't propagate through it to underlying clips.
             Box(
                 Modifier
                     .offset(x = msToDp(state.currentTimeMs))
                     .width(2.dp)
                     .fillMaxHeight()
                     .background(Red500),
-            )
-            // Transparent drag catcher centered on the playhead — makes the whole vertical
-            // extent of the playhead grabbable, not just the 24 dp ruler strip up top. 32 dp
-            // wide with the 2 dp visual line at its centre (offset by -15 dp). Only reacts to
-            // drag, so a tap on a clip beneath still falls through to the clip's own handler.
-            //
-            // Drag math: the catcher moves with the playhead, so `change.position.x` is
-            // catcher-local (not surface-local). Capture currentTimeMs at drag-start and
-            // accumulate the deltas — playhead ends up at (start + Δms) regardless of where
-            // the catcher was on screen when the finger landed.
-            Box(
-                Modifier
-                    .offset(x = msToDp(state.currentTimeMs) - 15.dp)
-                    .width(32.dp)
-                    .fillMaxHeight()
-                    .pointerInput(pps) {
-                        var startTimeMs = 0L
-                        var accDx = 0f
-                        detectDragGestures(
-                            onDragStart = {
-                                startTimeMs = vm.uiState.value.currentTimeMs
-                                accDx = 0f
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                accDx += dragAmount.x
-                                val newMs = (startTimeMs + (accDx / pps * 1000f).toLong())
-                                    .coerceAtLeast(0L)
-                                vm.seekTo(newMs)
-                            },
-                        )
-                    },
             )
             // Marquee (range-select) overlay: only in MARQUEE mode. Dragging draws a rectangle over a
             // time range and selects every clip it touches on release. It captures the drag (so the
