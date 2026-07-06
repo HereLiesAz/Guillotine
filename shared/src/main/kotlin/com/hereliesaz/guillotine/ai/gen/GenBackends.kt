@@ -375,23 +375,26 @@ object GenBackends {
     }
 
     private fun stabilityVideo(req: GenRequest, sink: GenSink) = object : GenJob {
-        // Stability image-to-video needs a start image; without one we surface a clear error.
+        // Stability image-to-video needs a start image, uploaded as the multipart `image` file part.
         override suspend fun submit(): String {
-            val img = req.extra["image_url"]
-                ?: throw GenException("Stability video needs a start image. Generate/select an image first.")
-            val body = multipart(mapOf("seed" to "0", "cfg_scale" to "1.8", "motion_bucket_id" to "127"))
-            val bytes = GenHttp.getBytesViaMultipart(
-                "https://api.stability.ai/v2beta/image-to-video",
-                GenHttp.bearer(req.apiKey), body.first, body.second,
+            val imgUrl = req.extra["image_url"]
+                ?: throw GenException("Stability image-to-video needs a start image. Generate or select an image first, then retry.")
+            val imageBytes = GenHttp.getBytes(imgUrl)
+            val (boundary, body) = multipartWithImage(
+                mapOf("seed" to "0", "cfg_scale" to "1.8", "motion_bucket_id" to "127"), imageBytes,
             )
-            return String(bytes) // returns {id}
+            val resp = GenHttp.requestRawMultipart(
+                "https://api.stability.ai/v2beta/image-to-video", GenHttp.bearer(req.apiKey), boundary, body,
+            )
+            return JSONObject(resp).getString("id")
         }
         override suspend fun poll(handle: String): JobStatus {
-            val id = JSONObject(handle).optString("id", handle)
             val bytes = GenHttp.getBytes(
-                "https://api.stability.ai/v2beta/image-to-video/result/$id",
+                "https://api.stability.ai/v2beta/image-to-video/result/$handle",
                 GenHttp.bearer(req.apiKey) + ("Accept" to "video/*"),
             )
+            // While generating, Stability returns a small JSON body (202); when done, the raw mp4.
+            if (bytes.isNotEmpty() && bytes.size < 512 && bytes[0] == '{'.code.toByte()) return JobStatus.Running()
             return JobStatus.Done(sink.saveBytes(bytes, "mp4"))
         }
     }
@@ -597,5 +600,24 @@ object GenBackends {
         }
         sb.append("--").append(boundary).append("--\r\n")
         return boundary to sb.toString().toByteArray()
+    }
+
+    /** Multipart body with text [fields] plus one binary image file part (raw bytes). */
+    private fun multipartWithImage(
+        fields: Map<String, String>,
+        image: ByteArray,
+        fieldName: String = "image",
+        filename: String = "image.png",
+    ): Pair<String, ByteArray> {
+        val boundary = "----guillotinegen"
+        val out = java.io.ByteArrayOutputStream()
+        fun w(s: String) = out.write(s.toByteArray())
+        fields.forEach { (k, v) ->
+            w("--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n")
+        }
+        w("--$boundary\r\nContent-Disposition: form-data; name=\"$fieldName\"; filename=\"$filename\"\r\nContent-Type: image/png\r\n\r\n")
+        out.write(image)
+        w("\r\n--$boundary--\r\n")
+        return boundary to out.toByteArray()
     }
 }

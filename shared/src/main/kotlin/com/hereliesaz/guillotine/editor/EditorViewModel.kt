@@ -398,13 +398,24 @@ open class EditorViewModel {
      */
     fun splitClipAt(clipId: String, timelineMsList: List<Long>) {
         val clip = document.clips.firstOrNull { it.id == clipId } ?: return
-        val bounds = sortedSetOf(0L, clip.durationMs)
-        timelineMsList.forEach { t ->
-            val rel = t - clip.startTimeMs
-            if (rel > 0 && rel < clip.durationMs) bounds.add(rel)
+        // Accept cut points greedily so every resulting slice (including the head and tail) is at
+        // least MIN_CLIP_DURATION_MS. Pre-filtering here — rather than dropping too-short slices
+        // after splitting — means no footage is ever discarded: cuts that would strand a tiny slice
+        // are simply merged into their neighbour, keeping the timeline gap-free.
+        val candidates = timelineMsList
+            .map { it - clip.startTimeMs }
+            .filter { it > 0 && it < clip.durationMs }
+            .distinct()
+            .sorted()
+        val cuts = ArrayList<Long>()
+        cuts.add(0L)
+        candidates.forEach { c ->
+            if (c - cuts.last() >= MIN_CLIP_DURATION_MS && clip.durationMs - c >= MIN_CLIP_DURATION_MS) {
+                cuts.add(c)
+            }
         }
-        val cuts = bounds.toList()
-        if (cuts.size <= 2) return // no internal cut
+        cuts.add(clip.durationMs)
+        if (cuts.size <= 2) return // no usable internal cut
 
         mutateDocument { doc ->
             val shadow = doc.clips.firstOrNull { it.linkedClipId == clip.id }
@@ -414,7 +425,8 @@ open class EditorViewModel {
                 val relStart = cuts[i]
                 val relEnd = cuts[i + 1]
                 val dur = relEnd - relStart
-                if (dur < MIN_CLIP_DURATION_MS) continue
+                // Slices are guaranteed >= MIN_CLIP_DURATION_MS by the greedy pre-filter above,
+                // so none is dropped here — all footage is preserved.
                 val pairGroup = if (shadow != null) newId() else null
                 val vid = clip.copy(
                     id = newId(),

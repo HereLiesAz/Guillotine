@@ -45,10 +45,6 @@ object PcmDecoder {
         val stride = (sampleRate / targetRate).coerceAtLeast(1)
         val outRate = sampleRate / stride
 
-        val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
-        codec.configure(format, null, null, 0)
-        codec.start()
-
         val out = ArrayList<Float>(1 shl 20)
         val info = MediaCodec.BufferInfo()
         var inputDone = false
@@ -58,25 +54,32 @@ object PcmDecoder {
         var chanCount = 0
         var monoIndex = 0L
 
+        // Codec creation/configure/start can throw — keep them inside the try so the extractor
+        // (and a partially-created codec) are always released.
+        var codec: MediaCodec? = null
         try {
+            val dec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+                .also { codec = it }
+            dec.configure(format, null, null, 0)
+            dec.start()
             while (!outputDone) {
                 if (!inputDone) {
-                    val idx = codec.dequeueInputBuffer(10_000)
+                    val idx = dec.dequeueInputBuffer(10_000)
                     if (idx >= 0) {
-                        val buf = codec.getInputBuffer(idx)!!
+                        val buf = dec.getInputBuffer(idx)!!
                         val sz = extractor.readSampleData(buf, 0)
                         if (sz < 0) {
-                            codec.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            dec.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputDone = true
                         } else {
-                            codec.queueInputBuffer(idx, 0, sz, extractor.sampleTime, 0)
+                            dec.queueInputBuffer(idx, 0, sz, extractor.sampleTime, 0)
                             extractor.advance()
                         }
                     }
                 }
-                val outIdx = codec.dequeueOutputBuffer(info, 10_000)
+                val outIdx = dec.dequeueOutputBuffer(info, 10_000)
                 if (outIdx >= 0) {
-                    val outBuf = codec.getOutputBuffer(outIdx)
+                    val outBuf = dec.getOutputBuffer(outIdx)
                     if (outBuf != null && info.size > 0) {
                         val shorts = outBuf.asShortBuffer()
                         while (shorts.hasRemaining()) {
@@ -90,13 +93,13 @@ object PcmDecoder {
                             }
                         }
                     }
-                    codec.releaseOutputBuffer(outIdx, false)
+                    dec.releaseOutputBuffer(outIdx, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
                 }
             }
         } finally {
-            runCatching { codec.stop() }
-            runCatching { codec.release() }
+            runCatching { codec?.stop() }
+            runCatching { codec?.release() }
             runCatching { extractor.release() }
         }
         return PcmAudio(out.toFloatArray(), outRate)
