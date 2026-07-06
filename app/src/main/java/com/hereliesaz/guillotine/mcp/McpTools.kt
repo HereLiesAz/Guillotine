@@ -936,12 +936,18 @@ class McpTools(
             var srcMs = clip.trimStartMs
             val endSrc = clip.trimStartMs + durationMs
             while (srcMs <= endSrc) {
+                // OPTION_CLOSEST (not _SYNC): we sample densely (~0.4s), so keyframe-only decoding would
+                // return the same keyframe repeatedly and fire false cuts at keyframe boundaries. On API
+                // 27+ pull a 32x32 frame straight from the decoder (much faster — we only histogram it).
                 val bmp = runCatching {
-                    r.getFrameAtTime(srcMs * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    val tUs = srcMs * 1000
+                    if (android.os.Build.VERSION.SDK_INT >= 27)
+                        r.getScaledFrameAtTime(tUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST, 32, 32)
+                    else
+                        r.getFrameAtTime(tUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST)
                 }.getOrNull()
                 if (bmp != null) {
-                    val hist = sceneHistogram(bmp)
-                    bmp.recycle()
+                    val hist = try { sceneHistogram(bmp) } finally { bmp.recycle() }
                     val p = prev
                     if (p != null && l1(p, hist) >= threshold) {
                         val tl = clip.startTimeMs + (srcMs - clip.trimStartMs)
