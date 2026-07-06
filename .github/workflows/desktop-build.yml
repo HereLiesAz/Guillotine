@@ -1,5 +1,9 @@
 name: Desktop Build
 
+# Native installers can't be cross-compiled: DMG needs a macOS runner, MSI needs Windows,
+# and DEB needs Linux. Runs on every push so a regression to any platform's build fails
+# CI immediately, not on the next release.
+
 on:
   push:
     branches: ['**']
@@ -15,7 +19,25 @@ concurrency:
 
 jobs:
   desktop-build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            task: packageDeb
+            artifact: desktop-linux-deb
+            path: desktop/build/compose/binaries/main/deb/*.deb
+          - os: macos-latest
+            task: packageDmg
+            artifact: desktop-macos-dmg
+            path: desktop/build/compose/binaries/main/dmg/*.dmg
+          - os: windows-latest
+            task: packageMsi
+            artifact: desktop-windows-msi
+            path: desktop/build/compose/binaries/main/msi/*.msi
+
+    runs-on: ${{ matrix.os }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -32,16 +54,19 @@ jobs:
           cache-read-only: false
           dependency-graph: disabled
 
-      - name: Compile desktop module
-        run: |
-          chmod +x gradlew
-          ./gradlew :desktop:compileKotlin --build-cache
+      - name: Grant execute permission for gradlew
+        if: runner.os != 'Windows'
+        run: chmod +x gradlew
 
-      - name: Package uber-jar
-        run: ./gradlew :desktop:packageUberJarForCurrentOS --build-cache
+      # Ask for the format by name on each leg — a config drop-out would otherwise
+      # silently skip the format we wanted instead of failing loudly.
+      - name: ${{ matrix.task }}
+        shell: bash
+        run: ./gradlew :desktop:${{ matrix.task }} --build-cache --stacktrace
 
-      - name: Upload desktop jar
+      - name: Upload ${{ matrix.artifact }}
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-jar
-          path: desktop/build/compose/jars/*.jar
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error

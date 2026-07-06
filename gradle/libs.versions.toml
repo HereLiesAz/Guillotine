@@ -39,7 +39,12 @@ okhttp = "5.4.0"
 junit = "4.13.2"
 json = "20260522"
 composeMultiplatform = "1.8.1"
+# Bytedeco tri-version pairing (JavaCV 1.5.11 → JavaCPP 1.5.11 → FFmpeg 7.1-1.5.11).
+# All three must move in lockstep — mixing versions produces UnsatisfiedLinkError at runtime.
+# See https://github.com/bytedeco/javacv/blob/master/CHANGELOG.md for pairings.
 javacv = "1.5.11"
+javacpp = "1.5.11"
+ffmpeg = "7.1-1.5.11"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -80,7 +85,9 @@ nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 json = { group = "org.json", name = "json", version.ref = "json" }
-javacv-platform = { group = "org.bytedeco", name = "javacv-platform", version.ref = "javacv" }
+javacv = { group = "org.bytedeco", name = "javacv", version.ref = "javacv" }
+javacpp = { group = "org.bytedeco", name = "javacpp", version.ref = "javacpp" }
+ffmpeg = { group = "org.bytedeco", name = "ffmpeg", version.ref = "ffmpeg" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
