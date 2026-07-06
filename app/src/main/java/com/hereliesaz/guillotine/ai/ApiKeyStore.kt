@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.hereliesaz.guillotine.ai.gen.GenKind
+import com.hereliesaz.guillotine.ai.gen.GenProviderType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,6 +52,17 @@ class ApiKeyStore(context: Context) {
         frameAnalysisCacheSize = prefs
             .getInt(KEY_FRAME_CACHE_SIZE, FrameAnalysisCache.DEFAULT_MAX_ENTRIES)
             .coerceIn(FrameAnalysisCache.MIN_MAX_ENTRIES, FrameAnalysisCache.MAX_MAX_ENTRIES),
+        genKeys = GenProviderType.entries
+            .associateWith { prefs.getString(genKeyPref(it), "").orEmpty() }.filterValues { it.isNotEmpty() },
+        genModels = GenProviderType.entries
+            .associateWith { prefs.getString(genModelPref(it), "").orEmpty() }.filterValues { it.isNotEmpty() },
+        genExtras = GenProviderType.entries
+            .associateWith { prefs.getString(genExtraPref(it), "").orEmpty() }.filterValues { it.isNotEmpty() },
+        genDefaults = GenKind.entries.mapNotNull { k ->
+            prefs.getString(genDefaultPref(k), null)
+                ?.let { runCatching { GenProviderType.valueOf(it) }.getOrNull() }
+                ?.let { k to it }
+        }.toMap(),
     )
 
     suspend fun save(settings: AiSettings) {
@@ -65,6 +78,15 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_SPEECH, settings.speechModelPath)
                 putString(KEY_AGENT_MODEL, settings.agentModelPath)
                 putInt(KEY_FRAME_CACHE_SIZE, settings.frameAnalysisCacheSize)
+                GenProviderType.entries.forEach {
+                    putString(genKeyPref(it), settings.genKeys[it].orEmpty())
+                    putString(genModelPref(it), settings.genModels[it].orEmpty())
+                    putString(genExtraPref(it), settings.genExtras[it].orEmpty())
+                }
+                GenKind.entries.forEach { k ->
+                    val p = settings.genDefaults[k]
+                    if (p != null) putString(genDefaultPref(k), p.name) else remove(genDefaultPref(k))
+                }
             }.apply()
         }
         _settings.value = settings
@@ -84,5 +106,9 @@ class ApiKeyStore(context: Context) {
         const val KEY_ONBOARDING_DONE = "onboarding_done"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"
+        fun genKeyPref(p: GenProviderType) = "gen_key_${p.name}"
+        fun genModelPref(p: GenProviderType) = "gen_model_${p.name}"
+        fun genExtraPref(p: GenProviderType) = "gen_extra_${p.name}"
+        fun genDefaultPref(k: GenKind) = "gen_default_${k.name}"
     }
 }

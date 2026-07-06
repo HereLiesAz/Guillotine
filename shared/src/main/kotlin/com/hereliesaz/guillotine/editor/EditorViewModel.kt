@@ -2,6 +2,7 @@ package com.hereliesaz.guillotine.editor
 
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.ClipType
+import com.hereliesaz.guillotine.model.CubicBezier
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.Document
 import com.hereliesaz.guillotine.model.GlobalSettings
@@ -385,6 +386,69 @@ open class EditorViewModel {
             doc.copy(clips = doc.clips.flatMap { if (it.id == clipId) listOf(first, second) else listOf(it) })
         }
         actionRecorder.record(RecordedAction("split_clip", mapOf("clip_id" to clipId, "at_ms" to timelineMs), "Split clip at ${timelineMs}ms"))
+    }
+
+    /**
+     * Split [clipId] into contiguous, independent pieces at every timeline position in
+     * [timelineMsList] — all footage is kept (nothing is deleted or rippled). Used by beat-driven
+     * editing to place many cuts on beat times in **one** undo step (unlike calling [splitClip] N
+     * times). Positions falling outside the clip, duplicates, and slices below the minimum clip
+     * length are dropped; keyframes are partitioned and re-based per piece; a linked shadow-audio
+     * clip is cut in lockstep so sound stays in sync.
+     */
+    fun splitClipAt(clipId: String, timelineMsList: List<Long>) {
+        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
+        val bounds = sortedSetOf(0L, clip.durationMs)
+        timelineMsList.forEach { t ->
+            val rel = t - clip.startTimeMs
+            if (rel > 0 && rel < clip.durationMs) bounds.add(rel)
+        }
+        val cuts = bounds.toList()
+        if (cuts.size <= 2) return // no internal cut
+
+        mutateDocument { doc ->
+            val shadow = doc.clips.firstOrNull { it.linkedClipId == clip.id }
+            val videoPieces = mutableListOf<TimelineClip>()
+            val shadowPieces = mutableListOf<TimelineClip>()
+            for (i in 0 until cuts.size - 1) {
+                val relStart = cuts[i]
+                val relEnd = cuts[i + 1]
+                val dur = relEnd - relStart
+                if (dur < MIN_CLIP_DURATION_MS) continue
+                val pairGroup = if (shadow != null) newId() else null
+                val vid = clip.copy(
+                    id = newId(),
+                    startTimeMs = clip.startTimeMs + relStart,
+                    trimStartMs = clip.trimStartMs + relStart,
+                    durationMs = dur,
+                    edits = emptyList(),
+                    groupId = pairGroup,
+                    linkedClipId = null,
+                    keyframes = clip.keyframes
+                        .filter { it.timeMs >= relStart && it.timeMs < relEnd }
+                        .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                )
+                videoPieces += vid
+                if (shadow != null && pairGroup != null) {
+                    shadowPieces += shadow.copy(
+                        id = newId(),
+                        startTimeMs = shadow.startTimeMs + relStart,
+                        trimStartMs = shadow.trimStartMs + relStart,
+                        durationMs = dur,
+                        edits = emptyList(),
+                        groupId = pairGroup,
+                        linkedClipId = vid.id,
+                        keyframes = shadow.keyframes
+                            .filter { it.timeMs >= relStart && it.timeMs < relEnd }
+                            .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                    )
+                }
+            }
+            if (videoPieces.isEmpty()) return@mutateDocument doc
+            val removed = setOfNotNull(clip.id, shadow?.id)
+            doc.copy(clips = doc.clips.filterNot { it.id in removed } + videoPieces + shadowPieces)
+        }
+        actionRecorder.record(RecordedAction("split_clip_at", mapOf("clip_id" to clipId, "count" to timelineMsList.size), "Split clip at ${timelineMsList.size} points"))
     }
 
     /**
@@ -1150,6 +1214,38 @@ open class EditorViewModel {
             }
             if (changed) doc.copy(clips = clips) else doc
         }
+    }
+
+    /**
+     * Insert keyframes at arbitrary clip-relative times, values, and easings — the entry point the
+     * beat-driven `apply_on_beat` tool needs (the playhead-based [addKeyframe]/[keyframeSettingAtPlayhead]
+     * can only capture the current value at the cursor). Each point's time is coerced into the clip;
+     * a keyframe already at the same (time, property) is overwritten. Run this **after** any cutting,
+     * since split/segment re-base keyframes. One undo step for the whole batch.
+     */
+    fun insertKeyframes(
+        clipId: String,
+        property: KeyframeProperty,
+        points: List<Triple<Long, Float, CubicBezier>>,
+    ) {
+        if (points.isEmpty()) return
+        mutateDocument { doc ->
+            doc.copy(clips = doc.clips.map { clip ->
+                if (clip.id != clipId) return@map clip
+                var kfs = clip.keyframes
+                points.forEach { (relRaw, value, easing) ->
+                    val rel = relRaw.coerceIn(0, clip.durationMs)
+                    val existing = kfs.firstOrNull { it.property == property && it.timeMs == rel }
+                    kfs = if (existing != null) {
+                        kfs.map { if (it.id == existing.id) it.copy(value = value, easing = easing) else it }
+                    } else {
+                        kfs + Keyframe(newId(), rel, value, property, easing)
+                    }
+                }
+                clip.copy(keyframes = kfs.sortedBy { it.timeMs })
+            })
+        }
+        actionRecorder.record(RecordedAction("insert_keyframes", mapOf("clip_id" to clipId, "property" to property.name, "count" to points.size), "Insert ${points.size} ${property.name} keyframes"))
     }
 
     fun updateKeyframe(clipId: String, keyframeId: String, transform: (Keyframe) -> Keyframe) {

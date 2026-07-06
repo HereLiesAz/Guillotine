@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Uri
 import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
+import com.hereliesaz.guillotine.ai.gen.GenKind
+import com.hereliesaz.guillotine.ai.gen.GenProviderType
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -17,6 +19,10 @@ data class SettingsBundle(
     val speechModelPath: String = "",
     val agentModelPath: String = "",
     val frameAnalysisCacheSize: Int = 200,
+    val genKeys: Map<String, String> = emptyMap(),
+    val genModels: Map<String, String> = emptyMap(),
+    val genExtras: Map<String, String> = emptyMap(),
+    val genDefaults: Map<String, String> = emptyMap(),
     val userTools: List<UserTool> = emptyList(),
 )
 
@@ -38,6 +44,10 @@ object SettingsBackup {
             speechModelPath = settings.speechModelPath,
             agentModelPath = settings.agentModelPath,
             frameAnalysisCacheSize = settings.frameAnalysisCacheSize,
+            genKeys = settings.genKeys.mapKeys { it.key.name },
+            genModels = settings.genModels.mapKeys { it.key.name },
+            genExtras = settings.genExtras.mapKeys { it.key.name },
+            genDefaults = settings.genDefaults.entries.associate { it.key.name to it.value.name },
             userTools = UserToolStore.load(context),
         )
         context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
@@ -64,6 +74,18 @@ object SettingsBackup {
             speechModelPath = bundle.speechModelPath,
             agentModelPath = bundle.agentModelPath,
             frameAnalysisCacheSize = bundle.frameAnalysisCacheSize,
+            genKeys = bundle.genKeys.mapNotNull { (k, v) ->
+                runCatching { GenProviderType.valueOf(k) to v }.getOrNull()
+            }.toMap(),
+            genModels = bundle.genModels.mapNotNull { (k, v) ->
+                runCatching { GenProviderType.valueOf(k) to v }.getOrNull()
+            }.toMap(),
+            genExtras = bundle.genExtras.mapNotNull { (k, v) ->
+                runCatching { GenProviderType.valueOf(k) to v }.getOrNull()
+            }.toMap(),
+            genDefaults = bundle.genDefaults.mapNotNull { (k, v) ->
+                runCatching { GenKind.valueOf(k) to GenProviderType.valueOf(v) }.getOrNull()
+            }.toMap(),
         )
     }
 }

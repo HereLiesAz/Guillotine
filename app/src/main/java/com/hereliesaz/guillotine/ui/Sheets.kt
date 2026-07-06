@@ -67,6 +67,10 @@ import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
 import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
 import com.hereliesaz.guillotine.ai.meta
+import com.hereliesaz.guillotine.ai.gen.GenKind
+import com.hereliesaz.guillotine.ai.gen.GenProviderType
+import com.hereliesaz.guillotine.ai.gen.genMeta
+import com.hereliesaz.guillotine.ai.gen.providersFor
 import kotlinx.coroutines.launch
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.GlobalSettings
@@ -102,6 +106,9 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
     var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
+    var genKeys by remember { mutableStateOf(current.genKeys) }
+    var genModels by remember { mutableStateOf(current.genModels) }
+    var genExtras by remember { mutableStateOf(current.genExtras) }
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     var crashRelayUrl by remember { mutableStateOf(com.hereliesaz.guillotine.crash.CrashConfig.relayUrl(context)) }
@@ -135,6 +142,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     leonardoKey = leonardoKey.trim(), leonardoModel = leonardoModel,
                     speechModelPath = speechModelPath.trim(), agentModelPath = agentModelPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
+                    genKeys = genKeys, genModels = genModels, genExtras = genExtras,
+                    genDefaults = current.genDefaults,
                 ),
             )
         }
@@ -153,11 +162,14 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             speechModelPath = restored.speechModelPath
             agentModelPath = restored.agentModelPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
+            genKeys = restored.genKeys
+            genModels = restored.genModels
+            genExtras = restored.genExtras
         }
     }
 
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("AI Analyzer", "Image Gen", "Transcription", "Advanced")
+    val tabs = listOf("AI Analyzer", "Generation", "Transcription", "Advanced")
 
     Column(
         Modifier
@@ -312,16 +324,34 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         onUse = { agentModelPath = it },
                     )
                 }
-                1 -> { // Image Gen
-                    Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
-                    KeyField("Leonardo API key", leonardoKey) { leonardoKey = it }
-                    Text("Default model", color = Neutral500, fontSize = 10.sp)
-                    LeonardoModelDropdown(leonardoKey, leonardoModel) { leonardoModel = it }
-                    Text("Leave the key blank to generate with free Pollinations.ai.", color = Neutral500, fontSize = 10.sp)
+                1 -> { // Generation (image / video / music)
                     Text(
-                        "Get a Leonardo API key  ↗",
-                        color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickableText { uriHandler.openUri("https://app.leonardo.ai/api-access") },
+                        "Bring your own AI keys to generate images, video, and music. Configure as many " +
+                            "providers as you like — only the categories and providers you set up are " +
+                            "offered when generating. Legacy Leonardo image key is picked up automatically.",
+                        color = Neutral400, fontSize = 12.sp,
+                    )
+                    GenCategorySection(
+                        title = "Image", kind = GenKind.IMAGE,
+                        genKeys = genKeys, genModels = genModels, genExtras = genExtras, uriHandler = uriHandler,
+                        onKey = { p, v -> genKeys = genKeys + (p to v) },
+                        onModel = { p, v -> genModels = genModels + (p to v) },
+                        onExtra = { p, v -> genExtras = genExtras + (p to v) },
+                        legacyLeonardoKey = leonardoKey, onLegacyLeonardoKey = { leonardoKey = it },
+                    )
+                    GenCategorySection(
+                        title = "Video", kind = GenKind.VIDEO,
+                        genKeys = genKeys, genModels = genModels, genExtras = genExtras, uriHandler = uriHandler,
+                        onKey = { p, v -> genKeys = genKeys + (p to v) },
+                        onModel = { p, v -> genModels = genModels + (p to v) },
+                        onExtra = { p, v -> genExtras = genExtras + (p to v) },
+                    )
+                    GenCategorySection(
+                        title = "Music", kind = GenKind.MUSIC,
+                        genKeys = genKeys, genModels = genModels, genExtras = genExtras, uriHandler = uriHandler,
+                        onKey = { p, v -> genKeys = genKeys + (p to v) },
+                        onModel = { p, v -> genModels = genModels + (p to v) },
+                        onExtra = { p, v -> genExtras = genExtras + (p to v) },
                     )
                 }
                 2 -> { // Transcription
@@ -450,6 +480,10 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             speechModelPath = speechModelPath.trim(),
                             agentModelPath = agentModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
+                            genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
+                            genModels = genModels,
+                            genExtras = genExtras.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
+                            genDefaults = current.genDefaults,
                         ),
                     )
                 },
@@ -582,6 +616,90 @@ private fun ProviderRow(label: String, blurb: String, selected: Boolean, onClick
         Column(Modifier.padding(start = 4.dp)) {
             Text(label, color = White, fontSize = 13.sp)
             Text(blurb, color = Neutral500, fontSize = 11.sp)
+        }
+    }
+}
+
+/**
+ * One generation category (Image / Video / Music): lists every provider that serves [kind] as a
+ * collapsible card with a key field, model field, and a "get a key" link. A red dot marks configured
+ * providers. Leonardo reuses the legacy top-level key so existing users don't have to re-enter it.
+ */
+@Composable
+private fun GenCategorySection(
+    title: String,
+    kind: GenKind,
+    genKeys: Map<GenProviderType, String>,
+    genModels: Map<GenProviderType, String>,
+    genExtras: Map<GenProviderType, String>,
+    uriHandler: androidx.compose.ui.platform.UriHandler,
+    onKey: (GenProviderType, String) -> Unit,
+    onModel: (GenProviderType, String) -> Unit,
+    onExtra: (GenProviderType, String) -> Unit,
+    legacyLeonardoKey: String = "",
+    onLegacyLeonardoKey: ((String) -> Unit)? = null,
+) {
+    Text(title, color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
+    providersFor(kind).forEach { p ->
+        val meta = genMeta(p)
+        var expanded by remember(p) { mutableStateOf(false) }
+        val isLeonardo = p == GenProviderType.LEONARDO
+        val keyValue = if (isLeonardo) legacyLeonardoKey else genKeys[p].orEmpty()
+        val configured = !meta.needsKey || keyValue.isNotBlank()
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, Neutral800, RoundedCornerShape(8.dp))
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().clickableText { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(8.dp).clip(RoundedCornerShape(4.dp))
+                        .background(if (configured) Red500 else Neutral700),
+                )
+                Column(Modifier.padding(start = 8.dp).weight(1f)) {
+                    Text(meta.label, color = White, fontSize = 13.sp)
+                    Text(meta.blurb, color = Neutral500, fontSize = 11.sp)
+                }
+                Text(if (expanded) "–" else "+", color = Neutral400, fontSize = 18.sp)
+            }
+            if (expanded) {
+                if (!meta.needsKey) {
+                    Text("Free — no key needed.", color = Neutral500, fontSize = 11.sp)
+                } else {
+                    KeyField("${meta.label} API key", keyValue) { v ->
+                        if (isLeonardo) onLegacyLeonardoKey?.invoke(v) else onKey(p, v)
+                    }
+                }
+                if (p == GenProviderType.SUNO_WRAPPER || p == GenProviderType.UDIO_WRAPPER) {
+                    OutlinedTextField(
+                        value = genExtras[p].orEmpty(),
+                        onValueChange = { onExtra(p, it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Wrapper base URL (https://…)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                }
+                if (meta.models.isNotEmpty()) {
+                    OutlinedTextField(
+                        value = genModels[p].orEmpty(),
+                        onValueChange = { onModel(p, it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Model (default: ${meta.defaultModel})", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text("Options: " + meta.models.joinToString { it.name }, color = Neutral500, fontSize = 10.sp)
+                }
+                meta.disclaimer?.let { Text(it, color = Neutral500, fontSize = 10.sp) }
+                meta.keyUrl?.let { url -> ActionText("Get a ${meta.label} key  ↗") { uriHandler.openUri(url) } }
+            }
         }
     }
 }
