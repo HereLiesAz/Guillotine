@@ -109,6 +109,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
     var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
     var faceEmbedModelPath by remember { mutableStateOf(current.faceEmbedModelPath) }
+    var effectModelPaths by remember { mutableStateOf(current.effectModelPaths) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -146,6 +147,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     leonardoKey = leonardoKey.trim(), leonardoModel = leonardoModel,
                     speechModelPath = speechModelPath.trim(), agentModelPath = agentModelPath.trim(),
                     idEmbedModelPath = idEmbedModelPath.trim(), faceEmbedModelPath = faceEmbedModelPath.trim(),
+                    effectModelPaths = effectModelPaths,
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -168,6 +170,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             agentModelPath = restored.agentModelPath
             idEmbedModelPath = restored.idEmbedModelPath
             faceEmbedModelPath = restored.faceEmbedModelPath
+            effectModelPaths = restored.effectModelPaths
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -378,6 +381,29 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = faceEmbedModelPath,
                         onUse = { faceEmbedModelPath = it },
                     )
+
+                    // On-device image-effect models (TFLite). Point each at a compatible .tflite; the AI
+                    // editor's apply_image_effect tool runs it on the current frame.
+                    Text("Image effects — on-device TFLite models (optional)", color = Neutral400, fontSize = 12.sp)
+                    listOf(
+                        "superres" to "Super-resolution model path (.tflite)",
+                        "style" to "Style-transfer model path (.tflite)",
+                        "depth" to "Depth model path (.tflite)",
+                    ).forEach { (kind, hint) ->
+                        OutlinedTextField(
+                            value = effectModelPaths[kind].orEmpty(),
+                            onValueChange = { effectModelPaths = effectModelPaths + (kind to it) },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text(hint, color = Neutral500, fontSize = 12.sp) },
+                            textStyle = TextStyle(color = White, fontSize = 12.sp),
+                            singleLine = true,
+                        )
+                    }
+                    Text(
+                        "Image→image TFLite models (e.g. ESRGAN, Magenta style transfer, MiDaS). Then ask the " +
+                            "assistant to \"upscale / stylize / depth this frame\".",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -536,6 +562,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             agentModelPath = agentModelPath.trim(),
                             idEmbedModelPath = idEmbedModelPath.trim(),
                             faceEmbedModelPath = faceEmbedModelPath.trim(),
+                            effectModelPaths = effectModelPaths.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,

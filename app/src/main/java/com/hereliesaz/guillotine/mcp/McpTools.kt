@@ -7,6 +7,7 @@ import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.BeatAnalyzer
 import com.hereliesaz.guillotine.ai.FaceEmbed
 import com.hereliesaz.guillotine.ai.MlKitProvider
+import com.hereliesaz.guillotine.ai.tflite.TfliteImageModel
 import com.hereliesaz.guillotine.ai.gen.GenController
 import com.hereliesaz.guillotine.ai.gen.GenKind
 import com.hereliesaz.guillotine.ai.gen.GenProviderType
@@ -211,6 +212,20 @@ class McpTools(
             ),
         ))
 
+        // ---- on-device image effects (TFLite) ----
+        put(toolDefinition(
+            "apply_image_effect",
+            "Run an ON-DEVICE image model on the current preview frame and add the result as a new image " +
+                "clip. effect = superres (upscale) | style (style transfer) | depth (depth map). Requires " +
+                "that effect's .tflite model to be set in Settings → AI Analyzer → Image effects; if it " +
+                "isn't, returns an error naming the setting (relay it, don't retry).",
+            objSchema(
+                "effect" to stringProp("superres | style | depth"),
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                required = listOf("effect"),
+            ),
+        ))
+
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
             "generate_image",
@@ -314,6 +329,7 @@ class McpTools(
         "start_recording" -> startRecording(args.getString("clip_id"))
         "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
         "discard_recording" -> discardRecording()
+        "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
         "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
         "list_concepts" -> listConcepts()
         "delete_concept" -> deleteConcept(args.getString("name"))
@@ -783,6 +799,51 @@ class McpTools(
             put("moved", moved)
             put("humanSummary", "Snapped $moved clip(s) on $trackId to the nearest $mode.")
         }
+    }
+
+    // ---- on-device image effects (TFLite) ----------------------------------
+
+    private fun applyImageEffect(effect: String, clipId: String): JSONObject {
+        val settings = settingsProvider()
+        val key = effect.lowercase().trim()
+        val path = settings.effectModelPaths[key].orEmpty()
+        require(path.isNotBlank()) {
+            "No on-device model set for \"$effect\". Add its .tflite path in Settings → AI Analyzer → Image effects."
+        }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+            )
+            ?: throw IllegalStateException("No video clip to apply the effect to — scrub onto one.")
+        val media = st.document.mediaFor(clip)
+            ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: throw IllegalStateException("Could not read the current frame.")
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Applying $key…", pausable = true,
+        ) { _ ->
+            val out = try {
+                TfliteImageModel(path).use { it.run(frame) }
+            } finally {
+                frame.recycle()
+            } ?: throw IllegalStateException("The $key model produced no output — check the .tflite file.")
+            val uri = saveBitmap(out)
+            out.recycle()
+            vm.addMedia(listOf(MediaItem(newId(), uri, "$key: ${media.name}", MediaKind.IMAGE, 5_000)))
+            ok().apply {
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Applied on-device $key and added the result as an image clip.")
+            }
+        }
+    }
+
+    private fun saveBitmap(bmp: android.graphics.Bitmap): String {
+        val f = java.io.File(context.cacheDir, "effect_${System.currentTimeMillis()}.png")
+        f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        return Uri.fromFile(f).toString()
     }
 
     // ---- learned concepts (teach a specific thing by pointing at it) --------

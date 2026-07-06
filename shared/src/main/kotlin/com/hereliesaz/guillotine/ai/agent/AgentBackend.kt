@@ -101,6 +101,12 @@ val AGENT_SYSTEM_PROMPT = """
     - list_concepts shows what's been taught; delete_concept forgets one. Prefer analyze_clip_with_concept
       over analyze_clip whenever the user taught the thing by pointing at it.
 
+    ON-DEVICE IMAGE EFFECTS:
+    - "upscale / enhance this frame" → apply_image_effect(effect="superres"); "stylize / apply a style" →
+      effect="style"; "depth map / show depth" → effect="depth". Each runs an on-device TFLite model on the
+      current frame and adds the result as an image clip. If the model isn't configured it returns an error
+      naming the Settings field — relay it, don't retry.
+
     CAPTIONS / TRANSCRIPTION:
     - "transcribe", "add captions/subtitles" → transcribe_clip: adds timed caption text clips synced to
       the spoken words;

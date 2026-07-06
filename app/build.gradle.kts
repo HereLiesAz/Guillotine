@@ -132,6 +132,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        // TensorFlow-Lite and MediaPipe can each ship a TFLite native lib; keep the first so the
+        // build doesn't fail on a duplicate .so.
+        jniLibs {
+            pickFirsts += "**/libtensorflowlite_jni.so"
+            pickFirsts += "**/libtensorflowlite_gpu_jni.so"
+        }
     }
 }
 
@@ -163,6 +169,8 @@ dependencies {
     implementation(libs.mlkit.segmentation.selfie)
     implementation(libs.mediapipe.tasks.genai)
     implementation(libs.mediapipe.tasks.vision)
+    implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.support)
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)
     implementation(libs.play.services.ads)
