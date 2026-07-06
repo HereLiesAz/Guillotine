@@ -109,6 +109,20 @@ object Exporter {
             val composition = buildComposition(document, normalizeGains, mattes)
             require(composition != null) { "Nothing to export — add a video clip first." }
 
+            // Detect whether the composition actually carries audio. Calling setAudioMimeType(AAC)
+            // on an audio-less composition trips Media3 into an IllegalStateException from inside
+            // the muxer because there's no track to enforce that MIME onto. Only force AAC when
+            // there IS audio to encode.
+            val disabled = document.disabledTrackIds
+            val hasAudio = document.clips.any { c ->
+                if (c.trackId in disabled) return@any false
+                when (c.type) {
+                    ClipType.AUDIO -> true
+                    ClipType.VIDEO -> document.mediaFor(c)?.hasAudio == true
+                    else -> false
+                }
+            }
+
             val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
 
             phase("Encoding video and audio…")
@@ -116,11 +130,14 @@ object Exporter {
                 var poller: Job? = null
                 try {
                     suspendCancellableCoroutine { cont ->
-                        val transformer = Transformer.Builder(context)
+                        val builder = Transformer.Builder(context)
                             .setVideoMimeType(MimeTypes.VIDEO_H264)
-                            // Media3's MP4 muxer rejects Opus/Vorbis/FLAC source audio; force AAC
-                            // re-encode so mixed-codec projects don't die with a bare "Export failed".
-                            .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        // Media3's MP4 muxer rejects Opus/Vorbis/FLAC source audio; force AAC
+                        // re-encode so mixed-codec projects don't die with a bare "Export failed".
+                        // Skip the call entirely when the composition has no audio — the muxer
+                        // otherwise raises IllegalStateException with no message.
+                        if (hasAudio) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        val transformer = builder
                             .addListener(object : Transformer.Listener {
                                 override fun onCompleted(c: Composition, result: ExportResult) {
                                     if (cont.isActive) cont.resume(Unit)
@@ -175,8 +192,9 @@ object Exporter {
     /**
      * Turn any export failure into an actionable, copyable diagnostic. Media3's [ExportException]
      * often carries a null message and puts the real detail on errorCode/errorCodeName/cause, so
-     * a naive `e.message ?: "Export failed"` throws that away. This walks the cause chain and
-     * pulls the code + first non-null message it finds.
+     * a naive `e.message ?: "Export failed"` throws that away. Also many internal exceptions
+     * (IllegalStateException in particular) throw with no message at all — for those we include
+     * the top three stack frames so the caller can at least see WHERE the failure came from.
      */
     fun describeExportError(e: Throwable): String {
         val head = when (e) {
@@ -187,22 +205,58 @@ object Exporter {
             }
             else -> e.javaClass.simpleName + (e.message?.let { ": $it" } ?: "")
         }
-        val chain = describeCauseChain(e)
-        return if (chain.isEmpty() || chain == e.message) head else "$head\n\n$chain"
+        return head + "\n\n" + describeCauseChain(e)
     }
 
-    /** Join every non-null message in the cause chain with " ← " so the root cause is visible. */
+    /**
+     * Walk the cause chain. For each level, print the class + message (or just the class when the
+     * message is null), then the top three stack frames indented under it. This turns an opaque
+     * "IllegalStateException" into something the maintainer can actually locate in the source.
+     */
     private fun describeCauseChain(e: Throwable): String {
-        val parts = mutableListOf<String>()
+        val out = StringBuilder()
         var cur: Throwable? = e
         val seen = HashSet<Throwable>()
+        var depth = 0
         while (cur != null && seen.add(cur)) {
+            if (depth > 0) out.append("\nCaused by ")
             val msg = cur.message?.trim().orEmpty()
-            val label = cur.javaClass.simpleName
-            parts += if (msg.isNotEmpty()) "$label: $msg" else label
+            out.append(cur.javaClass.name)
+            if (msg.isNotEmpty()) out.append(": ").append(msg)
+            cur.stackTrace.take(3).forEach { frame ->
+                out.append("\n    at ").append(frame.toString())
+            }
             cur = cur.cause
+            depth++
         }
-        return parts.joinToString(" ← ")
+        return out.toString()
+    }
+
+    /**
+     * Build a pre-filled GitHub issue URL so "Report" in the ExportSheet can open the browser
+     * straight to a new issue with the diagnostic already in the body. Sender still hits "Submit."
+     */
+    fun buildIssueUrl(context: Context, diagnostic: String): String {
+        val body = buildString {
+            appendLine("**What I was doing:** exporting my project.")
+            appendLine()
+            appendLine("**Device:** ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT})")
+            val pi = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }.getOrNull()
+            appendLine("**App version:** ${pi?.versionName ?: "?"} (${pi?.longVersionCode ?: "?"})")
+            appendLine()
+            appendLine("**Diagnostic**")
+            appendLine("```")
+            appendLine(diagnostic)
+            appendLine("```")
+        }
+        val title = "Export failed: " + diagnostic.lineSequence().firstOrNull().orEmpty().take(80)
+        val enc: (String) -> String = { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        return "https://github.com/HereLiesAz/Guillotine/issues/new" +
+            "?title=" + enc(title) +
+            "&body=" + enc(body) +
+            "&labels=" + enc("bug,export")
     }
 
     /**
