@@ -113,6 +113,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var faceEmbedModelPath by remember { mutableStateOf(current.faceEmbedModelPath) }
     var effectModelPaths by remember { mutableStateOf(current.effectModelPaths) }
     var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
+    var asrModelPath by remember { mutableStateOf(current.asrModelPath) }
+    var ttsModelPath by remember { mutableStateOf(current.ttsModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -152,6 +154,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     idEmbedModelPath = idEmbedModelPath.trim(), faceEmbedModelPath = faceEmbedModelPath.trim(),
                     effectModelPaths = effectModelPaths,
                     audioEventModelPath = audioEventModelPath.trim(),
+                    asrModelPath = asrModelPath.trim(), ttsModelPath = ttsModelPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -176,6 +179,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             faceEmbedModelPath = restored.faceEmbedModelPath
             effectModelPaths = restored.effectModelPaths
             audioEventModelPath = restored.audioEventModelPath
+            asrModelPath = restored.asrModelPath
+            ttsModelPath = restored.ttsModelPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -442,6 +447,48 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = audioEventModelPath,
                         onUse = { audioEventModelPath = it },
                     )
+
+                    // Offline speech: sherpa-onnx ASR (speech→text) and TTS (text→speech).
+                    Text("Speech (ASR) — offline transcription (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = asrModelPath,
+                        onValueChange = { asrModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("sherpa-onnx ASR model directory", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Enables \"transcribe this accurately\" via offline Whisper (sherpa-onnx).",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "ASR models — download, use, or remove",
+                        models = recommendedModelsFor(ModelCategory.ASR),
+                        selectedPath = asrModelPath,
+                        onUse = { asrModelPath = it },
+                    )
+                    Text("Speech (TTS) — offline voiceover (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = ttsModelPath,
+                        onValueChange = { ttsModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("sherpa-onnx TTS voice directory", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Enables \"add a voiceover saying …\" via offline neural TTS (sherpa-onnx).",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "TTS voices — download, use, or remove",
+                        models = recommendedModelsFor(ModelCategory.TTS),
+                        selectedPath = ttsModelPath,
+                        onUse = { ttsModelPath = it },
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -602,6 +649,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             faceEmbedModelPath = faceEmbedModelPath.trim(),
                             effectModelPaths = effectModelPaths.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             audioEventModelPath = audioEventModelPath.trim(),
+                            asrModelPath = asrModelPath.trim(),
+                            ttsModelPath = ttsModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,

@@ -112,6 +112,10 @@ val AGENT_SYSTEM_PROMPT = """
     CAPTIONS / TRANSCRIPTION:
     - "transcribe", "add captions/subtitles" → transcribe_clip: adds timed caption text clips synced to
       the spoken words;
+    - "transcribe this accurately", "what is said in this clip?", "get the transcript" → transcribe_precise:
+      offline Whisper (sherpa-onnx) that returns the transcript TEXT (more accurate than transcribe_clip's
+      recognizer). Use it when the user wants the words themselves (to read, summarize, or act on) rather
+      than on-screen captions. Needs the ASR model in Settings → AI Analyzer → Speech (ASR).
     - "animated captions", "kinetic text", "per-word/syllable animation", "grow as said", "words appear
       as spoken" → animated_transcribe_clip: splits each word into syllables on separate tracks with
       scale keyframes that grow each syllable as it's spoken — kinetic typography;
@@ -134,6 +138,12 @@ val AGENT_SYSTEM_PROMPT = """
     - the user can add caveats ("but adapt timings to clip length", "ignore exact positions") via the
       extra_instructions parameter of stop_recording, or edit the tool later with create_user_tool;
     - discard_recording cancels without saving.
+
+    VOICEOVER / NARRATION (offline TTS):
+    - "add a voiceover saying …", "narrate this", "read this out", "make a voice say …" → add_voiceover with
+      the text (optionally a speed). It synthesizes speech ON-DEVICE (sherpa-onnx neural TTS) and adds it as
+      an audio clip. Needs the TTS voice in Settings → AI Analyzer → Speech (TTS); if it isn't set the tool
+      returns an error naming the setting — relay it, don't retry.
 
     GENERATING MEDIA (images / video / music):
     - "generate/make/create an image of X", "add a picture of X" → generate_image with the prompt;

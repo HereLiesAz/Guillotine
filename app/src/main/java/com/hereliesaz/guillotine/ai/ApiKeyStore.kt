@@ -54,6 +54,8 @@ class ApiKeyStore(context: Context) {
         effectModelPaths = EFFECT_KEYS
             .associateWith { prefs.getString("effect_model_$it", "").orEmpty() }.filterValues { it.isNotEmpty() },
         audioEventModelPath = prefs.getString(KEY_AUDIO_EVENT, "").orEmpty(),
+        asrModelPath = prefs.getString(KEY_ASR_MODEL, "").orEmpty(),
+        ttsModelPath = prefs.getString(KEY_TTS_MODEL, "").orEmpty(),
         frameAnalysisCacheSize = prefs
             .getInt(KEY_FRAME_CACHE_SIZE, FrameAnalysisCache.DEFAULT_MAX_ENTRIES)
             .coerceIn(FrameAnalysisCache.MIN_MAX_ENTRIES, FrameAnalysisCache.MAX_MAX_ENTRIES),
@@ -86,6 +88,8 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_FACE_EMBED, settings.faceEmbedModelPath)
                 EFFECT_KEYS.forEach { putString("effect_model_$it", settings.effectModelPaths[it].orEmpty()) }
                 putString(KEY_AUDIO_EVENT, settings.audioEventModelPath)
+                putString(KEY_ASR_MODEL, settings.asrModelPath)
+                putString(KEY_TTS_MODEL, settings.ttsModelPath)
                 putInt(KEY_FRAME_CACHE_SIZE, settings.frameAnalysisCacheSize)
                 GenProviderType.entries.forEach {
                     putString(genKeyPref(it), settings.genKeys[it].orEmpty())
@@ -115,6 +119,8 @@ class ApiKeyStore(context: Context) {
         const val KEY_FACE_EMBED = "face_embed_model_path"
         val EFFECT_KEYS = listOf("superres", "style", "depth")
         const val KEY_AUDIO_EVENT = "audio_event_model_path"
+        const val KEY_ASR_MODEL = "asr_model_path"
+        const val KEY_TTS_MODEL = "tts_model_path"
         const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
         fun keyPref(p: AiProviderType) = "key_${p.name}"

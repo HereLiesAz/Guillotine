@@ -90,7 +90,7 @@ face path when a face model is configured (Settings → face model).
 | Tool | Task | License | Notes |
 |---|---|---|---|
 | **whisper.cpp** | ASR (tiny 39M / base 74M / small 244M) | MIT | Runs on Android (NDK); real-time streaming demos. |
-| **sherpa-onnx** | ASR **+ TTS + VAD + diarization + source-sep** | Apache-2.0 | Best all-in-one offline speech engine. Upgrade path from Vosk. |
+| **sherpa-onnx** — **shipped** (ASR + TTS) | ASR **+ TTS + VAD + diarization + source-sep** | Apache-2.0 | Best all-in-one offline speech engine. `transcribe_precise` (offline Whisper) + `add_voiceover` (offline neural TTS); models are one-tap `.tar.bz2` downloads. VAD/diarization/source-sep remain future work. |
 | **Moonshine** | Fast English ASR | MIT | Lower latency than Whisper for English. |
 | **Piper (VITS) / Kokoro-82M** | Offline neural TTS | MIT / Apache-2.0 | Voiceover/dubbing; run via sherpa-onnx. |
 
@@ -165,9 +165,11 @@ Each item is feasible on the current stack or a model listed above.
 7. Multicam sync by audio-waveform correlation; filler-word ("um") removal.
 
 **Speech & text**
-8. Better ASR (whisper.cpp/sherpa-onnx) — multilingual, word-level captions.
+8. Better ASR (whisper.cpp/sherpa-onnx) — multilingual, word-level captions. **(shipped —
+   `transcribe_precise` via offline Whisper/sherpa-onnx)**
 9. Offline TTS voiceover / dubbing (Piper/Kokoro), voice-clone dub (ElevenLabs);
-   translate + burn foreign subtitles on-device.
+   translate + burn foreign subtitles on-device. **(voiceover shipped — `add_voiceover` via
+   offline Piper/sherpa-onnx)**
 10. Speaker diarization → auto podcast multicam switching between speakers.
 11. Voice-command editing — speak the instruction; ASR feeds the agent.
 

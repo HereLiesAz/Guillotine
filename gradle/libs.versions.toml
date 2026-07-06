@@ -37,6 +37,8 @@ userMessaging = "4.0.0"
 nanohttpd = "2.3.1"
 okhttp = "5.4.0"
 tensorflowLite = "2.16.1"
+sherpaOnnx = "v1.13.3"
+commonsCompress = "1.27.1"
 junit = "4.13.2"
 json = "20260522"
 composeMultiplatform = "1.8.1"
@@ -87,6 +89,8 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 json = { group = "org.json", name = "json", version.ref = "json" }
 tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflowLite" }
+sherpa-onnx = { group = "com.github.k2-fsa", name = "sherpa-onnx", version.ref = "sherpaOnnx" }
+commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
 javacv = { group = "org.bytedeco", name = "javacv", version.ref = "javacv" }
 javacpp = { group = "org.bytedeco", name = "javacpp", version.ref = "javacpp" }
 ffmpeg = { group = "org.bytedeco", name = "ffmpeg", version.ref = "ffmpeg" }

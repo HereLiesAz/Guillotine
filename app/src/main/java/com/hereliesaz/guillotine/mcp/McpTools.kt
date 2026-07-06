@@ -8,6 +8,8 @@ import com.hereliesaz.guillotine.ai.BeatAnalyzer
 import com.hereliesaz.guillotine.ai.FaceEmbed
 import com.hereliesaz.guillotine.ai.MlKitProvider
 import com.hereliesaz.guillotine.ai.PcmDecoder
+import com.hereliesaz.guillotine.ai.SherpaAsr
+import com.hereliesaz.guillotine.ai.SherpaTts
 import com.hereliesaz.guillotine.ai.tflite.TfliteImageModel
 import com.hereliesaz.guillotine.ai.tflite.YamnetClassifier
 import com.hereliesaz.guillotine.ai.gen.GenController
@@ -262,6 +264,33 @@ class McpTools(
             ),
         ))
 
+        // ---- offline speech (sherpa-onnx ASR + TTS) ----
+        put(toolDefinition(
+            "transcribe_precise",
+            "Transcribe a clip's audio ON-DEVICE with the offline Whisper (sherpa-onnx) model and return " +
+                "the transcript text. More accurate than transcribe_clip's lightweight recognizer; use it " +
+                "for \"what is said in this clip?\", \"transcribe this accurately\", or to get text for " +
+                "summaries / voice commands. Requires the ASR model in Settings → AI Analyzer → Speech " +
+                "(ASR); if it isn't set it returns an error naming the setting — relay it, don't retry. " +
+                "(transcribe_clip still handles adding timed on-screen captions.)",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to transcribe"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "add_voiceover",
+            "Synthesize speech from text ON-DEVICE (offline neural TTS via sherpa-onnx) and add it to the " +
+                "timeline as an audio clip. Use for \"add a voiceover saying …\", \"narrate this\", " +
+                "\"read this out\". Requires the TTS voice in Settings → AI Analyzer → Speech (TTS); if it " +
+                "isn't set it returns an error naming the setting — relay it, don't retry.",
+            objSchema(
+                "text" to stringProp("The words to speak"),
+                "speed" to numberProp("Speaking rate (default 1.0; <1 slower, >1 faster)"),
+                required = listOf("text"),
+            ),
+        ))
+
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
             "generate_image",
@@ -379,6 +408,8 @@ class McpTools(
         "align_clips_to_beats" -> alignClipsToBeats(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "beats"))
         "find_highlights" -> findHighlights(args.getString("clip_id"), args.optDouble("threshold", 0.3).toFloat(), args.optBoolean("split", true))
         "detect_scenes" -> detectScenes(args.getString("clip_id"), args.optDouble("sensitivity", 0.5).toFloat(), args.optBoolean("split", true))
+        "transcribe_precise" -> transcribePrecise(args.getString("clip_id"))
+        "add_voiceover" -> addVoiceover(args.getString("text"), args.optDouble("speed", 1.0).toFloat())
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1002,6 +1033,58 @@ class McpTools(
         var s = 0f
         for (i in a.indices) s += kotlin.math.abs(a[i] - b[i])
         return s
+    }
+
+    // ---- offline speech (sherpa-onnx ASR + TTS) -----------------------------
+
+    /** Transcribe a clip's audio with the offline sherpa-onnx Whisper model; returns the text. */
+    private fun transcribePrecise(clipId: String): JSONObject {
+        val dir = settingsProvider().asrModelPath
+        require(dir.isNotBlank()) {
+            "No ASR model set. Download Whisper in Settings → AI Analyzer → Speech (ASR)."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), YamnetClassifier.SAMPLE_RATE)
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to transcribe.")
+        val samples = YamnetClassifier.resampleTo16k(pcm.samples, pcm.sampleRate)
+        val text = SherpaAsr.transcribe(dir, samples).trim()
+        return ok().apply {
+            put("text", text)
+            put(
+                "humanSummary",
+                if (text.isEmpty()) "Transcribed the clip — no speech detected."
+                else "Transcribed the clip: \"${text.take(120)}${if (text.length > 120) "…" else ""}\"",
+            )
+        }
+    }
+
+    /** Synthesize [text] to speech with the offline sherpa-onnx voice and add it as an audio clip. */
+    private fun addVoiceover(text: String, speed: Float): JSONObject {
+        require(text.isNotBlank()) { "Give the voiceover some text to speak." }
+        val dir = settingsProvider().ttsModelPath
+        require(dir.isNotBlank()) {
+            "No TTS voice set. Download a voice in Settings → AI Analyzer → Speech (TTS)."
+        }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Synthesizing voiceover…", pausable = false,
+        ) { _ ->
+            val out = java.io.File(context.cacheDir, "voiceover_${System.currentTimeMillis()}.wav")
+            val result = SherpaTts.synthesize(dir, text.trim(), out.absolutePath, speed.coerceIn(0.5f, 2.0f))
+            val duration = result.durationMs.coerceAtLeast(500L)
+            vm.addMedia(
+                listOf(
+                    MediaItem(newId(), Uri.fromFile(out).toString(), "VO: ${text.trim().take(40)}", MediaKind.AUDIO, duration),
+                ),
+            )
+            ok().apply {
+                put("durationMs", duration)
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Added a ${msFmt(duration)} voiceover to the timeline.")
+            }
+        }
     }
 
     // ---- on-device image effects (TFLite) ----------------------------------
