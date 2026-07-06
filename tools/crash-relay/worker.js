@@ -23,6 +23,12 @@ export default {
     }
     const title = (payload.title || "App crash").toString().slice(0, 200);
     const body = (payload.body || "").toString().slice(0, 60000);
+    // Optional label list from the client — the crash handler still lands with the default,
+    // but the manual Report button on the ExportSheet passes ["bug", "export"] so the two
+    // categories stay separate in the tracker.
+    const labels = Array.isArray(payload.labels) && payload.labels.length > 0
+      ? payload.labels.map((l) => String(l).slice(0, 40)).slice(0, 5)
+      : ["crash"];
     const repo = env.GH_REPO;
     const gh = (path, init = {}) =>
       fetch(`https://api.github.com/repos/${repo}${path}`, {
@@ -56,13 +62,16 @@ export default {
       }
     }
 
+    // Preface distinguishes an automatic crash upload from a manual Report tap — the manual
+    // path already carries a formatted markdown body, so we don't wrap it in ``` again.
+    const isManual = labels.some((l) => l === "bug" || l === "export");
+    const issueBody = isManual
+      ? body
+      : "Automatically filed from an app crash.\n\n```\n" + body + "\n```";
+
     const r = await gh(`/issues`, {
       method: "POST",
-      body: JSON.stringify({
-        title,
-        body: "Automatically filed from an app crash.\n\n```\n" + body + "\n```",
-        labels: ["crash"],
-      }),
+      body: JSON.stringify({ title, body: issueBody, labels }),
     });
     return new Response(await r.text(), { status: r.status });
   },

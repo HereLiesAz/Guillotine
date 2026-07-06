@@ -85,6 +85,18 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Default relay endpoint for the Report button — a Cloudflare Worker holding a
+        // GitHub PAT that files issues on our behalf. Set via a gradle property so end users
+        // don't need a GH account (or any config) to file a bug from the app. Empty in
+        // source, set at build time via `guillotine.crashRelayUrl=https://...` in
+        // ~/.gradle/gradle.properties or as a CI secret. Runtime override still lives in
+        // Settings → Crash reporting for anyone who wants their own relay.
+        buildConfigField(
+            "String",
+            "DEFAULT_CRASH_RELAY_URL",
+            "\"${project.findProperty("guillotine.crashRelayUrl") ?: ""}\"",
+        )
     }
 
     signingConfigs {
@@ -114,6 +126,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
