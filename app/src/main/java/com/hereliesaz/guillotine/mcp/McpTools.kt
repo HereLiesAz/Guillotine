@@ -10,6 +10,7 @@ import com.hereliesaz.guillotine.ai.MlKitProvider
 import com.hereliesaz.guillotine.ai.PcmDecoder
 import com.hereliesaz.guillotine.ai.SherpaAsr
 import com.hereliesaz.guillotine.ai.SherpaTts
+import com.hereliesaz.guillotine.ai.VocalIsolator
 import com.hereliesaz.guillotine.ai.tflite.TfliteImageModel
 import com.hereliesaz.guillotine.ai.tflite.YamnetClassifier
 import com.hereliesaz.guillotine.ai.gen.GenController
@@ -290,6 +291,18 @@ class McpTools(
                 required = listOf("text"),
             ),
         ))
+        put(toolDefinition(
+            "remove_vocals",
+            "Remove the lead vocals from a clip's audio ON-DEVICE (no model/key) and add the resulting " +
+                "instrumental as a new audio clip — for karaoke / backing tracks. Use for \"remove the " +
+                "vocals\", \"make a karaoke / instrumental version\", \"strip the singing\". Uses stereo " +
+                "center-channel cancellation, so it needs a STEREO track (returns an error on mono); it's " +
+                "a lightweight instrumental extractor, not a full multi-stem split.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to process"),
+                required = listOf("clip_id"),
+            ),
+        ))
 
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
@@ -410,6 +423,7 @@ class McpTools(
         "detect_scenes" -> detectScenes(args.getString("clip_id"), args.optDouble("sensitivity", 0.5).toFloat(), args.optBoolean("split", true))
         "transcribe_precise" -> transcribePrecise(args.getString("clip_id"))
         "add_voiceover" -> addVoiceover(args.getString("text"), args.optDouble("speed", 1.0).toFloat())
+        "remove_vocals" -> removeVocals(args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1083,6 +1097,34 @@ class McpTools(
                 put("durationMs", duration)
                 put("clipCount", vm.uiState.value.document.clips.size)
                 put("humanSummary", "Added a ${msFmt(duration)} voiceover to the timeline.")
+            }
+        }
+    }
+
+    /** Remove center-panned vocals (karaoke) from a clip's stereo audio and add the instrumental. */
+    private fun removeVocals(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Removing vocals…", pausable = false,
+        ) { _ ->
+            val out = java.io.File(context.cacheDir, "instrumental_${System.currentTimeMillis()}.wav")
+            val duration = VocalIsolator.removeVocals(context, Uri.parse(media.uri), out.absolutePath)
+                ?: throw IllegalStateException(
+                    "Couldn't remove vocals — the clip needs a stereo audio track (center-channel " +
+                        "cancellation can't work on mono).",
+                )
+            vm.addMedia(
+                listOf(
+                    MediaItem(newId(), Uri.fromFile(out).toString(), "Instrumental: ${media.name}", MediaKind.AUDIO, duration),
+                ),
+            )
+            ok().apply {
+                put("durationMs", duration)
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Added a ${msFmt(duration)} vocals-removed (instrumental) track.")
             }
         }
     }
