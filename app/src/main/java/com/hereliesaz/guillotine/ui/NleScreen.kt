@@ -382,6 +382,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onOpenProject = { openLauncher() },
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
+            onSettings = { showSettings = true },
             onAiComparison = { showAiComparison = true },
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
@@ -632,6 +633,7 @@ private fun TopBar(
     onOpenProject: () -> Unit,
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
+    onSettings: () -> Unit,
     onAiComparison: () -> Unit,
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
@@ -649,27 +651,28 @@ private fun TopBar(
         // resolve their own color via `takeOrElse { MaterialTheme.colorScheme.primary }` and
         // aren't affected by this override.
         CompositionLocalProvider(LocalContentColor provides Red500) {
-        AzDropdownMenu {
-            // showFooter=true: the AzNavRail footer adds About / Feedback / @HereLiesAz. "About"
-            // opens the in-app markdown reader, which auto-discovers the repo's root + docs/ .md
-            // files (a .azignore at the repo root excludes dev-only docs from that list).
-            azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp, showFooter = true)
-            azItem("New") { onNewProject() }
-            azItem("Open") { onOpenProject() }
-            azItem("Save") { onNameProject() }
-            azItem("Import") { onImport() }
-            azItem("Generate") { onGenerate() }
-            azItem("Render") { onExport() }
-            azDivider()
-            azItem("Project") { onProjectSettings() }
-            azItem("Compare AI") { onAiComparison() }
-            azItem("Tutorial") { onTutorial() }
-            azItem("FAQ") { onFaq() }
-            azItem("Icon Key") { onHelp() }
-            // AzNavRail draws its own primary-tinted divider above the footer (About / Feedback /
-            // @HereLiesAz) automatically when showFooter = true \u2014 an explicit azDivider() here
-            // would double up as two white/red lines. Let the library handle it.
-        }
+            AzDropdownMenu {
+                // showFooter=true: the AzNavRail footer adds About / Feedback / @HereLiesAz. "About"
+                // opens the in-app markdown reader, which auto-discovers the repo's root + docs/ .md
+                // files (a .azignore at the repo root excludes dev-only docs from that list).
+                azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp, showFooter = true)
+                azItem("New") { onNewProject() }
+                azItem("Open") { onOpenProject() }
+                azItem("Save") { onNameProject() }
+                azItem("Import") { onImport() }
+                azItem("Generate") { onGenerate() }
+                azItem("Render") { onExport() }
+                azDivider()
+                azItem("Project") { onProjectSettings() }
+                azItem("Settings") { onSettings() }
+                azItem("Compare AI") { onAiComparison() }
+                azItem("Tutorial") { onTutorial() }
+                azItem("FAQ") { onFaq() }
+                azItem("Icon Key") { onHelp() }
+                // AzNavRail draws its own primary-tinted divider above the footer (About / Feedback /
+                // @HereLiesAz) automatically when showFooter = true \u2014 an explicit azDivider() here
+                // would double up as two white/red lines. Let the library handle it.
+            }
         }
         Text(
             state.document.name.ifBlank { "Untitled project" },
