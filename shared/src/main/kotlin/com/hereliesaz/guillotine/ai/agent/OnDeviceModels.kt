@@ -186,10 +186,58 @@ val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
  */
 val RECOMMENDED_FACE_MODELS: List<OnDeviceModel> = emptyList()
 
+/**
+ * Recommended depth-estimation `.tflite` models for the "depth this frame" effect. "Use" sets
+ * `effectModelPaths["depth"]`. Single image in → single depth map out; [TfliteImageModel] normalizes the
+ * map to a visible greyscale image.
+ */
+val RECOMMENDED_DEPTH_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "midas-small-256-fp16",
+        label = "MiDaS-small — monocular depth",
+        fileName = "midas_small_256_fp16.tflite",
+        sizeBytes = 33_507_904L,
+        license = "MIT / Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("litert-community/MiDaS-small"),
+        downloadUrl = hfResolve("litert-community/MiDaS-small", "midas_small_256_fp16.tflite"),
+        abilities = "Estimates a per-pixel depth map from a single frame (256×256). Clean drop-in — for depth-of-field, parallax, or a depth-map look.",
+        limitations = "Relative (not metric) depth. 256×256 output is upscaled to the frame.",
+        category = ModelCategory.DEPTH,
+    ),
+)
+
+/**
+ * Recommended super-resolution `.tflite` models for the "upscale / enhance this frame" effect. "Use"
+ * sets `effectModelPaths["superres"]`. Single image in → single (larger) image out.
+ */
+val RECOMMENDED_SUPERRES_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "real-esrgan-x4v3",
+        label = "Real-ESRGAN ×4 (general v3) — upscale",
+        fileName = "realesr_general_x4v3.tflite",
+        sizeBytes = 3_549_456L,
+        license = "BSD-3-Clause",
+        gated = false,
+        repoUrl = hfRepo("litert-community/real-esrgan-x4v3-litert"),
+        downloadUrl = hfResolve("litert-community/real-esrgan-x4v3-litert", "realesr_general_x4v3.tflite"),
+        abilities = "4× super-resolution on a 128×128 tile (→512×512). Tiny (3.5 MB), good for sharpening a low-res still or a cropped frame.",
+        limitations = "Operates on a 128×128 input tile; large frames are downscaled first. Best for stills, heavy for full video.",
+        category = ModelCategory.SUPERRES,
+    ),
+)
+
+// Style transfer intentionally has no recommended download: the only common style `.tflite` files are
+// the two-input Magenta arbitrary-stylization pair (predict + transform), which don't fit the
+// single-image-in/out TfliteImageModel runtime. Users can still point the style path at a compatible
+// single-input model of their own.
+
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
     ModelCategory.RECOGNITION -> RECOMMENDED_RECOGNITION_MODELS
     ModelCategory.FACE -> RECOMMENDED_FACE_MODELS
+    ModelCategory.DEPTH -> RECOMMENDED_DEPTH_MODELS
+    ModelCategory.SUPERRES -> RECOMMENDED_SUPERRES_MODELS
     else -> emptyList()
 }

@@ -68,6 +68,8 @@ import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_FACE_MODELS
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_RECOGNITION_MODELS
+import com.hereliesaz.guillotine.ai.agent.ModelCategory
+import com.hereliesaz.guillotine.ai.agent.recommendedModelsFor
 import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.ai.gen.GenKind
 import com.hereliesaz.guillotine.ai.gen.GenProviderType
@@ -386,10 +388,10 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     // editor's apply_image_effect tool runs it on the current frame.
                     Text("Image effects — on-device TFLite models (optional)", color = Neutral400, fontSize = 12.sp)
                     listOf(
-                        "superres" to "Super-resolution model path (.tflite)",
-                        "style" to "Style-transfer model path (.tflite)",
-                        "depth" to "Depth model path (.tflite)",
-                    ).forEach { (kind, hint) ->
+                        Triple("superres", "Super-resolution model path (.tflite)", ModelCategory.SUPERRES),
+                        Triple("style", "Style-transfer model path (.tflite)", ModelCategory.STYLE),
+                        Triple("depth", "Depth model path (.tflite)", ModelCategory.DEPTH),
+                    ).forEach { (kind, hint, cat) ->
                         OutlinedTextField(
                             value = effectModelPaths[kind].orEmpty(),
                             onValueChange = { effectModelPaths = effectModelPaths + (kind to it) },
@@ -398,6 +400,16 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             textStyle = TextStyle(color = White, fontSize = 12.sp),
                             singleLine = true,
                         )
+                        val recs = recommendedModelsFor(cat)
+                        if (recs.isNotEmpty()) {
+                            ModelPicker(
+                                context = context,
+                                title = "$kind models — download, use, or remove",
+                                models = recs,
+                                selectedPath = effectModelPaths[kind].orEmpty(),
+                                onUse = { effectModelPaths = effectModelPaths + (kind to it) },
+                            )
+                        }
                     }
                     Text(
                         "Image→image TFLite models (e.g. ESRGAN, Magenta style transfer, MiDaS). Then ask the " +

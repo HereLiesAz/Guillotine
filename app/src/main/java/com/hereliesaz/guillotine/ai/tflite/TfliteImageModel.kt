@@ -75,23 +75,67 @@ class TfliteImageModel(modelPath: String) : Closeable {
         return buf
     }
 
-    /** Read an NHWC output [buf] back into an ARGB bitmap; float outputs are assumed `[0,1]`. */
+    /** Decoded output geometry: image [h]×[w] with [c] channels, laid out channel-first if [nchw]. */
+    private data class Dims(val h: Int, val w: Int, val c: Int, val nchw: Boolean)
+
+    /**
+     * Work out the image geometry + memory layout of an output tensor. Real models vary: RGB super-res
+     * emits NCHW `[1,3,H,W]`; MiDaS depth emits `[1,H,W]` (single channel, no channel dim); classic
+     * models emit NHWC `[1,H,W,3]`. The channel dim is the one that's 1/3/4.
+     */
+    private fun decodeShape(s: IntArray): Dims = when (s.size) {
+        4 -> {
+            val d1 = s[1]; val d2 = s[2]; val d3 = s[3]
+            when {
+                d3 == 1 || d3 == 3 || d3 == 4 -> Dims(d1, d2, d3, false) // NHWC
+                d1 == 1 || d1 == 3 || d1 == 4 -> Dims(d2, d3, d1, true)  // NCHW
+                else -> Dims(d1, d2, d3, false)
+            }
+        }
+        3 -> when {
+            s[0] == 1 -> Dims(s[1], s[2], 1, false)                       // [1,H,W] depth map
+            s[2] == 1 || s[2] == 3 || s[2] == 4 -> Dims(s[0], s[1], s[2], false) // [H,W,C]
+            else -> Dims(s[1], s[2], 1, false)
+        }
+        2 -> Dims(s[0], s[1], 1, false)
+        else -> Dims(0, 0, 0, false)
+    }
+
+    /**
+     * Read the output [buf] back into an ARGB bitmap, honouring NHWC/NCHW layout. RGB float outputs are
+     * assumed `[0,1]` (×255); a single-channel float map (depth) is min–max normalized to `[0,255]` so it
+     * renders as a visible greyscale depth image regardless of the model's raw value range.
+     */
     private fun bufferToBitmap(buf: ByteBuffer, shape: IntArray, isFloat: Boolean): Bitmap {
-        val h = shape.getOrElse(shape.size - 3) { 0 }
-        val w = shape.getOrElse(shape.size - 2) { 0 }
-        val c = shape.getOrElse(shape.size - 1) { 3 }
+        val (h, w, c, nchw) = decodeShape(shape)
         require(h > 0 && w > 0) { "Model output has no image dimensions." }
-        fun next(): Int {
-            var v = if (isFloat) buf.float * 255f else (buf.get().toInt() and 0xFF).toFloat()
+        val n = h * w * c
+        val vals = FloatArray(n) { if (isFloat) buf.float else (buf.get().toInt() and 0xFF).toFloat() }
+
+        // Scaling: RGB [0,1]→[0,255]; single-channel float depth → min–max stretch; uint8 already 0–255.
+        val depthMap = isFloat && c == 1
+        var lo = 0f; var span = 1f
+        if (depthMap) {
+            var mn = Float.MAX_VALUE; var mx = -Float.MAX_VALUE
+            for (v in vals) { if (v < mn) mn = v; if (v > mx) mx = v }
+            lo = mn; span = (mx - mn).takeIf { it > 1e-6f } ?: 1f
+        }
+        fun sample(y: Int, x: Int, ch: Int): Int {
+            val idx = if (nchw) ch * h * w + y * w + x else (y * w + x) * c + ch
+            val raw = vals[idx]
+            val v = when {
+                depthMap -> (raw - lo) / span * 255f
+                isFloat -> raw * 255f
+                else -> raw
+            }
             return v.toInt().coerceIn(0, 255)
         }
         val out = IntArray(w * h)
-        for (i in 0 until w * h) {
-            val r = next()
-            val g = if (c >= 3) next() else r
-            val b = if (c >= 3) next() else r
-            if (c > 3) repeat(c - 3) { if (isFloat) buf.float else buf.get() } // skip alpha/extra channels
-            out[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        for (y in 0 until h) for (x in 0 until w) {
+            val r = sample(y, x, 0)
+            val g = if (c >= 3) sample(y, x, 1) else r
+            val b = if (c >= 3) sample(y, x, 2) else r
+            out[y * w + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
         }
         return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
     }
