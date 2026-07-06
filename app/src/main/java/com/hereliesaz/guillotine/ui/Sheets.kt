@@ -601,6 +601,7 @@ fun ExportSheet(
     var name by remember { mutableStateOf("guillotine_export") }
     var errorExpanded by remember { mutableStateOf(false) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     Dialog(onDismissRequest = { if (!isExporting) onDismiss() }) {
         SheetCard {
             Text("Export", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -654,9 +655,11 @@ fun ExportSheet(
                                         .padding(top = 4.dp, bottom = 4.dp),
                                 )
                             }
-                            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
-                                // clickable-before-padding so the padding is part of the touch target
-                                // (a 10.sp "Show details" tap area would be uncomfortably tiny otherwise).
+                            // Left-align these — Cancel / Start render live on the right. Keeping the
+                            // secondary actions on the LEFT means an accidental tap can't land on
+                            // Cancel and dismiss the sheet mid-diagnosis. clickable-before-padding
+                            // so the padding is part of the touch target for the 10.sp text.
+                            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.Start) {
                                 Text(
                                     if (errorExpanded) "Hide details" else "Show details",
                                     color = Neutral400,
@@ -665,13 +668,27 @@ fun ExportSheet(
                                         .clickableText { errorExpanded = !errorExpanded }
                                         .padding(end = 12.dp),
                                 )
+                                // Open a pre-filled GitHub issue in the browser instead of dropping
+                                // the diagnostic on the clipboard and hoping the user files it.
+                                // The URL carries the title/body already; sender just hits Submit.
                                 Text(
-                                    "Copy",
+                                    "Report",
                                     color = Neutral400,
                                     fontSize = 10.sp,
                                     modifier = Modifier
                                         .clickableText {
-                                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg))
+                                            val url = com.hereliesaz.guillotine.export.Exporter.buildIssueUrl(context, msg)
+                                            runCatching {
+                                                val intent = android.content.Intent(
+                                                    android.content.Intent.ACTION_VIEW,
+                                                    android.net.Uri.parse(url),
+                                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                context.startActivity(intent)
+                                            }.onFailure {
+                                                // Fallback: copy to clipboard so the user still has
+                                                // something to paste if no browser handles the URL.
+                                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg))
+                                            }
                                         }
                                         .padding(4.dp),
                                 )
