@@ -126,7 +126,7 @@ class AssistantViewModel : ViewModel() {
      * "cut this clip" is left alone while "cut this" / "remove that" is treated as a preview reference.
      */
     private fun referencesPreview(text: String): Boolean {
-        val t = " ${text.lowercase()} "
+        val t = " ${text.lowercase(java.util.Locale.ROOT)} "
         val strong = listOf(
             "on screen", "on-screen", "on the screen", "in the frame", "in frame", "current frame",
             "this frame", "that frame", "in the preview", "on the preview", "right here",
@@ -134,10 +134,7 @@ class AssistantViewModel : ViewModel() {
             "this object", "that object", "the thing here", "am i looking at", "highlighted",
         )
         if (strong.any { t.contains(it) }) return true
-        val deictic = Regex("\\b(this|that|these|those|it)\\b").containsMatchIn(t)
-        val timelineNoun = Regex("\\b(clip|clips|track|tracks|timeline|selection|layer|layers)\\b")
-            .containsMatchIn(t)
-        return deictic && !timelineNoun
+        return DEICTIC_REGEX.containsMatchIn(t) && !TIMELINE_NOUN_REGEX.containsMatchIn(t)
     }
 
     /**
@@ -152,25 +149,29 @@ class AssistantViewModel : ViewModel() {
             runCatching { tools.call("describe_current_frame", JSONObject()) }.getOrNull()
         } ?: return instruction
         if (result.has("error")) return instruction
-        val clipId = result.optString("clipId")
-        val objects = result.optJSONArray("objects")
-        val objList = buildString {
-            if (objects != null) for (i in 0 until objects.length()) {
-                val o = objects.getJSONObject(i)
-                if (i > 0) append(", ")
-                append(o.optString("label")).append(" (").append(o.optInt("confidence")).append("%)")
+        return try {
+            val clipId = result.optString("clipId")
+            val objects = result.optJSONArray("objects")
+            val objList = buildString {
+                if (objects != null) for (i in 0 until objects.length()) {
+                    val o = objects.optJSONObject(i) ?: continue
+                    if (isNotEmpty()) append(", ")
+                    append(o.optString("label")).append(" (").append(o.optInt("confidence")).append("%)")
+                }
             }
-        }
-        return instruction + buildString {
-            append("\n\n[CONTEXT — the user's wording may refer to the current preview frame. ")
-            append("On-device vision of the frame at the playhead")
-            if (clipId.isNotBlank()) append(" (clip $clipId)")
-            append(": ")
-            append(if (objList.isBlank()) "no recognisable objects." else "$objList.")
-            append(" If they're asking WHAT is on screen, answer from this. If they're pointing at a ")
-            append("specific object to ACT on, set_prompt that object on the clip then use ")
-            append("analyze_clip_with_reference (it tracks THAT instance). If you can't tell whether they ")
-            append("mean an on-screen object or a whole clip, ask one short question.]")
+            instruction + buildString {
+                append("\n\n[CONTEXT — the user's wording may refer to the current preview frame. ")
+                append("On-device vision of the frame at the playhead")
+                if (clipId.isNotBlank()) append(" (clip $clipId)")
+                append(": ")
+                append(if (objList.isBlank()) "no recognisable objects." else "$objList.")
+                append(" If they're asking WHAT is on screen, answer from this. If they're pointing at a ")
+                append("specific object to ACT on, set_prompt that object on the clip then use ")
+                append("analyze_clip_with_reference (it tracks THAT instance). If you can't tell whether they ")
+                append("mean an on-screen object or a whole clip, ask one short question.]")
+            }
+        } catch (e: Exception) {
+            instruction
         }
     }
 
@@ -212,5 +213,11 @@ class AssistantViewModel : ViewModel() {
                 is AgentEvent.Failed -> st.copy(status = event.message, running = false, isError = true)
             }
         }
+    }
+
+    private companion object {
+        // Compiled once — cheap, but avoids rebuilding on every prompt.
+        val DEICTIC_REGEX = Regex("\\b(this|that|these|those|it)\\b")
+        val TIMELINE_NOUN_REGEX = Regex("\\b(clip|clips|track|tracks|timeline|selection|layer|layers)\\b")
     }
 }
