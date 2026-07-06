@@ -39,6 +39,22 @@ class MlKitProvider : ClipAnalyzer {
 
     private data class Intent(val terms: List<String>, val keepMatches: Boolean, val useFaces: Boolean)
 
+    /** One frame's on-device verdict: whether it matched, the labels vision saw, and the term that hit. */
+    private data class Verdict(val matched: Boolean, val labels: List<String>, val term: String?)
+
+    /** Short mm:ss.d timestamp for finding lines in the activity feed. */
+    private fun tsFmt(ms: Long): String {
+        val s = ms / 1000.0
+        return if (s < 60) String.format(java.util.Locale.US, "%.1fs", s)
+        else String.format(java.util.Locale.US, "%d:%02.0f", (ms / 60000L), (ms % 60000L) / 1000.0)
+    }
+
+    /** Build a feed line describing what a frame contained and its fate. */
+    private fun findingLine(atMs: Long, v: Verdict, keep: Boolean): String {
+        val labels = if (v.labels.isEmpty()) "nothing recognized" else v.labels.joinToString(", ")
+        return "${tsFmt(atMs)} · $labels · ${if (keep) "keep" else "cut"}"
+    }
+
     override suspend fun analyze(
         context: Context,
         mediaUri: Uri,
@@ -71,17 +87,19 @@ class MlKitProvider : ClipAnalyzer {
             sceneClassifier?.available != true
 
         val uriStr = mediaUri.toString()
-        val match: (Long, Bitmap) -> Boolean = { atMs, bmp ->
+        val match: (Long, Bitmap) -> Verdict = { atMs, bmp ->
             qualifies(uriStr, atMs, bmp, intent, labeler, faceDetector, objectVision, sceneClassifier, useMlKitFallback)
         }
         try {
             if (kind == MediaKind.IMAGE) {
                 val bmp = decodeImage(context, mediaUri)
                     ?: throw IllegalStateException("Could not read image for on-device vision.")
-                val matched = match(0L, bmp)
+                val v = match(0L, bmp)
                 bmp.recycle()
-                val action = if (matched == intent.keepMatches) EditAction.KEEP else EditAction.REMOVE
-                listOf(EditSegment(0, durationMs, action, if (matched) "match" else "no match"))
+                val keep = v.matched == intent.keepMatches
+                onProgress(AnalysisProgress("Analyzed image", 1f, if (v.matched) 1 else 0, findingLine(0, v, keep)))
+                val action = if (keep) EditAction.KEEP else EditAction.REMOVE
+                listOf(EditSegment(0, durationMs, action, v.term ?: "no match"))
             } else {
                 scanVideo(context, mediaUri, durationMs, intent.keepMatches, onProgress, checkpoint, match)
             }
@@ -126,32 +144,36 @@ class MlKitProvider : ClipAnalyzer {
             } else null
 
             val uriStr = mediaUri.toString()
-            val match: (Long, Bitmap) -> Boolean = if (refEmbedding != null) {
+            val match: (Long, Bitmap) -> Verdict = if (refEmbedding != null) {
                 { atMs, bmp ->
-                    FrameAnalysisCache.detections(uriStr, atMs) { objectVision.detect(bmp) }
+                    val dets = FrameAnalysisCache.detections(uriStr, atMs) { objectVision.detect(bmp) }
                         .filter { matchesTerm(it.label) }
-                        .any { d ->
-                            val c = crop(bmp, d.box) ?: return@any false
-                            try {
-                                val e = embed.embed(c) ?: return@any false
-                                embed.similarity(refEmbedding, e) >= REF_THRESHOLD
-                            } finally {
-                                if (c !== bmp) c.recycle()
-                            }
+                    val hit = dets.any { d ->
+                        val c = crop(bmp, d.box) ?: return@any false
+                        try {
+                            val e = embed.embed(c) ?: return@any false
+                            embed.similarity(refEmbedding, e) >= REF_THRESHOLD
+                        } finally {
+                            if (c !== bmp) c.recycle()
                         }
+                    }
+                    val labels = dets.map { it.label }.distinct().take(5)
+                    Verdict(hit, labels, if (hit) labels.firstOrNull() else null)
                 }
             } else {
                 { atMs, bmp ->
-                    objectVision.available && FrameAnalysisCache
-                        .objectLabels(uriStr, atMs) { objectVision.labels(bmp) }
-                        .any { matchesTerm(it) }
+                    val labs = FrameAnalysisCache.objectLabels(uriStr, atMs) { objectVision.labels(bmp) }
+                    val term = if (objectVision.available) labs.firstOrNull { matchesTerm(it) } else null
+                    Verdict(term != null, labs.take(5), term)
                 }
             }
 
             if (kind == MediaKind.IMAGE) {
-                val matched = match(0L, reference)
-                val action = if (matched == parsed.keepMatches) EditAction.KEEP else EditAction.REMOVE
-                listOf(EditSegment(0, durationMs, action, if (matched) "match" else "no match"))
+                val v = match(0L, reference)
+                val keep = v.matched == parsed.keepMatches
+                onProgress(AnalysisProgress("Analyzed image", 1f, if (v.matched) 1 else 0, findingLine(0, v, keep)))
+                val action = if (keep) EditAction.KEEP else EditAction.REMOVE
+                listOf(EditSegment(0, durationMs, action, v.term ?: "no match"))
             } else {
                 scanVideo(context, mediaUri, durationMs, parsed.keepMatches, onProgress, checkpoint, match)
             }
@@ -183,10 +205,11 @@ class MlKitProvider : ClipAnalyzer {
         keepMatches: Boolean,
         onProgress: (AnalysisProgress) -> Unit,
         checkpoint: () -> Unit,
-        match: (atMs: Long, bmp: Bitmap) -> Boolean,
+        match: (atMs: Long, bmp: Bitmap) -> Verdict,
     ): List<EditSegment> {
         val retriever = MediaMetadataRetriever()
         val matched = mutableListOf<LongRange>()
+        val matchedTerms = LinkedHashSet<String>()
         try {
             retriever.setDataSource(context, uri)
             val dur = if (durationMs > 0) durationMs
@@ -206,22 +229,24 @@ class MlKitProvider : ClipAnalyzer {
             var matchCount = 0
             var streak = 0         // consecutive same-result samples
             var lastResult = false // result of the previous sample
+            var firstEmitted = false
 
-            fun probe(atMs: Long): Boolean? {
+            fun probe(atMs: Long): Verdict? {
                 if (checks >= MAX_CHECKS) return null
                 checkpoint()
                 val bmp = retriever.getFrameAtTime(atMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                     ?: return null
-                val result = match(atMs, bmp)
+                val v = match(atMs, bmp)
                 bmp.recycle()
                 checks++
-                return result
+                if (v.matched) v.term?.let { matchedTerms.add(it) }
+                return v
             }
 
-            fun reportProgress(atMs: Long) {
+            fun reportProgress(atMs: Long, finding: String?) {
                 val curFrame = (atMs * fps / 1000f).toLong().coerceAtMost(totalFrames)
                 val fraction = (atMs.toFloat() / dur).coerceIn(0f, 1f)
-                onProgress(AnalysisProgress("Frame $curFrame of $totalFrames", fraction, matchCount))
+                onProgress(AnalysisProgress("Frame $curFrame of $totalFrames", fraction, matchCount, finding))
             }
 
             fun binaryRefine(matchSide: Long, missSide: Long) {
@@ -230,17 +255,18 @@ class MlKitProvider : ClipAnalyzer {
                 while (hi - lo > baseStep && checks < MAX_CHECKS) {
                     val mid = (lo + hi) / 2
                     checkpoint()
-                    val midResult = probe(mid) ?: break
-                    if (midResult) {
+                    val midV = probe(mid) ?: break
+                    if (midV.matched) {
                         matched += (mid - halfMs).coerceAtLeast(0L)..(mid + halfMs).coerceAtMost(dur)
                         matchCount++
                     }
-                    if (midResult == (matchSide < missSide)) lo = mid else hi = mid
+                    if (midV.matched == (matchSide < missSide)) lo = mid else hi = mid
                 }
             }
 
             while (t <= dur && checks < MAX_CHECKS) {
-                val result = probe(t) ?: break
+                val v = probe(t) ?: break
+                val result = v.matched
 
                 if (result) {
                     matched += (t - halfMs).coerceAtLeast(0L)..(t + halfMs).coerceAtMost(dur)
@@ -257,7 +283,13 @@ class MlKitProvider : ClipAnalyzer {
                     streak++
                 }
 
-                reportProgress(t)
+                // Emit a feed finding at the first sample and at each region boundary (entering or
+                // leaving a matching stretch) — enough to show what's in the clip and why a region is
+                // kept or cut, without a line per frame (the frame counter stays live on the progress
+                // indicator).
+                val boundary = !firstEmitted || result != lastResult
+                reportProgress(t, if (boundary) findingLine(t, v, result == keepMatches) else null)
+                firstEmitted = true
                 lastResult = result
 
                 // Accelerate through stable regions: after 3+ identical consecutive results,
@@ -276,7 +308,7 @@ class MlKitProvider : ClipAnalyzer {
         } finally {
             runCatching { retriever.release() }
         }
-        return buildCover(mergeRanges(matched), durationMs, keepMatches)
+        return buildCover(mergeRanges(matched), durationMs, keepMatches, matchedTerms.joinToString(", "))
     }
 
     private fun qualifies(
@@ -289,42 +321,40 @@ class MlKitProvider : ClipAnalyzer {
         objectVision: ObjectVision?,
         sceneClassifier: SceneClassifier?,
         useMlKitFallback: Boolean,
-    ): Boolean {
+    ): Verdict {
+        fun matchIn(labels: Collection<String>): String? =
+            labels.firstOrNull { o -> intent.terms.any { t -> o.contains(t) || t.contains(o) } }
+
         if (intent.useFaces && faceDetector != null) {
             val image = InputImage.fromBitmap(bmp, 0)
-            return Tasks.await(faceDetector.process(image)).isNotEmpty()
+            val present = Tasks.await(faceDetector.process(image)).isNotEmpty()
+            return Verdict(present, if (present) listOf("face") else emptyList(), if (present) "face" else null)
         }
+        val seen = LinkedHashSet<String>()
         // Tier 1: precise COCO bounding-box detection (EfficientDet-Lite2).
         if (objectVision != null && objectVision.available) {
             val ovLabels = FrameAnalysisCache.objectLabels(uri, atMs) { objectVision.labels(bmp) }
-            if (ovLabels.any { o -> intent.terms.any { t -> o.contains(t) || t.contains(o) } }) {
-                return true
-            }
+            seen += ovLabels
+            matchIn(ovLabels)?.let { return Verdict(true, seen.take(5).toList(), it) }
         }
         // Tier 2: fine-grained ImageNet classification (~1000 categories).
         if (sceneClassifier != null && sceneClassifier.available) {
             val scene = FrameAnalysisCache.classifierLabels(uri, atMs) { sceneClassifier.classify(bmp) }
-            if (scene.any { label ->
-                    label.confidence >= 0.2f && intent.terms.any { t ->
-                        label.lowerText.contains(t) || t.contains(label.lowerText)
-                    }
-                }) {
-                return true
-            }
+                .filter { it.confidence >= 0.2f }
+            seen += scene.map { it.lowerText }
+            matchIn(scene.map { it.lowerText })?.let { return Verdict(true, seen.take(5).toList(), it) }
         }
-        if (!useMlKitFallback) return false
+        if (!useMlKitFallback) return Verdict(false, seen.take(5).toList(), null)
         // Tier 3: ML Kit generic labels (tertiary fallback when both models unavailable).
         val mlLabels = FrameAnalysisCache.sceneLabels(uri, atMs) {
             val image = InputImage.fromBitmap(bmp, 0)
             Tasks.await(labeler.process(image)).map {
                 FrameAnalysisCache.SceneLabel(it.text, it.text.lowercase(), it.confidence)
             }
-        }
-        return mlLabels.any { label ->
-            label.confidence >= 0.5f && intent.terms.any { t ->
-                label.lowerText.contains(t) || t.contains(label.lowerText)
-            }
-        }
+        }.filter { it.confidence >= 0.5f }
+        seen += mlLabels.map { it.lowerText }
+        matchIn(mlLabels.map { it.lowerText })?.let { return Verdict(true, seen.take(5).toList(), it) }
+        return Verdict(false, seen.take(5).toList(), null)
     }
 
     private fun decodeImage(context: Context, uri: Uri): Bitmap? =
@@ -387,20 +417,29 @@ class MlKitProvider : ClipAnalyzer {
     }
 
     /** Tile [0, dur]: matched regions get the match action, gaps the opposite. */
-    private fun buildCover(matched: List<LongRange>, dur: Long, keepMatches: Boolean): List<EditSegment> {
+    private fun buildCover(
+        matched: List<LongRange>,
+        dur: Long,
+        keepMatches: Boolean,
+        matchLabel: String = "",
+    ): List<EditSegment> {
         val matchAction = if (keepMatches) EditAction.KEEP else EditAction.REMOVE
         val other = if (keepMatches) EditAction.REMOVE else EditAction.KEEP
+        // Reason strings explain each range in the activity feed: matched ranges name what was found;
+        // the gaps say the search term was absent.
+        val found = matchLabel.ifBlank { "match" }
+        val absent = if (matchLabel.isBlank()) "no match" else "no $matchLabel"
         val out = mutableListOf<EditSegment>()
         var cursor = 0L
         for (r in matched) {
             val s = r.first.coerceIn(0, dur)
             val e = r.last.coerceIn(0, dur)
             if (e <= s) continue
-            if (s > cursor) out += EditSegment(cursor, s, other, "no match")
-            out += EditSegment(s, e, matchAction, "match")
+            if (s > cursor) out += EditSegment(cursor, s, other, absent)
+            out += EditSegment(s, e, matchAction, found)
             cursor = e
         }
-        if (cursor < dur) out += EditSegment(cursor, dur, other, "no match")
+        if (cursor < dur) out += EditSegment(cursor, dur, other, absent)
         return out
     }
 

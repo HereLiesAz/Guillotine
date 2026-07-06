@@ -159,10 +159,17 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // AzNavRail bottom sheet. The single AI prompt stays in the tool strip; this sheet is output-only.
     val logEntries by ActivityLog.entries.collectAsState()
     val sheetController = rememberAzSheetController(initial = AzSheetDetent.HIDDEN)
-    // Analysis progress stages → log (deduped inside ActivityLog).
+    // Analysis progress → log. The frame counter ("Frame X of Y") stays live on the process
+    // indicator and is intentionally NOT dumped into the feed (that was all the sheet used to show).
+    // Instead the feed gets the per-region findings (what vision saw + keep/cut decision) and the
+    // narrative stages ("Decoding audio…", "Transcribing…").
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        vm.uiState.map { it.analysisProgress?.stage }.distinctUntilChanged().collect { stage ->
-            if (!stage.isNullOrBlank()) ActivityLog.progress(stage)
+        vm.uiState.map { it.analysisProgress }.distinctUntilChanged().collect { p ->
+            if (p == null) return@collect
+            p.finding?.let { ActivityLog.info(it) }
+            if (p.stage.isNotBlank() && !p.stage.startsWith("Frame ") && p.stage != "Analyzed image") {
+                ActivityLog.progress(p.stage)
+            }
         }
     }
     // Editor errors → log. Clear after logging so a later identical error is reported again.
@@ -292,9 +299,24 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     },
                     checkpoint = sink::checkpointBlocking,
                 )
+                // Report the exact actions to the feed so the user sees what was cut and why.
+                val name = media.name
+                val removed = edits.filter { it.action == com.hereliesaz.guillotine.model.EditAction.REMOVE }
+                if (removed.isEmpty()) {
+                    ActivityLog.info("No matching frames in \"$name\" — nothing to cut.")
+                } else {
+                    val totalMs = removed.sumOf { it.endMs - it.startMs }
+                    ActivityLog.info(
+                        "Cutting ${removed.size} region(s) (${fmtSecs(totalMs)}) from \"$name\":",
+                    )
+                    removed.take(12).forEach {
+                        ActivityLog.info("  · ${fmtSecs(it.startMs)}–${fmtSecs(it.endMs)} — ${it.reason}")
+                    }
+                    if (removed.size > 12) ActivityLog.info("  · …and ${removed.size - 12} more")
+                }
                 // Real cut, atomically: split into the kept pieces and delete the matched ranges (ripple
                 // closed), never persisting REMOVE marks on the timeline. Matches the agent's analyze_clip.
-                if (edits.any { it.action == com.hereliesaz.guillotine.model.EditAction.REMOVE }) {
+                if (removed.isNotEmpty()) {
                     vm.applyCuts(clip.id, edits)
                 }
             }
@@ -1038,4 +1060,11 @@ private fun handleKey(e: KeyEvent, vm: EditorViewModel): Boolean {
         !ctrl && e.key == Key.S -> { vm.splitAtPlayhead(); true }
         else -> false
     }
+}
+
+/** Compact seconds / M:SS timestamp for activity-feed action lines. */
+private fun fmtSecs(ms: Long): String {
+    val abs = ms.coerceAtLeast(0L)
+    return if (abs < 60_000L) String.format(java.util.Locale.US, "%.1fs", abs / 1000.0)
+    else String.format(java.util.Locale.US, "%d:%02d", abs / 60_000L, (abs % 60_000L) / 1000L)
 }

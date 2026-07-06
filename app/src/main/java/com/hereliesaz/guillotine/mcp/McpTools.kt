@@ -20,6 +20,7 @@ import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.newId
 import com.hereliesaz.guillotine.operation.OperationController
 import com.hereliesaz.guillotine.operation.OperationKind
+import com.hereliesaz.guillotine.ui.ActivityLog
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -353,7 +354,10 @@ class McpTools(
             ?: throw IllegalArgumentException("No media for clip: $clipId")
         require(clip.prompt.isNotBlank()) { "Clip has no prompt. Use set_prompt first." }
         val edits = runBlocking {
-            Analysis.run(context, settingsProvider(), Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs)
+            Analysis.run(
+                context, settingsProvider(), Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
+                onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
+            )
         }
         return analyzeResult(clipId, edits)
     }
@@ -367,9 +371,20 @@ class McpTools(
      */
     private fun analyzeResult(clipId: String, edits: List<EditSegment>): JSONObject {
         val cutApplied = edits.any { it.action == EditAction.REMOVE }
-        val removedMs = edits.filter { it.action == EditAction.REMOVE }.sumOf { it.endMs - it.startMs }
+        val removed = edits.filter { it.action == EditAction.REMOVE }
+        val removedMs = removed.sumOf { it.endMs - it.startMs }
         val keptCount = edits.count { it.action == EditAction.KEEP }
-        val removedCount = edits.count { it.action == EditAction.REMOVE }
+        val removedCount = removed.size
+        // Surface the exact actions (and why) in the activity feed, not just to the agent.
+        if (removed.isEmpty()) {
+            ActivityLog.info("No matching frames — nothing to cut.")
+        } else {
+            ActivityLog.info("Cutting $removedCount region(s) (${msFmt(removedMs)}):")
+            removed.take(12).forEach {
+                ActivityLog.info("  · ${msFmt(it.startMs)}–${msFmt(it.endMs)} — ${it.reason}")
+            }
+            if (removed.size > 12) ActivityLog.info("  · …and ${removed.size - 12} more")
+        }
         if (cutApplied) vm.applyCuts(clipId, edits)
         val newClipCount = vm.uiState.value.document.clips.size
         val newTotal = vm.uiState.value.document.totalDurationMs
@@ -460,6 +475,7 @@ class McpTools(
         val edits = runBlocking {
             MlKitProvider().analyzeWithReference(
                 context, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs, reference,
+                onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
             )
         }
         reference.recycle()
