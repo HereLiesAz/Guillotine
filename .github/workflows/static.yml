@@ -26,7 +26,8 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      # Whichever of the three retry attempts ended up succeeding.
+      url: ${{ steps.deploy1.outputs.page_url || steps.deploy2.outputs.page_url || steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -43,6 +44,30 @@ jobs:
         with:
           # Upload docs folder
           path: './docs/'
-      - name: Deploy to GitHub Pages
+      # actions/deploy-pages@v5 has no built-in retry. The Pages backend intermittently returns
+      # "Deployment failed, try again later" within seconds — usually a transient race with a
+      # prior deployment still finalizing on the Pages side (Actions' concurrency group only
+      # serializes the workflow, not the backend). Try up to three times with a short pause.
+      - name: Deploy to GitHub Pages (attempt 1)
+        id: deploy1
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - name: Pause before retry
+        if: steps.deploy1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Deploy to GitHub Pages (attempt 2)
+        id: deploy2
+        if: steps.deploy1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - name: Pause before final retry
+        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        run: sleep 60
+
+      - name: Deploy to GitHub Pages (final attempt)
         id: deployment
+        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
         uses: actions/deploy-pages@v5
