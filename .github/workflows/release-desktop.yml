@@ -1,0 +1,82 @@
+name: Release Desktop Installers
+
+# On every push of a tag matching v* (e.g. v1.0.0, v1.0.0-rc1), build native installers on
+# all three OSes and attach them to the matching GitHub Release. Also supports manual
+# dispatch against an existing release for re-uploads / hotfixes.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to attach installers to (e.g. v1.0.0)'
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            task: packageDeb
+            path: desktop/build/compose/binaries/main/deb/*.deb
+          - os: macos-latest
+            task: packageDmg
+            path: desktop/build/compose/binaries/main/dmg/*.dmg
+          - os: windows-latest
+            task: packageMsi
+            path: desktop/build/compose/binaries/main/msi/*.msi
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: false
+          dependency-graph: disabled
+
+      - name: Grant execute permission for gradlew
+        if: runner.os != 'Windows'
+        run: chmod +x gradlew
+
+      - name: ${{ matrix.task }}
+        shell: bash
+        run: ./gradlew :desktop:${{ matrix.task }} --build-cache --stacktrace
+
+      # softprops/action-gh-release@v2 upserts assets on the release matching the tag ref
+      # (or the workflow_dispatch input). Unsigned installers show scary OS prompts on
+      # first launch — that's called out in the release body.
+      - name: Attach installer to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: ${{ matrix.path }}
+          fail_on_unmatched_files: true
+          body: |
+            ## Guillotine desktop installers
+
+            Unsigned builds. First-launch instructions:
+
+            - **macOS**: Right-click the app in `/Applications` → **Open** → **Open** on the "unidentified developer" dialog.
+            - **Windows**: If SmartScreen blocks the installer, click **More info** → **Run anyway**.
+            - **Linux**: `sudo apt install ./guillotine_*.deb`.
