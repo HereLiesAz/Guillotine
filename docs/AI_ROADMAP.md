@@ -57,9 +57,9 @@ upgradeable to a TFLite-exported BeatNet/TempoCNN or aubio/Essentia via NDK.
 | Task | Model | License | Feasibility |
 |---|---|---|---|
 | Background / general matting | U²-Net, MODNet, BiRefNet (RMBG-1.4 = non-commercial) | Apache/MIT | Convert to TFLite; beyond ML Kit selfie. |
-| Depth | **MiDaS-small** (~16 MB), **Depth Anything V2-small** (25M) | MIT / Apache | Proven on Android → bokeh, parallax. |
-| Super-resolution | Real-ESRGAN / ESRGAN | BSD-3 | Tile-by-tile; heavy for video, fine for stills. |
-| Style transfer | Magenta Arbitrary Stylization TFLite | Apache-2.0 | Real-time capable, official example. |
+| Depth | **MiDaS-small** (~33 MB) — **shipped** (one-tap download) | MIT / Apache | Proven on Android → bokeh, parallax. Runs via the generic `TfliteImageModel`. |
+| Super-resolution | **Real-ESRGAN ×4 v3** (3.5 MB) — **shipped** (one-tap download) | BSD-3 | Tile-by-tile (128²→512²); heavy for video, fine for stills. |
+| Style transfer | Magenta Arbitrary Stylization TFLite | Apache-2.0 | Real-time capable, but the official model is **two-input** (content+style) so it doesn't fit the single-image `TfliteImageModel` — left as a bring-your-own-path option. |
 | Optical flow | OpenCV (Farnebäck/DIS) or RAFT | BSD | Classical runs easily; RAFT heavy. |
 | Shot detection | Histogram diff (in-code) or TransNetV2 | MIT | Cheap content-difference on-device. |
 | Captioning / VLM | SmolVLM 256M/500M, Moondream 0.5B, Florence-2, **Gemma 3n** | Apache/MIT | Lightest true on-device VLMs; or reuse Gemma 3n. |
