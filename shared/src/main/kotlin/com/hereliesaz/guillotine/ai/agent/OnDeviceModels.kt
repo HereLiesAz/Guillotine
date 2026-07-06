@@ -126,6 +126,20 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         abilities = "Compact and fast with good reasoning. Smallest download of the full-capability models.",
         limitations = "Requires a free Hugging Face sign-in to download (Gemma license).",
     ),
+    OnDeviceModel(
+        id = "deepseek-r1-qwen-1.5b-q8",
+        label = "DeepSeek-R1 Distill Qwen 1.5B (q8) — reasoning",
+        fileName = "deepseek_q8_ekv1280.task",
+        sizeBytes = 1_860_686_856L,
+        license = "MIT",
+        gated = false,
+        repoUrl = hfRepo("litert-community/DeepSeek-R1-Distill-Qwen-1.5B"),
+        downloadUrl = hfResolve("litert-community/DeepSeek-R1-Distill-Qwen-1.5B", "deepseek_q8_ekv1280.task"),
+        abilities = "Strong step-by-step reasoning for its size (distilled R1). Good for multi-step edits.",
+        limitations = "1.86 GB download. Its reasoning traces can be verbose.",
+    ),
+    // Note: Qwen3 and Gemma-3n ship only as `.litertlm`, which needs a newer MediaPipe runtime than
+    // this build loads (`.task`), so they're intentionally omitted from the download list for now.
 )
 
 /**
@@ -133,10 +147,40 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
  * These are MediaPipe ImageEmbedder-compatible `.tflite` files; "Use" sets `idEmbedModelPath`.
  * Populated with verified Hugging Face downloads.
  */
-val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = emptyList()
+val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "mobilenet-v3-large-embed",
+        label = "MobileNet-V3 Large — stronger recognition",
+        fileName = "mobilenet_v3_large.tflite",
+        sizeBytes = 10_889_458L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder",
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_large/float32/1/mobilenet_v3_large.tflite",
+        abilities = "A stronger, still-fast general embedder — better \"same thing?\" matching than the bundled small model. MediaPipe-native (has embedding metadata).",
+        limitations = "Slightly larger/slower than the default.",
+        category = ModelCategory.RECOGNITION,
+    ),
+    OnDeviceModel(
+        id = "efficientnet-lite0-embed",
+        label = "EfficientNet-Lite0 — higher-quality features",
+        fileName = "efficientnet_lite0.tflite",
+        sizeBytes = 18_582_189L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder",
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/float32/1/efficientnet_lite0.tflite",
+        abilities = "Richer features for instance matching, MediaPipe-compatible (metadata included).",
+        limitations = "~18 MB; a bit slower per frame than MobileNet.",
+        category = ModelCategory.RECOGNITION,
+    ),
+)
 
 /**
  * Recommended face-embedding models for identifying a specific person. "Use" sets `faceEmbedModelPath`.
+ * Empty for now: no ready-to-use, MediaPipe-metadata, commercially-licensed 512-d face `.tflite` is
+ * published on Hugging Face (MobileFaceNet tflites are 192-d app assets; EdgeFace ships PyTorch under a
+ * non-commercial license). Users can still point the face-model path at their own converted model.
  */
 val RECOMMENDED_FACE_MODELS: List<OnDeviceModel> = emptyList()
 
