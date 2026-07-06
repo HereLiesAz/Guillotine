@@ -170,7 +170,6 @@ dependencies {
     implementation(libs.mediapipe.tasks.genai)
     implementation(libs.mediapipe.tasks.vision)
     implementation(libs.tensorflow.lite)
-    implementation(libs.tensorflow.lite.support)
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)
     implementation(libs.play.services.ads)

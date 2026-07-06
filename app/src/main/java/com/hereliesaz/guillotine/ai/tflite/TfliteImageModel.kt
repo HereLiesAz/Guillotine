@@ -3,13 +3,10 @@ package com.hereliesaz.guillotine.ai.tflite
 import android.graphics.Bitmap
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.support.image.ImageProcessor
-import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.support.image.ops.ResizeOp
-import org.tensorflow.lite.support.common.ops.NormalizeOp
-import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
 import java.io.Closeable
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * Generic on-device image→image TFLite runtime (raw LiteRT `Interpreter`). Powers the on-device image
@@ -18,7 +15,9 @@ import java.io.File
  *
  * It reads the model's own input size and dtype, so different models drop in without code changes. It
  * assumes the common float `[0,1]` (or uint8 `[0,255]`) convention; a model using a different range may
- * need per-model tuning. On-device only — pixels never leave the device.
+ * need per-model tuning. Uses only the core `org.tensorflow:tensorflow-lite` runtime (no
+ * tensorflow-lite-support, which collides with MediaPipe's bundled TFLite at manifest-merge). Input and
+ * output are packed/read as raw NHWC [ByteBuffer]s by hand. On-device only — pixels never leave the device.
  */
 class TfliteImageModel(modelPath: String) : Closeable {
 
@@ -38,45 +37,63 @@ class TfliteImageModel(modelPath: String) : Closeable {
             val w = inShape.getOrElse(2) { 256 }
             val inFloat = inTensor.dataType() == DataType.FLOAT32
 
-            var image = TensorImage(inTensor.dataType())
-            image.load(input)
-            image = ImageProcessor.Builder()
-                .add(ResizeOp(h, w, ResizeOp.ResizeMethod.BILINEAR))
-                .apply { if (inFloat) add(NormalizeOp(0f, 255f)) } // uint8 [0,255] → float [0,1]
-                .build()
-                .process(image)
+            val scaled = if (input.width != w || input.height != h) {
+                Bitmap.createScaledBitmap(input, w, h, true)
+            } else input
+            val inBuf = bitmapToBuffer(scaled, h, w, inFloat)
 
             val outTensor = itp.getOutputTensor(0)
             val outShape = outTensor.shape()
-            val outBuf = TensorBuffer.createFixedSize(outShape, outTensor.dataType())
-            outBuf.buffer.rewind()
-            itp.run(image.buffer, outBuf.buffer)
-            outputToBitmap(outBuf, outShape, outTensor.dataType() == DataType.FLOAT32)
+            val outFloat = outTensor.dataType() == DataType.FLOAT32
+            val outBytesPer = if (outFloat) 4 else 1
+            val outCount = outShape.fold(1) { acc, d -> acc * d }
+            val outBuf = ByteBuffer.allocateDirect(outCount * outBytesPer).order(ByteOrder.nativeOrder())
+
+            itp.run(inBuf, outBuf)
+            outBuf.rewind()
+            bufferToBitmap(outBuf, outShape, outFloat)
         }.getOrNull()
     }
 
-    private fun outputToBitmap(buf: TensorBuffer, shape: IntArray, isFloat: Boolean): Bitmap {
+    /** Pack an [h]×[w] bitmap into an NHWC buffer: float32 `[0,1]` or uint8 `[0,255]`. */
+    private fun bitmapToBuffer(bmp: Bitmap, h: Int, w: Int, isFloat: Boolean): ByteBuffer {
+        val bytesPer = if (isFloat) 4 else 1
+        val buf = ByteBuffer.allocateDirect(w * h * 3 * bytesPer).order(ByteOrder.nativeOrder())
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, 0, 0, w, h)
+        for (p in px) {
+            val r = (p shr 16) and 0xFF
+            val g = (p shr 8) and 0xFF
+            val b = p and 0xFF
+            if (isFloat) {
+                buf.putFloat(r / 255f); buf.putFloat(g / 255f); buf.putFloat(b / 255f)
+            } else {
+                buf.put(r.toByte()); buf.put(g.toByte()); buf.put(b.toByte())
+            }
+        }
+        buf.rewind()
+        return buf
+    }
+
+    /** Read an NHWC output [buf] back into an ARGB bitmap; float outputs are assumed `[0,1]`. */
+    private fun bufferToBitmap(buf: ByteBuffer, shape: IntArray, isFloat: Boolean): Bitmap {
         val h = shape.getOrElse(shape.size - 3) { 0 }
         val w = shape.getOrElse(shape.size - 2) { 0 }
         val c = shape.getOrElse(shape.size - 1) { 3 }
         require(h > 0 && w > 0) { "Model output has no image dimensions." }
-        val floats = buf.floatArray // dequantized for uint8 buffers
-        val px = IntArray(w * h)
-        for (y in 0 until h) {
-            for (x in 0 until w) {
-                val base = (y * w + x) * c
-                fun ch(o: Int): Int {
-                    var v = floats.getOrElse(base + o) { 0f }
-                    if (isFloat) v *= 255f // float outputs are assumed [0,1]
-                    return v.toInt().coerceIn(0, 255)
-                }
-                val r = ch(0)
-                val g = if (c >= 3) ch(1) else r
-                val b = if (c >= 3) ch(2) else r
-                px[y * w + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
+        fun next(): Int {
+            var v = if (isFloat) buf.float * 255f else (buf.get().toInt() and 0xFF).toFloat()
+            return v.toInt().coerceIn(0, 255)
         }
-        return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
+        val out = IntArray(w * h)
+        for (i in 0 until w * h) {
+            val r = next()
+            val g = if (c >= 3) next() else r
+            val b = if (c >= 3) next() else r
+            if (c > 3) repeat(c - 3) { if (isFloat) buf.float else buf.get() } // skip alpha/extra channels
+            out[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
     }
 
     override fun close() {
