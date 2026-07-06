@@ -43,6 +43,8 @@ data class EditorUiState(
     val isProcessing: Boolean = false,
     val analysisProgress: com.hereliesaz.guillotine.ai.AnalysisProgress? = null,
     val error: String? = null,
+    /** Human-readable name of the current export phase, e.g. "Building Transformer". Cleared when export ends. */
+    val exportPhase: String? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
 ) {
@@ -1211,7 +1213,20 @@ open class EditorViewModel {
     }
 
     fun setProcessing(processing: Boolean, error: String? = null) {
-        _uiState.update { it.copy(isProcessing = processing, error = error) }
+        _uiState.update {
+            it.copy(
+                isProcessing = processing,
+                error = error,
+                // End-of-work should always clear the export phase; a stale "Building Transformer"
+                // line hanging after success or failure is confusing.
+                exportPhase = if (processing) it.exportPhase else null,
+            )
+        }
+    }
+
+    /** Set (or clear with null) the human-readable current export phase; shown in ExportSheet. */
+    fun setExportPhase(phase: String?) {
+        _uiState.update { it.copy(exportPhase = phase) }
     }
 
     fun setAnalysisProgress(progress: com.hereliesaz.guillotine.ai.AnalysisProgress?) {

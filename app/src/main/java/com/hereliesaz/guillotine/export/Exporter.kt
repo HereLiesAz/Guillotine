@@ -36,6 +36,7 @@ import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.TimelineMath
+import com.hereliesaz.guillotine.ui.ActivityLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -65,24 +66,49 @@ object Exporter {
         document: Document,
         outputName: String,
         onProgress: (Float) -> Unit,
+        onPhase: (String) -> Unit = {},
     ): Uri = withContext(Dispatchers.Main) {
+        fun phase(name: String) {
+            onPhase(name)
+            ActivityLog.info(name)
+        }
+
         // Peak-normalization gains for clips with "Normalize audio" — computed off the main thread
         // (reuses the cached waveform decoder) before the Transformer is built on Main.
-        val normalizeGains = withContext(Dispatchers.IO) { computeNormalizeGains(context, document) }
+        val normalizeCount = document.clips.count { it.filters.normalize }
+        if (normalizeCount > 0) phase("Analyzing audio levels for $normalizeCount clip(s)…")
+        val normalizeGains = withContext(Dispatchers.IO) {
+            runCatching { computeNormalizeGains(context, document) }
+                .onFailure { ActivityLog.error("Normalize scan failed: ${describeCauseChain(it)}") }
+                .getOrDefault(emptyMap())
+        }
+
         // Background-removal mattes are segmented off the main thread up front (not per render frame).
-        val mattes = withContext(Dispatchers.IO) { precomputeMattes(context, document) }
+        val matteCandidates = document.clips.count { it.type == ClipType.VIDEO && it.filters.removeBackground }
+        if (matteCandidates > 0) phase("Precomputing subject mattes for $matteCandidates clip(s)…")
+        val mattes = withContext(Dispatchers.IO) {
+            runCatching { precomputeMattes(context, document) }
+                .onFailure { ActivityLog.error("Matte precompute failed: ${describeCauseChain(it)}") }
+                .getOrDefault(emptyMap())
+        }
+
         try {
+            phase("Building export composition…")
             val composition = buildComposition(document, normalizeGains, mattes)
             require(composition != null) { "Nothing to export — add a video clip first." }
 
             val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
 
+            phase("Encoding video and audio…")
             coroutineScope {
                 var poller: Job? = null
                 try {
                     suspendCancellableCoroutine { cont ->
                         val transformer = Transformer.Builder(context)
                             .setVideoMimeType(MimeTypes.VIDEO_H264)
+                            // Media3's MP4 muxer rejects Opus/Vorbis/FLAC source audio; force AAC
+                            // re-encode so mixed-codec projects don't die with a bare "Export failed".
+                            .setAudioMimeType(MimeTypes.AUDIO_AAC)
                             .addListener(object : Transformer.Listener {
                                 override fun onCompleted(c: Composition, result: ExportResult) {
                                     if (cont.isActive) cont.resume(Unit)
@@ -96,9 +122,17 @@ object Exporter {
 
                         poller = launch {
                             val holder = ProgressHolder()
+                            var lastMilestone = -1
                             while (isActive) {
                                 transformer.getProgress(holder)
-                                onProgress((holder.progress / 100f).coerceIn(0f, 1f))
+                                val p = (holder.progress / 100f).coerceIn(0f, 1f)
+                                onProgress(p)
+                                // Emit at 25/50/75/100 so the log tells a story without spamming it.
+                                val ms = (p * 4).toInt()
+                                if (ms > lastMilestone && ms in 1..4) {
+                                    lastMilestone = ms
+                                    ActivityLog.progress("Encoding ${ms * 25}%…")
+                                }
                                 delay(200)
                             }
                         }
@@ -112,6 +146,7 @@ object Exporter {
             }
 
             onProgress(1f)
+            phase("Saving to gallery…")
             // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
             // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.
             withContext(Dispatchers.IO) {
@@ -123,6 +158,39 @@ object Exporter {
             // Free the precomputed matte bitmaps once the encode is done (or it failed/cancelled).
             mattes.values.forEach { runCatching { it.recycle() } }
         }
+    }
+
+    /**
+     * Turn any export failure into an actionable, copyable diagnostic. Media3's [ExportException]
+     * often carries a null message and puts the real detail on errorCode/errorCodeName/cause, so
+     * a naive `e.message ?: "Export failed"` throws that away. This walks the cause chain and
+     * pulls the code + first non-null message it finds.
+     */
+    fun describeExportError(e: Throwable): String {
+        val head = when (e) {
+            is ExportException -> {
+                val name = runCatching { ExportException.getErrorCodeName(e.errorCode) }.getOrNull()
+                    ?: "ERROR_CODE_${e.errorCode}"
+                "Media3 export failed: $name (code ${e.errorCode})"
+            }
+            else -> e.javaClass.simpleName + (e.message?.let { ": $it" } ?: "")
+        }
+        val chain = describeCauseChain(e)
+        return if (chain.isEmpty() || chain == e.message) head else "$head\n\n$chain"
+    }
+
+    /** Join every non-null message in the cause chain with " ← " so the root cause is visible. */
+    private fun describeCauseChain(e: Throwable): String {
+        val parts = mutableListOf<String>()
+        var cur: Throwable? = e
+        val seen = HashSet<Throwable>()
+        while (cur != null && seen.add(cur)) {
+            val msg = cur.message?.trim().orEmpty()
+            val label = cur.javaClass.simpleName
+            parts += if (msg.isNotEmpty()) "$label: $msg" else label
+            cur = cur.cause
+        }
+        return parts.joinToString(" ← ")
     }
 
     /**

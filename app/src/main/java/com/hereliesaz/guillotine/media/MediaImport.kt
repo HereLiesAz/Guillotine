@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.newId
+import com.hereliesaz.guillotine.ui.ActivityLog
 
 /**
  * Imports media via the Storage Access Framework. SAF (unlike the Photo Picker)
@@ -45,6 +46,7 @@ object MediaImport {
 
         var durationMs = 0L
         var hasAudio = false
+        var retrieverError: String? = null
         if (kind != MediaKind.IMAGE) {
             val retriever = MediaMetadataRetriever()
             try {
@@ -57,8 +59,8 @@ object MediaImport {
                 hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes"
                 if (!hasVideo && hasAudio) kind = MediaKind.AUDIO
                 else if (hasVideo) kind = MediaKind.VIDEO
-            } catch (_: Exception) {
-                // Leave kind/duration as best-effort defaults.
+            } catch (e: Exception) {
+                retrieverError = "${e.javaClass.simpleName}: ${e.message ?: "no detail"}"
             } finally {
                 runCatching { retriever.release() }
             }
@@ -69,7 +71,11 @@ object MediaImport {
         // it would land on the timeline as an invisible zero-width blip and confuse every downstream
         // operation. Images legitimately have durationMs == 0 here; the editor's addMedia gives them
         // a default display duration when they become clips.
-        if (kind != MediaKind.IMAGE && durationMs <= 0L) return null
+        if (kind != MediaKind.IMAGE && durationMs <= 0L) {
+            val reason = retrieverError ?: "unreadable or zero-duration media"
+            ActivityLog.error("Skipped \"$name\" — $reason")
+            return null
+        }
 
         return MediaItem(
             id = newId(),

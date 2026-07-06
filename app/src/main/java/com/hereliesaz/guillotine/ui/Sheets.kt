@@ -592,12 +592,15 @@ fun ExportSheet(
     totalDurationMs: Long,
     isExporting: Boolean,
     progress: Float,
+    exportPhase: String?,
     doneMessage: String?,
     errorMessage: String?,
     onStart: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember { mutableStateOf("guillotine_export") }
+    var errorExpanded by remember { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     Dialog(onDismissRequest = { if (!isExporting) onDismiss() }) {
         SheetCard {
             Text("Export", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -614,6 +617,9 @@ fun ExportSheet(
                     LoadingIndicator()
                     Text("Rendering… ${(progress * 100).toInt()}%", color = Neutral400, fontSize = 12.sp)
                     LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, color = Red500, modifier = Modifier.fillMaxWidth())
+                    // The user reported "no idea why it failed" — showing the current phase means
+                    // they can also tell WHEN it's slow and WHERE it dies if it fails.
+                    exportPhase?.let { Text(it, color = Neutral500, fontSize = 11.sp) }
                 }
                 else -> {
                     OutlinedTextField(
@@ -624,7 +630,48 @@ fun ExportSheet(
                         singleLine = true,
                     )
                     Text("Duration: ${"%.1f".format(totalDurationMs / 1000f)}s → Movies/Guillotine", color = Neutral500, fontSize = 11.sp)
-                    errorMessage?.let { Text(it, color = Red500, fontSize = 11.sp) }
+                    errorMessage?.let { msg ->
+                        // Collapsed: headline (first line). Expanded: full cause chain + Copy button.
+                        // The Media3 diagnostic string carries the errorCodeName, code, and every cause
+                        // — long, but every line is useful when reporting a bug.
+                        val headline = msg.substringBefore("\n").ifBlank { msg }
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(
+                                headline,
+                                color = Red500,
+                                fontSize = 11.sp,
+                                modifier = Modifier.fillMaxWidth().clickableText { errorExpanded = !errorExpanded },
+                            )
+                            if (errorExpanded && msg.length > headline.length) {
+                                Text(
+                                    msg.substringAfter("\n").trim(),
+                                    color = Neutral400,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 220.dp)
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(top = 4.dp, bottom = 4.dp),
+                                )
+                            }
+                            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+                                Text(
+                                    if (errorExpanded) "Hide details" else "Show details",
+                                    color = Neutral400,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.padding(end = 12.dp).clickableText { errorExpanded = !errorExpanded },
+                                )
+                                Text(
+                                    "Copy",
+                                    color = Neutral400,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.clickableText {
+                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(msg))
+                                    },
+                                )
+                            }
+                        }
+                    }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cancel", color = Neutral400, fontSize = 12.sp, modifier = Modifier.padding(end = 16.dp).clickableText(onDismiss))
                         Button(onClick = { onStart(name) }, colors = ButtonDefaults.buttonColors(containerColor = Red500)) {
