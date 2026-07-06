@@ -14,7 +14,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 import com.hereliesaz.guillotine.ui.ActivityLog
 
@@ -60,11 +65,23 @@ object ModelDownloadManager {
         return File(context.getExternalFilesDir(null) ?: context.filesDir, name).apply { mkdirs() }
     }
 
-    /** Absolute path of [model] if it's fully downloaded (present at its expected size), else null. */
+    /** Directory an archive model extracts into (named by the model id, inside its category dir). */
+    private fun archiveDir(context: Context, model: OnDeviceModel): File =
+        File(modelsDir(context, model.category), model.id)
+
+    /**
+     * Absolute path of [model] if it's fully installed, else null. For a single-file model that's the
+     * file at its expected size; for an archive model it's the extracted directory (verified by the
+     * presence of [OnDeviceModel.archiveMarker]).
+     */
     fun installedPath(context: Context, model: OnDeviceModel): String? =
-        File(modelsDir(context, model.category), model.fileName)
-            .takeIf { it.isFile && it.length() == model.sizeBytes }
-            ?.absolutePath
+        if (model.isArchive) {
+            archiveDir(context, model).takeIf { File(it, model.archiveMarker).isFile }?.absolutePath
+        } else {
+            File(modelsDir(context, model.category), model.fileName)
+                .takeIf { it.isFile && it.length() == model.sizeBytes }
+                ?.absolutePath
+        }
 
     /**
      * Bytes already on disk from an interrupted download of [model] (its `.part` file), or 0 if none.
@@ -83,6 +100,7 @@ object ModelDownloadManager {
         val dir = modelsDir(context, model.category)
         runCatching { File(dir, model.fileName).delete() }
         runCatching { File(dir, "${model.fileName}.part").delete() }
+        if (model.isArchive) runCatching { archiveDir(context, model).deleteRecursively() }
         // If a terminal state was pinned to this model, clear it so the UI refreshes cleanly.
         val s = _state.value
         if ((s as? DownloadState.Done)?.modelId == model.id || (s as? DownloadState.Failed)?.modelId == model.id) {
@@ -127,8 +145,10 @@ object ModelDownloadManager {
                 model.id, (resumeFrom.toFloat() / model.sizeBytes).coerceIn(0f, 1f), resumeFrom, model.sizeBytes,
             )
             try {
-                // Only the still-missing bytes need to fit on disk.
-                if (availableBytes(dir) < (model.sizeBytes - resumeFrom) + SAFETY_MARGIN) {
+                // Only the still-missing bytes need to fit on disk. An archive also needs room for its
+                // extracted contents alongside the bundle, so reserve extra headroom for those.
+                val extractHeadroom = if (model.isArchive) model.sizeBytes * 2 else 0L
+                if (availableBytes(dir) < (model.sizeBytes - resumeFrom) + extractHeadroom + SAFETY_MARGIN) {
                     throw IllegalStateException("Not enough free space for ${model.sizeLabel}.")
                 }
                 val request = Request.Builder().url(url).apply {
@@ -163,12 +183,25 @@ object ModelDownloadManager {
                         }
                     }
                 }
-                if (partFile.length() != model.sizeBytes) {
-                    throw IllegalStateException("Downloaded file is incomplete; try again.")
+                if (model.isArchive) {
+                    // Archive sizes are approximate (the exact byte count isn't published), so don't
+                    // enforce a size match — verify by extracting and checking the marker file instead.
+                    val destDir = archiveDir(context, model)
+                    runCatching { destDir.deleteRecursively() }
+                    extractTarBz2(partFile, destDir)
+                    partFile.delete()
+                    if (!File(destDir, model.archiveMarker).isFile) {
+                        throw IllegalStateException("Model archive did not contain ${model.archiveMarker}.")
+                    }
+                    _state.value = DownloadState.Done(model.id, destDir.absolutePath)
+                } else {
+                    if (partFile.length() != model.sizeBytes) {
+                        throw IllegalStateException("Downloaded file is incomplete; try again.")
+                    }
+                    finalFile.delete()
+                    if (!partFile.renameTo(finalFile)) throw IllegalStateException("Could not save the model file.")
+                    _state.value = DownloadState.Done(model.id, finalFile.absolutePath)
                 }
-                finalFile.delete()
-                if (!partFile.renameTo(finalFile)) throw IllegalStateException("Could not save the model file.")
-                _state.value = DownloadState.Done(model.id, finalFile.absolutePath)
             } catch (e: Throwable) {
                 // Keep the `.part` file so the next start resumes — both on user cancel and on transient
                 // network failure. (A size-mismatch "incomplete" is also resumable: the tail is retried.)
@@ -182,6 +215,35 @@ object ModelDownloadManager {
                 ActivityLog.error("Model download for \"${model.id}\" failed — $msg")
             } finally {
                 job = null
+            }
+        }
+    }
+
+    /**
+     * Extract a `.tar.bz2` [archive] into [destDir], stripping the single top-level directory the
+     * sherpa-onnx bundles wrap their files in (so the config can point straight at [destDir]).
+     */
+    private fun extractTarBz2(archive: File, destDir: File) {
+        destDir.mkdirs()
+        BufferedInputStream(FileInputStream(archive)).use { fis ->
+            BZip2CompressorInputStream(fis).use { bz ->
+                TarArchiveInputStream(bz).use { tar ->
+                    var entry = tar.nextEntry
+                    while (entry != null) {
+                        // Drop the leading path component ("sherpa-onnx-.../foo" -> "foo").
+                        val rel = entry.name.substringAfter('/', "")
+                        if (rel.isNotEmpty()) {
+                            val out = File(destDir, rel)
+                            if (entry.isDirectory) {
+                                out.mkdirs()
+                            } else {
+                                out.parentFile?.mkdirs()
+                                FileOutputStream(out).use { tar.copyTo(it) }
+                            }
+                        }
+                        entry = tar.nextEntry
+                    }
+                }
             }
         }
     }

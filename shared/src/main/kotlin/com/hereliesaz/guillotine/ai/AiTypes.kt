@@ -111,6 +111,10 @@ data class AiSettings(
     val effectModelPaths: Map<String, String> = emptyMap(),
     /** Optional on-device YAMNet audio-event `.tflite` for highlight detection; blank = feature off. */
     val audioEventModelPath: String = "",
+    /** Optional sherpa-onnx offline ASR model *directory* (extracted bundle); blank = feature off. */
+    val asrModelPath: String = "",
+    /** Optional sherpa-onnx offline TTS voice *directory* (extracted bundle); blank = feature off. */
+    val ttsModelPath: String = "",
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */

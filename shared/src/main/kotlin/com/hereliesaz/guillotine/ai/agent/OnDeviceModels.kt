@@ -50,6 +50,14 @@ data class OnDeviceModel(
     val bundled: Boolean = false,
     /** Which runtime this model is for (drives storage dir + how "Use" wires it). */
     val category: ModelCategory = ModelCategory.ASSISTANT_LLM,
+    /**
+     * True if [downloadUrl] is a `.tar.bz2` bundle of several files (sherpa-onnx models) that must be
+     * extracted into a per-model directory rather than used as a single file. When set, "Use" wires the
+     * extracted *directory* path (not a single file) and installed-ness is checked via [archiveMarker].
+     */
+    val isArchive: Boolean = false,
+    /** For archive models: a file, relative to the extracted directory, that must exist once installed. */
+    val archiveMarker: String = "",
 ) {
     /** Human-readable size, e.g. "1.46 GB" or "167 MB". */
     val sizeLabel: String get() {
@@ -260,6 +268,50 @@ val RECOMMENDED_AUDIO_EVENT_MODELS: List<OnDeviceModel> = listOf(
     ),
 )
 
+/**
+ * Recommended offline ASR (speech-to-text) models for sherpa-onnx. Multi-file `.tar.bz2` bundles
+ * extracted into a per-model directory; "Use" sets `asrModelPath` to that directory.
+ */
+val RECOMMENDED_ASR_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "sherpa-whisper-tiny-en",
+        label = "Whisper tiny.en — accurate captions",
+        fileName = "sherpa-onnx-whisper-tiny.en.tar.bz2",
+        sizeBytes = 113_000_000L, // approximate compressed size (for the free-space check / progress)
+        license = "MIT",
+        gated = false,
+        repoUrl = hfRepo("csukuangfj/sherpa-onnx-whisper-tiny.en"),
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.en.tar.bz2",
+        abilities = "Word-level English transcription (OpenAI Whisper tiny) — sharper captions than the lightweight default recognizer.",
+        limitations = "~100 MB. English only; runs offline via sherpa-onnx.",
+        isArchive = true,
+        archiveMarker = "tiny.en-encoder.int8.onnx",
+        category = ModelCategory.ASR,
+    ),
+)
+
+/**
+ * Recommended offline TTS (text-to-speech) voices for sherpa-onnx. Multi-file `.tar.bz2` bundles;
+ * "Use" sets `ttsModelPath` to the extracted directory.
+ */
+val RECOMMENDED_TTS_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "sherpa-piper-en-us-amy-low",
+        label = "Piper — Amy (US English) voice",
+        fileName = "vits-piper-en_US-amy-low.tar.bz2",
+        sizeBytes = 30_000_000L, // approximate
+        license = "MIT (verify the voice's dataset license before commercial use)",
+        gated = false,
+        repoUrl = hfRepo("csukuangfj/vits-piper-en_US-amy-low"),
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-low.tar.bz2",
+        abilities = "Offline neural text-to-speech for voiceover / narration (Piper VITS).",
+        limitations = "~30 MB. One English voice; runs offline via sherpa-onnx.",
+        isArchive = true,
+        archiveMarker = "en_US-amy-low.onnx",
+        category = ModelCategory.TTS,
+    ),
+)
+
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
@@ -268,5 +320,7 @@ fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (c
     ModelCategory.DEPTH -> RECOMMENDED_DEPTH_MODELS
     ModelCategory.SUPERRES -> RECOMMENDED_SUPERRES_MODELS
     ModelCategory.AUDIO_EVENT -> RECOMMENDED_AUDIO_EVENT_MODELS
+    ModelCategory.ASR -> RECOMMENDED_ASR_MODELS
+    ModelCategory.TTS -> RECOMMENDED_TTS_MODELS
     else -> emptyList()
 }
