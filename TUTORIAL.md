@@ -56,6 +56,8 @@ Open **Settings → Advanced** and tap **Export settings** to save your AI confi
 
 ## 11. Render your video
 
-When it looks right, open the menu and choose **Export video**. Guillotine renders a real mp4 with Media3: it makes your cuts, composites every track, applies your filters, transforms, background mattes, captions, and audio mix, then saves to your gallery. Long jobs run in the background with a progress notification you can pause, resume, or cancel.
+When it looks right, open the menu and choose **Render**. Guillotine renders a real mp4 — Media3 on Android, FFmpeg on desktop — making your cuts, compositing every track, applying filters, transforms, background mattes, captions, and audio mix, then saving to your gallery (Android) or `~/Videos/Guillotine` (desktop). Long jobs run in the background with a progress notification you can cancel.
 
-That's the whole loop — import, arrange, cut, enhance, animate, caption, teach, and export. Explore the icon key (the **?** button) any time you forget what a button does.
+The Export dialog narrates every phase (analyzing audio, precomputing mattes, encoding, saving) in the activity-log sheet. If the render fails you'll see the failure phase with a stack-frame diagnostic and a **Report** button — one tap opens a pre-filled GitHub issue so the bug lands in the tracker without you copy-pasting anything.
+
+That's the whole loop — import, arrange, cut, enhance, animate, caption, teach, and render. Explore the icon key (the **?** button) any time you forget what a button does.

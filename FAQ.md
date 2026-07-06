@@ -32,6 +32,14 @@ A real mp4, rendered with Media3 Transformer: your cuts, every composited video 
 
 Yes. Guillotine has phone, tablet, and Chromebook layouts, with keyboard shortcuts and mouse + Ctrl-scroll zoom. It's a first-class large-screen app, not just a phone port.
 
+## Is there a desktop version?
+
+Yes — native installers for **macOS (`.dmg`)**, **Windows (`.msi`)** and **Linux (`.deb`)** are attached to every GitHub Release. The desktop app shares the editor core with Android (multi-track timeline, keyframes, AI-driven cuts, mp4 export). The media engine is JavaCV/FFmpeg on desktop where Android uses Media3. Installers are currently unsigned — macOS: right-click → Open on first launch; Windows: SmartScreen → More info → Run anyway; Linux: `sudo apt install ./guillotine_*.deb`.
+
+## How do I report a bug?
+
+The Export dialog has a **Report** button that opens a pre-filled GitHub issue with your device details and the diagnostic stack trace already in the body — just hit Submit. For non-export bugs, use the [issue tracker](https://github.com/HereLiesAz/Guillotine/issues) directly.
+
 ## What are animated / kinetic captions?
 
 Regular **Transcribe** creates timed text clips that appear and disappear with the spoken words. **Animated transcribe** goes further: it splits each word into syllables on separate tracks with scale keyframes so each syllable grows from small to full size as it's spoken — a kinetic typography effect. Ask the AI for "animated captions," "kinetic text," or "per-syllable animation."

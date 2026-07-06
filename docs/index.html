@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Guillotine — AI-native video editor for Android</title>
-<meta name="description" content="Guillotine is an AI-powered, on-device non-linear video editor for Android, tablets and Chromebooks. Multi-track timeline, keyframes, real mp4 export. Bring your own AI key or use the free no-key fallback." />
+<title>Guillotine — AI-native video editor for Android, macOS, Windows, Linux</title>
+<meta name="description" content="Guillotine is an AI-powered, on-device non-linear video editor. Native apps for Android, tablets, Chromebooks, macOS, Windows, and Linux. Multi-track timeline, keyframes, real mp4 export. Bring your own AI key or use the free no-key fallback." />
 <meta name="theme-color" content="#000000" />
 
 <!-- Open Graph / social -->
 <meta property="og:title" content="Guillotine — AI-native video editor" />
-<meta property="og:description" content="Tell it what to cut, and it cuts. On-device, multi-track video editing for Android, tablets and Chromebooks." />
+<meta property="og:description" content="Tell it what to cut, and it cuts. On-device, multi-track video editing for Android, macOS, Windows, and Linux." />
 <meta property="og:type" content="website" />
 <meta property="og:image" content="guillotine_header.webp" />
 
@@ -271,18 +271,18 @@
       <div class="hero-copy">
         <span class="eyebrow">● On-device · Open source</span>
         <h1>Tell it what<br>to cut.<br><span class="accent">It cuts.</span></h1>
-        <p class="lede">The AI-native, non-linear video editor for Android, tablets and Chromebooks. A real multi-track timeline, keyframes, and true mp4 export — no account, no cloud required.</p>
+        <p class="lede">The AI-native, non-linear video editor. Native apps for Android, tablets, Chromebooks, and desktop — macOS, Windows, and Linux. A real multi-track timeline, keyframes, and true mp4 export — no account, no cloud required.</p>
         <div class="hero-cta">
-          <a class="btn btn-red" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener">
+          <a class="btn btn-red" href="#downloads">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-            Download APK
+            Download
           </a>
           <a class="btn btn-ghost" href="https://github.com/HereLiesAz/Guillotine" target="_blank" rel="noopener">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 016 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
             View source
           </a>
         </div>
-        <p class="meta-line"><b>Free</b> · <b>BYO AI key or no-key fallback</b> · <b>Android 8.0+</b></p>
+        <p class="meta-line"><b>Free</b> · <b>BYO AI key or no-key fallback</b> · <b>Android 8.0+</b> · <b>macOS · Windows · Linux</b></p>
       </div>
       <div class="hero-art">
         <img src="guillotine_header.webp" alt="Guillotine app icon" />
@@ -295,10 +295,10 @@
     <div class="wrap">
       <div class="stat"><div class="v">Free</div><div class="k">&amp; open source</div></div>
       <div class="stat"><div class="v">Android 8.0+</div><div class="k">API 26</div></div>
+      <div class="stat"><div class="v">macOS · Win · Linux</div><div class="k">native installers</div></div>
       <div class="stat"><div class="v">On-device</div><div class="k">no account</div></div>
-      <div class="stat"><div class="v">mp4</div><div class="k">export to gallery</div></div>
+      <div class="stat"><div class="v">mp4</div><div class="k">real export</div></div>
       <div class="stat"><div class="v">.gilt</div><div class="k">project files</div></div>
-      <div class="stat"><div class="v">Phone · Tablet · CrOS</div><div class="k">adaptive</div></div>
     </div>
   </section>
 
@@ -552,10 +552,43 @@
           <div class="a">Yes. The layout adapts to large screens, supports keyboard shortcuts and mouse with Ctrl-scroll zoom, and installs without a touchscreen.</div>
         </details>
         <details class="qa">
+          <summary>Is there a desktop version?</summary>
+          <div class="a">Yes — native installers for macOS (.dmg), Windows (.msi) and Linux (.deb) ship in every GitHub Release. The desktop app shares the editor core with Android; the media engine is JavaCV/FFmpeg where Android uses Media3. Installers are currently unsigned — you'll need to bypass the OS warning on first launch (see the download section above).</div>
+        </details>
+        <details class="qa">
+          <summary>How do I report a bug?</summary>
+          <div class="a">The Export dialog has a <b>Report</b> button that opens a pre-filled GitHub issue with your device details and the diagnostic stack trace already in the body — one tap, one Submit. Non-export bugs go on the <a href="https://github.com/HereLiesAz/Guillotine/issues" target="_blank" rel="noopener">issue tracker</a> directly.</div>
+        </details>
+        <details class="qa">
           <summary>What can I control — formats, quality, aspect ratio?</summary>
           <div class="a">Import video, audio and images. Choose aspect ratio (16:9, 9:16, 1:1 or Original) and quality (Original, 4K, 1080p, 720p), apply filters and per-clip audio, and animate with keyframes.</div>
         </details>
       </div>
+    </div>
+  </section>
+
+  <!-- DOWNLOADS -->
+  <section class="section" id="downloads">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="kicker">Get Guillotine</div>
+        <h2>Every platform, one editor.</h2>
+        <p>Native apps for phone, tablet, Chromebook, and desktop. Shared editor core; each platform gets a real installer built on its own CI runner.</p>
+      </div>
+
+      <div class="shortcuts-grid reveal">
+        <div class="sc"><span class="act"><b>Android</b> · APK / AAB</span><span class="keys"><a class="btn btn-red" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener" style="padding:6px 12px;font-size:12px">Download</a></span></div>
+        <div class="sc"><span class="act"><b>macOS</b> · Apple Silicon .dmg</span><span class="keys"><a class="btn btn-red" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener" style="padding:6px 12px;font-size:12px">Download</a></span></div>
+        <div class="sc"><span class="act"><b>Windows</b> · .msi</span><span class="keys"><a class="btn btn-red" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener" style="padding:6px 12px;font-size:12px">Download</a></span></div>
+        <div class="sc"><span class="act"><b>Linux</b> · .deb</span><span class="keys"><a class="btn btn-red" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener" style="padding:6px 12px;font-size:12px">Download</a></span></div>
+      </div>
+
+      <p style="margin-top:24px;color:var(--n500);font-size:13px;text-align:center">
+        Desktop installers are currently <b>unsigned</b>. First launch:
+        macOS <span style="color:var(--n300)">right-click &rarr; Open</span>,
+        Windows <span style="color:var(--n300)">SmartScreen &rarr; More info &rarr; Run anyway</span>,
+        Linux <code style="font-family:var(--mono);color:var(--red-bright);font-size:12px">sudo apt install ./guillotine_*.deb</code>.
+      </p>
     </div>
   </section>
 
@@ -564,7 +597,7 @@
     <h2>Cut to the chase.</h2>
     <p>Grab the latest build and start editing. Free, open source, and runs entirely on your device.</p>
     <div class="hero-cta">
-      <a class="btn btn-red" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener">Download APK</a>
+      <a class="btn btn-red" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener">Latest release</a>
       <a class="btn btn-ghost" href="https://github.com/HereLiesAz/Guillotine" target="_blank" rel="noopener">View on GitHub</a>
     </div>
   </section>
@@ -580,7 +613,7 @@
       <a href="privacy.html">Privacy</a>
       <a href="https://github.com/HereLiesAz/Guillotine/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
     </div>
-    <p class="note">Built with Kotlin · Jetpack Compose (Material 3 Expressive) · Media3. Not affiliated with Sony Vegas.</p>
+    <p class="note">Built with Kotlin · Jetpack Compose (Material 3 Expressive) on Android · Compose Multiplatform on desktop · Media3 &amp; JavaCV/FFmpeg. Not affiliated with Sony Vegas.</p>
   </div>
 </footer>
 

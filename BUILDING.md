@@ -1,9 +1,19 @@
-# Building Guillotine (Android)
+# Building Guillotine
+
+Guillotine ships two apps sharing an editor core:
+
+- **`:app`** — Android application (Kotlin + Jetpack Compose).
+- **`:desktop`** — Compose Multiplatform application producing native installers for macOS
+  (`.dmg`), Windows (`.msi`), and Linux (`.deb`).
+- **`:shared`** — pure-Kotlin editor model (`Document`, `EditorViewModel`, timeline math),
+  reused by both.
 
 ## Requirements
 
-- **Android Studio** (current stable) — bundles a compatible JDK 17.
-- **Android SDK** API 37 (compile) / 36 (target) installed; a device or emulator on **API 26+**.
+- **JDK 17** (Android Studio bundles one). Desktop builds ALSO need JDK 21 available for the
+  `jpackage` step (`gradle/actions/setup-gradle@v6` provisions it in CI).
+- **Android Studio** (current stable) for the Android app.
+- **Android SDK** API 37 (compile) / 36 (target); a device or emulator on **API 26+**.
 - The Gradle wrapper (`gradlew` / `gradlew.bat` + `gradle/wrapper/gradle-wrapper.jar`) is committed,
   so no separate Gradle install is needed.
 
@@ -70,14 +80,65 @@ service account granted release access in the Play Console). The workflow header
 one-time setup — note that **the very first release for a new app must be uploaded manually** in the
 Play Console before the API can publish subsequent builds.
 
+## Desktop build (macOS / Windows / Linux)
+
+Native installers can't be cross-compiled — jpackage bakes in the host's JDK image. So:
+
+- `packageDmg` needs a **macOS** runner.
+- `packageMsi` needs a **Windows** runner.
+- `packageDeb` needs a **Linux** runner.
+
+Locally, you only get the installer for the OS you're on. Build it with:
+
+```
+./gradlew :desktop:packageDeb          # or packageDmg / packageMsi
+```
+
+The installer lands under `desktop/build/compose/binaries/main/<format>/`. On Linux install with
+`sudo apt install ./guillotine_*.deb`; on macOS drag the DMG contents to `/Applications`; on
+Windows double-click the MSI.
+
+Development run:
+
+```
+./gradlew :desktop:run
+```
+
+### Desktop dependency detail
+
+The `:desktop` module drops the fat `javacv-platform` artifact (~600 MB installed with every
+OS's natives) for per-host classifier deps auto-selected by `desktop/build.gradle.kts`:
+
+- `org.bytedeco:javacv` (core, no natives)
+- `org.bytedeco:javacpp:<version>:<host-classifier>`
+- `org.bytedeco:ffmpeg:<version>:<host-classifier>`
+
+`<host-classifier>` is one of `macosx-arm64`, `macosx-x86_64`, `linux-x86_64`, `linux-arm64`,
+`windows-x86_64` — resolved at Gradle configuration time. Installers land ~150-200 MB.
+
+### CI: build installers on every push
+
+`.github/workflows/desktop-build.yml` fans out over `ubuntu-latest` / `macos-latest` /
+`windows-latest` and uploads the produced installer as an artifact on every push.
+
+### CI: attach installers to a release
+
+`.github/workflows/release-desktop.yml` runs on every `v*` tag: same matrix, but uploads via
+`softprops/action-gh-release@v2` to the GitHub Release matching the tag.
+
 ## Project layout
 
 ```
 settings.gradle.kts, build.gradle.kts, gradle.properties   # build config
 gradle/libs.versions.toml                                  # version catalog
+shared/
+  src/main/kotlin/com/hereliesaz/guillotine/               # editor core (Document, VM, math)
 app/
   src/main/AndroidManifest.xml
-  src/main/java/com/hereliesaz/guillotine/                 # Kotlin sources
+  src/main/java/com/hereliesaz/guillotine/                 # Android sources
   src/main/res/                                            # resources, adaptive icon, splash
   src/test/java/com/hereliesaz/guillotine/                 # JVM unit tests (TimelineMath)
+desktop/
+  src/main/kotlin/com/hereliesaz/guillotine/desktop/       # Compose Desktop sources
+  src/main/resources/icons/                                # icon.icns / icon.ico / icon.png
 ```

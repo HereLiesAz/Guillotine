@@ -1,10 +1,12 @@
 # Guillotine
 
-An AI-powered, on-device **non-linear video editor for Android** (also a first-class
-large-screen / Chromebook app).
+An AI-powered, on-device **non-linear video editor** — Android, tablet, Chromebook, **and native
+desktop apps for macOS, Windows, and Linux**. Kotlin Multiplatform: one shared editor core,
+platform-native shells.
 
-Built with **Kotlin + Jetpack Compose** (Material 3 Expressive) and **Jetpack Media3**
-(`ExoPlayer` for playback, `Transformer` for real on-device editing and mp4 export).
+Built with **Kotlin + Jetpack Compose** (Material 3 Expressive) on Android and **Compose
+Multiplatform** on desktop. Video engine is **Jetpack Media3** on Android (`ExoPlayer` for
+playback, `Transformer` for real on-device mp4 export) and **JavaCV / FFmpeg** on desktop.
 
 **Your video never leaves the device.** All frame/audio analysis runs **on-device**. Cloud AIs
 (Gemini/OpenAI/Anthropic/…) are *controllers only*: they drive the editor as text over the
@@ -13,8 +15,23 @@ never receive your clips or frames. Cloud keys are bring-your-own, stored encryp
 and there's a free, no-key on-device path (vision + an optional on-device LLM brain) so the app
 is fully usable with zero configuration.
 
+## Download
+
+- **Android** — [latest AAB / APK](https://github.com/HereLiesAz/Guillotine/releases/latest) (also
+  on Google Play internal / alpha tracks).
+- **macOS** — [`.dmg`](https://github.com/HereLiesAz/Guillotine/releases/latest) (Apple Silicon;
+  unsigned — right-click → Open on first launch).
+- **Windows** — [`.msi`](https://github.com/HereLiesAz/Guillotine/releases/latest) (unsigned — if
+  SmartScreen blocks it, More info → Run anyway).
+- **Linux** — [`.deb`](https://github.com/HereLiesAz/Guillotine/releases/latest) (`sudo apt install
+  ./guillotine_*.deb`).
+
+Desktop installers are built by CI (`.github/workflows/release-desktop.yml`) on every `v*` tag and
+attached to the matching GitHub Release.
+
 > Guillotine began as a web prototype (Vite + React + Express). That code has been removed; the
-> product is the native Android app under `app/`. The brand assets remain in `assets/`.
+> product is the shipping app under `app/` (Android) and `desktop/` (Compose Multiplatform),
+> sharing an editor core under `shared/`. Brand assets remain in `assets/`.
 
 ## Features
 
@@ -68,11 +85,17 @@ is fully usable with zero configuration.
   layer below — in the live preview and baked into the export.
 - **Image generation:** free **Pollinations.ai** (no key) or **Leonardo.ai** (BYO key, model
   selectable).
-- **Real mp4 export** (Media3 Transformer): cuts removed ranges, composites every video track,
-  positions clips on the timeline, applies per-clip filters (brightness/contrast/saturation/hue/
-  sepia/blur/grayscale/invert) and the crop-tool transform (scale/rotate/offset), project crop/aspect,
-  the segmentation matte and caption overlays, bakes per-clip + track volume / pan / peak-normalize /
-  mute / opacity, and saves to the gallery.
+- **Real mp4 export** (Media3 Transformer on Android; FFmpeg on desktop): cuts removed ranges,
+  composites every video track, positions clips on the timeline, applies per-clip filters
+  (brightness/contrast/saturation/hue/sepia/blur/grayscale/invert) and the crop-tool transform
+  (scale/rotate/offset), project crop/aspect, the segmentation matte and caption overlays, bakes
+  per-clip + track volume / pan / peak-normalize / mute / opacity, and saves to the gallery
+  (Android) or `~/Videos/Guillotine` (desktop). The export dialog **narrates every phase** in the
+  activity log and, if the encode fails, shows a **copyable stack-frame diagnostic** and a **Report
+  button** that opens a pre-filled GitHub issue so a bug can be filed in one tap.
+- **Transparent errors:** every failure surface — export, import, model download, on-device AI
+  provider — flushes to the process-wide activity log (bottom sheet) with the cause chain, so you
+  can see *why* something went wrong without adb.
 - **Settings backup & restore:** export all AI settings (provider, keys, models, speech/agent model
   paths, cache size) to a JSON file and import them back — handy for migrating to a new device or
   sharing a configuration.
