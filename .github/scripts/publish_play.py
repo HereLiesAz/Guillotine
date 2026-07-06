@@ -223,10 +223,15 @@ def main() -> int:
     # Best-effort staging on the remaining tracks. Each runs in its own edit so
     # a FAILED_PRECONDITION on one (e.g. the track was never initialised in the
     # Play Console) doesn't undo the successful ones.
+    #
+    # beta and production are commented out — those tracks are not initialised in the
+    # Play Console yet and every push fails them with FAILED_PRECONDITION, marking the
+    # whole workflow red for a known non-issue. Re-enable once someone has manually
+    # created a first release on each in the Play Console.
     stage_plan = [
         ("alpha", "draft"),      # closed testing
-        ("beta", "draft"),       # open testing
-        ("production", "draft"),
+        # ("beta", "draft"),       # open testing — needs manual init in Play Console
+        # ("production", "draft"), # production — needs manual init in Play Console
     ]
     failures: list[tuple[str, str]] = []
     for track, status in stage_plan:
@@ -249,7 +254,7 @@ def main() -> int:
         )
         return EXIT_PARTIAL
 
-    print(f"All four tracks released. versionCode {version_code}.")
+    print(f"Enabled tracks released. versionCode {version_code}.")
     return EXIT_OK
 
 
