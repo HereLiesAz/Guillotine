@@ -89,6 +89,9 @@ private const val SNAP_GRID_PX = 8f
 /** Live drag offset shared across a clip's group so every member moves together DURING the drag. */
 private data class GroupDrag(val ids: Set<String>, val dx: Float, val dy: Float)
 
+/** Which axis a two-finger pinch is currently locked to. Null until first significant motion. */
+private enum class ZoomAxis { HORIZONTAL, VERTICAL }
+
 /**
  * Full timeline panel: scrollable multi-track lanes with playhead. The editing
  * tools (select/split/zoom/etc.) and the AI prompt live in the shared
@@ -121,27 +124,36 @@ private fun TimelineLanes(
     // Live, group-aware drag offset: while a clip is dragged, every clip in its group reads this and
     // moves together (snapped) — so the whole group tracks the cursor, not just the grabbed clip.
     var groupDrag by remember { mutableStateOf<GroupDrag?>(null) }
+    // Visible timeline width in px, updated whenever the horizontally-scrolled BoxWithConstraints
+    // (re)measures. Read from the pps-change effect to clamp the playhead into view.
+    var viewportWidthPx by remember { mutableIntStateOf(0) }
 
     // Zoom-around-playhead: any pps change (pinch, Ctrl+scroll, TopBar buttons, addMedia fit-all)
-    // must keep the playhead pinned to the same on-screen X — otherwise the frame you were looking
-    // at slides out from under your finger. Tracked as an effect on pps, not baked into individual
-    // callers, so every path that changes pps gets this behaviour for free.
+    // solves for a scroll that KEEPS THE PLAYHEAD AT THE SAME ON-SCREEN X. Zoom is precision — the
+    // frame under the user's fingers must not slide out from under them.
     //
-    // The scroll delta is derived from the ratio (newPps - lastPps): a playhead sitting at t seconds
-    // now occupies t·pps pixels on the surface, so shifting scroll by t·(newPps - lastPps) keeps it
-    // at the same viewport-relative offset.
+    // We compute the playhead's pre-zoom viewport-X and preserve it: after the new pps takes effect,
+    // scroll to (newPlayheadPx − anchorViewportX). If the playhead was already visible, its on-screen
+    // position doesn't change at all. If it was scrolled off-screen we CLAMP the anchor into
+    // [0, viewport] so the zoom always leaves the playhead at the nearest visible edge — the "stays
+    // in the viewport" guarantee — rather than shifting it further off-screen with each zoom step.
     //
     // withFrameNanos before scroll.scrollTo lets the layout pass with the new pps commit first —
-    // otherwise scroll.maxValue is stale from the previous width and the scroll clamps to the wrong
-    // value on zoom-in. roundToInt (not toInt) so a shift of e.g. -0.9 doesn't truncate to 0.
+    // otherwise scroll.maxValue is stale from the previous width and the scroll clamps wrong on
+    // zoom-in. roundToInt (not toInt) so a target of e.g. −0.9 doesn't truncate to 0.
     var lastZoomedPps by remember { mutableFloatStateOf(pps) }
     LaunchedEffect(pps) {
         if (pps == lastZoomedPps) return@LaunchedEffect
         val playheadMs = vm.uiState.value.currentTimeMs
-        val shift = playheadMs / 1000f * (pps - lastZoomedPps)
-        val target = (scroll.value + shift).roundToInt().coerceAtLeast(0)
+        val oldPlayheadPx = playheadMs / 1000f * lastZoomedPps
+        val vp = viewportWidthPx
+        val rawViewportX = oldPlayheadPx - scroll.value
+        val anchorViewportX =
+            if (vp > 0) rawViewportX.coerceIn(0f, vp.toFloat()) else rawViewportX
         lastZoomedPps = pps
         androidx.compose.runtime.withFrameNanos {}
+        val newPlayheadPx = playheadMs / 1000f * pps
+        val target = (newPlayheadPx - anchorViewportX).roundToInt().coerceAtLeast(0)
         scroll.scrollTo(target)
     }
 
@@ -156,35 +168,58 @@ private fun TimelineLanes(
     val zoomModifier = Modifier
         .pointerInput(Unit) {
             // Single-axis pinch: one gesture changes EITHER width (pixels/second) OR track
-            // height, never both. We pick whichever axis the fingers moved more this event,
-            // so a mostly-horizontal pinch zooms width and a mostly-vertical one zooms height.
+            // height, never both. Picking the axis PER EVENT (as we used to) meant a
+            // slightly-diagonal pinch flipped axes mid-gesture and both wound up scaled.
+            // Now we lock the axis on the first significant motion and keep it locked
+            // until fewer than two fingers are down (gesture end).
             awaitPointerEventScope {
+                var lockedAxis: ZoomAxis? = null
+                val axisLockThresholdPx = 8f
                 while (true) {
                     // Initial pass: claim two-finger pinch before the nested scroll/clip
                     // children can consume the drag (that's why vertical zoom didn't work).
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     val pts = event.changes.filter { it.pressed }
-                    if (pts.size >= 2) {
-                        val a = pts[0]
-                        val b = pts[1]
-                        val curH = kotlin.math.abs(a.position.x - b.position.x)
-                        val curV = kotlin.math.abs(a.position.y - b.position.y)
-                        val prevH = kotlin.math.abs(a.previousPosition.x - b.previousPosition.x)
-                        val prevV = kotlin.math.abs(a.previousPosition.y - b.previousPosition.y)
-                        val dH = kotlin.math.abs(curH - prevH)
-                        val dV = kotlin.math.abs(curV - prevV)
-                        var acted = false
-                        if (dH >= dV) {
+                    if (pts.size < 2) {
+                        // Gesture ended (release or lifted below two fingers) — unlock so
+                        // the next pinch is free to pick its own axis.
+                        lockedAxis = null
+                        continue
+                    }
+                    val a = pts[0]
+                    val b = pts[1]
+                    val curH = kotlin.math.abs(a.position.x - b.position.x)
+                    val curV = kotlin.math.abs(a.position.y - b.position.y)
+                    val prevH = kotlin.math.abs(a.previousPosition.x - b.previousPosition.x)
+                    val prevV = kotlin.math.abs(a.previousPosition.y - b.previousPosition.y)
+                    val dH = kotlin.math.abs(curH - prevH)
+                    val dV = kotlin.math.abs(curV - prevV)
+                    if (lockedAxis == null) {
+                        // First significant motion decides — need at least axisLockThresholdPx
+                        // of change so a stationary two-finger touch doesn't lock on noise.
+                        lockedAxis = when {
+                            dH >= axisLockThresholdPx && dH > dV -> ZoomAxis.HORIZONTAL
+                            dV >= axisLockThresholdPx && dV > dH -> ZoomAxis.VERTICAL
+                            else -> null
+                        }
+                    }
+                    var acted = false
+                    when (lockedAxis) {
+                        ZoomAxis.HORIZONTAL -> {
                             if (prevH > 1f && curH > 1f && curH != prevH) {
-                                vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH)); acted = true
-                            }
-                        } else {
-                            if (prevV > 1f && curV > 1f && curV != prevV) {
-                                vm.scaleTrackHeight(curV / prevV); acted = true
+                                vm.setZoom(vm.uiState.value.pixelsPerSecond * (curH / prevH))
+                                acted = true
                             }
                         }
-                        if (acted) pts.forEach { it.consume() }
+                        ZoomAxis.VERTICAL -> {
+                            if (prevV > 1f && curV > 1f && curV != prevV) {
+                                vm.scaleTrackHeight(curV / prevV)
+                                acted = true
+                            }
+                        }
+                        null -> {}
                     }
+                    if (acted) pts.forEach { it.consume() }
                 }
             }
         }
@@ -221,7 +256,10 @@ private fun TimelineLanes(
         // Report the visible lanes width so the view model can cap zoom-out at "whole project
         // fits in 2/3 of the timeline".
         val viewportPx = with(density) { maxWidth.toPx() }
-        androidx.compose.runtime.LaunchedEffect(viewportPx) { vm.setTimelineViewportPx(viewportPx) }
+        androidx.compose.runtime.LaunchedEffect(viewportPx) {
+            vm.setTimelineViewportPx(viewportPx)
+            viewportWidthPx = viewportPx.roundToInt()
+        }
         Box(
             Modifier
                 .fillMaxSize()
@@ -263,6 +301,38 @@ private fun TimelineLanes(
                     .width(2.dp)
                     .fillMaxHeight()
                     .background(Red500),
+            )
+            // Transparent drag catcher centered on the playhead — makes the whole vertical
+            // extent of the playhead grabbable, not just the 24 dp ruler strip up top. 32 dp
+            // wide with the 2 dp visual line at its centre (offset by -15 dp). Only reacts to
+            // drag, so a tap on a clip beneath still falls through to the clip's own handler.
+            //
+            // Drag math: the catcher moves with the playhead, so `change.position.x` is
+            // catcher-local (not surface-local). Capture currentTimeMs at drag-start and
+            // accumulate the deltas — playhead ends up at (start + Δms) regardless of where
+            // the catcher was on screen when the pointer landed.
+            Box(
+                Modifier
+                    .offset(x = msToDp(state.currentTimeMs) - 15.dp)
+                    .width(32.dp)
+                    .fillMaxHeight()
+                    .pointerInput(pps) {
+                        var startTimeMs = 0L
+                        var accDx = 0f
+                        detectDragGestures(
+                            onDragStart = {
+                                startTimeMs = vm.uiState.value.currentTimeMs
+                                accDx = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                accDx += dragAmount.x
+                                val newMs = (startTimeMs + (accDx / pps * 1000f).toLong())
+                                    .coerceAtLeast(0L)
+                                vm.seekTo(newMs)
+                            },
+                        )
+                    },
             )
             // Marquee (range-select) overlay: only in MARQUEE mode. Dragging draws a rectangle over a
             // time range and selects every clip it touches on release. It captures the drag (so the
