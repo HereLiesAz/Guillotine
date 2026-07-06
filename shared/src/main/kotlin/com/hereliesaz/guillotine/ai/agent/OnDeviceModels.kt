@@ -20,8 +20,14 @@ enum class ModelCategory {
     RECOGNITION,
     /** Face-embedding `.tflite` — identifying a specific person. */
     FACE,
+    /** Depth-estimation `.tflite` (image→image) for the "depth this frame" effect. */
+    DEPTH,
+    /** Super-resolution `.tflite` (image→image) for the "upscale this frame" effect. */
+    SUPERRES,
+    /** YAMNet audio-event `.tflite` — highlight / best-moment detection from a clip's audio. */
+    AUDIO_EVENT,
     // --- reserved for upcoming runtimes (not yet shown in the picker) ---
-    ASR, TTS, DEPTH, SUPERRES, STYLE, STEM, VLM,
+    ASR, TTS, STYLE, STEM, VLM,
 }
 
 data class OnDeviceModel(
@@ -126,6 +132,20 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         abilities = "Compact and fast with good reasoning. Smallest download of the full-capability models.",
         limitations = "Requires a free Hugging Face sign-in to download (Gemma license).",
     ),
+    OnDeviceModel(
+        id = "deepseek-r1-qwen-1.5b-q8",
+        label = "DeepSeek-R1 Distill Qwen 1.5B (q8) — reasoning",
+        fileName = "deepseek_q8_ekv1280.task",
+        sizeBytes = 1_860_686_856L,
+        license = "MIT",
+        gated = false,
+        repoUrl = hfRepo("litert-community/DeepSeek-R1-Distill-Qwen-1.5B"),
+        downloadUrl = hfResolve("litert-community/DeepSeek-R1-Distill-Qwen-1.5B", "deepseek_q8_ekv1280.task"),
+        abilities = "Strong step-by-step reasoning for its size (distilled R1). Good for multi-step edits.",
+        limitations = "1.86 GB download. Its reasoning traces can be verbose.",
+    ),
+    // Note: Qwen3 and Gemma-3n ship only as `.litertlm`, which needs a newer MediaPipe runtime than
+    // this build loads (`.task`), so they're intentionally omitted from the download list for now.
 )
 
 /**
@@ -133,17 +153,120 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
  * These are MediaPipe ImageEmbedder-compatible `.tflite` files; "Use" sets `idEmbedModelPath`.
  * Populated with verified Hugging Face downloads.
  */
-val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = emptyList()
+val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "mobilenet-v3-large-embed",
+        label = "MobileNet-V3 Large — stronger recognition",
+        fileName = "mobilenet_v3_large.tflite",
+        sizeBytes = 10_889_458L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder",
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_large/float32/1/mobilenet_v3_large.tflite",
+        abilities = "A stronger, still-fast general embedder — better \"same thing?\" matching than the bundled small model. MediaPipe-native (has embedding metadata).",
+        limitations = "Slightly larger/slower than the default.",
+        category = ModelCategory.RECOGNITION,
+    ),
+    // (EfficientNet-Lite0 was dropped: the only public tflite is an image *classifier*, which MediaPipe's
+    // ImageEmbedder rejects/mis-uses. MobileNet-V3-Small/Large are the official embedder models.)
+    OnDeviceModel(
+        id = "mobilenet-v3-small-embed",
+        label = "MobileNet-V3 Small — the default embedder",
+        fileName = "mobilenet_v3_small.tflite",
+        sizeBytes = 4_117_670L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder",
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/mobilenet_v3_small.tflite",
+        abilities = "The lightweight reference embedder (same family as the bundled default) — handy if you want an explicit copy on disk.",
+        limitations = "Lower quality than MobileNet-V3-Large.",
+        category = ModelCategory.RECOGNITION,
+    ),
+)
 
 /**
  * Recommended face-embedding models for identifying a specific person. "Use" sets `faceEmbedModelPath`.
+ * Empty for now: no ready-to-use, MediaPipe-metadata, commercially-licensed 512-d face `.tflite` is
+ * published on Hugging Face (MobileFaceNet tflites are 192-d app assets; EdgeFace ships PyTorch under a
+ * non-commercial license). Users can still point the face-model path at their own converted model.
  */
 val RECOMMENDED_FACE_MODELS: List<OnDeviceModel> = emptyList()
+
+/**
+ * Recommended depth-estimation `.tflite` models for the "depth this frame" effect. "Use" sets
+ * `effectModelPaths["depth"]`. Single image in → single depth map out; [TfliteImageModel] normalizes the
+ * map to a visible greyscale image.
+ */
+val RECOMMENDED_DEPTH_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "midas-small-256-fp16",
+        label = "MiDaS-small — monocular depth",
+        fileName = "midas_small_256_fp16.tflite",
+        sizeBytes = 33_507_904L,
+        license = "MIT / Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("litert-community/MiDaS-small"),
+        downloadUrl = hfResolve("litert-community/MiDaS-small", "midas_small_256_fp16.tflite"),
+        abilities = "Estimates a per-pixel depth map from a single frame (256×256). Clean drop-in — for depth-of-field, parallax, or a depth-map look.",
+        limitations = "Relative (not metric) depth. 256×256 output is upscaled to the frame.",
+        category = ModelCategory.DEPTH,
+    ),
+)
+
+/**
+ * Recommended super-resolution `.tflite` models for the "upscale / enhance this frame" effect. "Use"
+ * sets `effectModelPaths["superres"]`. Single image in → single (larger) image out.
+ */
+val RECOMMENDED_SUPERRES_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "real-esrgan-x4v3",
+        label = "Real-ESRGAN ×4 (general v3) — upscale",
+        fileName = "realesr_general_x4v3.tflite",
+        sizeBytes = 3_549_456L,
+        license = "BSD-3-Clause",
+        gated = false,
+        repoUrl = hfRepo("litert-community/real-esrgan-x4v3-litert"),
+        downloadUrl = hfResolve("litert-community/real-esrgan-x4v3-litert", "realesr_general_x4v3.tflite"),
+        abilities = "4× super-resolution on a 128×128 tile (→512×512). Tiny (3.5 MB), good for sharpening a low-res still or a cropped frame.",
+        limitations = "Operates on a 128×128 input tile; large frames are downscaled first. Best for stills, heavy for full video.",
+        category = ModelCategory.SUPERRES,
+    ),
+)
+
+// Style transfer intentionally has no recommended download: the only common style `.tflite` files are
+// the two-input Magenta arbitrary-stylization pair (predict + transform), which don't fit the
+// single-image-in/out TfliteImageModel runtime. Users can still point the style path at a compatible
+// single-input model of their own.
+
+/**
+ * Recommended audio-event `.tflite` for highlight detection. "Use" sets `audioEventModelPath`. This is
+ * the standard TF-Hub YAMNet classification export: a fixed 15600-sample (0.975 s @ 16 kHz) waveform in →
+ * `[1,521]` AudioSet class scores out. `find_highlights` runs it frame-by-frame to locate exciting
+ * moments (applause, cheering, laughter, music…).
+ */
+val RECOMMENDED_AUDIO_EVENT_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "yamnet-classification",
+        label = "YAMNet — audio-event highlights",
+        fileName = "lite-model_yamnet_classification_tflite_1.tflite",
+        sizeBytes = 4_126_810L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("thelou1s/yamnet"),
+        downloadUrl = hfResolve("thelou1s/yamnet", "lite-model_yamnet_classification_tflite_1.tflite"),
+        abilities = "Detects 521 audio events on-device. Powers \"find the highlights / best moments\" — applause, cheering, laughter, music, screaming, crowd.",
+        limitations = "Tags sound, not beats; a noisy mix can blur events. ~1s time resolution.",
+        category = ModelCategory.AUDIO_EVENT,
+    ),
+)
 
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
     ModelCategory.RECOGNITION -> RECOMMENDED_RECOGNITION_MODELS
     ModelCategory.FACE -> RECOMMENDED_FACE_MODELS
+    ModelCategory.DEPTH -> RECOMMENDED_DEPTH_MODELS
+    ModelCategory.SUPERRES -> RECOMMENDED_SUPERRES_MODELS
+    ModelCategory.AUDIO_EVENT -> RECOMMENDED_AUDIO_EVENT_MODELS
     else -> emptyList()
 }

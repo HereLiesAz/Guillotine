@@ -7,6 +7,9 @@ import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.BeatAnalyzer
 import com.hereliesaz.guillotine.ai.FaceEmbed
 import com.hereliesaz.guillotine.ai.MlKitProvider
+import com.hereliesaz.guillotine.ai.PcmDecoder
+import com.hereliesaz.guillotine.ai.tflite.TfliteImageModel
+import com.hereliesaz.guillotine.ai.tflite.YamnetClassifier
 import com.hereliesaz.guillotine.ai.gen.GenController
 import com.hereliesaz.guillotine.ai.gen.GenKind
 import com.hereliesaz.guillotine.ai.gen.GenProviderType
@@ -211,6 +214,38 @@ class McpTools(
             ),
         ))
 
+        // ---- on-device image effects (TFLite) ----
+        put(toolDefinition(
+            "apply_image_effect",
+            "Run an ON-DEVICE image model on the current preview frame and add the result as a new image " +
+                "clip. effect = superres (upscale) | style (style transfer) | depth (depth map). Requires " +
+                "that effect's .tflite model to be set in Settings → AI Analyzer → Image effects; if it " +
+                "isn't, returns an error naming the setting (relay it, don't retry).",
+            objSchema(
+                "effect" to stringProp("superres | style | depth"),
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                required = listOf("effect"),
+            ),
+        ))
+
+        // ---- audio-event highlights (YAMNet, on-device) ----
+        put(toolDefinition(
+            "find_highlights",
+            "Scan a clip's AUDIO on-device (YAMNet) for exciting moments — applause, cheering, laughter, " +
+                "music, screaming, a roaring crowd — and return them as timestamped ranges. By default it " +
+                "also splits the clip at each highlight boundary so every best-moment becomes its own clip " +
+                "(pass split=false to only report). Use for \"find the best moments / highlights\", " +
+                "\"make a highlight reel\", \"where does the crowd cheer?\". Requires the YAMNet model set " +
+                "in Settings → AI Analyzer → Audio highlights; if it isn't, returns an error naming the " +
+                "setting (relay it, don't retry).",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to scan"),
+                "threshold" to numberProp("Detection confidence 0–1 (default 0.3; lower finds more)"),
+                "split" to boolProp("Split the clip at highlight boundaries (default true)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
             "generate_image",
@@ -314,6 +349,7 @@ class McpTools(
         "start_recording" -> startRecording(args.getString("clip_id"))
         "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
         "discard_recording" -> discardRecording()
+        "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
         "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
         "list_concepts" -> listConcepts()
         "delete_concept" -> deleteConcept(args.getString("name"))
@@ -325,6 +361,7 @@ class McpTools(
         "cut_to_beats" -> cutToBeats(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("every_n", 1))
         "apply_on_beat" -> applyOnBeat(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.getString("effect"), args.optString("mode", "downbeats"))
         "align_clips_to_beats" -> alignClipsToBeats(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "beats"))
+        "find_highlights" -> findHighlights(args.getString("clip_id"), args.optDouble("threshold", 0.3).toFloat(), args.optBoolean("split", true))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -783,6 +820,119 @@ class McpTools(
             put("moved", moved)
             put("humanSummary", "Snapped $moved clip(s) on $trackId to the nearest $mode.")
         }
+    }
+
+    // ---- audio-event highlights (YAMNet, on-device) -------------------------
+
+    /**
+     * Scan a clip's audio with on-device YAMNet and locate "exciting" moments (applause, cheering,
+     * laughter, music, screaming, crowd). Merges nearby detections into ranges and, when [split], cuts
+     * the clip at each highlight boundary so every best-moment becomes its own piece the user can keep.
+     */
+    private fun findHighlights(clipId: String, threshold: Float, split: Boolean): JSONObject {
+        val path = settingsProvider().audioEventModelPath
+        require(path.isNotBlank()) {
+            "No audio-event model set. Download YAMNet in Settings → AI Analyzer → Audio highlights."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), YamnetClassifier.SAMPLE_RATE)
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to analyze.")
+        val samples = YamnetClassifier.resampleTo16k(pcm.samples, pcm.sampleRate)
+        val hits = YamnetClassifier(path).use { m ->
+            require(m.available) { "The audio-event model failed to load — check the .tflite file." }
+            m.scanHighlights(samples, threshold.coerceIn(0.05f, 0.95f))
+        }
+        if (hits.isEmpty()) {
+            return JSONObject().apply {
+                put("ok", true); put("highlightCount", 0)
+                put("humanSummary", "No highlight-worthy audio events found (try a lower threshold).")
+            }
+        }
+        // Merge consecutive detections (<=1.5 s gap) into ranges, tracking each range's dominant label.
+        val frameMs = YamnetClassifier.FRAME * 1000L / YamnetClassifier.SAMPLE_RATE
+        class Range(val startMs: Long, var endMs: Long, val labels: MutableMap<String, Int>)
+        val ranges = ArrayList<Range>()
+        for (h in hits.sortedBy { it.startMs }) {
+            val last = ranges.lastOrNull()
+            if (last != null && h.startMs - last.endMs <= 1500L) {
+                last.endMs = h.startMs + frameMs
+                last.labels[h.label] = (last.labels[h.label] ?: 0) + 1
+            } else {
+                ranges += Range(h.startMs, h.startMs + frameMs, mutableMapOf(h.label to 1))
+            }
+        }
+        // Source ms → timeline ms, clamped to the clip's placement.
+        fun toTimeline(srcMs: Long) = (clip.startTimeMs + (srcMs - clip.trimStartMs))
+            .coerceIn(clip.startTimeMs, clip.endTimeMs)
+        val arr = JSONArray()
+        val boundaries = sortedSetOf<Long>()
+        ranges.forEach { r ->
+            val s = toTimeline(r.startMs); val e = toTimeline(r.endMs)
+            val label = r.labels.maxByOrNull { it.value }?.key ?: "event"
+            arr.put(JSONObject().apply { put("startMs", s); put("endMs", e); put("event", label) })
+            if (s > clip.startTimeMs && s < clip.endTimeMs) boundaries += s
+            if (e > clip.startTimeMs && e < clip.endTimeMs) boundaries += e
+        }
+        var splitInfo = ""
+        if (split && boundaries.isNotEmpty()) {
+            vm.splitClipAt(clipId, boundaries.toList())
+            splitInfo = " Split at ${boundaries.size} boundaries so each best moment is its own clip."
+        }
+        val topLabels = ranges.flatMap { it.labels.keys }.distinct().take(4).joinToString(", ")
+        return ok().apply {
+            put("highlightCount", ranges.size)
+            put("highlights", arr)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Found ${ranges.size} highlight moment(s) — $topLabels.$splitInfo")
+        }
+    }
+
+    // ---- on-device image effects (TFLite) ----------------------------------
+
+    private fun applyImageEffect(effect: String, clipId: String): JSONObject {
+        val settings = settingsProvider()
+        val key = effect.lowercase().trim()
+        val path = settings.effectModelPaths[key].orEmpty()
+        require(path.isNotBlank()) {
+            "No on-device model set for \"$effect\". Add its .tflite path in Settings → AI Analyzer → Image effects."
+        }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+            )
+            ?: throw IllegalStateException("No video clip to apply the effect to — scrub onto one.")
+        val media = st.document.mediaFor(clip)
+            ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: throw IllegalStateException("Could not read the current frame.")
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Applying $key…", pausable = true,
+        ) { _ ->
+            val out = try {
+                TfliteImageModel(path).use { it.run(frame) }
+            } finally {
+                frame.recycle()
+            } ?: throw IllegalStateException("The $key model produced no output — check the .tflite file.")
+            val uri = saveBitmap(out)
+            out.recycle()
+            vm.addMedia(listOf(MediaItem(newId(), uri, "$key: ${media.name}", MediaKind.IMAGE, 5_000)))
+            ok().apply {
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Applied on-device $key and added the result as an image clip.")
+            }
+        }
+    }
+
+    private fun saveBitmap(bmp: android.graphics.Bitmap): String {
+        val f = java.io.File(context.cacheDir, "effect_${System.currentTimeMillis()}.png")
+        f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        return Uri.fromFile(f).toString()
     }
 
     // ---- learned concepts (teach a specific thing by pointing at it) --------

@@ -40,3 +40,15 @@ fun intProp(desc: String = ""): JSONObject = JSONObject().apply {
     put("type", "integer")
     if (desc.isNotEmpty()) put("description", desc)
 }
+
+/** Shorthand for a JSON schema number (float) property. */
+fun numberProp(desc: String = ""): JSONObject = JSONObject().apply {
+    put("type", "number")
+    if (desc.isNotEmpty()) put("description", desc)
+}
+
+/** Shorthand for a JSON schema boolean property. */
+fun boolProp(desc: String = ""): JSONObject = JSONObject().apply {
+    put("type", "boolean")
+    if (desc.isNotEmpty()) put("description", desc)
+}

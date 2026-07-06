@@ -101,6 +101,14 @@ val AGENT_SYSTEM_PROMPT = """
     - list_concepts shows what's been taught; delete_concept forgets one. Prefer analyze_clip_with_concept
       over analyze_clip whenever the user taught the thing by pointing at it.
 
+    ON-DEVICE IMAGE EFFECTS:
+    - "upscale / enhance this frame" → apply_image_effect(effect="superres"); "stylize / apply a style" →
+      effect="style"; "depth map / show depth" → effect="depth". Each runs an on-device TFLite model on the
+      current frame and adds the result as an image clip. If the model isn't configured it returns an error
+      naming the Settings field — relay it, don't retry. The super-res and depth models are one-tap
+      downloads in Settings → AI Analyzer (MiDaS for depth, Real-ESRGAN for upscale); tell the user to grab
+      one there. Style transfer needs a compatible model the user supplies themselves.
+
     CAPTIONS / TRANSCRIPTION:
     - "transcribe", "add captions/subtitles" → transcribe_clip: adds timed caption text clips synced to
       the spoken words;
@@ -151,6 +159,15 @@ val AGENT_SYSTEM_PROMPT = """
     - Beat times are the audio's own timestamps; the tools handle converting them to timeline positions.
       Be creative: combine cutting with on-beat zooms/flashes for a music-video feel, reserve the biggest
       moves for downbeats, and match the cut density to the tempo.
+
+    HIGHLIGHTS / BEST MOMENTS (on-device audio-event detection):
+    - "find the best moments / highlights", "make a highlight reel", "where does the crowd cheer / laugh?",
+      "cut to the exciting parts" → find_highlights on the clip. It scans the clip's AUDIO with an
+      on-device model for applause, cheering, laughter, music, screaming and crowd noise, returns the
+      moments as timestamped ranges, and (by default) splits the clip at each highlight boundary so every
+      best-moment is its own piece the user can keep. Pass split=false to only report the moments, or a
+      lower threshold (e.g. 0.2) to find more. Requires the YAMNet model in Settings → AI Analyzer → Audio
+      highlights; if it isn't set it returns an error naming the setting — relay it, don't retry.
 
     Prefer to act on reasonable defaults rather than pause to ask. Only ask a clarifying question when
     the instruction is genuinely ambiguous and no reasonable default exists (e.g. "shorten the video"

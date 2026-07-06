@@ -44,7 +44,7 @@ standout because it is natively multimodal.
 | **aubio** | Onset, beat, tempo/BPM, pitch | GPL-3.0 (copyleft) | C lib, cross-compiles to NDK. Lightweight, real-time. |
 | **Essentia** | Beat tracking, BPM, key/scale, onset + **TempoCNN** TFLite | AGPL-3.0 / commercial | Official Android build; richest analysis toolkit. |
 | **madmom / BeatNet** | SOTA DL beat/downbeat tracking | BSD / MIT | Python/PyTorch — export to ONNX/TFLite for on-device. Best offline accuracy. |
-| **TensorFlow YAMNet** | 521-class audio events (speech, music, applause…) | Apache-2.0, ~4 MB TFLite | Official example. Auto-tagging, not beat detection. |
+| **TensorFlow YAMNet** — **shipped** (one-tap download) | 521-class audio events (speech, music, applause…) | Apache-2.0, ~4 MB TFLite | Powers `find_highlights`: on-device best-moment / highlight-reel detection (applause, cheering, laughter, music, crowd). Runs via a raw TFLite `Interpreter`. |
 | **Spotify BasicPitch** | Audio → MIDI / polyphonic pitch | Apache-2.0 | Ships TFLite/ONNX — on-device friendly. Melody/key extraction. |
 | **Spleeter / Demucs** | Stem separation (vocals/drums/bass) | MIT | Spleeter → TFLite feasible; Demucs heavier (better as desktop/cloud). |
 
@@ -57,9 +57,9 @@ upgradeable to a TFLite-exported BeatNet/TempoCNN or aubio/Essentia via NDK.
 | Task | Model | License | Feasibility |
 |---|---|---|---|
 | Background / general matting | U²-Net, MODNet, BiRefNet (RMBG-1.4 = non-commercial) | Apache/MIT | Convert to TFLite; beyond ML Kit selfie. |
-| Depth | **MiDaS-small** (~16 MB), **Depth Anything V2-small** (25M) | MIT / Apache | Proven on Android → bokeh, parallax. |
-| Super-resolution | Real-ESRGAN / ESRGAN | BSD-3 | Tile-by-tile; heavy for video, fine for stills. |
-| Style transfer | Magenta Arbitrary Stylization TFLite | Apache-2.0 | Real-time capable, official example. |
+| Depth | **MiDaS-small** (~33 MB) — **shipped** (one-tap download) | MIT / Apache | Proven on Android → bokeh, parallax. Runs via the generic `TfliteImageModel`. |
+| Super-resolution | **Real-ESRGAN ×4 v3** (3.5 MB) — **shipped** (one-tap download) | BSD-3 | Tile-by-tile (128²→512²); heavy for video, fine for stills. |
+| Style transfer | Magenta Arbitrary Stylization TFLite | Apache-2.0 | Real-time capable, but the official model is **two-input** (content+style) so it doesn't fit the single-image `TfliteImageModel` — left as a bring-your-own-path option. |
 | Optical flow | OpenCV (Farnebäck/DIS) or RAFT | BSD | Classical runs easily; RAFT heavy. |
 | Shot detection | Histogram diff (in-code) or TransNetV2 | MIT | Cheap content-difference on-device. |
 | Captioning / VLM | SmolVLM 256M/500M, Moondream 0.5B, Florence-2, **Gemma 3n** | Apache/MIT | Lightest true on-device VLMs; or reuse Gemma 3n. |
@@ -183,7 +183,8 @@ Each item is feasible on the current stack or a model listed above.
     generate a thumbnail from the best frame.
 19. Semantic footage search ("find all clips with a dog/sunset/red car") via the
     existing on-device image embeddings.
-20. Audio-event & highlight detection (YAMNet) → auto-trailer / best-moments reel.
+20. Audio-event & highlight detection (YAMNet) → auto-trailer / best-moments reel. **(shipped —
+    `find_highlights`)**
 
 **Workflow & product**
 21. Script-to-video and storyboard-to-video: prompt → generated clips + TTS + music
