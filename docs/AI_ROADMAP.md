@@ -165,8 +165,8 @@ Each item is feasible on the current stack or a model listed above.
    writes VOLUME keyframes on the music under detected speech, on-device, no model)**
 4. AI soundtrack: generate a mood- and length-matched score; AI SFX timed to
    actions/transitions (ElevenLabs SFX).
-5. Loudness normalization to platform targets (−14 LUFS YouTube) on export. **(partial —
-   `normalize_levels` level-matches clips by RMS; broadcast-LUFS export normalization is a follow-up)**
+5. Loudness normalization to platform targets (−14 LUFS YouTube) on export. **(shipped —
+   `normalize_loudness` uses BS.1770 K-weighted LUFS; `normalize_levels` is the quick RMS match)**
 6. Noise reduction / de-reverb / voice isolation on-device (sherpa-onnx).
 7. Multicam sync by audio-waveform correlation **(shipped — `sync_by_audio`)**; filler-word
    ("um") removal **(shipped — `remove_fillers` via offline Whisper word timings)**.
@@ -186,7 +186,8 @@ Each item is feasible on the current stack or a model listed above.
 **Vision & generation**
 12. Smart auto-reframe landscape→9:16/1:1 following the subject (AutoFlip). **(shipped —
     `auto_reframe` punches in and pans OFFSET_X keyframes to follow the main face)**
-13. Depth effects: portrait/bokeh blur, 2.5D parallax "3D Ken Burns," fake dolly.
+13. Depth effects: portrait/bokeh blur, 2.5D parallax "3D Ken Burns," fake dolly. **(bokeh shipped —
+    `apply_bokeh` blurs the depth-far background; animated 2.5D parallax is a follow-up)**
 14. Super-resolution upscale of old/low-res footage and stills.
 15. Style transfer / AI looks; on-device auto color-correct & shot-match; LUTs.
 16. Background replace without green screen (matting) + generated backgrounds.

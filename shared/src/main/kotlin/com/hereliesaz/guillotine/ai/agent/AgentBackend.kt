@@ -104,6 +104,16 @@ val AGENT_SYSTEM_PROMPT = """
     - list_concepts shows what's been taught; delete_concept forgets one. Prefer analyze_clip_with_concept
       over analyze_clip whenever the user taught the thing by pointing at it.
 
+    DEPTH-OF-FIELD / BOKEH (on-device):
+    - "blur the background", "portrait mode", "add bokeh / depth of field", "cinematic blur" → apply_bokeh.
+      It runs the depth model, keeps the near subject sharp, blurs the far background, and adds the result
+      as an image clip. strength scales the blur. Needs the depth model (Settings → Image effects (depth)).
+
+    LOUDNESS NORMALIZATION (on-device):
+    - "normalize to -14 LUFS", "match YouTube/Spotify loudness", "broadcast loudness" → normalize_loudness
+      (BS.1770 K-weighted; target_lufs default -14, -16 podcasts, -23 EBU). For a quick relative
+      level-match without a target, normalize_levels (RMS) is enough.
+
     ON-DEVICE IMAGE EFFECTS:
     - "upscale / enhance this frame" → apply_image_effect(effect="superres"); "stylize / apply a style" →
       effect="style"; "depth map / show depth" → effect="depth". Each runs an on-device TFLite model on the
