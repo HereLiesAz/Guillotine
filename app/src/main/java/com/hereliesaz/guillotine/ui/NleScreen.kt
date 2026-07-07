@@ -145,6 +145,18 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Fire an Android share sheet for the exported video [uri] (a MediaStore content URI). */
+private fun shareVideo(context: android.content.Context, uri: Uri) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "video/*"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val chooser = android.content.Intent.createChooser(send, "Share video")
+        .apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
+    runCatching { context.startActivity(chooser) }
+}
+
 @Composable
 fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -213,6 +225,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf<String?>(null) }
     var exportError by remember { mutableStateOf<String?>(null) }
+    var exportedUri by remember { mutableStateOf<Uri?>(null) }
     // Which track an import should land on (set by a track header's "Import"; null = default).
     var importTargetTrack by remember { mutableStateOf<String?>(null) }
 
@@ -427,6 +440,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     state,
                     Modifier.weight(1f).fillMaxWidth(),
                     cropMode = state.tool == EditorTool.CROP,
+                    showSafeZones = state.tool == EditorTool.CROP,
                     onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
                 )
                 TransportControls(vm, state)
@@ -438,6 +452,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 state,
                 Modifier.weight(0.42f).fillMaxWidth(),
                 cropMode = state.tool == EditorTool.CROP,
+                showSafeZones = state.tool == EditorTool.CROP,
                 onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
             )
             TransportControls(vm, state)
@@ -562,6 +577,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             progress = exportProgress,
             exportPhase = state.exportPhase,
             doneMessage = exportDone,
+            onShare = exportedUri?.let { uri -> { shareVideo(context, uri) } },
             errorMessage = exportError,
             onStart = { name ->
                 // Show the "render" interstitial as the export begins; rendering continues underneath.
@@ -586,7 +602,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         ActivityLog.success("Exported to Movies/Guillotine.")
                     },
                 ) { sink ->
-                    Exporter.export(
+                    val uri = Exporter.export(
                         context,
                         vm.uiState.value.document,
                         name,
@@ -598,6 +614,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                             scope.launch { vm.setExportPhase(phase) }
                         },
                     )
+                    scope.launch { exportedUri = uri } // for the Share action once done
                 }
                 if (!startedExport) { exportError = "Another operation is already running."; exporting = false }
             },

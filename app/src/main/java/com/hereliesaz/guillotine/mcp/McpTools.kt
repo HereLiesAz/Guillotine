@@ -336,8 +336,31 @@ class McpTools(
             "Even out the loudness of the timeline's audio clips ON-DEVICE (no key): measures each audio " +
                 "clip's level and sets its volume so they all sit at a consistent perceived loudness. Use " +
                 "for \"normalize the audio levels\", \"even out the volume\", \"level-match the clips\". " +
-                "(Level matching, not a broadcast-LUFS export normalization.)",
+                "(Simple RMS level matching; for a platform loudness target use normalize_loudness.)",
             emptySchema(),
+        ))
+        put(toolDefinition(
+            "normalize_loudness",
+            "Normalize each audio clip to a platform LOUDNESS target ON-DEVICE (no key), using ITU-R " +
+                "BS.1770 K-weighted LUFS. Use for \"normalize to -14 LUFS\", \"match YouTube/Spotify " +
+                "loudness\", \"make it broadcast loudness\". target_lufs defaults to -14 (YouTube/Spotify); " +
+                "-16 is Apple/podcasts, -23 is EBU R128 broadcast. (Ungated integrated LUFS — a good " +
+                "loudness match, not a certified meter.)",
+            objSchema(
+                "target_lufs" to numberProp("Target loudness in LUFS (default -14)"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_bokeh",
+            "Add a depth-of-field / portrait \"bokeh\" blur to the current frame ON-DEVICE: runs the depth " +
+                "model, keeps the near subject sharp and blurs the far background, and adds the result as " +
+                "an image clip. Use for \"blur the background\", \"portrait mode\", \"add bokeh / depth of " +
+                "field\", \"cinematic blur\". strength scales the blur (default 1.0). Requires the depth " +
+                "model in Settings → AI Analyzer → Image effects (depth); relay its error if unset.",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                "strength" to numberProp("Blur strength (default 1.0; higher = more blur)"),
+            ),
         ))
         put(toolDefinition(
             "diarize_clip",
@@ -538,6 +561,8 @@ class McpTools(
         "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
         "discard_recording" -> discardRecording()
         "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
+        "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
+        "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
         "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
         "list_concepts" -> listConcepts()
         "delete_concept" -> deleteConcept(args.getString("name"))
@@ -1811,6 +1836,72 @@ class McpTools(
         val f = java.io.File(context.cacheDir, "effect_${System.currentTimeMillis()}.png")
         f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         return Uri.fromFile(f).toString()
+    }
+
+    /** Depth-of-field bokeh: run the depth model on the current frame, blur the far background, add it. */
+    private fun applyBokeh(clipId: String, strength: Float): JSONObject {
+        val settings = settingsProvider()
+        val depthPath = settings.effectModelPaths["depth"].orEmpty()
+        require(depthPath.isNotBlank()) {
+            "Bokeh needs the depth model. Set it in Settings → AI Analyzer → Image effects (depth)."
+        }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+            )
+            ?: throw IllegalStateException("No video clip to apply bokeh to — scrub onto one.")
+        val media = st.document.mediaFor(clip)
+            ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: throw IllegalStateException("Could not read the current frame.")
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Applying bokeh…", pausable = true,
+        ) { _ ->
+            val depth = TfliteImageModel(depthPath).use { it.run(frame) }
+                ?: run { frame.recycle(); throw IllegalStateException("The depth model produced no output — check the .tflite file.") }
+            val radius = (14f * strength.coerceIn(0.2f, 4f)).toInt().coerceAtLeast(2)
+            val out = com.hereliesaz.guillotine.ai.DepthBokeh.apply(frame, depth, radius)
+            depth.recycle(); frame.recycle()
+            val uri = saveBitmap(out)
+            out.recycle()
+            vm.addMedia(listOf(MediaItem(newId(), uri, "bokeh: ${media.name}", MediaKind.IMAGE, 5_000)))
+            ok().apply {
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Added a depth-of-field (bokeh) frame — near subject sharp, background blurred.")
+            }
+        }
+    }
+
+    /** Normalize each audio clip to [targetLufs] using ITU-R BS.1770 K-weighted loudness. */
+    private fun normalizeLoudness(targetLufs: Double): JSONObject {
+        val doc = vm.uiState.value.document
+        val clips = doc.clips.filter {
+            val kind = doc.mediaFor(it)?.kind
+            kind == MediaKind.AUDIO || kind == MediaKind.VIDEO
+        }
+        var normalized = 0
+        for (clip in clips) {
+            val media = doc.mediaFor(clip) ?: continue
+            val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), 16_000) ?: continue
+            if (pcm.samples.isEmpty()) continue
+            val lufs = com.hereliesaz.guillotine.ai.Loudness.measureLufs(pcm.samples, pcm.sampleRate)
+            if (lufs <= -70.0) continue // silence
+            val gain = com.hereliesaz.guillotine.ai.Loudness.gainToTarget(lufs, targetLufs)
+            vm.updateClipFilters(clip.id) { it.copy(volume = gain.coerceIn(0f, 2f)) }
+            normalized++
+        }
+        return ok().apply {
+            put("normalized", normalized)
+            put("targetLufs", targetLufs)
+            put(
+                "humanSummary",
+                if (normalized == 0) "No measurable audio to normalize."
+                else "Normalized $normalized audio clip(s) toward ${targetLufs.toInt()} LUFS.",
+            )
+        }
     }
 
     // ---- learned concepts (teach a specific thing by pointing at it) --------
