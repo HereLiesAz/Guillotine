@@ -1153,11 +1153,15 @@ class McpTools(
         }
         val st = vm.uiState.value
         val now = st.currentTimeMs
-        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
-            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+        // An explicit clip_id must resolve (like every other tool); blank = the video clip at the playhead.
+        val clip = if (clipId.isNotBlank()) {
+            st.document.clips.firstOrNull { it.id == clipId }
+                ?: throw IllegalArgumentException("Clip not found: $clipId")
+        } else {
+            com.hereliesaz.guillotine.model.TimelineMath.activeClip(
                 st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
-            )
-            ?: throw IllegalStateException("No video clip at the playhead — scrub onto one.")
+            ) ?: throw IllegalStateException("No video clip at the playhead — scrub onto one.")
+        }
         val media = st.document.mediaFor(clip)
             ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
         val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)

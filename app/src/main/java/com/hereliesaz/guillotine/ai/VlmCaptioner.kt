@@ -22,7 +22,11 @@ object VlmCaptioner {
     @Synchronized
     private fun engine(context: Context, modelPath: String): LlmInference {
         instance?.let { if (path == modelPath) return it }
+        // Clear state BEFORE (re)creating: if createFromOptions throws we must not leave `instance`
+        // pointing at the just-closed engine, or a retry with the same path would return a dead handle.
         runCatching { instance?.close() }
+        instance = null
+        path = null
         instance = LlmInference.createFromOptions(
             context.applicationContext,
             LlmInference.LlmInferenceOptions.builder()
@@ -50,11 +54,13 @@ object VlmCaptioner {
                 .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
                 .build(),
         )
+        val mpImage = BitmapImageBuilder(frame).build()
         return try {
             session.addQueryChunk(prompt)
-            session.addImage(BitmapImageBuilder(frame).build())
+            session.addImage(mpImage)
             session.generateResponse().orEmpty().trim()
         } finally {
+            runCatching { mpImage.close() } // MPImage holds native memory — must be released explicitly
             runCatching { session.close() }
         }
     }
