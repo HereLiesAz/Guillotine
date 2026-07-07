@@ -70,7 +70,10 @@ val AGENT_SYSTEM_PROMPT = """
 
     REFERRING TO THE PREVIEW (what's on screen at the playhead) — two DIFFERENT intents, tell them apart:
     - INSPECT ("what's on screen?", "what is this?", "describe this frame", "what am I looking at?"):
-      call describe_current_frame and answer from its detected objects. Do NOT edit anything.
+      call describe_current_frame and answer from its detected objects. Do NOT edit anything. If the user
+      wants a real, natural-language understanding of the scene (not just an object list) and a VLM is
+      configured, prefer caption_frame — an on-device multimodal model (Gemma-3n) that actually looks at
+      the frame and describes it. If caption_frame reports no VLM is set, fall back to describe_current_frame.
     - ACT on a specific on-screen thing ("this", "that one", "the thing here", "this is my phone — cut it",
       "remove that", "get rid of it"): the user is POINTING at the current frame. If you don't already know
       what's there, call describe_current_frame first; then set_prompt that object on the clip and call

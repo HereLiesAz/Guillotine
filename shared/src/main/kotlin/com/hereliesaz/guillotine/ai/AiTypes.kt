@@ -115,6 +115,8 @@ data class AiSettings(
     val asrModelPath: String = "",
     /** Optional sherpa-onnx offline TTS voice *directory* (extracted bundle); blank = feature off. */
     val ttsModelPath: String = "",
+    /** Optional multimodal VLM `.task` (e.g. Gemma-3n) for rich frame captioning; blank = feature off. */
+    val vlmModelPath: String = "",
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */

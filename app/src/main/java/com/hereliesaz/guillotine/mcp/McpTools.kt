@@ -10,6 +10,7 @@ import com.hereliesaz.guillotine.ai.MlKitProvider
 import com.hereliesaz.guillotine.ai.PcmDecoder
 import com.hereliesaz.guillotine.ai.SherpaAsr
 import com.hereliesaz.guillotine.ai.SherpaTts
+import com.hereliesaz.guillotine.ai.VlmCaptioner
 import com.hereliesaz.guillotine.ai.VocalIsolator
 import com.hereliesaz.guillotine.ai.tflite.TfliteImageModel
 import com.hereliesaz.guillotine.ai.tflite.YamnetClassifier
@@ -303,6 +304,20 @@ class McpTools(
                 required = listOf("clip_id"),
             ),
         ))
+        put(toolDefinition(
+            "caption_frame",
+            "Describe a frame in rich natural language using the ON-DEVICE multimodal VLM (Gemma-3n). " +
+                "Prefer this over describe_current_frame when the user wants a real description / " +
+                "understanding of the scene (\"what's happening in this frame?\", \"describe this shot\", " +
+                "\"what is this a picture of?\") rather than just a list of detected objects. Optionally " +
+                "pass a specific question as prompt. Requires the VLM model in Settings → AI Analyzer → " +
+                "Frame captioning (VLM); if it isn't set it returns an error naming the setting — relay " +
+                "it, don't retry (you can still fall back to describe_current_frame).",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                "prompt" to stringProp("Optional question about the frame (default: describe it)"),
+            ),
+        ))
 
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
@@ -424,6 +439,7 @@ class McpTools(
         "transcribe_precise" -> transcribePrecise(args.getString("clip_id"))
         "add_voiceover" -> addVoiceover(args.getString("text"), args.optDouble("speed", 1.0).toFloat())
         "remove_vocals" -> removeVocals(args.getString("clip_id"))
+        "caption_frame" -> captionFrame(args.optString("clip_id"), args.optString("prompt"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1125,6 +1141,40 @@ class McpTools(
                 put("durationMs", duration)
                 put("clipCount", vm.uiState.value.document.clips.size)
                 put("humanSummary", "Added a ${msFmt(duration)} vocals-removed (instrumental) track.")
+            }
+        }
+    }
+
+    /** Describe the current (or [clipId]) frame in natural language with the on-device multimodal VLM. */
+    private fun captionFrame(clipId: String, prompt: String): JSONObject {
+        val path = settingsProvider().vlmModelPath
+        require(path.isNotBlank()) {
+            "No VLM model set. Add a multimodal .task in Settings → AI Analyzer → Frame captioning (VLM)."
+        }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+            )
+            ?: throw IllegalStateException("No video clip at the playhead — scrub onto one.")
+        val media = st.document.mediaFor(clip)
+            ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: throw IllegalStateException("Could not read the current frame.")
+        val question = prompt.ifBlank { "Describe what is happening in this image in detail." }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Looking at the frame…", pausable = false,
+        ) { _ ->
+            val text = try {
+                VlmCaptioner.describe(context, path, frame, question)
+            } finally {
+                frame.recycle()
+            }
+            ok().apply {
+                put("caption", text)
+                put("humanSummary", if (text.isBlank()) "The VLM returned no description." else text)
             }
         }
     }

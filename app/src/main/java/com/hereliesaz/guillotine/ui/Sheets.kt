@@ -115,6 +115,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
     var asrModelPath by remember { mutableStateOf(current.asrModelPath) }
     var ttsModelPath by remember { mutableStateOf(current.ttsModelPath) }
+    var vlmModelPath by remember { mutableStateOf(current.vlmModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -155,6 +156,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     effectModelPaths = effectModelPaths,
                     audioEventModelPath = audioEventModelPath.trim(),
                     asrModelPath = asrModelPath.trim(), ttsModelPath = ttsModelPath.trim(),
+                    vlmModelPath = vlmModelPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -181,6 +183,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             audioEventModelPath = restored.audioEventModelPath
             asrModelPath = restored.asrModelPath
             ttsModelPath = restored.ttsModelPath
+            vlmModelPath = restored.vlmModelPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -489,6 +492,29 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = ttsModelPath,
                         onUse = { ttsModelPath = it },
                     )
+
+                    // Multimodal VLM (Gemma-3n) for rich frame captioning.
+                    Text("Frame captioning (VLM) — multimodal model (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = vlmModelPath,
+                        onValueChange = { vlmModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Multimodal VLM model path (.task)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Lets the assistant \"describe / understand this frame\" in rich language (Gemma-3n " +
+                            "vision). Gated — sign in free at Hugging Face, download, and paste the path.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "VLM models — download, use, or remove",
+                        models = recommendedModelsFor(ModelCategory.VLM),
+                        selectedPath = vlmModelPath,
+                        onUse = { vlmModelPath = it },
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -651,6 +677,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             audioEventModelPath = audioEventModelPath.trim(),
                             asrModelPath = asrModelPath.trim(),
                             ttsModelPath = ttsModelPath.trim(),
+                            vlmModelPath = vlmModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,

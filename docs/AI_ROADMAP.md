@@ -25,7 +25,7 @@ Google's **AI Edge Gallery** app is a good compatibility oracle for what runs we
 
 | Model | Size | Task | License | Android feasibility |
 |---|---|---|---|---|
-| **Gemma 3n E2B / E4B** | ~2B / ~4B effective (MatFormer + PLE) | Multimodal LLM: text + **image + audio** in | Gemma (commercial OK) | **Top pick.** One model captions frames, understands audio, and drives the editor — collapses several models. Official `.litertlm`/`.task`. |
+| **Gemma 3n E2B / E4B** — **shipped** (vision, `caption_frame`) | ~2B / ~4B effective (MatFormer + PLE) | Multimodal LLM: text + **image + audio** in | Gemma (commercial OK) | **Top pick.** On-device frame captioning via MediaPipe LlmInference + vision modality. Official `.task` (gated, links out for the free Gemma sign-in). Audio-in remains future work. |
 | **Gemma 3 1B** | 1B | Text LLM | Gemma | Excellent, very light, `.task` available. |
 | **Llama 3.2 1B / 3B** | 1B / 3B | Text LLM | Llama 3.2 Community | Good; `.task` (MediaPipe) + ExecuTorch (Meta's official mobile path). |
 | **Qwen2.5 0.5–3B / Qwen3 0.6–4B** | 0.5–4B | Text LLM | Apache-2.0 (small); Qwen2.5-3B is Research License | Strong. Qwen2.5-1.5B ships as `.litertlm` in AI Edge Gallery. |
@@ -62,7 +62,7 @@ upgradeable to a TFLite-exported BeatNet/TempoCNN or aubio/Essentia via NDK.
 | Style transfer | Magenta Arbitrary Stylization TFLite | Apache-2.0 | Real-time capable, but the official model is **two-input** (content+style) so it doesn't fit the single-image `TfliteImageModel` — left as a bring-your-own-path option. |
 | Optical flow | OpenCV (Farnebäck/DIS) or RAFT | BSD | Classical runs easily; RAFT heavy. |
 | Shot detection | **Histogram diff (in-code)** — **shipped** (`detect_scenes`) or TransNetV2 | MIT | Cheap content-difference on-device; splits a clip into shots / chapters. |
-| Captioning / VLM | SmolVLM 256M/500M, Moondream 0.5B, Florence-2, **Gemma 3n** | Apache/MIT | Lightest true on-device VLMs; or reuse Gemma 3n. |
+| Captioning / VLM | **Gemma 3n** — **shipped** (`caption_frame`), SmolVLM 256M/500M, Moondream 0.5B, Florence-2 | Apache/MIT/Gemma | On-device multimodal frame captioning via MediaPipe LlmInference + vision modality (a separate instance, so the text `.task` path is untouched). |
 | Auto-reframe | MediaPipe AutoFlip + saliency (BASNet/U²-Net) | Apache/MIT | Smart vertical crop tracking the subject. |
 
 ### 1.3b Recognition / ID embedding models ("is this the same specific thing?")
