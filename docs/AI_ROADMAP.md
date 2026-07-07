@@ -154,7 +154,8 @@ every snare", "one clip per bar") become concrete rhythm-locked edits.
 Each item is feasible on the current stack or a model listed above.
 
 **Audio & music**
-1. Beat-synced editing (shipped) + auto music-video assembly from a clip folder.
+1. Beat-synced editing (shipped) + auto music-video assembly from a clip folder. **(shipped —
+   `assemble_music_video` trims a track's clips to the beat grid)**
 2. Stem separation (Spleeter/Demucs): "cut to the drums," karaoke, isolate/remove
    vocals, auto-duck music under the vocal stem. **(partial — `remove_vocals` ships a
    dep-free stereo center-channel karaoke/instrumental extractor. True ML multi-stem
@@ -164,10 +165,11 @@ Each item is feasible on the current stack or a model listed above.
    writes VOLUME keyframes on the music under detected speech, on-device, no model)**
 4. AI soundtrack: generate a mood- and length-matched score; AI SFX timed to
    actions/transitions (ElevenLabs SFX).
-5. Loudness normalization to platform targets (−14 LUFS YouTube) on export.
+5. Loudness normalization to platform targets (−14 LUFS YouTube) on export. **(partial —
+   `normalize_levels` level-matches clips by RMS; broadcast-LUFS export normalization is a follow-up)**
 6. Noise reduction / de-reverb / voice isolation on-device (sherpa-onnx).
 7. Multicam sync by audio-waveform correlation **(shipped — `sync_by_audio`)**; filler-word
-   ("um") removal.
+   ("um") removal **(shipped — `remove_fillers` via offline Whisper word timings)**.
 
 **Speech & text**
 8. Better ASR (whisper.cpp/sherpa-onnx) — multilingual, word-level captions. **(shipped —
@@ -200,6 +202,8 @@ Each item is feasible on the current stack or a model listed above.
     + captions → a rough cut the user refines.
 22. Auto-chaptering / scene detection → timeline markers + YouTube chapters. **(shipped —
     `detect_scenes` splits a clip into shots on-device)**
-23. Platform export presets (TikTok/Reels/Shorts) with safe-zones + direct share.
+23. Platform export presets (TikTok/Reels/Shorts) with safe-zones + direct share. **(partial —
+    `set_export_preset` sets the 9:16 / 1:1 / 16:9 output aspect; safe-zone overlays + share are a
+    follow-up)**
 24. Kinetic-caption & meme templates, emoji reactions timed to speech.
 25. Teachable-tool marketplace — share user-defined AI editing tools.

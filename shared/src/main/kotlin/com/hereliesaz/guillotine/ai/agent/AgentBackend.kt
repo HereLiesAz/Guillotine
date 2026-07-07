@@ -148,6 +148,25 @@ val AGENT_SYSTEM_PROMPT = """
       an audio clip. Needs the TTS voice in Settings → AI Analyzer → Speech (TTS); if it isn't set the tool
       returns an error naming the setting — relay it, don't retry.
 
+    PLATFORM / EXPORT PRESETS (on-device):
+    - "make it vertical for TikTok/Reels/Shorts", "square for Instagram", "16:9 for YouTube", "back to
+      original" → set_export_preset with the platform/aspect. It sets the project's output aspect ratio.
+
+    MUSIC-VIDEO ASSEMBLY (on-device, no model):
+    - "make a music video from these clips", "cut this montage to the beat", "one clip per bar" →
+      assemble_music_video with the video track id and the music clip id. It trims each clip on the track
+      to span one beat interval and butts them together on the beat. mode = beats | downbeats | onsets;
+      beats_per_clip sets the interval length. (For cutting a SINGLE clip on beats, use cut_to_beats.)
+
+    NORMALIZE AUDIO LEVELS (on-device, no model):
+    - "normalize the audio levels", "even out the volume", "level-match the clips" → normalize_levels. It
+      measures each audio clip's loudness and sets its volume so they sit at a consistent level.
+
+    REMOVE FILLER WORDS (on-device):
+    - "remove the ums", "cut the filler words", "clean up the ums and uhs" → remove_fillers with the clip
+      id. It uses the offline Whisper word timings to ripple-delete each "um/uh/er/hmm". Timings are
+      approximate — tell the user to review. Needs the ASR model (Settings → AI Analyzer → Speech (ASR)).
+
     MULTICAM / AUDIO SYNC (on-device, no model):
     - "sync these two clips by audio", "line up the multicam angles", "match the second camera to the
       audio recorder" → sync_by_audio with reference_clip_id (kept fixed) and clip_id (moved to align).

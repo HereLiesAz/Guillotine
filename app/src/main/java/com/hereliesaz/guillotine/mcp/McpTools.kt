@@ -305,6 +305,52 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "set_export_preset",
+            "Set the project's output aspect ratio for a platform ON-DEVICE. Use for \"make it vertical " +
+                "for TikTok/Reels/Shorts\", \"square for Instagram\", \"16:9 for YouTube\", \"back to " +
+                "original\". preset = tiktok | reels | shorts | vertical (all 9:16), square | instagram " +
+                "(1:1), youtube | landscape (16:9), or original.",
+            objSchema(
+                "preset" to stringProp("Platform/aspect: tiktok/reels/shorts/vertical, square, youtube/landscape, original"),
+                required = listOf("preset"),
+            ),
+        ))
+        put(toolDefinition(
+            "assemble_music_video",
+            "Assemble the clips on a video track into a montage cut to the beat ON-DEVICE: analyze the " +
+                "audio clip's beat grid and trim each clip on the track to span one beat interval, butting " +
+                "them together on the downbeats. Use for \"make a music video from these clips\", \"cut " +
+                "this montage to the beat\", \"one clip per bar\". mode = beats | downbeats | onsets; " +
+                "beats_per_clip sets how many beats each clip holds (default 1).",
+            objSchema(
+                "track_id" to stringProp("The video track whose clips to assemble (e.g. V1)"),
+                "audio_clip_id" to stringProp("The music clip that provides the beat grid"),
+                "mode" to stringProp("beats | downbeats | onsets (default downbeats)"),
+                "beats_per_clip" to intProp("Beats each clip spans (default 1)"),
+                required = listOf("track_id", "audio_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "normalize_levels",
+            "Even out the loudness of the timeline's audio clips ON-DEVICE (no key): measures each audio " +
+                "clip's level and sets its volume so they all sit at a consistent perceived loudness. Use " +
+                "for \"normalize the audio levels\", \"even out the volume\", \"level-match the clips\". " +
+                "(Level matching, not a broadcast-LUFS export normalization.)",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "remove_fillers",
+            "Remove filler words (\"um\", \"uh\", \"er\", \"hmm\") from a clip ON-DEVICE using the offline " +
+                "Whisper (sherpa-onnx) word timings, ripple-deleting each filler so the timeline closes " +
+                "up. Use for \"remove the ums\", \"cut the filler words\", \"clean up the ums and uhs\". " +
+                "Requires the ASR model in Settings → AI Analyzer → Speech (ASR); relay its error if unset. " +
+                "Timings are approximate — review the result.",
+            objSchema(
+                "clip_id" to stringProp("The clip to de-filler"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
             "sync_by_audio",
             "Sync two clips by their audio ON-DEVICE (no key): cross-correlates the two audio tracks to " +
                 "find the time offset and moves the second clip so its audio lines up with the reference " +
@@ -498,6 +544,10 @@ class McpTools(
         "search_clips" -> searchClips(args.getString("query"))
         "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
         "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
+        "set_export_preset" -> setExportPreset(args.getString("preset"))
+        "assemble_music_video" -> assembleMusicVideo(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("beats_per_clip", 1))
+        "normalize_levels" -> normalizeLevels()
+        "remove_fillers" -> removeFillers(args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1412,6 +1462,160 @@ class McpTools(
         val std = kotlin.math.sqrt(varSum / env.size).toFloat().coerceAtLeast(1e-6f)
         for (i in env.indices) env[i] = (env[i] - mean) / std
         return env
+    }
+
+    /** Set the project's output aspect ratio from a platform [preset]. */
+    private fun setExportPreset(preset: String): JSONObject {
+        val p = preset.lowercase().trim()
+        val aspect = when {
+            listOf("tiktok", "reels", "reel", "shorts", "short", "vertical", "9:16", "story", "stories", "portrait").any { p.contains(it) } ->
+                com.hereliesaz.guillotine.model.AspectRatio.RATIO_9_16
+            listOf("square", "1:1", "instagram post", "feed").any { p.contains(it) } ->
+                com.hereliesaz.guillotine.model.AspectRatio.RATIO_1_1
+            listOf("youtube", "landscape", "16:9", "wide", "tv", "horizontal").any { p.contains(it) } ->
+                com.hereliesaz.guillotine.model.AspectRatio.RATIO_16_9
+            listOf("original", "source", "native").any { p.contains(it) } ->
+                com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL
+            else -> throw IllegalArgumentException(
+                "Unknown preset \"$preset\". Try tiktok/reels/shorts (9:16), square (1:1), youtube (16:9), or original.",
+            )
+        }
+        val cur = vm.uiState.value.document.settings
+        vm.setGlobalSettings(cur.copy(aspectRatio = aspect))
+        val label = aspect.name.removePrefix("RATIO_").replace('_', ':')
+        return ok().apply {
+            put("aspectRatio", aspect.name)
+            put("humanSummary", "Set the project to $label${if (aspect.name == "ORIGINAL") "" else " ($preset)"}.")
+        }
+    }
+
+    /**
+     * Trim each clip on [trackId] to span one beat interval of [audioClipId]'s grid, butting them
+     * together on the beats — a montage cut to the music. [beatsPerClip] controls the interval length.
+     */
+    private fun assembleMusicVideo(trackId: String, audioClipId: String, mode: String, beatsPerClip: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        val audio = doc.clips.firstOrNull { it.id == audioClipId }
+            ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
+        val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
+        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val every = beatsPerClip.coerceAtLeast(1)
+        // Beat times → timeline positions (on the audio clip), thinned to every Nth beat.
+        val grid = map.points(mode)
+            .map { audio.startTimeMs + (it - audio.trimStartMs) }
+            .filter { it in audio.startTimeMs..audio.endTimeMs }
+            .sorted()
+            .filterIndexed { i, _ -> i % every == 0 }
+        if (grid.size < 2) {
+            return JSONObject().apply {
+                put("ok", true); put("assembled", 0)
+                put("humanSummary", "Not enough $mode in the music to build a montage.")
+            }
+        }
+        val clips = doc.clips
+            .filter { it.trackId == trackId && it.type == com.hereliesaz.guillotine.model.ClipType.VIDEO }
+            .sortedBy { it.startTimeMs }
+        if (clips.isEmpty()) throw IllegalStateException("No video clips on track $trackId to assemble.")
+        var assembled = 0
+        for (i in clips.indices) {
+            if (i + 1 >= grid.size) break // ran out of beat intervals
+            val start = grid[i]
+            val interval = grid[i + 1] - start
+            val clip = clips[i]
+            val avail = ((doc.mediaFor(clip)?.durationMs ?: interval) - clip.trimStartMs).coerceAtLeast(1)
+            val dur = interval.coerceAtMost(avail)
+            vm.updateClip(clip.id) { it.copy(startTimeMs = start, durationMs = dur) }
+            assembled++
+        }
+        return ok().apply {
+            put("assembled", assembled); put("bpm", map.bpm)
+            put("humanSummary", "Assembled $assembled clip(s) on $trackId to the beat (~${map.bpm.toInt()} BPM, every $every $mode).")
+        }
+    }
+
+    /** Even out audio-clip loudness: measure each clip's RMS and set its volume toward a shared target. */
+    private fun normalizeLevels(): JSONObject {
+        val doc = vm.uiState.value.document
+        val audioClips = doc.clips.filter {
+            val kind = doc.mediaFor(it)?.kind
+            kind == MediaKind.AUDIO || kind == MediaKind.VIDEO
+        }
+        val rmsByClip = HashMap<String, Float>()
+        for (clip in audioClips) {
+            val media = doc.mediaFor(clip) ?: continue
+            val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), 8_000) ?: continue
+            if (pcm.samples.isEmpty()) continue
+            var sum = 0.0
+            for (v in pcm.samples) sum += v * v
+            val rms = kotlin.math.sqrt(sum / pcm.samples.size).toFloat()
+            if (rms > 1e-4f) rmsByClip[clip.id] = rms
+        }
+        if (rmsByClip.size < 1) {
+            return JSONObject().apply {
+                put("ok", true); put("normalized", 0)
+                put("humanSummary", "No measurable audio to normalize.")
+            }
+        }
+        // Target = median RMS across clips (robust to one very loud/quiet clip).
+        val target = rmsByClip.values.sorted().let { it[it.size / 2] }
+        var normalized = 0
+        for ((id, rms) in rmsByClip) {
+            val gain = (target / rms).coerceIn(0.1f, 4f)
+            vm.updateClipFilters(id) { it.copy(volume = gain.coerceIn(0f, 2f)) }
+            normalized++
+        }
+        return ok().apply {
+            put("normalized", normalized)
+            put("humanSummary", "Level-matched $normalized audio clip(s) to a consistent loudness.")
+        }
+    }
+
+    /** Filler words this removes (lowercased, punctuation-stripped word match). */
+    private val FILLER_WORDS = setOf("um", "uh", "er", "erm", "hmm", "mm", "umm", "uhh", "uhm", "ah")
+
+    /**
+     * Remove filler words from a clip using offline Whisper word timings, ripple-deleting each filler's
+     * timeline range (latest-first so earlier ranges stay valid). Timings are approximate.
+     */
+    private fun removeFillers(clipId: String): JSONObject {
+        val dir = settingsProvider().asrModelPath
+        require(dir.isNotBlank()) {
+            "No ASR model set. Download Whisper in Settings → AI Analyzer → Speech (ASR)."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), YamnetClassifier.SAMPLE_RATE)
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to de-filler.")
+        val samples = YamnetClassifier.resampleTo16k(pcm.samples, pcm.sampleRate)
+        val words = SherpaAsr.transcribeWords(dir, samples)
+        // Filler word source ranges → timeline ranges within this clip.
+        val ranges = words
+            .filter { it.text.lowercase().trim().trim('.', ',', '!', '?', ';', ':') in FILLER_WORDS }
+            .map { w ->
+                val tlStart = clip.startTimeMs + (w.startMs - clip.trimStartMs)
+                val tlEnd = clip.startTimeMs + (w.endMs - clip.trimStartMs)
+                tlStart.coerceIn(clip.startTimeMs, clip.endTimeMs) to tlEnd.coerceIn(clip.startTimeMs, clip.endTimeMs)
+            }
+            .filter { it.second - it.first >= 40L }
+            .sortedByDescending { it.first } // delete latest-first so earlier ranges don't shift
+        if (ranges.isEmpty()) {
+            return JSONObject().apply {
+                put("ok", true); put("removed", 0)
+                put("humanSummary", "No filler words detected in the clip.")
+            }
+        }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Removing filler words…", pausable = false,
+        ) { _ ->
+            var removed = 0
+            for ((s, e) in ranges) { vm.rippleDeleteRange(s, e); removed++ }
+            ok().apply {
+                put("removed", removed)
+                put("humanSummary", "Removed $removed filler word(s) (um/uh/…) and closed the gaps.")
+            }
+        }
     }
 
     /**
