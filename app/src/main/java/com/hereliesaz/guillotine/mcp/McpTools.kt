@@ -363,6 +363,20 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "separate_stems",
+            "Split a clip's music into VOCALS and ACCOMPANIMENT (instrumental) tracks ON-DEVICE (Spleeter " +
+                "via ONNX, no key) and add both as audio clips — true ML stem separation for remixes, " +
+                "karaoke, or isolating either part. Use for \"separate the stems\", \"split vocals and " +
+                "instrumental\", \"isolate the vocals\", \"give me the acapella / instrumental\". (For a " +
+                "quick stereo karaoke without a model, use remove_vocals.) Requires the Spleeter model in " +
+                "Settings → AI Analyzer → Stem separation; heavy — best on moderate clip lengths. Relay " +
+                "its error if the model isn't set.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to separate"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
             "diarize_clip",
             "Speaker diarization ON-DEVICE (no key): work out WHO spoke WHEN in a clip's audio and return " +
                 "the speaker turns (speaker index + time range). Use for \"who speaks when?\", \"label the " +
@@ -589,6 +603,7 @@ class McpTools(
         "normalize_levels" -> normalizeLevels()
         "remove_fillers" -> removeFillers(args.getString("clip_id"))
         "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
+        "separate_stems" -> separateStems(args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1608,6 +1623,35 @@ class McpTools(
         return ok().apply {
             put("normalized", normalized)
             put("humanSummary", "Level-matched $normalized audio clip(s) to a consistent loudness.")
+        }
+    }
+
+    /** Separate a clip's music into vocals + accompaniment via on-device Spleeter (ONNX); add both. */
+    private fun separateStems(clipId: String): JSONObject {
+        val dir = settingsProvider().stemModelPath
+        require(dir.isNotBlank()) {
+            "No stem model set. Download Spleeter in Settings → AI Analyzer → Stem separation."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Separating stems…", pausable = false,
+        ) { _ ->
+            val stems = com.hereliesaz.guillotine.ai.Spleeter.separate(
+                context, Uri.parse(media.uri), dir, java.io.File(context.cacheDir, "stems"),
+            ) ?: throw IllegalStateException("Couldn't separate — the clip needs decodable audio.")
+            vm.addMedia(
+                listOf(
+                    MediaItem(newId(), Uri.fromFile(java.io.File(stems.vocalsWav)).toString(), "vocals: ${media.name}", MediaKind.AUDIO, stems.durationMs),
+                    MediaItem(newId(), Uri.fromFile(java.io.File(stems.accompanimentWav)).toString(), "instrumental: ${media.name}", MediaKind.AUDIO, stems.durationMs),
+                ),
+            )
+            ok().apply {
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Separated into vocals + accompaniment and added both as audio clips.")
+            }
         }
     }
 

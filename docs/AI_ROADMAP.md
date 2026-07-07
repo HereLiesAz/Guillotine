@@ -157,10 +157,9 @@ Each item is feasible on the current stack or a model listed above.
 1. Beat-synced editing (shipped) + auto music-video assembly from a clip folder. **(shipped —
    `assemble_music_video` trims a track's clips to the beat grid)**
 2. Stem separation (Spleeter/Demucs): "cut to the drums," karaoke, isolate/remove
-   vocals, auto-duck music under the vocal stem. **(partial — `remove_vocals` ships a
-   dep-free stereo center-channel karaoke/instrumental extractor. True ML multi-stem
-   Spleeter is a follow-up: sherpa-onnx v1.13.3 has no Kotlin/JNI source-separation
-   binding, so it needs `onnxruntime-android` + an STFT/iSTFT spectrogram pipeline.)**
+   vocals, auto-duck music under the vocal stem. **(shipped — `separate_stems` runs
+   Deezer Spleeter 2-stem via ONNX Runtime (STFT → model → ratio mask → iSTFT) into
+   vocals + accompaniment; `remove_vocals` is the quick dep-free stereo karaoke.)**
 3. Auto-ducking / sidechain: lower music under speech via VAD + RMS. **(shipped — `auto_duck`
    writes VOLUME keyframes on the music under detected speech, on-device, no model)**
 4. AI soundtrack: generate a mood- and length-matched score; AI SFX timed to

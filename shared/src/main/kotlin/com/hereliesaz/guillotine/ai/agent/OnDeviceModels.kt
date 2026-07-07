@@ -406,6 +406,28 @@ val RECOMMENDED_DIARIZE_EMBED_MODELS: List<OnDeviceModel> = listOf(
     ),
 )
 
+/**
+ * Recommended source-separation (stem) model for ONNX Runtime — Deezer Spleeter 2-stem. Multi-file
+ * `.tar.bz2` (vocals + accompaniment `.onnx`); "Use" sets `stemModelPath` to the extracted directory.
+ */
+val RECOMMENDED_STEM_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "spleeter-2stems",
+        label = "Spleeter 2-stem — vocals / accompaniment",
+        fileName = "sherpa-onnx-spleeter-2stems.tar.bz2",
+        sizeBytes = 71_200_000L,
+        license = "MIT (Deezer Spleeter)",
+        gated = false,
+        repoUrl = hfRepo("csukuangfj/sherpa-onnx-spleeter-2stems"),
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/sherpa-onnx-spleeter-2stems.tar.bz2",
+        abilities = "Separates a song into a vocals track and an instrumental (accompaniment) track — real ML stem splitting for remixes, karaoke, or isolating either part.",
+        limitations = "~71 MB. Runs via ONNX Runtime; heavy (hundreds of MB of RAM) — best on a capable device and moderate clip lengths.",
+        isArchive = true,
+        archiveMarker = "vocals.onnx",
+        category = ModelCategory.STEM,
+    ),
+)
+
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
@@ -419,5 +441,6 @@ fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (c
     ModelCategory.VLM -> RECOMMENDED_VLM_MODELS
     ModelCategory.DIARIZE_SEG -> RECOMMENDED_DIARIZE_SEG_MODELS
     ModelCategory.DIARIZE_EMBED -> RECOMMENDED_DIARIZE_EMBED_MODELS
+    ModelCategory.STEM -> RECOMMENDED_STEM_MODELS
     else -> emptyList()
 }
