@@ -16,7 +16,7 @@ coreKtx = "1.19.0"
 lifecycle = "2.11.0"
 activityCompose = "1.13.0"
 composeUi = "1.12.0-beta01"
-material3 = "1.5.0-alpha22"
+material3 = "1.5.0-alpha23"
 iconsExtended = "1.7.8"
 media3 = "1.10.1"
 datastore = "1.2.1"
@@ -48,7 +48,7 @@ composeMultiplatform = "1.8.1"
 # See https://github.com/bytedeco/javacv/blob/master/CHANGELOG.md for pairings.
 javacv = "1.5.11"
 javacpp = "1.5.11"
-ffmpeg = "7.1-1.5.11"
+ffmpeg = "8.0.1-1.5.13"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
