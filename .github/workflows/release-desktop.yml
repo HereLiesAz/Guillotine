@@ -6,7 +6,7 @@ name: Release Desktop Installers
 # matching desktop installers to the SAME release, so a v0.9 tag ends up with the Android
 # artifacts + macOS DMG + Windows MSI + Linux DEB in one place.
 #
-# Force-pushing an existing tag still fires push:tags — softprops/action-gh-release@v2 upserts,
+# Force-pushing an existing tag still fires push:tags — softprops/action-gh-release@v3 upserts,
 # so re-runs cleanly replace the installers on the release.
 #
 # `v*` is kept for future proper semver releases; `latest-release-v*` is the current cadence.
@@ -72,11 +72,11 @@ jobs:
         shell: bash
         run: ./gradlew :desktop:${{ matrix.task }} --build-cache --stacktrace
 
-      # softprops/action-gh-release@v2 upserts assets on the release matching the tag ref
+      # softprops/action-gh-release@v3 upserts assets on the release matching the tag ref
       # (or the workflow_dispatch input). Unsigned installers show scary OS prompts on
       # first launch — that's called out in the release body.
       - name: Attach installer to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: ${{ matrix.path }}
