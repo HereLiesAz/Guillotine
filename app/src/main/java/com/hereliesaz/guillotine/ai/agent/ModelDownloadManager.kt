@@ -79,7 +79,7 @@ object ModelDownloadManager {
             archiveDir(context, model).takeIf { File(it, model.archiveMarker).isFile }?.absolutePath
         } else {
             File(modelsDir(context, model.category), model.fileName)
-                .takeIf { it.isFile && it.length() == model.sizeBytes }
+                .takeIf { it.isFile && (if (model.verifyBySize) it.length() == model.sizeBytes else it.length() > 0L) }
                 ?.absolutePath
         }
 
@@ -195,7 +195,8 @@ object ModelDownloadManager {
                     }
                     _state.value = DownloadState.Done(model.id, destDir.absolutePath)
                 } else {
-                    if (partFile.length() != model.sizeBytes) {
+                    // Enforce an exact-size match only when we trust the published size.
+                    if (model.verifyBySize && partFile.length() != model.sizeBytes) {
                         throw IllegalStateException("Downloaded file is incomplete; try again.")
                     }
                     finalFile.delete()

@@ -32,6 +32,10 @@ enum class ModelCategory {
     TTS,
     /** Multimodal VLM `.task` (MediaPipe LlmInference + vision) — rich frame captioning. */
     VLM,
+    /** sherpa-onnx pyannote segmentation model bundle — speaker diarization (who spoke when). */
+    DIARIZE_SEG,
+    /** sherpa-onnx speaker-embedding `.onnx` — the other half of diarization. */
+    DIARIZE_EMBED,
     // --- reserved for upcoming runtimes (not yet shown in the picker) ---
     STYLE, STEM,
 }
@@ -64,6 +68,12 @@ data class OnDeviceModel(
     val isArchive: Boolean = false,
     /** For archive models: a file, relative to the extracted directory, that must exist once installed. */
     val archiveMarker: String = "",
+    /**
+     * For single-file downloads: whether "installed" is verified by an exact byte-size match. Default
+     * true. Set false when the exact size isn't known (e.g. a release `.onnx` whose size we couldn't
+     * verify) — then a fully-downloaded, non-empty file counts as installed.
+     */
+    val verifyBySize: Boolean = true,
 ) {
     /** Human-readable size, e.g. "1.46 GB" or "167 MB". */
     val sizeLabel: String get() {
@@ -352,6 +362,50 @@ val RECOMMENDED_VLM_MODELS: List<OnDeviceModel> = listOf(
     ),
 )
 
+/**
+ * Recommended speaker-diarization models for sherpa-onnx — the SEGMENTATION half (pyannote). Multi-file
+ * `.tar.bz2`; "Use" sets `diarizeSegModelPath` to the extracted directory. Pair with an embedding model.
+ */
+val RECOMMENDED_DIARIZE_SEG_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "sherpa-pyannote-seg-3-0",
+        label = "Pyannote segmentation 3.0 — speaker turns",
+        fileName = "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        sizeBytes = 6_000_000L, // approximate
+        license = "MIT (converted pyannote weights)",
+        gated = false,
+        repoUrl = hfRepo("csukuangfj/sherpa-onnx-pyannote-segmentation-3-0"),
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        abilities = "Detects who is speaking when (speaker turns). Half of diarization — pair it with a speaker-embedding model.",
+        limitations = "~6 MB. Needs a speaker-embedding model too.",
+        isArchive = true,
+        archiveMarker = "model.onnx",
+        category = ModelCategory.DIARIZE_SEG,
+    ),
+)
+
+/**
+ * Recommended speaker-diarization models for sherpa-onnx — the EMBEDDING half (single `.onnx`). "Use"
+ * sets `diarizeEmbedModelPath`. Pair with a segmentation model.
+ */
+val RECOMMENDED_DIARIZE_EMBED_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "3dspeaker-eres2net-base-16k",
+        label = "3D-Speaker ERes2Net — speaker embeddings",
+        fileName = "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+        sizeBytes = 26_000_000L, // approximate (exact size unverified → don't size-check)
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("csukuangfj/speaker-embedding-models"),
+        // Release tag is spelled "recongition" upstream — keep it verbatim or the download 404s.
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+        abilities = "Turns each speaker turn into a voiceprint so turns can be grouped by speaker. The other half of diarization.",
+        limitations = "~26 MB. Needs a segmentation model too.",
+        verifyBySize = false,
+        category = ModelCategory.DIARIZE_EMBED,
+    ),
+)
+
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
@@ -363,5 +417,7 @@ fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (c
     ModelCategory.ASR -> RECOMMENDED_ASR_MODELS
     ModelCategory.TTS -> RECOMMENDED_TTS_MODELS
     ModelCategory.VLM -> RECOMMENDED_VLM_MODELS
+    ModelCategory.DIARIZE_SEG -> RECOMMENDED_DIARIZE_SEG_MODELS
+    ModelCategory.DIARIZE_EMBED -> RECOMMENDED_DIARIZE_EMBED_MODELS
     else -> emptyList()
 }

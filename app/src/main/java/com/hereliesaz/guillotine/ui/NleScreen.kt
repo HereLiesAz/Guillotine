@@ -1,6 +1,11 @@
 package com.hereliesaz.guillotine.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -36,6 +41,8 @@ import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
@@ -424,7 +431,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 )
                 TransportControls(vm, state)
             }
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = settings.asrModelPath)
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
             PreviewPlayer(
@@ -434,7 +441,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
             )
             TransportControls(vm, state)
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true })
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = settings.asrModelPath)
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
         } // editor Column
@@ -819,6 +826,8 @@ private fun EditorToolStrip(
     onAgentRun: (String) -> Unit,
     onImport: () -> Unit,
     onHelp: () -> Unit,
+    /** Offline ASR model dir for voice-command dictation; blank hides the mic button. */
+    asrModelPath: String = "",
 ) {
     val selected = state.selectedClips
     // Dismiss the soft keyboard AND drop focus on submit — without this the IME stays up after
@@ -850,6 +859,47 @@ private fun EditorToolStrip(
     }
     // Whether the prompt field has focus — drives the recent-prompts history dropdown.
     var promptFocused by remember { mutableStateOf(false) }
+
+    // ---- Voice-command dictation (offline ASR) --------------------------------------------------
+    // Tap the mic → record → tap again → transcribe on-device → drop the text into the prompt field
+    // (the user reviews, then hits send). Only offered when an offline ASR model is configured.
+    val voiceCtx = LocalContext.current
+    val voiceScope = rememberCoroutineScope()
+    var capture by remember { mutableStateOf<com.hereliesaz.guillotine.ai.VoiceCapture?>(null) }
+    var listening by remember { mutableStateOf(false) }
+    var transcribing by remember { mutableStateOf(false) }
+    val beginListening: () -> Unit = {
+        capture = com.hereliesaz.guillotine.ai.VoiceCapture().also { if (!it.start()) { capture = null } }
+        listening = capture != null
+    }
+    val micPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) beginListening()
+    }
+    val toggleVoice: () -> Unit = {
+        if (listening) {
+            val cap = capture; capture = null; listening = false
+            if (cap != null) {
+                transcribing = true
+                voiceScope.launch(Dispatchers.Default) {
+                    val pcm = cap.stop()
+                    val text = if (asrModelPath.isNotBlank() && pcm.isNotEmpty()) {
+                        runCatching { com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm) }.getOrNull()
+                    } else null
+                    withContext(Dispatchers.Main) {
+                        transcribing = false
+                        if (!text.isNullOrBlank()) {
+                            val existing = assistant.input
+                            onAgentInput(if (existing.isBlank()) text.trim() else "${existing.trim()} ${text.trim()}")
+                        }
+                    }
+                }
+            }
+        } else {
+            val granted = ContextCompat.checkSelfPermission(voiceCtx, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            if (granted) beginListening() else micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
     Column(Modifier.fillMaxWidth().background(Neutral900)) {
         Row(
             Modifier
@@ -983,6 +1033,22 @@ private fun EditorToolStrip(
                             onClick = { if (hasClip) vm.setPromptForSelected(p) else onAgentInput(p); promptFocused = false },
                         )
                     }
+                }
+            }
+            // Voice-command mic: dictate an instruction on-device. Only when ASR is configured and no
+            // clip is selected (the field is an AI instruction, not a per-clip analysis prompt).
+            if (!hasClip && asrModelPath.isNotBlank()) {
+                Spacer(Modifier.width(4.dp))
+                if (transcribing) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Red500)
+                } else {
+                    IconToolButton(
+                        if (listening) Icons.Filled.Stop else Icons.Filled.Mic,
+                        if (listening) "Stop dictation" else "Dictate a command",
+                        active = listening,
+                        enabled = !assistant.running,
+                        onClick = toggleVoice,
+                    )
                 }
             }
             Spacer(Modifier.width(8.dp))

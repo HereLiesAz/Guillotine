@@ -117,6 +117,10 @@ data class AiSettings(
     val ttsModelPath: String = "",
     /** Optional multimodal VLM `.task` (e.g. Gemma-3n) for rich frame captioning; blank = feature off. */
     val vlmModelPath: String = "",
+    /** Optional sherpa-onnx pyannote segmentation model *directory* for speaker diarization. */
+    val diarizeSegModelPath: String = "",
+    /** Optional sherpa-onnx speaker-embedding `.onnx` file for speaker diarization. */
+    val diarizeEmbedModelPath: String = "",
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */

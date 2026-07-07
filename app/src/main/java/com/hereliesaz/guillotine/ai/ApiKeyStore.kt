@@ -57,6 +57,8 @@ class ApiKeyStore(context: Context) {
         asrModelPath = prefs.getString(KEY_ASR_MODEL, "").orEmpty(),
         ttsModelPath = prefs.getString(KEY_TTS_MODEL, "").orEmpty(),
         vlmModelPath = prefs.getString(KEY_VLM_MODEL, "").orEmpty(),
+        diarizeSegModelPath = prefs.getString(KEY_DIARIZE_SEG, "").orEmpty(),
+        diarizeEmbedModelPath = prefs.getString(KEY_DIARIZE_EMBED, "").orEmpty(),
         frameAnalysisCacheSize = prefs
             .getInt(KEY_FRAME_CACHE_SIZE, FrameAnalysisCache.DEFAULT_MAX_ENTRIES)
             .coerceIn(FrameAnalysisCache.MIN_MAX_ENTRIES, FrameAnalysisCache.MAX_MAX_ENTRIES),
@@ -92,6 +94,8 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_ASR_MODEL, settings.asrModelPath)
                 putString(KEY_TTS_MODEL, settings.ttsModelPath)
                 putString(KEY_VLM_MODEL, settings.vlmModelPath)
+                putString(KEY_DIARIZE_SEG, settings.diarizeSegModelPath)
+                putString(KEY_DIARIZE_EMBED, settings.diarizeEmbedModelPath)
                 putInt(KEY_FRAME_CACHE_SIZE, settings.frameAnalysisCacheSize)
                 GenProviderType.entries.forEach {
                     putString(genKeyPref(it), settings.genKeys[it].orEmpty())
@@ -124,6 +128,8 @@ class ApiKeyStore(context: Context) {
         const val KEY_ASR_MODEL = "asr_model_path"
         const val KEY_TTS_MODEL = "tts_model_path"
         const val KEY_VLM_MODEL = "vlm_model_path"
+        const val KEY_DIARIZE_SEG = "diarize_seg_model_path"
+        const val KEY_DIARIZE_EMBED = "diarize_embed_model_path"
         const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
