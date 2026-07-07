@@ -48,7 +48,7 @@ composeMultiplatform = "1.8.1"
 # See https://github.com/bytedeco/javacv/blob/master/CHANGELOG.md for pairings.
 javacv = "1.5.11"
 javacpp = "1.5.11"
-ffmpeg = "7.1-1.5.11"
+ffmpeg = "8.0.1-1.5.13"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
