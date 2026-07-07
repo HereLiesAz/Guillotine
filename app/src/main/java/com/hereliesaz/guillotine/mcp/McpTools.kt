@@ -10,6 +10,7 @@ import com.hereliesaz.guillotine.ai.MlKitProvider
 import com.hereliesaz.guillotine.ai.PcmDecoder
 import com.hereliesaz.guillotine.ai.SherpaAsr
 import com.hereliesaz.guillotine.ai.SherpaTts
+import com.hereliesaz.guillotine.ai.VlmCaptioner
 import com.hereliesaz.guillotine.ai.VocalIsolator
 import com.hereliesaz.guillotine.ai.tflite.TfliteImageModel
 import com.hereliesaz.guillotine.ai.tflite.YamnetClassifier
@@ -303,6 +304,120 @@ class McpTools(
                 required = listOf("clip_id"),
             ),
         ))
+        put(toolDefinition(
+            "set_export_preset",
+            "Set the project's output aspect ratio for a platform ON-DEVICE. Use for \"make it vertical " +
+                "for TikTok/Reels/Shorts\", \"square for Instagram\", \"16:9 for YouTube\", \"back to " +
+                "original\". preset = tiktok | reels | shorts | vertical (all 9:16), square | instagram " +
+                "(1:1), youtube | landscape (16:9), or original.",
+            objSchema(
+                "preset" to stringProp("Platform/aspect: tiktok/reels/shorts/vertical, square, youtube/landscape, original"),
+                required = listOf("preset"),
+            ),
+        ))
+        put(toolDefinition(
+            "assemble_music_video",
+            "Assemble the clips on a video track into a montage cut to the beat ON-DEVICE: analyze the " +
+                "audio clip's beat grid and trim each clip on the track to span one beat interval, butting " +
+                "them together on the downbeats. Use for \"make a music video from these clips\", \"cut " +
+                "this montage to the beat\", \"one clip per bar\". mode = beats | downbeats | onsets; " +
+                "beats_per_clip sets how many beats each clip holds (default 1).",
+            objSchema(
+                "track_id" to stringProp("The video track whose clips to assemble (e.g. V1)"),
+                "audio_clip_id" to stringProp("The music clip that provides the beat grid"),
+                "mode" to stringProp("beats | downbeats | onsets (default downbeats)"),
+                "beats_per_clip" to intProp("Beats each clip spans (default 1)"),
+                required = listOf("track_id", "audio_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "normalize_levels",
+            "Even out the loudness of the timeline's audio clips ON-DEVICE (no key): measures each audio " +
+                "clip's level and sets its volume so they all sit at a consistent perceived loudness. Use " +
+                "for \"normalize the audio levels\", \"even out the volume\", \"level-match the clips\". " +
+                "(Level matching, not a broadcast-LUFS export normalization.)",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "remove_fillers",
+            "Remove filler words (\"um\", \"uh\", \"er\", \"hmm\") from a clip ON-DEVICE using the offline " +
+                "Whisper (sherpa-onnx) word timings, ripple-deleting each filler so the timeline closes " +
+                "up. Use for \"remove the ums\", \"cut the filler words\", \"clean up the ums and uhs\". " +
+                "Requires the ASR model in Settings → AI Analyzer → Speech (ASR); relay its error if unset. " +
+                "Timings are approximate — review the result.",
+            objSchema(
+                "clip_id" to stringProp("The clip to de-filler"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "sync_by_audio",
+            "Sync two clips by their audio ON-DEVICE (no key): cross-correlates the two audio tracks to " +
+                "find the time offset and moves the second clip so its audio lines up with the reference " +
+                "(multicam / dual-recording sync). Use for \"sync these two clips by audio\", \"line up " +
+                "the multicam angles\", \"match the second camera to the audio recorder\". Both clips need " +
+                "audio of the same moment.",
+            objSchema(
+                "reference_clip_id" to stringProp("The clip to keep fixed (the reference)"),
+                "clip_id" to stringProp("The clip to move so its audio aligns to the reference"),
+                "max_offset_sec" to intProp("Max search offset in seconds (default 15)"),
+                required = listOf("reference_clip_id", "clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "auto_reframe",
+            "Auto-reframe a clip to keep the subject centered ON-DEVICE (no key): detects the main face " +
+                "across the clip and pans a punched-in crop to follow it — the classic \"make it work " +
+                "vertically / follow the speaker\" reframe. Use for \"auto-reframe this\", \"keep the " +
+                "subject centered\", \"follow the face\", \"reframe for vertical/Reels\". zoom is the " +
+                "punch-in (default 1.3). Sets the clip's scale and writes OFFSET_X keyframes that track " +
+                "the face; needs faces in the footage (returns an error if none are found).",
+            objSchema(
+                "clip_id" to stringProp("The clip to reframe"),
+                "zoom" to numberProp("Punch-in scale (default 1.3; more = tighter, more room to pan)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "search_clips",
+            "Find which video clips contain something ON-DEVICE (no key): samples each clip's frames and " +
+                "matches them against [query] using on-device image labels (~400 common things/scenes — " +
+                "e.g. dog, car, beach, sunset, food, crowd). Use for \"find the clips with a dog\", " +
+                "\"which shots have a sunset?\", \"where's the beach footage?\". Returns the matching " +
+                "clips with the matched label and a timestamp; it does not edit anything.",
+            objSchema(
+                "query" to stringProp("What to look for, e.g. \"dog\" or \"sunset\""),
+                required = listOf("query"),
+            ),
+        ))
+        put(toolDefinition(
+            "auto_duck",
+            "Auto-duck (sidechain) a music clip under a voice/speech clip ON-DEVICE (no model/key): detect " +
+                "where the voice is talking and dip the music's VOLUME there with smooth ramps, restoring " +
+                "it in the gaps. Use for \"duck the music under the voiceover\", \"lower the music when " +
+                "someone's talking\", \"sidechain the music to the narration\". amount is the ducked level " +
+                "(0–1, default 0.3 = −10 dB-ish).",
+            objSchema(
+                "music_clip_id" to stringProp("The music clip to duck"),
+                "voice_clip_id" to stringProp("The voice/speech clip that triggers the ducking"),
+                "amount" to numberProp("Ducked music level 0–1 (default 0.3; lower = quieter under speech)"),
+                required = listOf("music_clip_id", "voice_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "caption_frame",
+            "Describe a frame in rich natural language using the ON-DEVICE multimodal VLM (Gemma-3n). " +
+                "Prefer this over describe_current_frame when the user wants a real description / " +
+                "understanding of the scene (\"what's happening in this frame?\", \"describe this shot\", " +
+                "\"what is this a picture of?\") rather than just a list of detected objects. Optionally " +
+                "pass a specific question as prompt. Requires the VLM model in Settings → AI Analyzer → " +
+                "Frame captioning (VLM); if it isn't set it returns an error naming the setting — relay " +
+                "it, don't retry (you can still fall back to describe_current_frame).",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                "prompt" to stringProp("Optional question about the frame (default: describe it)"),
+            ),
+        ))
 
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
@@ -424,6 +539,15 @@ class McpTools(
         "transcribe_precise" -> transcribePrecise(args.getString("clip_id"))
         "add_voiceover" -> addVoiceover(args.getString("text"), args.optDouble("speed", 1.0).toFloat())
         "remove_vocals" -> removeVocals(args.getString("clip_id"))
+        "caption_frame" -> captionFrame(args.optString("clip_id"), args.optString("prompt"))
+        "auto_duck" -> autoDuck(args.getString("music_clip_id"), args.getString("voice_clip_id"), args.optDouble("amount", 0.3).toFloat())
+        "search_clips" -> searchClips(args.getString("query"))
+        "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
+        "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
+        "set_export_preset" -> setExportPreset(args.getString("preset"))
+        "assemble_music_video" -> assembleMusicVideo(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("beats_per_clip", 1))
+        "normalize_levels" -> normalizeLevels()
+        "remove_fillers" -> removeFillers(args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1125,6 +1249,463 @@ class McpTools(
                 put("durationMs", duration)
                 put("clipCount", vm.uiState.value.document.clips.size)
                 put("humanSummary", "Added a ${msFmt(duration)} vocals-removed (instrumental) track.")
+            }
+        }
+    }
+
+    /**
+     * Auto-duck (sidechain) [musicClipId] under the speech in [voiceClipId]: find where the voice is
+     * talking (RMS energy gate) and dip the music's VOLUME to [amount] there with short ramps, back to
+     * 1.0 in the gaps — all on-device, no model. Writes VOLUME keyframes on the music clip.
+     */
+    private fun autoDuck(musicClipId: String, voiceClipId: String, amount: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        val music = doc.clips.firstOrNull { it.id == musicClipId }
+            ?: throw IllegalArgumentException("Music clip not found: $musicClipId")
+        val voice = doc.clips.firstOrNull { it.id == voiceClipId }
+            ?: throw IllegalArgumentException("Voice clip not found: $voiceClipId")
+        val vmedia = doc.mediaFor(voice) ?: throw IllegalArgumentException("No media for voice clip: $voiceClipId")
+        val pcm = PcmDecoder.decode(context, Uri.parse(vmedia.uri), 8_000)
+            ?: throw IllegalStateException("No audio track in \"${vmedia.name}\" to detect speech.")
+        val regions = speechRegions(pcm) // source ms within the voice media
+        if (regions.isEmpty()) {
+            return JSONObject().apply {
+                put("ok", true); put("duckedRegions", 0)
+                put("humanSummary", "No speech detected in the voice clip — nothing to duck under.")
+            }
+        }
+        // Map each voice-source region to music-clip-relative ms, keeping only the on-clip overlap.
+        val duck = amount.coerceIn(0f, 1f)
+        val ramp = 120L
+        val ease = CubicBezier()
+        val points = mutableListOf<Triple<Long, Float, CubicBezier>>()
+        var applied = 0
+        for ((s, e) in regions) {
+            val tlStart = voice.startTimeMs + (s - voice.trimStartMs)
+            val tlEnd = voice.startTimeMs + (e - voice.trimStartMs)
+            val relStart = (tlStart - music.startTimeMs)
+            val relEnd = (tlEnd - music.startTimeMs)
+            if (relEnd <= 0 || relStart >= music.durationMs) continue // no overlap with the music clip
+            val rs = relStart.coerceIn(0, music.durationMs)
+            val re = relEnd.coerceIn(0, music.durationMs)
+            points += Triple((rs - ramp).coerceAtLeast(0), 1f, ease)
+            points += Triple(rs, duck, ease)
+            points += Triple(re, duck, ease)
+            points += Triple((re + ramp).coerceAtMost(music.durationMs), 1f, ease)
+            applied++
+        }
+        if (applied == 0) {
+            return JSONObject().apply {
+                put("ok", true); put("duckedRegions", 0)
+                put("humanSummary", "The speech doesn't overlap the music clip — nothing ducked.")
+            }
+        }
+        vm.insertKeyframes(musicClipId, KeyframeProperty.VOLUME, points)
+        return ok().apply {
+            put("duckedRegions", applied)
+            put("humanSummary", "Ducked the music to ${(duck * 100).toInt()}% under $applied speech section(s).")
+        }
+    }
+
+    /**
+     * Detect speech regions in [pcm] via a short-window RMS energy gate with an adaptive threshold.
+     * Returns [start,end] pairs in source ms, merging gaps < 250 ms and dropping blips < 150 ms.
+     */
+    private fun speechRegions(pcm: com.hereliesaz.guillotine.ai.PcmAudio): List<Pair<Long, Long>> {
+        val rate = pcm.sampleRate
+        if (rate <= 0 || pcm.samples.isEmpty()) return emptyList()
+        val win = (rate * 0.04).toInt().coerceAtLeast(1) // 40 ms windows
+        val n = pcm.samples.size / win
+        if (n == 0) return emptyList()
+        val rms = FloatArray(n)
+        var peak = 0f
+        for (i in 0 until n) {
+            var sum = 0.0
+            val base = i * win
+            for (j in 0 until win) { val v = pcm.samples[base + j]; sum += v * v }
+            rms[i] = kotlin.math.sqrt(sum / win).toFloat()
+            if (rms[i] > peak) peak = rms[i]
+        }
+        val threshold = maxOf(0.02f, peak * 0.2f)
+        fun winMs(w: Int) = w.toLong() * win * 1000L / rate
+        val raw = ArrayList<Pair<Long, Long>>()
+        var i = 0
+        while (i < n) {
+            if (rms[i] >= threshold) {
+                var j = i
+                while (j < n && rms[j] >= threshold) j++
+                raw += winMs(i) to winMs(j)
+                i = j
+            } else i++
+        }
+        // Merge close regions, then drop too-short ones.
+        val merged = ArrayList<Pair<Long, Long>>()
+        for (r in raw) {
+            val last = merged.lastOrNull()
+            if (last != null && r.first - last.second <= 250L) merged[merged.size - 1] = last.first to r.second
+            else merged += r
+        }
+        return merged.filter { it.second - it.first >= 150L }
+    }
+
+    /**
+     * Auto-reframe [clipId] to follow the main face: sample frames, find the largest face's horizontal
+     * position, punch in by [zoom], and write OFFSET_X keyframes that pan to keep the subject centered.
+     */
+    private fun autoReframe(clipId: String, zoom: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val z = zoom.coerceIn(1.05f, 3f)
+        val durationMs = clip.durationMs
+        require(durationMs > 0) { "Clip has no duration to reframe." }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Auto-reframing…", pausable = false,
+        ) { _ ->
+            val uri = Uri.parse(media.uri)
+            val step = maxOf(300L, durationMs / 60) // ~every 0.3s, capped ~60 samples
+            // Max pan (normalized) that keeps the punched-in crop inside the frame.
+            val maxPan = ((z - 1f) / (2f * z)).coerceIn(0f, 0.5f)
+            val samples = ArrayList<Pair<Long, Float>>() // relMs -> centerX (0..1)
+            var srcMs = clip.trimStartMs
+            val endSrc = clip.trimStartMs + durationMs
+            while (srcMs <= endSrc) {
+                val frame = grabFrame(uri, srcMs)
+                if (frame != null) {
+                    val cx = try { com.hereliesaz.guillotine.ai.FaceEmbed.largestFaceCenterX(context, frame) }
+                        finally { frame.recycle() }
+                    if (cx != null) samples += (srcMs - clip.trimStartMs) to cx
+                }
+                srcMs += step
+            }
+            if (samples.isEmpty()) {
+                throw IllegalStateException("No faces found to follow — auto-reframe needs a face in the shot.")
+            }
+            // Smooth the centers (moving average of 3) to avoid jitter, then map to a pan offset.
+            val ease = CubicBezier()
+            val points = samples.mapIndexed { i, (relMs, _) ->
+                val lo = maxOf(0, i - 1); val hi = minOf(samples.size - 1, i + 1)
+                val avgCx = (lo..hi).map { samples[it].second }.average().toFloat()
+                // Subject right of center → pan the image left (negative offset) to recenter.
+                val offsetX = ((0.5f - avgCx) * 2f * maxPan).coerceIn(-maxPan, maxPan)
+                Triple(relMs, offsetX, ease)
+            }
+            vm.updateClip(clipId) { it.copy(scale = z) }
+            vm.insertKeyframes(clipId, KeyframeProperty.OFFSET_X, points)
+            ok().apply {
+                put("keyframes", points.size)
+                put("humanSummary", "Auto-reframed: punched in ${z}× and panned across ${points.size} points to follow the face.")
+            }
+        }
+    }
+
+    /** Envelope sample rate for audio-sync cross-correlation (100 Hz = one RMS point per 10 ms). */
+    private val ENV_RATE = 100
+
+    /**
+     * Sync [clipId] to [refClipId] by audio: build an RMS envelope of each clip's audio, cross-correlate
+     * them over ±[maxOffsetSec], and move [clipId]'s start so the matching audio lines up on the timeline.
+     */
+    private fun syncByAudio(refClipId: String, clipId: String, maxOffsetSec: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        val ref = doc.clips.firstOrNull { it.id == refClipId }
+            ?: throw IllegalArgumentException("Reference clip not found: $refClipId")
+        val mov = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val envA = audioEnvelope(doc, ref) ?: throw IllegalStateException("No audio in the reference clip to sync on.")
+        val envB = audioEnvelope(doc, mov) ?: throw IllegalStateException("No audio in \"$clipId\" to sync on.")
+        val maxLag = (maxOffsetSec.coerceIn(1, 120) * ENV_RATE)
+        // Find the lag L (in env samples) maximizing Σ envA[k] * envB[k+L]. envA[k] ≈ envB[k+L] means the
+        // same event is at index k in A and k+L in B, so B should start L*10ms earlier than A.
+        var bestLag = 0
+        var bestScore = -Double.MAX_VALUE
+        for (lag in -maxLag..maxLag) {
+            var sum = 0.0
+            var count = 0
+            var k = maxOf(0, -lag)
+            val kEnd = minOf(envA.size, envB.size - lag)
+            while (k < kEnd) { sum += envA[k] * envB[k + lag]; count++; k++ }
+            if (count > ENV_RATE) { // need at least ~1s of overlap to trust a score
+                val score = sum / count
+                if (score > bestScore) { bestScore = score; bestLag = lag }
+            }
+        }
+        val offsetMs = bestLag.toLong() * (1000L / ENV_RATE)
+        val newStart = (ref.startTimeMs - offsetMs).coerceAtLeast(0L)
+        vm.updateClip(clipId) { it.copy(startTimeMs = newStart) }
+        return ok().apply {
+            put("offsetMs", offsetMs)
+            put("newStartMs", newStart)
+            put("humanSummary", "Synced by audio: moved the clip to ${msFmt(newStart)} (offset ${offsetMs}ms) so its audio matches the reference.")
+        }
+    }
+
+    /** Normalized (zero-mean, unit-std) RMS envelope of a clip's audio at [ENV_RATE], or null if none. */
+    private fun audioEnvelope(doc: com.hereliesaz.guillotine.model.Document, clip: TimelineClip): FloatArray? {
+        val media = doc.mediaFor(clip) ?: return null
+        val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), 4_000) ?: return null
+        if (pcm.sampleRate <= 0 || pcm.samples.isEmpty()) return null
+        val win = (pcm.sampleRate / ENV_RATE).coerceAtLeast(1)
+        val n = pcm.samples.size / win
+        if (n < ENV_RATE) return null
+        val env = FloatArray(n)
+        for (i in 0 until n) {
+            var s = 0.0
+            val base = i * win
+            for (j in 0 until win) { val v = pcm.samples[base + j]; s += v * v }
+            env[i] = kotlin.math.sqrt(s / win).toFloat()
+        }
+        val mean = env.average().toFloat()
+        var varSum = 0.0
+        for (v in env) varSum += (v - mean) * (v - mean)
+        val std = kotlin.math.sqrt(varSum / env.size).toFloat().coerceAtLeast(1e-6f)
+        for (i in env.indices) env[i] = (env[i] - mean) / std
+        return env
+    }
+
+    /** Set the project's output aspect ratio from a platform [preset]. */
+    private fun setExportPreset(preset: String): JSONObject {
+        val p = preset.lowercase().trim()
+        val aspect = when {
+            listOf("tiktok", "reels", "reel", "shorts", "short", "vertical", "9:16", "story", "stories", "portrait").any { p.contains(it) } ->
+                com.hereliesaz.guillotine.model.AspectRatio.RATIO_9_16
+            listOf("square", "1:1", "instagram post", "feed").any { p.contains(it) } ->
+                com.hereliesaz.guillotine.model.AspectRatio.RATIO_1_1
+            listOf("youtube", "landscape", "16:9", "wide", "tv", "horizontal").any { p.contains(it) } ->
+                com.hereliesaz.guillotine.model.AspectRatio.RATIO_16_9
+            listOf("original", "source", "native").any { p.contains(it) } ->
+                com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL
+            else -> throw IllegalArgumentException(
+                "Unknown preset \"$preset\". Try tiktok/reels/shorts (9:16), square (1:1), youtube (16:9), or original.",
+            )
+        }
+        val cur = vm.uiState.value.document.settings
+        vm.setGlobalSettings(cur.copy(aspectRatio = aspect))
+        val label = aspect.name.removePrefix("RATIO_").replace('_', ':')
+        return ok().apply {
+            put("aspectRatio", aspect.name)
+            put("humanSummary", "Set the project to $label${if (aspect.name == "ORIGINAL") "" else " ($preset)"}.")
+        }
+    }
+
+    /**
+     * Trim each clip on [trackId] to span one beat interval of [audioClipId]'s grid, butting them
+     * together on the beats — a montage cut to the music. [beatsPerClip] controls the interval length.
+     */
+    private fun assembleMusicVideo(trackId: String, audioClipId: String, mode: String, beatsPerClip: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        val audio = doc.clips.firstOrNull { it.id == audioClipId }
+            ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
+        val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
+        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val every = beatsPerClip.coerceAtLeast(1)
+        // Beat times → timeline positions (on the audio clip), thinned to every Nth beat.
+        val grid = map.points(mode)
+            .map { audio.startTimeMs + (it - audio.trimStartMs) }
+            .filter { it in audio.startTimeMs..audio.endTimeMs }
+            .sorted()
+            .filterIndexed { i, _ -> i % every == 0 }
+        if (grid.size < 2) {
+            return JSONObject().apply {
+                put("ok", true); put("assembled", 0)
+                put("humanSummary", "Not enough $mode in the music to build a montage.")
+            }
+        }
+        val clips = doc.clips
+            .filter { it.trackId == trackId && it.type == com.hereliesaz.guillotine.model.ClipType.VIDEO }
+            .sortedBy { it.startTimeMs }
+        if (clips.isEmpty()) throw IllegalStateException("No video clips on track $trackId to assemble.")
+        var assembled = 0
+        for (i in clips.indices) {
+            if (i + 1 >= grid.size) break // ran out of beat intervals
+            val start = grid[i]
+            val interval = grid[i + 1] - start
+            val clip = clips[i]
+            val avail = ((doc.mediaFor(clip)?.durationMs ?: interval) - clip.trimStartMs).coerceAtLeast(1)
+            val dur = interval.coerceAtMost(avail)
+            vm.updateClip(clip.id) { it.copy(startTimeMs = start, durationMs = dur) }
+            assembled++
+        }
+        return ok().apply {
+            put("assembled", assembled); put("bpm", map.bpm)
+            put("humanSummary", "Assembled $assembled clip(s) on $trackId to the beat (~${map.bpm.toInt()} BPM, every $every $mode).")
+        }
+    }
+
+    /** Even out audio-clip loudness: measure each clip's RMS and set its volume toward a shared target. */
+    private fun normalizeLevels(): JSONObject {
+        val doc = vm.uiState.value.document
+        val audioClips = doc.clips.filter {
+            val kind = doc.mediaFor(it)?.kind
+            kind == MediaKind.AUDIO || kind == MediaKind.VIDEO
+        }
+        val rmsByClip = HashMap<String, Float>()
+        for (clip in audioClips) {
+            val media = doc.mediaFor(clip) ?: continue
+            val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), 8_000) ?: continue
+            if (pcm.samples.isEmpty()) continue
+            var sum = 0.0
+            for (v in pcm.samples) sum += v * v
+            val rms = kotlin.math.sqrt(sum / pcm.samples.size).toFloat()
+            if (rms > 1e-4f) rmsByClip[clip.id] = rms
+        }
+        if (rmsByClip.size < 1) {
+            return JSONObject().apply {
+                put("ok", true); put("normalized", 0)
+                put("humanSummary", "No measurable audio to normalize.")
+            }
+        }
+        // Target = median RMS across clips (robust to one very loud/quiet clip).
+        val target = rmsByClip.values.sorted().let { it[it.size / 2] }
+        var normalized = 0
+        for ((id, rms) in rmsByClip) {
+            val gain = (target / rms).coerceIn(0.1f, 4f)
+            vm.updateClipFilters(id) { it.copy(volume = gain.coerceIn(0f, 2f)) }
+            normalized++
+        }
+        return ok().apply {
+            put("normalized", normalized)
+            put("humanSummary", "Level-matched $normalized audio clip(s) to a consistent loudness.")
+        }
+    }
+
+    /** Filler words this removes (lowercased, punctuation-stripped word match). */
+    private val FILLER_WORDS = setOf("um", "uh", "er", "erm", "hmm", "mm", "umm", "uhh", "uhm", "ah")
+
+    /**
+     * Remove filler words from a clip using offline Whisper word timings, ripple-deleting each filler's
+     * timeline range (latest-first so earlier ranges stay valid). Timings are approximate.
+     */
+    private fun removeFillers(clipId: String): JSONObject {
+        val dir = settingsProvider().asrModelPath
+        require(dir.isNotBlank()) {
+            "No ASR model set. Download Whisper in Settings → AI Analyzer → Speech (ASR)."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), YamnetClassifier.SAMPLE_RATE)
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to de-filler.")
+        val samples = YamnetClassifier.resampleTo16k(pcm.samples, pcm.sampleRate)
+        val words = SherpaAsr.transcribeWords(dir, samples)
+        // Filler word source ranges → timeline ranges within this clip.
+        val ranges = words
+            .filter { it.text.lowercase().trim().trim('.', ',', '!', '?', ';', ':') in FILLER_WORDS }
+            .map { w ->
+                val tlStart = clip.startTimeMs + (w.startMs - clip.trimStartMs)
+                val tlEnd = clip.startTimeMs + (w.endMs - clip.trimStartMs)
+                tlStart.coerceIn(clip.startTimeMs, clip.endTimeMs) to tlEnd.coerceIn(clip.startTimeMs, clip.endTimeMs)
+            }
+            .filter { it.second - it.first >= 40L }
+            .sortedByDescending { it.first } // delete latest-first so earlier ranges don't shift
+        if (ranges.isEmpty()) {
+            return JSONObject().apply {
+                put("ok", true); put("removed", 0)
+                put("humanSummary", "No filler words detected in the clip.")
+            }
+        }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Removing filler words…", pausable = false,
+        ) { _ ->
+            var removed = 0
+            for ((s, e) in ranges) { vm.rippleDeleteRange(s, e); removed++ }
+            ok().apply {
+                put("removed", removed)
+                put("humanSummary", "Removed $removed filler word(s) (um/uh/…) and closed the gaps.")
+            }
+        }
+    }
+
+    /**
+     * Find video clips whose sampled frames match [query] using on-device image labels (~400 common
+     * things/scenes). Samples up to 4 frames per clip; returns each matching clip with the matched label
+     * and the timeline ms of the best-scoring hit. Read-only — edits nothing.
+     */
+    private fun searchClips(query: String): JSONObject {
+        val q = query.trim().lowercase()
+        require(q.isNotBlank()) { "Give something to search for, e.g. \"dog\"." }
+        val doc = vm.uiState.value.document
+        val videoClips = doc.clips.filter { it.type == com.hereliesaz.guillotine.model.ClipType.VIDEO }
+        val matches = JSONArray()
+        var found = 0
+        com.hereliesaz.guillotine.ai.SceneClassifier(context).use { classifier ->
+            for (clip in videoClips) {
+                val media = doc.mediaFor(clip) ?: continue
+                val uri = Uri.parse(media.uri)
+                var bestLabel: String? = null
+                var bestScore = 0f
+                var bestTimeline = clip.startTimeMs
+                // Sample 4 frames across the clip's source range.
+                for (k in 1..4) {
+                    val sourceMs = clip.trimStartMs + clip.durationMs * k / 5
+                    val frame = grabFrame(uri, sourceMs) ?: continue
+                    val labels = try { classifier.classify(frame) } finally { frame.recycle() }
+                    val hit = labels.firstOrNull { it.lowerText.contains(q) || q.contains(it.lowerText) }
+                    if (hit != null && hit.confidence > bestScore) {
+                        bestScore = hit.confidence
+                        bestLabel = hit.text
+                        bestTimeline = clip.startTimeMs + (sourceMs - clip.trimStartMs)
+                    }
+                }
+                if (bestLabel != null) {
+                    found++
+                    matches.put(JSONObject().apply {
+                        put("clipId", clip.id)
+                        put("name", media.name)
+                        put("label", bestLabel)
+                        put("confidence", (bestScore * 100).toInt())
+                        put("timelineMs", bestTimeline)
+                    })
+                }
+            }
+        }
+        return ok().apply {
+            put("matchCount", found)
+            put("matches", matches)
+            put(
+                "humanSummary",
+                if (found == 0) "No clips matched \"$query\"."
+                else "Found $found clip(s) matching \"$query\".",
+            )
+        }
+    }
+
+    /** Describe the current (or [clipId]) frame in natural language with the on-device multimodal VLM. */
+    private fun captionFrame(clipId: String, prompt: String): JSONObject {
+        val path = settingsProvider().vlmModelPath
+        require(path.isNotBlank()) {
+            "No VLM model set. Add a multimodal .task in Settings → AI Analyzer → Frame captioning (VLM)."
+        }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        // An explicit clip_id must resolve (like every other tool); blank = the video clip at the playhead.
+        val clip = if (clipId.isNotBlank()) {
+            st.document.clips.firstOrNull { it.id == clipId }
+                ?: throw IllegalArgumentException("Clip not found: $clipId")
+        } else {
+            com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+            ) ?: throw IllegalStateException("No video clip at the playhead — scrub onto one.")
+        }
+        val media = st.document.mediaFor(clip)
+            ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: throw IllegalStateException("Could not read the current frame.")
+        val question = prompt.ifBlank { "Describe what is happening in this image in detail." }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Looking at the frame…", pausable = false,
+        ) { _ ->
+            val text = try {
+                VlmCaptioner.describe(context, path, frame, question)
+            } finally {
+                frame.recycle()
+            }
+            ok().apply {
+                put("caption", text)
+                put("humanSummary", if (text.isBlank()) "The VLM returned no description." else text)
             }
         }
     }

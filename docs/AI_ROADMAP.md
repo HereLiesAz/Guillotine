@@ -25,7 +25,7 @@ Google's **AI Edge Gallery** app is a good compatibility oracle for what runs we
 
 | Model | Size | Task | License | Android feasibility |
 |---|---|---|---|---|
-| **Gemma 3n E2B / E4B** | ~2B / ~4B effective (MatFormer + PLE) | Multimodal LLM: text + **image + audio** in | Gemma (commercial OK) | **Top pick.** One model captions frames, understands audio, and drives the editor — collapses several models. Official `.litertlm`/`.task`. |
+| **Gemma 3n E2B / E4B** — **shipped** (vision, `caption_frame`) | ~2B / ~4B effective (MatFormer + PLE) | Multimodal LLM: text + **image + audio** in | Gemma (commercial OK) | **Top pick.** On-device frame captioning via MediaPipe LlmInference + vision modality. Official `.task` (gated, links out for the free Gemma sign-in). Audio-in remains future work. |
 | **Gemma 3 1B** | 1B | Text LLM | Gemma | Excellent, very light, `.task` available. |
 | **Llama 3.2 1B / 3B** | 1B / 3B | Text LLM | Llama 3.2 Community | Good; `.task` (MediaPipe) + ExecuTorch (Meta's official mobile path). |
 | **Qwen2.5 0.5–3B / Qwen3 0.6–4B** | 0.5–4B | Text LLM | Apache-2.0 (small); Qwen2.5-3B is Research License | Strong. Qwen2.5-1.5B ships as `.litertlm` in AI Edge Gallery. |
@@ -62,8 +62,8 @@ upgradeable to a TFLite-exported BeatNet/TempoCNN or aubio/Essentia via NDK.
 | Style transfer | Magenta Arbitrary Stylization TFLite | Apache-2.0 | Real-time capable, but the official model is **two-input** (content+style) so it doesn't fit the single-image `TfliteImageModel` — left as a bring-your-own-path option. |
 | Optical flow | OpenCV (Farnebäck/DIS) or RAFT | BSD | Classical runs easily; RAFT heavy. |
 | Shot detection | **Histogram diff (in-code)** — **shipped** (`detect_scenes`) or TransNetV2 | MIT | Cheap content-difference on-device; splits a clip into shots / chapters. |
-| Captioning / VLM | SmolVLM 256M/500M, Moondream 0.5B, Florence-2, **Gemma 3n** | Apache/MIT | Lightest true on-device VLMs; or reuse Gemma 3n. |
-| Auto-reframe | MediaPipe AutoFlip + saliency (BASNet/U²-Net) | Apache/MIT | Smart vertical crop tracking the subject. |
+| Captioning / VLM | **Gemma 3n** — **shipped** (`caption_frame`), SmolVLM 256M/500M, Moondream 0.5B, Florence-2 | Apache/MIT/Gemma | On-device multimodal frame captioning via MediaPipe LlmInference + vision modality (a separate instance, so the text `.task` path is untouched). |
+| Auto-reframe | **face-follow (in-code, ML Kit)** — **shipped** (`auto_reframe`); AutoFlip + saliency for non-face subjects | Apache/MIT | Punch-in + OFFSET_X keyframes tracking the main face; saliency-based (non-face) tracking is future work. |
 
 ### 1.3b Recognition / ID embedding models ("is this the same specific thing?")
 
@@ -154,18 +154,22 @@ every snare", "one clip per bar") become concrete rhythm-locked edits.
 Each item is feasible on the current stack or a model listed above.
 
 **Audio & music**
-1. Beat-synced editing (shipped) + auto music-video assembly from a clip folder.
+1. Beat-synced editing (shipped) + auto music-video assembly from a clip folder. **(shipped —
+   `assemble_music_video` trims a track's clips to the beat grid)**
 2. Stem separation (Spleeter/Demucs): "cut to the drums," karaoke, isolate/remove
    vocals, auto-duck music under the vocal stem. **(partial — `remove_vocals` ships a
    dep-free stereo center-channel karaoke/instrumental extractor. True ML multi-stem
    Spleeter is a follow-up: sherpa-onnx v1.13.3 has no Kotlin/JNI source-separation
    binding, so it needs `onnxruntime-android` + an STFT/iSTFT spectrogram pipeline.)**
-3. Auto-ducking / sidechain: lower music under speech via VAD + RMS.
+3. Auto-ducking / sidechain: lower music under speech via VAD + RMS. **(shipped — `auto_duck`
+   writes VOLUME keyframes on the music under detected speech, on-device, no model)**
 4. AI soundtrack: generate a mood- and length-matched score; AI SFX timed to
    actions/transitions (ElevenLabs SFX).
-5. Loudness normalization to platform targets (−14 LUFS YouTube) on export.
+5. Loudness normalization to platform targets (−14 LUFS YouTube) on export. **(partial —
+   `normalize_levels` level-matches clips by RMS; broadcast-LUFS export normalization is a follow-up)**
 6. Noise reduction / de-reverb / voice isolation on-device (sherpa-onnx).
-7. Multicam sync by audio-waveform correlation; filler-word ("um") removal.
+7. Multicam sync by audio-waveform correlation **(shipped — `sync_by_audio`)**; filler-word
+   ("um") removal **(shipped — `remove_fillers` via offline Whisper word timings)**.
 
 **Speech & text**
 8. Better ASR (whisper.cpp/sherpa-onnx) — multilingual, word-level captions. **(shipped —
@@ -177,7 +181,8 @@ Each item is feasible on the current stack or a model listed above.
 11. Voice-command editing — speak the instruction; ASR feeds the agent.
 
 **Vision & generation**
-12. Smart auto-reframe landscape→9:16/1:1 following the subject (AutoFlip).
+12. Smart auto-reframe landscape→9:16/1:1 following the subject (AutoFlip). **(shipped —
+    `auto_reframe` punches in and pans OFFSET_X keyframes to follow the main face)**
 13. Depth effects: portrait/bokeh blur, 2.5D parallax "3D Ken Burns," fake dolly.
 14. Super-resolution upscale of old/low-res footage and stills.
 15. Style transfer / AI looks; on-device auto color-correct & shot-match; LUTs.
@@ -187,7 +192,8 @@ Each item is feasible on the current stack or a model listed above.
 18. Text-to-video B-roll to fill gaps; image-gen titles/thumbnails/lower-thirds;
     generate a thumbnail from the best frame.
 19. Semantic footage search ("find all clips with a dog/sunset/red car") via the
-    existing on-device image embeddings.
+    existing on-device image embeddings. **(shipped — `search_clips` matches on-device
+    image labels across each clip's sampled frames)**
 20. Audio-event & highlight detection (YAMNet) → auto-trailer / best-moments reel. **(shipped —
     `find_highlights`)**
 
@@ -196,6 +202,8 @@ Each item is feasible on the current stack or a model listed above.
     + captions → a rough cut the user refines.
 22. Auto-chaptering / scene detection → timeline markers + YouTube chapters. **(shipped —
     `detect_scenes` splits a clip into shots on-device)**
-23. Platform export presets (TikTok/Reels/Shorts) with safe-zones + direct share.
+23. Platform export presets (TikTok/Reels/Shorts) with safe-zones + direct share. **(partial —
+    `set_export_preset` sets the 9:16 / 1:1 / 16:9 output aspect; safe-zone overlays + share are a
+    follow-up)**
 24. Kinetic-caption & meme templates, emoji reactions timed to speech.
 25. Teachable-tool marketplace — share user-defined AI editing tools.

@@ -26,8 +26,14 @@ enum class ModelCategory {
     SUPERRES,
     /** YAMNet audio-event `.tflite` — highlight / best-moment detection from a clip's audio. */
     AUDIO_EVENT,
+    /** sherpa-onnx offline ASR model bundle — speech-to-text. */
+    ASR,
+    /** sherpa-onnx offline TTS voice bundle — text-to-speech. */
+    TTS,
+    /** Multimodal VLM `.task` (MediaPipe LlmInference + vision) — rich frame captioning. */
+    VLM,
     // --- reserved for upcoming runtimes (not yet shown in the picker) ---
-    ASR, TTS, STYLE, STEM, VLM,
+    STYLE, STEM,
 }
 
 data class OnDeviceModel(
@@ -312,6 +318,40 @@ val RECOMMENDED_TTS_MODELS: List<OnDeviceModel> = listOf(
     ),
 )
 
+/**
+ * Recommended multimodal VLM `.task` models (MediaPipe `LlmInference` + vision) for rich frame
+ * captioning. "Use" sets `vlmModelPath`. Gemma-3n is gated (Gemma license), so these link out to Hugging
+ * Face for a free sign-in — the user downloads there and pastes the path.
+ */
+val RECOMMENDED_VLM_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "gemma-3n-e2b-it",
+        label = "Gemma 3n E2B (vision) — frame captioning",
+        fileName = "gemma-3n-E2B-it-int4.task",
+        sizeBytes = 3_136_226_711L,
+        license = "Gemma (free sign-in)",
+        gated = true,
+        repoUrl = hfRepo("google/gemma-3n-E2B-it-litert-preview"),
+        downloadUrl = null,
+        abilities = "Natively multimodal: looks at a frame and describes it in rich natural language. Powers \"describe / what's happening in this frame\".",
+        limitations = "~2.9 GB; needs a free Hugging Face sign-in (Gemma license). High-end device recommended.",
+        category = ModelCategory.VLM,
+    ),
+    OnDeviceModel(
+        id = "gemma-3n-e4b-it",
+        label = "Gemma 3n E4B (vision) — higher quality",
+        fileName = "gemma-3n-E4B-it-int4.task",
+        sizeBytes = 4_405_655_031L,
+        license = "Gemma (free sign-in)",
+        gated = true,
+        repoUrl = hfRepo("google/gemma-3n-E4B-it-litert-preview"),
+        downloadUrl = null,
+        abilities = "The larger, more capable multimodal Gemma-3n — sharper, more detailed frame descriptions.",
+        limitations = "~4.1 GB; free Hugging Face sign-in (Gemma license). Needs a high-end device with plenty of storage.",
+        category = ModelCategory.VLM,
+    ),
+)
+
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
@@ -322,5 +362,6 @@ fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (c
     ModelCategory.AUDIO_EVENT -> RECOMMENDED_AUDIO_EVENT_MODELS
     ModelCategory.ASR -> RECOMMENDED_ASR_MODELS
     ModelCategory.TTS -> RECOMMENDED_TTS_MODELS
+    ModelCategory.VLM -> RECOMMENDED_VLM_MODELS
     else -> emptyList()
 }
