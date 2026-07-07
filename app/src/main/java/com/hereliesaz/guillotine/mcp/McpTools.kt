@@ -9,6 +9,7 @@ import com.hereliesaz.guillotine.ai.FaceEmbed
 import com.hereliesaz.guillotine.ai.MlKitProvider
 import com.hereliesaz.guillotine.ai.PcmDecoder
 import com.hereliesaz.guillotine.ai.SherpaAsr
+import com.hereliesaz.guillotine.ai.SherpaDiarizer
 import com.hereliesaz.guillotine.ai.SherpaTts
 import com.hereliesaz.guillotine.ai.VlmCaptioner
 import com.hereliesaz.guillotine.ai.VocalIsolator
@@ -339,6 +340,20 @@ class McpTools(
             emptySchema(),
         ))
         put(toolDefinition(
+            "diarize_clip",
+            "Speaker diarization ON-DEVICE (no key): work out WHO spoke WHEN in a clip's audio and return " +
+                "the speaker turns (speaker index + time range). Use for \"who speaks when?\", \"label the " +
+                "speakers\", \"split by speaker\", \"how many people are talking?\", or as the basis for " +
+                "podcast multicam switching. Optionally pass num_speakers if you know the count (else it's " +
+                "inferred). Requires BOTH diarization models in Settings → AI Analyzer → Speaker " +
+                "diarization; relay its error if unset.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to diarize"),
+                "num_speakers" to intProp("Known speaker count (0 = infer automatically)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
             "remove_fillers",
             "Remove filler words (\"um\", \"uh\", \"er\", \"hmm\") from a clip ON-DEVICE using the offline " +
                 "Whisper (sherpa-onnx) word timings, ripple-deleting each filler so the timeline closes " +
@@ -548,6 +563,7 @@ class McpTools(
         "assemble_music_video" -> assembleMusicVideo(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("beats_per_clip", 1))
         "normalize_levels" -> normalizeLevels()
         "remove_fillers" -> removeFillers(args.getString("clip_id"))
+        "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1567,6 +1583,48 @@ class McpTools(
         return ok().apply {
             put("normalized", normalized)
             put("humanSummary", "Level-matched $normalized audio clip(s) to a consistent loudness.")
+        }
+    }
+
+    /** Diarize a clip's audio into speaker turns (who spoke when), mapped to timeline ms. */
+    private fun diarizeClip(clipId: String, numSpeakers: Int): JSONObject {
+        val settings = settingsProvider()
+        val seg = settings.diarizeSegModelPath
+        val embed = settings.diarizeEmbedModelPath
+        require(seg.isNotBlank() && embed.isNotBlank()) {
+            "Speaker diarization needs both models. Set them in Settings → AI Analyzer → Speaker diarization."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), YamnetClassifier.SAMPLE_RATE)
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to diarize.")
+        val samples = YamnetClassifier.resampleTo16k(pcm.samples, pcm.sampleRate)
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Identifying speakers…", pausable = false,
+        ) { _ ->
+            val turns = SherpaDiarizer.diarize(seg, embed, samples, numSpeakers)
+            val arr = JSONArray()
+            val speakers = HashSet<Int>()
+            for (t in turns) {
+                speakers += t.speaker
+                arr.put(JSONObject().apply {
+                    put("speaker", t.speaker)
+                    put("startMs", clip.startTimeMs + (t.startMs - clip.trimStartMs))
+                    put("endMs", clip.startTimeMs + (t.endMs - clip.trimStartMs))
+                })
+            }
+            ok().apply {
+                put("speakerCount", speakers.size)
+                put("turnCount", turns.size)
+                put("turns", arr)
+                put(
+                    "humanSummary",
+                    if (turns.isEmpty()) "No distinct speakers detected."
+                    else "Found ${speakers.size} speaker(s) across ${turns.size} turn(s).",
+                )
+            }
         }
     }
 

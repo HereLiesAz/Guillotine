@@ -4,6 +4,9 @@
     <!-- AI providers (BYO key) are called directly over the network. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Voice-command editing: capture a spoken instruction, transcribe it on-device, run the agent. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <!-- AdMob advertising identifier (app-open ad). -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 

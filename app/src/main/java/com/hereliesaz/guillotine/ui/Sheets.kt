@@ -116,6 +116,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var asrModelPath by remember { mutableStateOf(current.asrModelPath) }
     var ttsModelPath by remember { mutableStateOf(current.ttsModelPath) }
     var vlmModelPath by remember { mutableStateOf(current.vlmModelPath) }
+    var diarizeSegModelPath by remember { mutableStateOf(current.diarizeSegModelPath) }
+    var diarizeEmbedModelPath by remember { mutableStateOf(current.diarizeEmbedModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -157,6 +159,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     audioEventModelPath = audioEventModelPath.trim(),
                     asrModelPath = asrModelPath.trim(), ttsModelPath = ttsModelPath.trim(),
                     vlmModelPath = vlmModelPath.trim(),
+                    diarizeSegModelPath = diarizeSegModelPath.trim(),
+                    diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -184,6 +188,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             asrModelPath = restored.asrModelPath
             ttsModelPath = restored.ttsModelPath
             vlmModelPath = restored.vlmModelPath
+            diarizeSegModelPath = restored.diarizeSegModelPath
+            diarizeEmbedModelPath = restored.diarizeEmbedModelPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -515,6 +521,43 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = vlmModelPath,
                         onUse = { vlmModelPath = it },
                     )
+
+                    // Speaker diarization needs TWO sherpa models: a segmentation model + an embedding model.
+                    Text("Speaker diarization — who spoke when (optional, needs both models)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = diarizeSegModelPath,
+                        onValueChange = { diarizeSegModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Segmentation model directory (pyannote)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "Segmentation models — download, use, or remove",
+                        models = recommendedModelsFor(ModelCategory.DIARIZE_SEG),
+                        selectedPath = diarizeSegModelPath,
+                        onUse = { diarizeSegModelPath = it },
+                    )
+                    OutlinedTextField(
+                        value = diarizeEmbedModelPath,
+                        onValueChange = { diarizeEmbedModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Speaker-embedding model (.onnx)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Enables \"who speaks when?\" — set BOTH a segmentation and an embedding model.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "Speaker-embedding models — download, use, or remove",
+                        models = recommendedModelsFor(ModelCategory.DIARIZE_EMBED),
+                        selectedPath = diarizeEmbedModelPath,
+                        onUse = { diarizeEmbedModelPath = it },
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -678,6 +721,8 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             asrModelPath = asrModelPath.trim(),
                             ttsModelPath = ttsModelPath.trim(),
                             vlmModelPath = vlmModelPath.trim(),
+                            diarizeSegModelPath = diarizeSegModelPath.trim(),
+                            diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,

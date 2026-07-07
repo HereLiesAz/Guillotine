@@ -167,6 +167,12 @@ val AGENT_SYSTEM_PROMPT = """
       id. It uses the offline Whisper word timings to ripple-delete each "um/uh/er/hmm". Timings are
       approximate — tell the user to review. Needs the ASR model (Settings → AI Analyzer → Speech (ASR)).
 
+    SPEAKER DIARIZATION (who spoke when, on-device):
+    - "who speaks when?", "label the speakers", "split by speaker", "how many people are talking?", or as
+      the basis for podcast multicam switching → diarize_clip with the clip id. It returns speaker turns
+      (speaker index + time range). Pass num_speakers if the count is known, else it's inferred. Needs
+      BOTH diarization models (Settings → AI Analyzer → Speaker diarization) — relay its error if unset.
+
     MULTICAM / AUDIO SYNC (on-device, no model):
     - "sync these two clips by audio", "line up the multicam angles", "match the second camera to the
       audio recorder" → sync_by_audio with reference_clip_id (kept fixed) and clip_id (moved to align).

@@ -177,8 +177,11 @@ Each item is feasible on the current stack or a model listed above.
 9. Offline TTS voiceover / dubbing (Piper/Kokoro), voice-clone dub (ElevenLabs);
    translate + burn foreign subtitles on-device. **(voiceover shipped — `add_voiceover` via
    offline Piper/sherpa-onnx)**
-10. Speaker diarization → auto podcast multicam switching between speakers.
-11. Voice-command editing — speak the instruction; ASR feeds the agent.
+10. Speaker diarization → auto podcast multicam switching between speakers. **(shipped —
+    `diarize_clip` via sherpa-onnx pyannote segmentation + speaker embedding)**
+11. Voice-command editing — speak the instruction; ASR feeds the agent. **(shipped — a mic button
+    on the assistant field records on-device, transcribes via offline Whisper, and drops the text into
+    the prompt for review/send; needs the ASR model configured)**
 
 **Vision & generation**
 12. Smart auto-reframe landscape→9:16/1:1 following the subject (AutoFlip). **(shipped —
