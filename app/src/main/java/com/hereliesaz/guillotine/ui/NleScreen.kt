@@ -886,9 +886,16 @@ private fun EditorToolStrip(
     var listening by remember { mutableStateOf(false) }
     var transcribing by remember { mutableStateOf(false) }
     val beginListening: () -> Unit = {
-        capture = com.hereliesaz.guillotine.ai.VoiceCapture().also { if (!it.start()) { capture = null } }
-        listening = capture != null
-        if (capture == null) {
+        // Assign capture from start()'s result directly: a prior `VoiceCapture().also { …capture = null }`
+        // form was buggy — .also returns the receiver, so the outer assignment overwrote the null and
+        // capture was never null on failure (listening stuck true, no error shown).
+        val cap = com.hereliesaz.guillotine.ai.VoiceCapture()
+        if (cap.start()) {
+            capture = cap
+            listening = true
+        } else {
+            capture = null
+            listening = false
             android.widget.Toast.makeText(voiceCtx, "Couldn't start the mic — it may be in use.", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
@@ -907,7 +914,18 @@ private fun EditorToolStrip(
                     // run (e.g. the ASR native lib/runtime is incompatible on this device) vs. no audio
                     // captured vs. audio heard but no words recognized.
                     val result = if (asrModelPath.isNotBlank() && pcm.isNotEmpty()) {
-                        runCatching { com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm) }
+                        // Catch Exception + LinkageError (native ASR lib/ABI faults), rethrow
+                        // CancellationException; don't swallow fatal VM errors (OOM) — transcription is
+                        // memory-heavy, and a swallowed OutOfMemoryError leaves the process unstable.
+                        try {
+                            Result.success(com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm))
+                        } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+                            throw c
+                        } catch (e: Exception) {
+                            Result.failure(e)
+                        } catch (l: LinkageError) {
+                            Result.failure(l)
+                        }
                     } else null
                     val text = result?.getOrNull()
                     withContext(Dispatchers.Main) {

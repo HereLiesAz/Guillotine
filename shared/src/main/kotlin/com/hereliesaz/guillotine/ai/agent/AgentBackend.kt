@@ -294,11 +294,14 @@ fun callTool(tools: McpToolsSurface, name: String, args: JSONObject): ToolOutcom
         // Cooperative cancellation must propagate, not be reported as a tool failure.
         throw c
     } catch (t: Throwable) {
-        // Catch Throwable, not just Exception: on-device tools load native libraries (sherpa-onnx
-        // ASR/TTS/diarization, ONNX Runtime stem separation, MediaPipe VLM). A native load or ABI
-        // mismatch throws a LinkageError subclass (UnsatisfiedLinkError / ExceptionInInitializerError /
-        // NoClassDefFoundError) — a java.lang.Error, not an Exception. Reporting it as a recoverable
-        // tool result lets the model relay a legible message instead of crashing the agent loop.
+        // Handle Exception AND LinkageError, but let genuinely-fatal VM errors (OutOfMemoryError,
+        // StackOverflowError, other VirtualMachineErrors) propagate rather than masking them.
+        // On-device tools load native libraries (sherpa-onnx ASR/TTS/diarization, ONNX Runtime stem
+        // separation, MediaPipe VLM); a native load or ABI mismatch throws a LinkageError subclass
+        // (UnsatisfiedLinkError / ExceptionInInitializerError / NoClassDefFoundError) — a
+        // java.lang.Error, not an Exception. Reporting those as a recoverable tool result lets the
+        // model relay a legible message instead of crashing the agent loop.
+        if (t !is Exception && t !is LinkageError) throw t
         val msg = t.message ?: t::class.simpleName ?: "tool failed"
         val hint = if (t is LinkageError) {
             " (the on-device engine failed to load — the model may be incompatible with this device's runtime)"
