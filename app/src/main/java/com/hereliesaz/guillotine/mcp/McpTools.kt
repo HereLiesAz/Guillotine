@@ -305,6 +305,20 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "sync_by_audio",
+            "Sync two clips by their audio ON-DEVICE (no key): cross-correlates the two audio tracks to " +
+                "find the time offset and moves the second clip so its audio lines up with the reference " +
+                "(multicam / dual-recording sync). Use for \"sync these two clips by audio\", \"line up " +
+                "the multicam angles\", \"match the second camera to the audio recorder\". Both clips need " +
+                "audio of the same moment.",
+            objSchema(
+                "reference_clip_id" to stringProp("The clip to keep fixed (the reference)"),
+                "clip_id" to stringProp("The clip to move so its audio aligns to the reference"),
+                "max_offset_sec" to intProp("Max search offset in seconds (default 15)"),
+                required = listOf("reference_clip_id", "clip_id"),
+            ),
+        ))
+        put(toolDefinition(
             "auto_reframe",
             "Auto-reframe a clip to keep the subject centered ON-DEVICE (no key): detects the main face " +
                 "across the clip and pans a punched-in crop to follow it — the classic \"make it work " +
@@ -483,6 +497,7 @@ class McpTools(
         "auto_duck" -> autoDuck(args.getString("music_clip_id"), args.getString("voice_clip_id"), args.optDouble("amount", 0.3).toFloat())
         "search_clips" -> searchClips(args.getString("query"))
         "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
+        "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1333,6 +1348,70 @@ class McpTools(
                 put("humanSummary", "Auto-reframed: punched in ${z}× and panned across ${points.size} points to follow the face.")
             }
         }
+    }
+
+    /** Envelope sample rate for audio-sync cross-correlation (100 Hz = one RMS point per 10 ms). */
+    private val ENV_RATE = 100
+
+    /**
+     * Sync [clipId] to [refClipId] by audio: build an RMS envelope of each clip's audio, cross-correlate
+     * them over ±[maxOffsetSec], and move [clipId]'s start so the matching audio lines up on the timeline.
+     */
+    private fun syncByAudio(refClipId: String, clipId: String, maxOffsetSec: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        val ref = doc.clips.firstOrNull { it.id == refClipId }
+            ?: throw IllegalArgumentException("Reference clip not found: $refClipId")
+        val mov = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val envA = audioEnvelope(doc, ref) ?: throw IllegalStateException("No audio in the reference clip to sync on.")
+        val envB = audioEnvelope(doc, mov) ?: throw IllegalStateException("No audio in \"$clipId\" to sync on.")
+        val maxLag = (maxOffsetSec.coerceIn(1, 120) * ENV_RATE)
+        // Find the lag L (in env samples) maximizing Σ envA[k] * envB[k+L]. envA[k] ≈ envB[k+L] means the
+        // same event is at index k in A and k+L in B, so B should start L*10ms earlier than A.
+        var bestLag = 0
+        var bestScore = -Double.MAX_VALUE
+        for (lag in -maxLag..maxLag) {
+            var sum = 0.0
+            var count = 0
+            var k = maxOf(0, -lag)
+            val kEnd = minOf(envA.size, envB.size - lag)
+            while (k < kEnd) { sum += envA[k] * envB[k + lag]; count++; k++ }
+            if (count > ENV_RATE) { // need at least ~1s of overlap to trust a score
+                val score = sum / count
+                if (score > bestScore) { bestScore = score; bestLag = lag }
+            }
+        }
+        val offsetMs = bestLag.toLong() * (1000L / ENV_RATE)
+        val newStart = (ref.startTimeMs - offsetMs).coerceAtLeast(0L)
+        vm.updateClip(clipId) { it.copy(startTimeMs = newStart) }
+        return ok().apply {
+            put("offsetMs", offsetMs)
+            put("newStartMs", newStart)
+            put("humanSummary", "Synced by audio: moved the clip to ${msFmt(newStart)} (offset ${offsetMs}ms) so its audio matches the reference.")
+        }
+    }
+
+    /** Normalized (zero-mean, unit-std) RMS envelope of a clip's audio at [ENV_RATE], or null if none. */
+    private fun audioEnvelope(doc: com.hereliesaz.guillotine.model.Document, clip: TimelineClip): FloatArray? {
+        val media = doc.mediaFor(clip) ?: return null
+        val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), 4_000) ?: return null
+        if (pcm.sampleRate <= 0 || pcm.samples.isEmpty()) return null
+        val win = (pcm.sampleRate / ENV_RATE).coerceAtLeast(1)
+        val n = pcm.samples.size / win
+        if (n < ENV_RATE) return null
+        val env = FloatArray(n)
+        for (i in 0 until n) {
+            var s = 0.0
+            val base = i * win
+            for (j in 0 until win) { val v = pcm.samples[base + j]; s += v * v }
+            env[i] = kotlin.math.sqrt(s / win).toFloat()
+        }
+        val mean = env.average().toFloat()
+        var varSum = 0.0
+        for (v in env) varSum += (v - mean) * (v - mean)
+        val std = kotlin.math.sqrt(varSum / env.size).toFloat().coerceAtLeast(1e-6f)
+        for (i in env.indices) env[i] = (env[i] - mean) / std
+        return env
     }
 
     /**

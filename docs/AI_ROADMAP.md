@@ -166,7 +166,8 @@ Each item is feasible on the current stack or a model listed above.
    actions/transitions (ElevenLabs SFX).
 5. Loudness normalization to platform targets (−14 LUFS YouTube) on export.
 6. Noise reduction / de-reverb / voice isolation on-device (sherpa-onnx).
-7. Multicam sync by audio-waveform correlation; filler-word ("um") removal.
+7. Multicam sync by audio-waveform correlation **(shipped — `sync_by_audio`)**; filler-word
+   ("um") removal.
 
 **Speech & text**
 8. Better ASR (whisper.cpp/sherpa-onnx) — multilingual, word-level captions. **(shipped —

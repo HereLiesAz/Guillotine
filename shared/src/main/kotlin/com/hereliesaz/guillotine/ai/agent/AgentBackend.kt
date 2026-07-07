@@ -148,6 +148,12 @@ val AGENT_SYSTEM_PROMPT = """
       an audio clip. Needs the TTS voice in Settings → AI Analyzer → Speech (TTS); if it isn't set the tool
       returns an error naming the setting — relay it, don't retry.
 
+    MULTICAM / AUDIO SYNC (on-device, no model):
+    - "sync these two clips by audio", "line up the multicam angles", "match the second camera to the
+      audio recorder" → sync_by_audio with reference_clip_id (kept fixed) and clip_id (moved to align).
+      It cross-correlates the two audio tracks and shifts the second clip so the audio matches. Both clips
+      must contain audio of the same moment.
+
     AUTO-REFRAME / FOLLOW THE SUBJECT (on-device, no model):
     - "auto-reframe this", "keep the subject centered", "follow the face/speaker", "reframe for
       vertical/Reels/TikTok" → auto_reframe with the clip id. It detects the main face across the clip,
