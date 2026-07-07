@@ -191,7 +191,10 @@ Each item is feasible on the current stack or a model listed above.
 15. Style transfer / AI looks; on-device auto color-correct & shot-match; LUTs.
 16. Background replace without green screen (matting) + generated backgrounds.
 17. Face tools: auto-blur faces (privacy), face-tracking reframe, "keep only shots
-    with person X."
+    with person X." **("keep only person X" shipped — teach a person by pointing at their
+    face across frames (`add_reference`, routed to the face-ID embedder), then
+    `analyze_clip_with_concept(keep_only=true)`; negatives ("that's a different person")
+    sharpen it. Auto-blur and non-face-follow reframe remain future work.)**
 18. Text-to-video B-roll to fill gaps; image-gen titles/thumbnails/lower-thirds;
     generate a thumbnail from the best frame.
 19. Semantic footage search ("find all clips with a dog/sunset/red car") via the
