@@ -160,7 +160,8 @@ Each item is feasible on the current stack or a model listed above.
    dep-free stereo center-channel karaoke/instrumental extractor. True ML multi-stem
    Spleeter is a follow-up: sherpa-onnx v1.13.3 has no Kotlin/JNI source-separation
    binding, so it needs `onnxruntime-android` + an STFT/iSTFT spectrogram pipeline.)**
-3. Auto-ducking / sidechain: lower music under speech via VAD + RMS.
+3. Auto-ducking / sidechain: lower music under speech via VAD + RMS. **(shipped — `auto_duck`
+   writes VOLUME keyframes on the music under detected speech, on-device, no model)**
 4. AI soundtrack: generate a mood- and length-matched score; AI SFX timed to
    actions/transitions (ElevenLabs SFX).
 5. Loudness normalization to platform targets (−14 LUFS YouTube) on export.
@@ -187,7 +188,8 @@ Each item is feasible on the current stack or a model listed above.
 18. Text-to-video B-roll to fill gaps; image-gen titles/thumbnails/lower-thirds;
     generate a thumbnail from the best frame.
 19. Semantic footage search ("find all clips with a dog/sunset/red car") via the
-    existing on-device image embeddings.
+    existing on-device image embeddings. **(shipped — `search_clips` matches on-device
+    image labels across each clip's sampled frames)**
 20. Audio-event & highlight detection (YAMNet) → auto-trailer / best-moments reel. **(shipped —
     `find_highlights`)**
 

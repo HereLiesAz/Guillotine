@@ -305,6 +305,32 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "search_clips",
+            "Find which video clips contain something ON-DEVICE (no key): samples each clip's frames and " +
+                "matches them against [query] using on-device image labels (~400 common things/scenes — " +
+                "e.g. dog, car, beach, sunset, food, crowd). Use for \"find the clips with a dog\", " +
+                "\"which shots have a sunset?\", \"where's the beach footage?\". Returns the matching " +
+                "clips with the matched label and a timestamp; it does not edit anything.",
+            objSchema(
+                "query" to stringProp("What to look for, e.g. \"dog\" or \"sunset\""),
+                required = listOf("query"),
+            ),
+        ))
+        put(toolDefinition(
+            "auto_duck",
+            "Auto-duck (sidechain) a music clip under a voice/speech clip ON-DEVICE (no model/key): detect " +
+                "where the voice is talking and dip the music's VOLUME there with smooth ramps, restoring " +
+                "it in the gaps. Use for \"duck the music under the voiceover\", \"lower the music when " +
+                "someone's talking\", \"sidechain the music to the narration\". amount is the ducked level " +
+                "(0–1, default 0.3 = −10 dB-ish).",
+            objSchema(
+                "music_clip_id" to stringProp("The music clip to duck"),
+                "voice_clip_id" to stringProp("The voice/speech clip that triggers the ducking"),
+                "amount" to numberProp("Ducked music level 0–1 (default 0.3; lower = quieter under speech)"),
+                required = listOf("music_clip_id", "voice_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
             "caption_frame",
             "Describe a frame in rich natural language using the ON-DEVICE multimodal VLM (Gemma-3n). " +
                 "Prefer this over describe_current_frame when the user wants a real description / " +
@@ -440,6 +466,8 @@ class McpTools(
         "add_voiceover" -> addVoiceover(args.getString("text"), args.optDouble("speed", 1.0).toFloat())
         "remove_vocals" -> removeVocals(args.getString("clip_id"))
         "caption_frame" -> captionFrame(args.optString("clip_id"), args.optString("prompt"))
+        "auto_duck" -> autoDuck(args.getString("music_clip_id"), args.getString("voice_clip_id"), args.optDouble("amount", 0.3).toFloat())
+        "search_clips" -> searchClips(args.getString("query"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1142,6 +1170,155 @@ class McpTools(
                 put("clipCount", vm.uiState.value.document.clips.size)
                 put("humanSummary", "Added a ${msFmt(duration)} vocals-removed (instrumental) track.")
             }
+        }
+    }
+
+    /**
+     * Auto-duck (sidechain) [musicClipId] under the speech in [voiceClipId]: find where the voice is
+     * talking (RMS energy gate) and dip the music's VOLUME to [amount] there with short ramps, back to
+     * 1.0 in the gaps — all on-device, no model. Writes VOLUME keyframes on the music clip.
+     */
+    private fun autoDuck(musicClipId: String, voiceClipId: String, amount: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        val music = doc.clips.firstOrNull { it.id == musicClipId }
+            ?: throw IllegalArgumentException("Music clip not found: $musicClipId")
+        val voice = doc.clips.firstOrNull { it.id == voiceClipId }
+            ?: throw IllegalArgumentException("Voice clip not found: $voiceClipId")
+        val vmedia = doc.mediaFor(voice) ?: throw IllegalArgumentException("No media for voice clip: $voiceClipId")
+        val pcm = PcmDecoder.decode(context, Uri.parse(vmedia.uri), 8_000)
+            ?: throw IllegalStateException("No audio track in \"${vmedia.name}\" to detect speech.")
+        val regions = speechRegions(pcm) // source ms within the voice media
+        if (regions.isEmpty()) {
+            return JSONObject().apply {
+                put("ok", true); put("duckedRegions", 0)
+                put("humanSummary", "No speech detected in the voice clip — nothing to duck under.")
+            }
+        }
+        // Map each voice-source region to music-clip-relative ms, keeping only the on-clip overlap.
+        val duck = amount.coerceIn(0f, 1f)
+        val ramp = 120L
+        val ease = CubicBezier()
+        val points = mutableListOf<Triple<Long, Float, CubicBezier>>()
+        var applied = 0
+        for ((s, e) in regions) {
+            val tlStart = voice.startTimeMs + (s - voice.trimStartMs)
+            val tlEnd = voice.startTimeMs + (e - voice.trimStartMs)
+            val relStart = (tlStart - music.startTimeMs)
+            val relEnd = (tlEnd - music.startTimeMs)
+            if (relEnd <= 0 || relStart >= music.durationMs) continue // no overlap with the music clip
+            val rs = relStart.coerceIn(0, music.durationMs)
+            val re = relEnd.coerceIn(0, music.durationMs)
+            points += Triple((rs - ramp).coerceAtLeast(0), 1f, ease)
+            points += Triple(rs, duck, ease)
+            points += Triple(re, duck, ease)
+            points += Triple((re + ramp).coerceAtMost(music.durationMs), 1f, ease)
+            applied++
+        }
+        if (applied == 0) {
+            return JSONObject().apply {
+                put("ok", true); put("duckedRegions", 0)
+                put("humanSummary", "The speech doesn't overlap the music clip — nothing ducked.")
+            }
+        }
+        vm.insertKeyframes(musicClipId, KeyframeProperty.VOLUME, points)
+        return ok().apply {
+            put("duckedRegions", applied)
+            put("humanSummary", "Ducked the music to ${(duck * 100).toInt()}% under $applied speech section(s).")
+        }
+    }
+
+    /**
+     * Detect speech regions in [pcm] via a short-window RMS energy gate with an adaptive threshold.
+     * Returns [start,end] pairs in source ms, merging gaps < 250 ms and dropping blips < 150 ms.
+     */
+    private fun speechRegions(pcm: com.hereliesaz.guillotine.ai.PcmAudio): List<Pair<Long, Long>> {
+        val rate = pcm.sampleRate
+        if (rate <= 0 || pcm.samples.isEmpty()) return emptyList()
+        val win = (rate * 0.04).toInt().coerceAtLeast(1) // 40 ms windows
+        val n = pcm.samples.size / win
+        if (n == 0) return emptyList()
+        val rms = FloatArray(n)
+        var peak = 0f
+        for (i in 0 until n) {
+            var sum = 0.0
+            val base = i * win
+            for (j in 0 until win) { val v = pcm.samples[base + j]; sum += v * v }
+            rms[i] = kotlin.math.sqrt(sum / win).toFloat()
+            if (rms[i] > peak) peak = rms[i]
+        }
+        val threshold = maxOf(0.02f, peak * 0.2f)
+        fun winMs(w: Int) = w.toLong() * win * 1000L / rate
+        val raw = ArrayList<Pair<Long, Long>>()
+        var i = 0
+        while (i < n) {
+            if (rms[i] >= threshold) {
+                var j = i
+                while (j < n && rms[j] >= threshold) j++
+                raw += winMs(i) to winMs(j)
+                i = j
+            } else i++
+        }
+        // Merge close regions, then drop too-short ones.
+        val merged = ArrayList<Pair<Long, Long>>()
+        for (r in raw) {
+            val last = merged.lastOrNull()
+            if (last != null && r.first - last.second <= 250L) merged[merged.size - 1] = last.first to r.second
+            else merged += r
+        }
+        return merged.filter { it.second - it.first >= 150L }
+    }
+
+    /**
+     * Find video clips whose sampled frames match [query] using on-device image labels (~400 common
+     * things/scenes). Samples up to 4 frames per clip; returns each matching clip with the matched label
+     * and the timeline ms of the best-scoring hit. Read-only — edits nothing.
+     */
+    private fun searchClips(query: String): JSONObject {
+        val q = query.trim().lowercase()
+        require(q.isNotBlank()) { "Give something to search for, e.g. \"dog\"." }
+        val doc = vm.uiState.value.document
+        val videoClips = doc.clips.filter { it.type == com.hereliesaz.guillotine.model.ClipType.VIDEO }
+        val matches = JSONArray()
+        var found = 0
+        com.hereliesaz.guillotine.ai.SceneClassifier(context).use { classifier ->
+            for (clip in videoClips) {
+                val media = doc.mediaFor(clip) ?: continue
+                val uri = Uri.parse(media.uri)
+                var bestLabel: String? = null
+                var bestScore = 0f
+                var bestTimeline = clip.startTimeMs
+                // Sample 4 frames across the clip's source range.
+                for (k in 1..4) {
+                    val sourceMs = clip.trimStartMs + clip.durationMs * k / 5
+                    val frame = grabFrame(uri, sourceMs) ?: continue
+                    val labels = try { classifier.classify(frame) } finally { frame.recycle() }
+                    val hit = labels.firstOrNull { it.lowerText.contains(q) || q.contains(it.lowerText) }
+                    if (hit != null && hit.confidence > bestScore) {
+                        bestScore = hit.confidence
+                        bestLabel = hit.text
+                        bestTimeline = clip.startTimeMs + (sourceMs - clip.trimStartMs)
+                    }
+                }
+                if (bestLabel != null) {
+                    found++
+                    matches.put(JSONObject().apply {
+                        put("clipId", clip.id)
+                        put("name", media.name)
+                        put("label", bestLabel)
+                        put("confidence", (bestScore * 100).toInt())
+                        put("timelineMs", bestTimeline)
+                    })
+                }
+            }
+        }
+        return ok().apply {
+            put("matchCount", found)
+            put("matches", matches)
+            put(
+                "humanSummary",
+                if (found == 0) "No clips matched \"$query\"."
+                else "Found $found clip(s) matching \"$query\".",
+            )
         }
     }
 

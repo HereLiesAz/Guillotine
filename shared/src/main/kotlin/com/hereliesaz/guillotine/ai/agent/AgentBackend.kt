@@ -148,6 +148,18 @@ val AGENT_SYSTEM_PROMPT = """
       an audio clip. Needs the TTS voice in Settings → AI Analyzer → Speech (TTS); if it isn't set the tool
       returns an error naming the setting — relay it, don't retry.
 
+    FOOTAGE SEARCH (on-device, no model):
+    - "find the clips with a dog", "which shots have a sunset?", "where's the beach footage?", "find the
+      food shots" → search_clips with the thing to look for. It samples each clip's frames and matches
+      on-device image labels, returning the matching clips + a timestamp. It only finds; to act on a
+      result, use its clip id with the editing tools.
+
+    AUTO-DUCKING / SIDECHAIN (on-device, no model):
+    - "duck the music under the voiceover", "lower the music when someone's talking", "sidechain the music
+      to the narration" → auto_duck with the music clip id and the voice/speech clip id. It detects where
+      the voice is talking and dips the music's volume there (smooth ramps), restoring it in the gaps.
+      Optionally pass amount (0–1, default 0.3) for how far to duck.
+
     KARAOKE / REMOVE VOCALS (on-device, no model):
     - "remove the vocals", "make a karaoke / instrumental version", "strip the singing", "backing track"
       → remove_vocals on the clip. It cancels center-panned vocals from the STEREO audio and adds the
