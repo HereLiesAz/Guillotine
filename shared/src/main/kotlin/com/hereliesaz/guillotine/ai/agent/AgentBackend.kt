@@ -290,6 +290,18 @@ data class ToolOutcome(val json: JSONObject, val isError: Boolean) {
 fun callTool(tools: McpToolsSurface, name: String, args: JSONObject): ToolOutcome =
     try {
         ToolOutcome(tools.call(name, args), isError = false)
-    } catch (e: Exception) {
-        ToolOutcome(JSONObject().put("error", e.message ?: "tool failed"), isError = true)
+    } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+        // Cooperative cancellation must propagate, not be reported as a tool failure.
+        throw c
+    } catch (t: Throwable) {
+        // Catch Throwable, not just Exception: on-device tools load native libraries (sherpa-onnx
+        // ASR/TTS/diarization, ONNX Runtime stem separation, MediaPipe VLM). A native load or ABI
+        // mismatch throws a LinkageError subclass (UnsatisfiedLinkError / ExceptionInInitializerError /
+        // NoClassDefFoundError) — a java.lang.Error, not an Exception. Reporting it as a recoverable
+        // tool result lets the model relay a legible message instead of crashing the agent loop.
+        val msg = t.message ?: t::class.simpleName ?: "tool failed"
+        val hint = if (t is LinkageError) {
+            " (the on-device engine failed to load — the model may be incompatible with this device's runtime)"
+        } else ""
+        ToolOutcome(JSONObject().put("error", "$msg$hint"), isError = true)
     }

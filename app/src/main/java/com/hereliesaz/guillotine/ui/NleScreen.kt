@@ -888,9 +888,13 @@ private fun EditorToolStrip(
     val beginListening: () -> Unit = {
         capture = com.hereliesaz.guillotine.ai.VoiceCapture().also { if (!it.start()) { capture = null } }
         listening = capture != null
+        if (capture == null) {
+            android.widget.Toast.makeText(voiceCtx, "Couldn't start the mic — it may be in use.", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
     val micPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) beginListening()
+        else android.widget.Toast.makeText(voiceCtx, "Mic permission is needed for voice commands.", android.widget.Toast.LENGTH_SHORT).show()
     }
     val toggleVoice: () -> Unit = {
         if (listening) {
@@ -899,14 +903,25 @@ private fun EditorToolStrip(
                 transcribing = true
                 voiceScope.launch(Dispatchers.Default) {
                     val pcm = cap.stop()
-                    val text = if (asrModelPath.isNotBlank() && pcm.isNotEmpty()) {
-                        runCatching { com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm) }.getOrNull()
+                    // Distinguish the failure modes so the mic never fails silently: engine couldn't
+                    // run (e.g. the ASR native lib/runtime is incompatible on this device) vs. no audio
+                    // captured vs. audio heard but no words recognized.
+                    val result = if (asrModelPath.isNotBlank() && pcm.isNotEmpty()) {
+                        runCatching { com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm) }
                     } else null
+                    val text = result?.getOrNull()
                     withContext(Dispatchers.Main) {
                         transcribing = false
                         if (!text.isNullOrBlank()) {
                             val existing = assistant.input
                             onAgentInput(if (existing.isBlank()) text.trim() else "${existing.trim()} ${text.trim()}")
+                        } else {
+                            val msg = when {
+                                pcm.isEmpty() -> "No audio captured — check the mic permission."
+                                result?.isFailure == true -> "The speech engine couldn't run on this device."
+                                else -> "Didn't catch any speech — try again."
+                            }
+                            android.widget.Toast.makeText(voiceCtx, msg, android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
