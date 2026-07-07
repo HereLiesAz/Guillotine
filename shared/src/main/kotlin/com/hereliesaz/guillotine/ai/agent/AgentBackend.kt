@@ -148,6 +148,12 @@ val AGENT_SYSTEM_PROMPT = """
       an audio clip. Needs the TTS voice in Settings → AI Analyzer → Speech (TTS); if it isn't set the tool
       returns an error naming the setting — relay it, don't retry.
 
+    AUTO-REFRAME / FOLLOW THE SUBJECT (on-device, no model):
+    - "auto-reframe this", "keep the subject centered", "follow the face/speaker", "reframe for
+      vertical/Reels/TikTok" → auto_reframe with the clip id. It detects the main face across the clip,
+      punches in, and pans (OFFSET_X keyframes) to keep them centered. Optionally pass zoom (default 1.3).
+      Needs faces in the footage; it returns an error if none are found.
+
     FOOTAGE SEARCH (on-device, no model):
     - "find the clips with a dog", "which shots have a sunset?", "where's the beach footage?", "find the
       food shots" → search_clips with the thing to look for. It samples each clip's frames and matches

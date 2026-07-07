@@ -36,6 +36,23 @@ object FaceEmbed {
         }
     }
 
+    /**
+     * Normalized horizontal center (0..1) of the largest detected face in [frame], or null if none.
+     * Used by auto-reframe to pan the crop so the subject stays centered.
+     */
+    fun largestFaceCenterX(context: Context, frame: Bitmap): Float? {
+        val d = detector()
+        return try {
+            Tasks.await(d.process(InputImage.fromBitmap(frame, 0)))
+                .maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+                ?.let { (it.boundingBox.exactCenterX() / frame.width.toFloat()).coerceIn(0f, 1f) }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { d.close() }
+        }
+    }
+
     /** Cheap check: is there at least one face in [frame]? Used to route a concept to the face path. */
     fun hasFace(context: Context, frame: Bitmap): Boolean {
         val d = detector()

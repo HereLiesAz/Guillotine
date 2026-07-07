@@ -63,7 +63,7 @@ upgradeable to a TFLite-exported BeatNet/TempoCNN or aubio/Essentia via NDK.
 | Optical flow | OpenCV (Farnebäck/DIS) or RAFT | BSD | Classical runs easily; RAFT heavy. |
 | Shot detection | **Histogram diff (in-code)** — **shipped** (`detect_scenes`) or TransNetV2 | MIT | Cheap content-difference on-device; splits a clip into shots / chapters. |
 | Captioning / VLM | **Gemma 3n** — **shipped** (`caption_frame`), SmolVLM 256M/500M, Moondream 0.5B, Florence-2 | Apache/MIT/Gemma | On-device multimodal frame captioning via MediaPipe LlmInference + vision modality (a separate instance, so the text `.task` path is untouched). |
-| Auto-reframe | MediaPipe AutoFlip + saliency (BASNet/U²-Net) | Apache/MIT | Smart vertical crop tracking the subject. |
+| Auto-reframe | **face-follow (in-code, ML Kit)** — **shipped** (`auto_reframe`); AutoFlip + saliency for non-face subjects | Apache/MIT | Punch-in + OFFSET_X keyframes tracking the main face; saliency-based (non-face) tracking is future work. |
 
 ### 1.3b Recognition / ID embedding models ("is this the same specific thing?")
 
@@ -178,7 +178,8 @@ Each item is feasible on the current stack or a model listed above.
 11. Voice-command editing — speak the instruction; ASR feeds the agent.
 
 **Vision & generation**
-12. Smart auto-reframe landscape→9:16/1:1 following the subject (AutoFlip).
+12. Smart auto-reframe landscape→9:16/1:1 following the subject (AutoFlip). **(shipped —
+    `auto_reframe` punches in and pans OFFSET_X keyframes to follow the main face)**
 13. Depth effects: portrait/bokeh blur, 2.5D parallax "3D Ken Burns," fake dolly.
 14. Super-resolution upscale of old/low-res footage and stills.
 15. Style transfer / AI looks; on-device auto color-correct & shot-match; LUTs.

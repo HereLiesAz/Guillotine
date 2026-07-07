@@ -305,6 +305,20 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "auto_reframe",
+            "Auto-reframe a clip to keep the subject centered ON-DEVICE (no key): detects the main face " +
+                "across the clip and pans a punched-in crop to follow it — the classic \"make it work " +
+                "vertically / follow the speaker\" reframe. Use for \"auto-reframe this\", \"keep the " +
+                "subject centered\", \"follow the face\", \"reframe for vertical/Reels\". zoom is the " +
+                "punch-in (default 1.3). Sets the clip's scale and writes OFFSET_X keyframes that track " +
+                "the face; needs faces in the footage (returns an error if none are found).",
+            objSchema(
+                "clip_id" to stringProp("The clip to reframe"),
+                "zoom" to numberProp("Punch-in scale (default 1.3; more = tighter, more room to pan)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
             "search_clips",
             "Find which video clips contain something ON-DEVICE (no key): samples each clip's frames and " +
                 "matches them against [query] using on-device image labels (~400 common things/scenes — " +
@@ -468,6 +482,7 @@ class McpTools(
         "caption_frame" -> captionFrame(args.optString("clip_id"), args.optString("prompt"))
         "auto_duck" -> autoDuck(args.getString("music_clip_id"), args.getString("voice_clip_id"), args.optDouble("amount", 0.3).toFloat())
         "search_clips" -> searchClips(args.getString("query"))
+        "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -1266,6 +1281,58 @@ class McpTools(
             else merged += r
         }
         return merged.filter { it.second - it.first >= 150L }
+    }
+
+    /**
+     * Auto-reframe [clipId] to follow the main face: sample frames, find the largest face's horizontal
+     * position, punch in by [zoom], and write OFFSET_X keyframes that pan to keep the subject centered.
+     */
+    private fun autoReframe(clipId: String, zoom: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val z = zoom.coerceIn(1.05f, 3f)
+        val durationMs = clip.durationMs
+        require(durationMs > 0) { "Clip has no duration to reframe." }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Auto-reframing…", pausable = false,
+        ) { _ ->
+            val uri = Uri.parse(media.uri)
+            val step = maxOf(300L, durationMs / 60) // ~every 0.3s, capped ~60 samples
+            // Max pan (normalized) that keeps the punched-in crop inside the frame.
+            val maxPan = ((z - 1f) / (2f * z)).coerceIn(0f, 0.5f)
+            val samples = ArrayList<Pair<Long, Float>>() // relMs -> centerX (0..1)
+            var srcMs = clip.trimStartMs
+            val endSrc = clip.trimStartMs + durationMs
+            while (srcMs <= endSrc) {
+                val frame = grabFrame(uri, srcMs)
+                if (frame != null) {
+                    val cx = try { com.hereliesaz.guillotine.ai.FaceEmbed.largestFaceCenterX(context, frame) }
+                        finally { frame.recycle() }
+                    if (cx != null) samples += (srcMs - clip.trimStartMs) to cx
+                }
+                srcMs += step
+            }
+            if (samples.isEmpty()) {
+                throw IllegalStateException("No faces found to follow — auto-reframe needs a face in the shot.")
+            }
+            // Smooth the centers (moving average of 3) to avoid jitter, then map to a pan offset.
+            val ease = CubicBezier()
+            val points = samples.mapIndexed { i, (relMs, _) ->
+                val lo = maxOf(0, i - 1); val hi = minOf(samples.size - 1, i + 1)
+                val avgCx = (lo..hi).map { samples[it].second }.average().toFloat()
+                // Subject right of center → pan the image left (negative offset) to recenter.
+                val offsetX = ((0.5f - avgCx) * 2f * maxPan).coerceIn(-maxPan, maxPan)
+                Triple(relMs, offsetX, ease)
+            }
+            vm.updateClip(clipId) { it.copy(scale = z) }
+            vm.insertKeyframes(clipId, KeyframeProperty.OFFSET_X, points)
+            ok().apply {
+                put("keyframes", points.size)
+                put("humanSummary", "Auto-reframed: punched in ${z}× and panned across ${points.size} points to follow the face.")
+            }
+        }
     }
 
     /**
