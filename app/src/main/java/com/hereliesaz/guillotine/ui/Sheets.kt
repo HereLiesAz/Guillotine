@@ -118,6 +118,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var vlmModelPath by remember { mutableStateOf(current.vlmModelPath) }
     var diarizeSegModelPath by remember { mutableStateOf(current.diarizeSegModelPath) }
     var diarizeEmbedModelPath by remember { mutableStateOf(current.diarizeEmbedModelPath) }
+    var stemModelPath by remember { mutableStateOf(current.stemModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -161,6 +162,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     vlmModelPath = vlmModelPath.trim(),
                     diarizeSegModelPath = diarizeSegModelPath.trim(),
                     diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
+                    stemModelPath = stemModelPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -190,6 +192,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             vlmModelPath = restored.vlmModelPath
             diarizeSegModelPath = restored.diarizeSegModelPath
             diarizeEmbedModelPath = restored.diarizeEmbedModelPath
+            stemModelPath = restored.stemModelPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -558,6 +561,29 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = diarizeEmbedModelPath,
                         onUse = { diarizeEmbedModelPath = it },
                     )
+
+                    // Stem separation (Spleeter via ONNX Runtime).
+                    Text("Stem separation — vocals / instrumental (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = stemModelPath,
+                        onValueChange = { stemModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Spleeter model directory (ONNX)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Enables \"separate the stems / isolate the vocals\" (Spleeter). Heavy — best on a " +
+                            "capable device and moderate clip lengths.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "Stem models — download, use, or remove",
+                        models = recommendedModelsFor(ModelCategory.STEM),
+                        selectedPath = stemModelPath,
+                        onUse = { stemModelPath = it },
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -723,6 +749,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             vlmModelPath = vlmModelPath.trim(),
                             diarizeSegModelPath = diarizeSegModelPath.trim(),
                             diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
+                            stemModelPath = stemModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,

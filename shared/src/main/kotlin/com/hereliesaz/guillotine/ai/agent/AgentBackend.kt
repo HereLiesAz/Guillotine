@@ -207,6 +207,12 @@ val AGENT_SYSTEM_PROMPT = """
       the voice is talking and dips the music's volume there (smooth ramps), restoring it in the gaps.
       Optionally pass amount (0–1, default 0.3) for how far to duck.
 
+    STEM SEPARATION (vocals / instrumental, on-device ML):
+    - "separate the stems", "split vocals and instrumental", "isolate the vocals", "give me the acapella /
+      instrumental" → separate_stems with the clip id. It runs Spleeter (ONNX) and adds a vocals clip and
+      an accompaniment (instrumental) clip. Needs the Spleeter model (Settings → AI Analyzer → Stem
+      separation) and is heavy — for a quick stereo karaoke without a model, use remove_vocals instead.
+
     KARAOKE / REMOVE VOCALS (on-device, no model):
     - "remove the vocals", "make a karaoke / instrumental version", "strip the singing", "backing track"
       → remove_vocals on the clip. It cancels center-panned vocals from the STEREO audio and adds the

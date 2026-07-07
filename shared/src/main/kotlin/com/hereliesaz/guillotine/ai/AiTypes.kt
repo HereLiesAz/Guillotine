@@ -121,6 +121,8 @@ data class AiSettings(
     val diarizeSegModelPath: String = "",
     /** Optional sherpa-onnx speaker-embedding `.onnx` file for speaker diarization. */
     val diarizeEmbedModelPath: String = "",
+    /** Optional Spleeter model *directory* (ONNX) for stem separation (vocals / accompaniment). */
+    val stemModelPath: String = "",
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */
