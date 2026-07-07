@@ -85,6 +85,8 @@ fun PreviewPlayer(
     state: EditorUiState,
     modifier: Modifier = Modifier,
     cropMode: Boolean = false,
+    /** Draw platform safe-zone guides (caption/UI areas) over vertical/square projects. */
+    showSafeZones: Boolean = false,
     onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
 ) {
     val context = LocalContext.current
@@ -192,6 +194,29 @@ fun PreviewPlayer(
                     .background(Color.Black.copy(alpha = 0.55f))
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             )
+        }
+        // Platform safe-zone guides: for vertical/square projects, show where TikTok/Reels/Shorts UI
+        // (captions bottom, action icons right) covers the frame, so titles/subjects stay inside.
+        val aspect = state.document.settings.aspectRatio
+        if (showSafeZones && (aspect == AspectRatio.RATIO_9_16 || aspect == AspectRatio.RATIO_1_1)) {
+            androidx.compose.foundation.Canvas(modifier = Modifier.matchParentSize()) {
+                val w = size.width; val h = size.height
+                // Unsafe insets (fractions): top small, bottom (captions/CTA), right (action rail).
+                val top = h * 0.06f
+                val bottom = h * (if (aspect == AspectRatio.RATIO_9_16) 0.20f else 0.10f)
+                val right = w * (if (aspect == AspectRatio.RATIO_9_16) 0.12f else 0.06f)
+                val left = w * 0.04f
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = 2f,
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 10f)),
+                )
+                drawRect(
+                    color = Color(0xFFE53935).copy(alpha = 0.7f),
+                    topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                    size = androidx.compose.ui.geometry.Size(w - left - right, h - top - bottom),
+                    style = stroke,
+                )
+            }
         }
     }
 }

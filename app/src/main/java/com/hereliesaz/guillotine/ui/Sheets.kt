@@ -975,6 +975,8 @@ fun ExportSheet(
     errorMessage: String?,
     onStart: (String) -> Unit,
     onDismiss: () -> Unit,
+    /** Share the just-exported video; null until the export produced a shareable file. */
+    onShare: (() -> Unit)? = null,
 ) {
     var name by remember { mutableStateOf("guillotine_export") }
     var errorExpanded by remember { mutableStateOf(false) }
@@ -987,6 +989,12 @@ fun ExportSheet(
                 doneMessage != null -> {
                     Text(doneMessage, color = Neutral400, fontSize = 12.sp)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (onShare != null) {
+                            Button(onClick = onShare, colors = ButtonDefaults.buttonColors(containerColor = White)) {
+                                Text("Share", fontSize = 12.sp, color = Color.Black)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                        }
                         Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = Neutral800)) {
                             Text("Close", fontSize = 12.sp, color = White)
                         }

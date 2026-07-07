@@ -206,8 +206,8 @@ Each item is feasible on the current stack or a model listed above.
     + captions → a rough cut the user refines.
 22. Auto-chaptering / scene detection → timeline markers + YouTube chapters. **(shipped —
     `detect_scenes` splits a clip into shots on-device)**
-23. Platform export presets (TikTok/Reels/Shorts) with safe-zones + direct share. **(partial —
-    `set_export_preset` sets the 9:16 / 1:1 / 16:9 output aspect; safe-zone overlays + share are a
-    follow-up)**
+23. Platform export presets (TikTok/Reels/Shorts) with safe-zones + direct share. **(shipped —
+    `set_export_preset` sets the aspect; the preview shows platform safe-zone guides in Crop mode for
+    vertical/square projects; the export dialog has a Share button.)**
 24. Kinetic-caption & meme templates, emoji reactions timed to speech.
 25. Teachable-tool marketplace — share user-defined AI editing tools.
