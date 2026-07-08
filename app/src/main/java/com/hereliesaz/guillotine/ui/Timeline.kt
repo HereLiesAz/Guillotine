@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -1043,7 +1044,7 @@ private fun keyframeColor(prop: KeyframeProperty): Color = when (prop) {
     KeyframeProperty.OFFSET_X, KeyframeProperty.OFFSET_Y -> Red500
     KeyframeProperty.VOLUME, KeyframeProperty.PAN -> Neutral400
     KeyframeProperty.BRIGHTNESS, KeyframeProperty.CONTRAST, KeyframeProperty.SATURATION,
-    KeyframeProperty.HUE, KeyframeProperty.SEPIA -> Neutral500
+    KeyframeProperty.HUE, KeyframeProperty.SEPIA, KeyframeProperty.SPEED -> Neutral500
 }
 
 /** Canvas position of a keyframe: x by time, y by value (higher value = higher on the clip). */

@@ -174,7 +174,7 @@ object Exporter {
                 }
             }
 
-            onProgress(1f)
+            onProgress(1f, document.totalDurationMs)
             phase("Saving to gallery…")
             // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
             // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.
