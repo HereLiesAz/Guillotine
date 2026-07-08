@@ -345,33 +345,65 @@ private fun TimelineLanes(
             // timeline doesn't scroll), and its local x == content x, so x/pps maps straight to ms.
             if (state.tool == EditorTool.MARQUEE) {
                 var startX by remember { mutableStateOf<Float?>(null) }
+                var startY by remember { mutableStateOf<Float?>(null) }
                 var curX by remember { mutableFloatStateOf(0f) }
+                var curY by remember { mutableFloatStateOf(0f) }
                 Box(
                     Modifier
                         .matchParentSize()
                         .pointerInput(pps) {
                             detectDragGestures(
-                                onDragStart = { off -> startX = off.x; curX = off.x },
-                                onDrag = { change, _ -> change.consume(); curX = change.position.x },
+                                onDragStart = { off -> 
+                                    startX = off.x; curX = off.x
+                                    startY = off.y; curY = off.y 
+                                },
+                                onDrag = { change, _ -> 
+                                    change.consume()
+                                    curX = change.position.x
+                                    curY = change.position.y
+                                },
                                 onDragEnd = {
-                                    startX?.let { s ->
-                                        vm.selectClipsInRange(
-                                            (s / pps * 1000f).toLong(),
+                                    val sx = startX
+                                    val sy = startY
+                                    if (sx != null && sy != null) {
+                                        val minY = kotlin.math.min(sy, curY)
+                                        val maxY = kotlin.math.max(sy, curY)
+                                        val tracks = mutableSetOf<String>()
+                                        var currentY = with(density) { RULER_HEIGHT.toPx() }
+                                        for (trackId in state.document.videoTracks) {
+                                            val h = with(density) { state.trackHeight(trackId).dp.toPx() }
+                                            if (currentY < maxY && currentY + h > minY) tracks.add(trackId)
+                                            currentY += h
+                                        }
+                                        for (trackId in state.document.audioTracks) {
+                                            val h = with(density) { state.trackHeight(trackId).dp.toPx() }
+                                            if (currentY < maxY && currentY + h > minY) tracks.add(trackId)
+                                            currentY += h
+                                        }
+                                        vm.selectClipsInRect(
+                                            (sx / pps * 1000f).toLong(),
                                             (curX / pps * 1000f).toLong(),
+                                            tracks
                                         )
                                     }
                                     startX = null
+                                    startY = null
                                 },
-                                onDragCancel = { startX = null },
+                                onDragCancel = { startX = null; startY = null },
                             )
                         },
                 ) {
-                    startX?.let { s ->
+                    val sx = startX
+                    val sy = startY
+                    if (sx != null && sy != null) {
                         Box(
                             Modifier
-                                .offset(x = with(density) { kotlin.math.min(s, curX).toDp() })
-                                .width(with(density) { kotlin.math.abs(curX - s).toDp() })
-                                .fillMaxHeight()
+                                .offset(
+                                    x = with(density) { kotlin.math.min(sx, curX).toDp() },
+                                    y = with(density) { kotlin.math.min(sy, curY).toDp() }
+                                )
+                                .width(with(density) { kotlin.math.abs(curX - sx).toDp() })
+                                .height(with(density) { kotlin.math.abs(curY - sy).toDp() })
                                 .background(Red500.copy(alpha = 0.18f))
                                 .border(1.dp, Red500),
                         )
@@ -991,7 +1023,7 @@ private fun keyframeColor(prop: KeyframeProperty): Color = when (prop) {
     KeyframeProperty.OFFSET_X, KeyframeProperty.OFFSET_Y -> Red500
     KeyframeProperty.VOLUME, KeyframeProperty.PAN -> Neutral400
     KeyframeProperty.BRIGHTNESS, KeyframeProperty.CONTRAST, KeyframeProperty.SATURATION,
-    KeyframeProperty.HUE, KeyframeProperty.SEPIA -> Neutral500
+    KeyframeProperty.HUE, KeyframeProperty.SEPIA, KeyframeProperty.SPEED -> Neutral500
 }
 
 /** Canvas position of a keyframe: x by time, y by value (higher value = higher on the clip). */
