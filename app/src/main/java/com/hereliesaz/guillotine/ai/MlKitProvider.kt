@@ -97,7 +97,7 @@ class MlKitProvider : ClipAnalyzer {
                 val v = match(0L, bmp)
                 bmp.recycle()
                 val keep = v.matched == intent.keepMatches
-                onProgress(AnalysisProgress("Analyzed image", 1f, if (v.matched) 1 else 0, findingLine(0, v, keep)))
+                onProgress(AnalysisProgress("Analyzed image", 1f, if (v.matched) 1 else 0, findingLine(0, v, keep), 0L))
                 val action = if (keep) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, v.term ?: "no match"))
             } else {
@@ -172,7 +172,7 @@ class MlKitProvider : ClipAnalyzer {
             if (kind == MediaKind.IMAGE) {
                 val v = match(0L, reference)
                 val keep = v.matched == parsed.keepMatches
-                onProgress(AnalysisProgress("Analyzed image", 1f, if (v.matched) 1 else 0, findingLine(0, v, keep)))
+                onProgress(AnalysisProgress("Analyzed image", 1f, if (v.matched) 1 else 0, findingLine(0, v, keep), 0L))
                 val action = if (keep) EditAction.KEEP else EditAction.REMOVE
                 listOf(EditSegment(0, durationMs, action, v.term ?: "no match"))
             } else {
@@ -435,7 +435,7 @@ class MlKitProvider : ClipAnalyzer {
             fun reportProgress(atMs: Long, finding: String?) {
                 val curFrame = (atMs * fps / 1000f).toLong().coerceAtMost(totalFrames)
                 val fraction = (atMs.toFloat() / dur).coerceIn(0f, 1f)
-                onProgress(AnalysisProgress("Frame $curFrame of $totalFrames", fraction, matchCount, finding))
+                onProgress(AnalysisProgress("Frame $curFrame of $totalFrames", fraction, matchCount, finding, atMs))
             }
 
             fun binaryRefine(matchSide: Long, missSide: Long) {

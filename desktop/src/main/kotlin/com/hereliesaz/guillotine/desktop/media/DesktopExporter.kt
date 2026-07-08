@@ -40,7 +40,7 @@ object DesktopExporter {
     suspend fun export(
         document: Document,
         config: ExportConfig = ExportConfig(),
-        onProgress: (Float) -> Unit = {},
+        onProgress: (Float, Long) -> Unit = { _, _ -> },
     ): File = withContext(Dispatchers.IO) {
         val safeName = config.name.replace(Regex("[/\\\\]"), "_").replace("..", "_").ifBlank { "export" }
         val outputDir = File(System.getProperty("user.home"), "Videos/Guillotine")
@@ -137,7 +137,7 @@ object DesktopExporter {
                 bg.dispose()
 
                 recorder.record(converter.convert(bgrImage))
-                onProgress(frameIdx.toFloat() / totalFrames)
+                onProgress(frameIdx.toFloat() / totalFrames, timeMs)
             }
 
             // Audio: mix all audio tracks together
@@ -149,7 +149,7 @@ object DesktopExporter {
             recorder.release()
         }
 
-        onProgress(1f)
+        onProgress(1f, totalDurationMs)
         outputFile
     }
 

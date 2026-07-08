@@ -548,6 +548,27 @@ class McpTools(
                 required = listOf("track_id", "audio_clip_id"),
             ),
         ))
+        put(toolDefinition(
+            "set_clip_filter", "Sets static values for a clip filter (e.g., brightness = 1.2, speed = 2.0).",
+            objSchema(
+                "clip_id" to stringProp(), "property" to stringProp("e.g. brightness, speed"), "value" to numberProp(),
+                required = listOf("clip_id", "property", "value")
+            )
+        ))
+        put(toolDefinition(
+            "add_keyframe", "Adds a keyframe for a specific KeyframeProperty at a specific time in the clip.",
+            objSchema(
+                "clip_id" to stringProp(), "property" to stringProp(), "time_ms" to intProp(), "value" to numberProp(),
+                required = listOf("clip_id", "property", "time_ms", "value")
+            )
+        ))
+        put(toolDefinition(
+            "clear_keyframes", "Removes all keyframes for a specified property on a clip.",
+            objSchema(
+                "clip_id" to stringProp(), "property" to stringProp(),
+                required = listOf("clip_id", "property")
+            )
+        ))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -604,6 +625,9 @@ class McpTools(
         "remove_fillers" -> removeFillers(args.getString("clip_id"))
         "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
         "separate_stems" -> separateStems(args.getString("clip_id"))
+        "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
+        "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
+        "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -687,7 +711,10 @@ class McpTools(
         val edits = runBlocking {
             Analysis.run(
                 context, settingsProvider(), Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
-                onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
+                onProgress = { p -> 
+                    p.finding?.let { ActivityLog.info(it) } 
+                    p.currentMs?.let { ms -> vm.seekTo(clip.startTimeMs + ms) }
+                },
             )
         }
         return analyzeResult(clipId, edits)
@@ -837,6 +864,9 @@ class McpTools(
             val removes = runBlocking {
                 Analysis.run(
                     context, settings, Uri.parse(media.uri), media.kind, "remove ${clip.prompt}", clip.durationMs,
+                    onProgress = { p -> 
+                        p.currentMs?.let { ms -> vm.seekTo(clip.startTimeMs + ms) }
+                    },
                     checkpoint = sink::checkpointBlocking,
                 )
             }.filter { it.action == EditAction.REMOVE }
@@ -2320,4 +2350,83 @@ class McpTools(
             put("properties", JSONObject().apply { props.forEach { (k, v) -> put(k, v) } })
             if (required.isNotEmpty()) put("required", JSONArray(required))
         }
+    private fun setClipFilter(clipId: String, property: String, value: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        
+        val prop = try {
+            com.hereliesaz.guillotine.model.KeyframeProperty.valueOf(property.uppercase())
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Unknown property: $property")
+        }
+        
+        vm.updateClipFilters(clipId) { f ->
+            when (prop) {
+                com.hereliesaz.guillotine.model.KeyframeProperty.BRIGHTNESS -> f.copy(brightness = value)
+                com.hereliesaz.guillotine.model.KeyframeProperty.CONTRAST -> f.copy(contrast = value)
+                com.hereliesaz.guillotine.model.KeyframeProperty.SATURATION -> f.copy(saturation = value)
+                com.hereliesaz.guillotine.model.KeyframeProperty.HUE -> f.copy(hueRotate = value)
+                com.hereliesaz.guillotine.model.KeyframeProperty.SEPIA -> f.copy(sepia = value)
+                com.hereliesaz.guillotine.model.KeyframeProperty.SPEED -> f.copy(speed = value)
+                com.hereliesaz.guillotine.model.KeyframeProperty.VOLUME -> f.copy(volume = value)
+                com.hereliesaz.guillotine.model.KeyframeProperty.PAN -> f.copy(pan = value)
+                else -> f
+            }
+        }
+        
+        if (prop in com.hereliesaz.guillotine.model.KeyframeProperty.TRANSFORM) {
+            vm.updateClip(clipId) { c ->
+                when (prop) {
+                    com.hereliesaz.guillotine.model.KeyframeProperty.SCALE -> c.copy(scale = value)
+                    com.hereliesaz.guillotine.model.KeyframeProperty.ROTATION -> c.copy(rotation = value)
+                    com.hereliesaz.guillotine.model.KeyframeProperty.OFFSET_X -> c.copy(offsetX = value)
+                    com.hereliesaz.guillotine.model.KeyframeProperty.OFFSET_Y -> c.copy(offsetY = value)
+                    else -> c
+                }
+            }
+        }
+
+        return ok().apply { put("humanSummary", "Set $property to $value on clip $clipId.") }
+    }
+
+    private fun addKeyframe(clipId: String, property: String, timeMs: Long, value: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+            
+        val prop = try {
+            com.hereliesaz.guillotine.model.KeyframeProperty.valueOf(property.uppercase())
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Unknown property: $property")
+        }
+        
+        vm.updateClip(clipId) { c ->
+            val newKf = com.hereliesaz.guillotine.model.Keyframe(
+                id = com.hereliesaz.guillotine.model.newId(),
+                timeMs = timeMs,
+                value = value,
+                property = prop
+            )
+            c.copy(keyframes = c.keyframes + newKf)
+        }
+        
+        return ok().apply { put("humanSummary", "Added $property keyframe at ${timeMs}ms with value $value on clip $clipId.") }
+    }
+
+    private fun clearKeyframes(clipId: String, property: String): JSONObject {
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+            
+        val prop = try {
+            com.hereliesaz.guillotine.model.KeyframeProperty.valueOf(property.uppercase())
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Unknown property: $property")
+        }
+        
+        vm.updateClip(clipId) { c ->
+            c.copy(keyframes = c.keyframes.filter { it.property != prop })
+        }
+        
+        return ok().apply { put("humanSummary", "Cleared all $property keyframes on clip $clipId.") }
+    }
+
 }
