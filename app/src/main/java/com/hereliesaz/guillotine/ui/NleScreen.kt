@@ -114,6 +114,7 @@ import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.data.ProjectAutosave
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
+import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
 import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.AndroidEditorViewModel
@@ -245,11 +246,17 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             else -> { importTargetTrack = track; importLauncher() }
         }
     }
-    // The project is auto-saved internally; "Save" only names it. Load imports a .gilt copy.
+    // The project is auto-saved internally; "Rename" only names it. Load imports a .gilt copy.
     val openLauncher = rememberOpenProjectLauncher { uri ->
         scope.launch {
             val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
             if (doc != null) vm.loadDocument(doc)
+        }
+    }
+    
+    val saveLauncher = rememberSaveProjectLauncher { uri ->
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { ProjectStore.save(context, uri, vm.uiState.value.document) } }
         }
     }
 
@@ -423,6 +430,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onNameProject = { showNameDialog = true },
             onNewProject = { showNewProjectConfirm = true },
             onOpenProject = { openLauncher() },
+            onSaveProject = { saveLauncher() },
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
             onSettings = { showSettings = true },
@@ -626,7 +634,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
     if (showHelp) HelpKeyDialog(onDismiss = { showHelp = false })
     if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
-    if (showFaq) FaqDialog(onDismiss = { showFaq = false })
+    if (showFaq) FaqDialog(settings = settings, onDismiss = { showFaq = false })
     if (showOnboarding) {
         OnboardingDialog(
             onComplete = { selectedModelPath ->
@@ -678,6 +686,7 @@ private fun TopBar(
     onNameProject: () -> Unit,
     onNewProject: () -> Unit,
     onOpenProject: () -> Unit,
+    onSaveProject: () -> Unit,
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
     onSettings: () -> Unit,
@@ -702,10 +711,11 @@ private fun TopBar(
                 // showFooter=true: the AzNavRail footer adds About / Feedback / @HereLiesAz. "About"
                 // opens the in-app markdown reader, which auto-discovers the repo's root + docs/ .md
                 // files (a .azignore at the repo root excludes dev-only docs from that list).
-                azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp, showFooter = true)
+                azConfig(design = AzDropdownDesign.MENU, headerIcon = com.hereliesaz.guillotine.R.mipmap.ic_launcher, headerIconSize = 40.dp, showFooter = true)
                 azItem("New") { onNewProject() }
                 azItem("Open") { onOpenProject() }
-                azItem("Save") { onNameProject() }
+                azItem("Save Project") { onSaveProject() }
+                azItem("Rename") { onNameProject() }
                 azItem("Import") { onImport() }
                 azItem("Generate") { onGenerate() }
                 azItem("Render") { onExport() }
@@ -794,11 +804,13 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
         )
         Spacer(Modifier.weight(1f))
         val frameMs = Math.round(state.document.settings.frameDurationMs)
-        IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
-        IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
-        IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
-        IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
-        IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
+            IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
+            IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+            IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
+            IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        }
         Spacer(Modifier.weight(1f))
         val rates = listOf(0.5f, 1f, 1.5f, 2f)
         Text(

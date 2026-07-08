@@ -57,6 +57,8 @@ import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral900
 import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
+import com.hereliesaz.guillotine.ai.AiSettings
+import com.hereliesaz.guillotine.ai.gen.GenKind
 
 // ---- Icon key -----------------------------------------------------------------
 
@@ -163,9 +165,13 @@ fun TutorialDialog(onDismiss: () -> Unit) {
 
 /** FAQ from the bundled `FAQ.md` (one question per `## ` heading), as a tap-to-expand list. */
 @Composable
-fun FaqDialog(onDismiss: () -> Unit) {
+fun FaqDialog(settings: AiSettings, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val entries = remember { parseSections(readDoc(context, "FAQ.md")) }
+    val entries = remember(settings) { 
+        val base = parseSections(readDoc(context, "FAQ.md"))
+        val cmds = DocSection("What can I ask the AI to do?", getDynamicAiCommands(settings))
+        listOf(cmds) + base
+    }
     var open by remember { mutableStateOf(-1) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -260,3 +266,71 @@ private fun parseSections(md: String): List<DocSection> {
 private fun readDoc(context: Context, fileName: String): String =
     runCatching { context.assets.open("help/$fileName").bufferedReader().use { it.readText() } }
         .getOrDefault("")
+
+private fun getDynamicAiCommands(settings: AiSettings): String {
+    val b = StringBuilder()
+    b.appendLine("The AI assistant can edit your timeline directly. Talk to it naturally! Here are examples of what you can ask it to do right now, based on your configured AI models:\n")
+    
+    b.appendLine("### Core Editing (Always Available)")
+    b.appendLine("- \"Cut out the silence in this clip.\"")
+    b.appendLine("- \"Split this clip into separate scenes.\"")
+    b.appendLine("- \"Normalize the audio levels across the timeline.\"")
+    b.appendLine("- \"Auto-duck the music under the voiceover.\"")
+    b.appendLine("- \"Find clips containing a dog.\" (On-device object search)")
+    
+    if (settings.audioEventModelPath.isNotBlank()) {
+        b.appendLine("\n### Audio Highlights")
+        b.appendLine("- \"Find the best moments in this video.\"")
+        b.appendLine("- \"Where does the crowd cheer?\"")
+    }
+    
+    if (settings.asrModelPath.isNotBlank()) {
+        b.appendLine("\n### Speech & Transcription")
+        b.appendLine("- \"Transcribe this clip accurately.\"")
+        b.appendLine("- \"Remove filler words like 'um' and 'uh'.\"")
+    } else {
+        b.appendLine("\n### Speech & Transcription")
+        b.appendLine("- \"Add animated captions to this clip.\"")
+    }
+    
+    if (settings.ttsModelPath.isNotBlank()) {
+        b.appendLine("\n### Voiceover")
+        b.appendLine("- \"Add a voiceover saying 'Welcome to my vlog'.\"")
+    }
+    
+    if (settings.stemModelPath.isNotBlank()) {
+        b.appendLine("\n### Stem Separation")
+        b.appendLine("- \"Isolate the vocals in this clip.\"")
+        b.appendLine("- \"Give me the instrumental track.\"")
+    }
+    
+    if (settings.diarizeSegModelPath.isNotBlank() && settings.diarizeEmbedModelPath.isNotBlank()) {
+        b.appendLine("\n### Speaker Diarization")
+        b.appendLine("- \"Who speaks when in this audio?\"")
+        b.appendLine("- \"Split this clip by speaker.\"")
+    }
+    
+    if (settings.effectModelPaths["depth"]?.isNotBlank() == true) {
+        b.appendLine("\n### Image Effects")
+        b.appendLine("- \"Blur the background of this clip.\"")
+        b.appendLine("- \"Apply portrait mode.\"")
+    }
+    
+    if (settings.vlmModelPath.isNotBlank()) {
+        b.appendLine("\n### Vision Understanding")
+        b.appendLine("- \"Describe exactly what is happening in this scene.\"")
+    }
+    
+    val genFeatures = mutableListOf<String>()
+    if (settings.isKindOffered(GenKind.IMAGE)) genFeatures.add("- \"Generate an image of a cyberpunk city.\"")
+    if (settings.isKindOffered(GenKind.VIDEO)) genFeatures.add("- \"Generate a video of a dog running.\"")
+    if (settings.isKindOffered(GenKind.MUSIC)) genFeatures.add("- \"Generate an upbeat electronic background track.\"")
+    
+    if (genFeatures.isNotEmpty()) {
+        b.appendLine("\n### Generative AI")
+        genFeatures.forEach { b.appendLine(it) }
+    }
+    
+    b.appendLine("\n*(You can enable more capabilities by downloading models or adding API keys in **Settings → AI Analyzer**.)*")
+    return b.toString()
+}

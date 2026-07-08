@@ -198,11 +198,23 @@ private fun ExpandedLog(
                 Text("No activity yet.", color = Neutral500, fontSize = 12.sp)
             }
         } else {
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            
+            // If the user is viewing the newest item (index 0 in reverseLayout), keep them
+            // pinned there when a new item arrives. If they scrolled away to read history,
+            // don't yank their scroll position.
+            LaunchedEffect(entries.size) {
+                if (listState.firstVisibleItemIndex == 0) {
+                    listState.scrollToItem(0)
+                }
+            }
+
             // reverseLayout keeps the newest entry pinned to the bottom (visible) without any
             // manual scroll bookkeeping; older lines scroll up out of view. Weight lets the reply
             // row (below) share the sheet's height when it's shown.
             LazyColumn(
                 Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+                state = listState,
                 reverseLayout = true,
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {

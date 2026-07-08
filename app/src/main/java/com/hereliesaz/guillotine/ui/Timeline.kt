@@ -143,30 +143,35 @@ private fun TimelineLanes(
     // Zoom-around-playhead: any pps change (pinch, Ctrl+scroll, TopBar buttons, addMedia fit-all)
     // solves for a scroll that KEEPS THE PLAYHEAD AT THE SAME ON-SCREEN X. Zoom is precision — the
     // frame under the user's fingers must not slide out from under them.
-    //
-    // We compute the playhead's pre-zoom viewport-X and preserve it: after the new pps takes effect,
-    // scroll to (newPlayheadPx − anchorViewportX). If the playhead was already visible, its on-screen
-    // position doesn't change at all. If it was scrolled off-screen we CLAMP the anchor into
-    // [0, viewport] so the zoom always leaves the playhead at the nearest visible edge — the "stays
-    // in the viewport" guarantee — rather than shifting it further off-screen with each zoom step.
-    //
-    // withFrameNanos before scroll.scrollTo lets the layout pass with the new pps commit first —
-    // otherwise scroll.maxValue is stale from the previous width and the scroll clamps wrong on
-    // zoom-in. roundToInt (not toInt) so a target of e.g. −0.9 doesn't truncate to 0.
     var lastZoomedPps by remember { mutableFloatStateOf(pps) }
-    LaunchedEffect(pps) {
-        if (pps == lastZoomedPps) return@LaunchedEffect
-        val playheadMs = vm.uiState.value.currentTimeMs
+    var targetScroll by remember { mutableStateOf<Int?>(null) }
+
+    if (pps != lastZoomedPps) {
+        val playheadMs = state.currentTimeMs
         val oldPlayheadPx = playheadMs / 1000f * lastZoomedPps
         val vp = viewportWidthPx
         val rawViewportX = oldPlayheadPx - scroll.value
         val anchorViewportX =
             if (vp > 0) rawViewportX.coerceIn(0f, vp.toFloat()) else rawViewportX
-        lastZoomedPps = pps
-        androidx.compose.runtime.withFrameNanos {}
+        
         val newPlayheadPx = playheadMs / 1000f * pps
-        val target = (newPlayheadPx - anchorViewportX).roundToInt().coerceAtLeast(0)
-        scroll.scrollTo(target)
+        targetScroll = (newPlayheadPx - anchorViewportX).roundToInt().coerceAtLeast(0)
+        lastZoomedPps = pps
+    }
+
+    // Compose's scroll.scrollTo() can only run in a suspend function (LaunchedEffect), which means
+    // it executes after the layout pass. This creates a 1-frame lag where the timeline draws with
+    // the NEW width but the OLD scroll value, causing a visual jump from X=0.
+    // By computing the translation difference here, we perfectly compensate for that lag!
+    val translationX = targetScroll?.let { scroll.value.toFloat() - it } ?: 0f
+
+    LaunchedEffect(targetScroll) {
+        targetScroll?.let { target ->
+            // Wait for layout to finish so scroll.maxValue is updated to the new width
+            androidx.compose.runtime.withFrameNanos {}
+            scroll.scrollTo(target)
+            targetScroll = null
+        }
     }
 
     fun msToDp(ms: Long) = with(density) { (ms / 1000f * pps).toDp() }
@@ -276,6 +281,7 @@ private fun TimelineLanes(
             Modifier
                 .fillMaxSize()
                 .horizontalScroll(scroll)
+                .graphicsLayer { this.translationX = translationX }
                 .width(surfaceWidth)
                 // Tap anywhere on the timeline surface (ruler, gaps, below the tracks) to
                 // move the playhead there. Clips sit on top and handle their own taps.
@@ -349,37 +355,72 @@ private fun TimelineLanes(
                     .background(Red500),
             )
             // Marquee (range-select) overlay: only in MARQUEE mode. Dragging draws a rectangle over a
-            // time range and selects every clip it touches on release. It captures the drag (so the
-            // timeline doesn't scroll), and its local x == content x, so x/pps maps straight to ms.
+            // time range and specific tracks, selecting every clip it touches on release.
+            // It captures the drag (so the timeline doesn't scroll), and its local x == content x,
+            // so x/pps maps straight to ms. Y maps to track lanes.
             if (state.tool == EditorTool.MARQUEE) {
                 var startX by remember { mutableStateOf<Float?>(null) }
+                var startY by remember { mutableStateOf<Float?>(null) }
                 var curX by remember { mutableFloatStateOf(0f) }
+                var curY by remember { mutableFloatStateOf(0f) }
                 Box(
                     Modifier
                         .matchParentSize()
                         .pointerInput(pps) {
                             detectDragGestures(
-                                onDragStart = { off -> startX = off.x; curX = off.x },
-                                onDrag = { change, _ -> change.consume(); curX = change.position.x },
+                                onDragStart = { off -> 
+                                    startX = off.x; curX = off.x
+                                    startY = off.y; curY = off.y 
+                                },
+                                onDrag = { change, _ -> 
+                                    change.consume()
+                                    curX = change.position.x
+                                    curY = change.position.y
+                                },
                                 onDragEnd = {
-                                    startX?.let { s ->
-                                        vm.selectClipsInRange(
-                                            (s / pps * 1000f).toLong(),
+                                    val sx = startX
+                                    val sy = startY
+                                    if (sx != null && sy != null) {
+                                        val minY = kotlin.math.min(sy, curY)
+                                        val maxY = kotlin.math.max(sy, curY)
+                                        val tracks = mutableSetOf<String>()
+                                        var currentY = with(density) { RULER_HEIGHT.toPx() }
+                                        for (trackId in state.document.videoTracks) {
+                                            val h = with(density) { state.trackHeight(trackId).dp.toPx() }
+                                            if (currentY < maxY && currentY + h > minY) tracks.add(trackId)
+                                            currentY += h
+                                        }
+                                        for (trackId in state.document.audioTracks) {
+                                            val h = with(density) { state.trackHeight(trackId).dp.toPx() }
+                                            if (currentY < maxY && currentY + h > minY) tracks.add(trackId)
+                                            currentY += h
+                                        }
+                                        vm.selectClipsInRect(
+                                            (sx / pps * 1000f).toLong(),
                                             (curX / pps * 1000f).toLong(),
+                                            tracks
                                         )
                                     }
                                     startX = null
+                                    startY = null
                                 },
-                                onDragCancel = { startX = null },
+                                onDragCancel = { startX = null; startY = null },
                             )
                         },
                 ) {
-                    startX?.let { s ->
+                    val sx = startX
+                    val sy = startY
+                    if (sx != null && sy != null) {
                         Box(
                             Modifier
-                                .offset(x = with(density) { kotlin.math.min(s, curX).toDp() })
-                                .width(with(density) { kotlin.math.abs(curX - s).toDp() })
-                                .fillMaxHeight()
+                                .offset(
+                                    x = with(density) { kotlin.math.min(sx, curX).toDp() },
+                                    y = with(density) { kotlin.math.min(sy, curY).toDp() }
+                                )
+                                .size(
+                                    width = with(density) { kotlin.math.abs(curX - sx).toDp() },
+                                    height = with(density) { kotlin.math.abs(curY - sy).toDp() }
+                                )
                                 .background(Red500.copy(alpha = 0.18f))
                                 .border(1.dp, Red500),
                         )

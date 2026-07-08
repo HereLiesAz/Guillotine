@@ -483,7 +483,7 @@ fun NleScreen(
     }
     if (showHelp) HelpKeyDialog(onDismiss = { showHelp = false })
     if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
-    if (showFaq) FaqDialog(onDismiss = { showFaq = false })
+    if (showFaq) FaqDialog(settings = settings, onDismiss = { showFaq = false })
 }
 
 // -------------------------------------------------------------------------------------
@@ -615,11 +615,13 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
         )
         Spacer(Modifier.weight(1f))
         val frameMs = Math.round(state.document.settings.frameDurationMs)
-        IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
-        IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
-        IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
-        IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
-        IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
+            IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
+            IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+            IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
+            IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        }
         Spacer(Modifier.weight(1f))
         val rates = listOf(0.5f, 1f, 1.5f, 2f)
         Text(
