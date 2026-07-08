@@ -31,7 +31,7 @@ mlkitSelfieSegmentation = "16.0.0-beta6"
 vosk = "0.3.75"
 mediapipeTasksGenai = "0.10.35"
 mediapipeTasksVision = "0.20230731"
-aznavrail = "10.32"
+aznavrail = "10.33"
 playServicesAds = "25.4.0"
 userMessaging = "4.0.0"
 nanohttpd = "2.3.1"
@@ -78,7 +78,7 @@ mlkit-segmentation-selfie = { group = "com.google.mlkit", name = "segmentation-s
 vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
 mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipeTasksVision" }
-aznavrail = { group = "com.github.HereLiesAz.AzNavRail", name = "aznavrail-cmp-android", version.ref = "aznavrail" }
+aznavrail = { group = "com.github.HereLiesAz.AzNavRail", name = "aznavrail", version.ref = "aznavrail" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 user-messaging-platform = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "userMessaging" }
 androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycle" }
