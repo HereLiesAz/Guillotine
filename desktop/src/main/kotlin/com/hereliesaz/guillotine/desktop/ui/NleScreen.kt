@@ -202,13 +202,21 @@ fun NleScreen(
         }
     }
 
-    // The project is auto-saved internally; "Save" only names it. Load imports a .gilt copy.
+    // The project is auto-saved internally; "Save" exports it as a .gilt file. Load imports a .gilt copy.
     val openLauncher = rememberOpenProjectLauncher { file ->
         scope.launch {
             val doc = withContext(Dispatchers.IO) {
                 runCatching { DesktopProjectAutosave.loadFromFile(file) }.getOrNull()
             }
             if (doc != null) vm.loadDocument(doc)
+        }
+    }
+    
+    val saveLauncher = rememberSaveProjectLauncher { file ->
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { DesktopProjectAutosave.saveToFile(file, vm.uiState.value.document) }
+            }
         }
     }
 
@@ -313,9 +321,9 @@ fun NleScreen(
             onFitAll = vm::fitAllToViewport,
             onImport = { importTargetTrack = null; importLauncher() },
             onGenerate = { showGenerate = true },
-            onNameProject = { showNameDialog = true },
             onNewProject = { showNewProjectConfirm = true },
             onOpenProject = { openLauncher() },
+            onSaveProject = { saveLauncher() },
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
             onSettings = { showSettings = true },
@@ -463,7 +471,10 @@ fun NleScreen(
                         val file = com.hereliesaz.guillotine.desktop.media.DesktopExporter.export(
                             document = vm.uiState.value.document,
                             config = config,
-                            onProgress = { exportProgress = it },
+                            onProgress = { p, ms ->
+                                exportProgress = p
+                                vm.seekTo(ms)
+                            },
                         )
                         exportDone = "Saved to ${file.absolutePath}"
                         ActivityLog.info("Export complete: ${file.absolutePath}")
@@ -501,9 +512,9 @@ private fun TopBar(
     onFitAll: () -> Unit,
     onImport: () -> Unit,
     onGenerate: () -> Unit,
-    onNameProject: () -> Unit,
     onNewProject: () -> Unit,
     onOpenProject: () -> Unit,
+    onSaveProject: () -> Unit,
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
     onSettings: () -> Unit,
@@ -523,7 +534,7 @@ private fun TopBar(
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 DropdownMenuItem(text = { Text("New") }, onClick = { menuExpanded = false; onNewProject() })
                 DropdownMenuItem(text = { Text("Open") }, onClick = { menuExpanded = false; onOpenProject() })
-                DropdownMenuItem(text = { Text("Save") }, onClick = { menuExpanded = false; onNameProject() })
+                DropdownMenuItem(text = { Text("Save") }, onClick = { menuExpanded = false; onSaveProject() })
                 DropdownMenuItem(text = { Text("Import") }, onClick = { menuExpanded = false; onImport() })
                 DropdownMenuItem(text = { Text("Generate") }, onClick = { menuExpanded = false; onGenerate() })
                 DropdownMenuItem(text = { Text("Render") }, onClick = { menuExpanded = false; onExport() })

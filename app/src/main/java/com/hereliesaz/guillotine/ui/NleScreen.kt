@@ -614,8 +614,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         context,
                         vm.uiState.value.document,
                         name,
-                        onProgress = { p ->
+                        onProgress = { p, ms ->
                             scope.launch { exportProgress = p } // hop to the main thread for Compose state
+                            vm.seekTo(ms)
                             sink.report(p, "Exporting…")
                         },
                         onPhase = { phase ->
@@ -714,8 +715,7 @@ private fun TopBar(
                 azConfig(design = AzDropdownDesign.MENU, headerIcon = com.hereliesaz.guillotine.R.mipmap.ic_launcher, headerIconSize = 40.dp, showFooter = true)
                 azItem("New") { onNewProject() }
                 azItem("Open") { onOpenProject() }
-                azItem("Save Project") { onSaveProject() }
-                azItem("Rename") { onNameProject() }
+                azItem("Save") { onSaveProject() }
                 azItem("Import") { onImport() }
                 azItem("Generate") { onGenerate() }
                 azItem("Render") { onExport() }

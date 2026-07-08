@@ -34,7 +34,8 @@ enum class KeyframeProperty(val uiRange: ClosedFloatingPointRange<Float>, val is
     SATURATION(0f..2f),
     HUE(0f..360f),
     SEPIA(0f..100f),
-    PAN(-1f..1f, isAudio = true);
+    PAN(-1f..1f, isAudio = true),
+    SPEED(0.1f..10f);
 
     /** The clip's current value for this property (default when unkeyframed; what the diamond records). */
     fun staticValue(clip: TimelineClip): Float = when (this) {
@@ -50,6 +51,7 @@ enum class KeyframeProperty(val uiRange: ClosedFloatingPointRange<Float>, val is
         SATURATION -> clip.filters.saturation
         HUE -> clip.filters.hueRotate
         SEPIA -> clip.filters.sepia
+        SPEED -> clip.filters.speed
     }
 
     companion object {
@@ -127,6 +129,7 @@ data class ClipFilters(
     val hueRotate: Float = 0f,    // degrees
     val invert: Float = 0f,       // 0..100 (%)
     val grayscale: Float = 0f,    // 0..100 (%)
+    val speed: Float = 1f,        // 0.1..10.0x
     /** On-device subject segmentation: keep the foreground, drop the background so a lower layer shows through. */
     val removeBackground: Boolean = false,
 )

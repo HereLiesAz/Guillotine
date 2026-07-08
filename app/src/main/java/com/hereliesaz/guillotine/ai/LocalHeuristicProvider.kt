@@ -69,6 +69,7 @@ object LocalHeuristicProvider : ClipAnalyzer {
                     "Detecting silences\u2026",
                     (i.toFloat() / audible.size).coerceIn(0f, 1f),
                     silenceCount,
+                    currentMs = e
                 ))
             }
         }
@@ -137,7 +138,7 @@ object LocalHeuristicProvider : ClipAnalyzer {
                                 rmsList += sqrt(sumSquares / sampleCount).toFloat()
                                 sumSquares = 0.0; sampleCount = 0
                                 if (rmsList.size % 100 == 0) {
-                                    onProgress(AnalysisProgress("Decoding audio\u2026 ${rmsList.size} windows"))
+                                    onProgress(AnalysisProgress("Decoding audio\u2026 ${rmsList.size} windows", currentMs = rmsList.size * WINDOW_MS))
                                 }
                             }
                         }

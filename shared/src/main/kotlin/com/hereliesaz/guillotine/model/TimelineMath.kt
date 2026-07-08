@@ -74,8 +74,24 @@ object TimelineMath {
     }
 
     /** Convert a timeline time to the corresponding source-media time for [clip]. */
-    fun sourceTimeMs(clip: TimelineClip, timelineMs: Long): Long =
-        clip.trimStartMs + (timelineMs - clip.startTimeMs)
+    fun sourceTimeMs(clip: TimelineClip, timelineMs: Long): Long {
+        val relMs = (timelineMs - clip.startTimeMs).coerceAtLeast(0L)
+        val speedKfs = clip.keyframes.filter { it.property == KeyframeProperty.SPEED }.sortedBy { it.timeMs }
+        if (speedKfs.isEmpty() && clip.filters.speed == 1f) {
+            return clip.trimStartMs + relMs
+        }
+        
+        var sourceAdvance = 0.0
+        val step = 10L
+        var t = 0L
+        while (t < relMs) {
+            val dt = if (t + step > relMs) relMs - t else step
+            val speed = if (speedKfs.isEmpty()) clip.filters.speed else interpolateSorted(speedKfs, t + dt / 2, clip.filters.speed)
+            sourceAdvance += speed * dt
+            t += dt
+        }
+        return clip.trimStartMs + sourceAdvance.toLong()
+    }
 
     /**
      * The clip of [type] that should be shown/heard at [timelineMs]. When clips
