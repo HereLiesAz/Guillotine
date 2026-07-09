@@ -58,6 +58,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Create google-services.json
+        env:
+          GOOGLE_SERVICES: ${{ secrets.GOOGLE_SERVICES }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES" ]; then
+            echo "$GOOGLE_SERVICES" > app/google-services.json
+          fi
+
       - name: Generate keystore from secrets
         env:
           KEYSTORE_PRIVATE: ${{ secrets.KEYSTORE_PRIVATE }}
