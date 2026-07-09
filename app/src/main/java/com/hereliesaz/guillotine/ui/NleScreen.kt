@@ -712,10 +712,11 @@ private fun TopBar(
                 // showFooter=true: the AzNavRail footer adds About / Feedback / @HereLiesAz. "About"
                 // opens the in-app markdown reader, which auto-discovers the repo's root + docs/ .md
                 // files (a .azignore at the repo root excludes dev-only docs from that list).
-                azConfig(design = AzDropdownDesign.MENU, showFooter = true)
+                azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp, showFooter = true)
                 azItem("New") { onNewProject() }
                 azItem("Open") { onOpenProject() }
                 azItem("Save") { onSaveProject() }
+                azItem("Rename") { onNameProject() }
                 azItem("Import") { onImport() }
                 azItem("Generate") { onGenerate() }
                 azItem("Render") { onExport() }
