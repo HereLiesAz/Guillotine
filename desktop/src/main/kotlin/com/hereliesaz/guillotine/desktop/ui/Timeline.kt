@@ -169,6 +169,20 @@ private fun TimelineLanes(
         }
     }
 
+    LaunchedEffect(state.isPlaying) {
+        if (state.isPlaying) {
+            androidx.compose.runtime.snapshotFlow { vm.uiState.value.currentTimeMs }.collect { timeMs ->
+                if (viewportWidthPx > 0) {
+                    val playheadPx = timeMs / 1000f * pps
+                    val centerTarget = (playheadPx - (viewportWidthPx / 2f)).roundToInt().coerceAtLeast(0)
+                    if (kotlin.math.abs(centerTarget - scroll.value) > 1) {
+                        scroll.scrollTo(centerTarget)
+                    }
+                }
+            }
+        }
+    }
+
     fun msToDp(ms: Long) = with(density) { (ms / 1000f * pps).toDp() }
     val totalMs = state.document.totalDurationMs
     val contentWidth = msToDp(totalMs) + 400.dp
