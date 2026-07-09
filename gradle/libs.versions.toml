@@ -34,6 +34,7 @@ mediapipeTasksVision = "0.20230731"
 aznavrail = "10.33"
 playServicesAds = "25.4.0"
 userMessaging = "4.0.0"
+billing = "7.1.1"
 nanohttpd = "2.3.1"
 okhttp = "5.4.0"
 tensorflowLite = "2.17.0"
@@ -87,6 +88,7 @@ mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision"
 aznavrail = { group = "com.github.HereLiesAz.AzNavRail", name = "aznavrail-cmp-android", version.ref = "aznavrail" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 user-messaging-platform = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "userMessaging" }
+billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
 androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycle" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }

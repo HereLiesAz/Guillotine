@@ -182,6 +182,7 @@ dependencies {
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)
     implementation(libs.play.services.ads)
+    implementation(libs.billing.ktx)
     implementation(libs.user.messaging.platform)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)

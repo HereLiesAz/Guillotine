@@ -222,6 +222,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showHelp by remember { mutableStateOf(false) }
     var showTutorial by remember { mutableStateOf(false) }
     var showFaq by remember { mutableStateOf(false) }
+    var showAdFree by remember { mutableStateOf(false) }
+    
+    val billingManager = remember { com.hereliesaz.guillotine.billing.BillingManager(context, scope).apply { initialize() } }
+    
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf<String?>(null) }
@@ -438,6 +442,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
             onFaq = { showFaq = true },
+            onAdFree = { showAdFree = true },
         )
 
         // Analysis/export status & errors now stream into the activity-log bottom sheet below,
@@ -636,6 +641,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     if (showHelp) HelpKeyDialog(onDismiss = { showHelp = false })
     if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
     if (showFaq) FaqDialog(settings = settings, onDismiss = { showFaq = false })
+    if (showAdFree) AdFreeDialog(billingManager = billingManager, onDismiss = { showAdFree = false })
     if (showOnboarding) {
         OnboardingDialog(
             onComplete = { selectedModelPath ->
@@ -695,6 +701,7 @@ private fun TopBar(
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
     onFaq: () -> Unit,
+    onAdFree: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(end = 8.dp),
@@ -727,8 +734,11 @@ private fun TopBar(
                 azItem("Tutorial") { onTutorial() }
                 azItem("FAQ") { onFaq() }
                 azItem("Icon Key") { onHelp() }
+                if (!com.hereliesaz.guillotine.ads.AdsState.isAdFreePermanently.value) {
+                    azItem("Ad-Free") { onAdFree() }
+                }
                 // AzNavRail draws its own primary-tinted divider above the footer (About / Feedback /
-                // @HereLiesAz) automatically when showFooter = true \u2014 an explicit azDivider() here
+                // @HereLiesAz) automatically when showFooter = true — an explicit azDivider() here
                 // would double up as two white/red lines. Let the library handle it.
             }
         }
@@ -1196,4 +1206,36 @@ private fun fmtSecs(ms: Long): String {
     val abs = ms.coerceAtLeast(0L)
     return if (abs < 60_000L) String.format(java.util.Locale.US, "%.1fs", abs / 1000.0)
     else String.format(java.util.Locale.US, "%d:%02d", abs / 60_000L, (abs % 60_000L) / 1000L)
+}
+
+
+@Composable
+fun AdFreeDialog(billingManager: com.hereliesaz.guillotine.billing.BillingManager, onDismiss: () -> Unit) {
+    val productDetails by billingManager.adFreeProductDetails.collectAsState(initial = null)
+    val context = LocalContext.current as? android.app.Activity
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { androidx.compose.material3.Text("Ad-Free Experience") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                androidx.compose.material3.Text("Enjoy the app without ads! You can unlock the ad-free experience permanently, or temporarily disable ads for this session.")
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                context?.let { billingManager.purchaseAdFree(it) }
+                onDismiss()
+            }) {
+                androidx.compose.material3.Text(productDetails?.oneTimePurchaseOfferDetails?.formattedPrice ?: "Buy Ad-Free")
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                com.hereliesaz.guillotine.ads.AdsState.isAdFree.value = true
+                onDismiss()
+            }) {
+                androidx.compose.material3.Text("Free Session")
+            }
+        }
+    )
 }

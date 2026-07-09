@@ -29,6 +29,12 @@ object AdsState {
 
     /** Flips true after consent is gathered and MobileAds is initialized; gates ad requests. */
     val ready = mutableStateOf(false)
+    
+    /** True if the user has purchased Ad-Free or selected the free session option. */
+    val isAdFree = mutableStateOf(false)
+    
+    /** True ONLY if the user has permanently purchased Ad-Free (so we can hide the menu option). */
+    val isAdFreePermanently = mutableStateOf(false)
 }
 
 /**
@@ -83,7 +89,7 @@ class InterstitialAdManager(private val adUnitId: String) {
     private var loading = false
 
     fun load(context: Context) {
-        if (loading || ad != null || !AdsState.ready.value) return
+        if (loading || ad != null || !AdsState.ready.value || AdsState.isAdFree.value) return
         loading = true
         InterstitialAd.load(
             context,
@@ -98,6 +104,8 @@ class InterstitialAdManager(private val adUnitId: String) {
 
     /** Show the interstitial if one is ready; otherwise just preload for next time. */
     fun show(activity: Activity) {
+        if (AdsState.isAdFree.value) return
+        
         // Frequency cap: no more than one full-screen ad every 5 minutes (shared with the app-open
         // ad). When gated, keep one preloaded for the next eligible show.
         if (!FullScreenAdGate.canShow()) { if (ad == null) load(activity); return }
@@ -115,7 +123,7 @@ class InterstitialAdManager(private val adUnitId: String) {
 /** Bottom banner ad (adaptive width). Renders nothing until ads are ready (post-consent). */
 @Composable
 fun BannerAd(modifier: Modifier = Modifier, adUnitId: String = AdsState.BANNER_UNIT) {
-    if (!AdsState.ready.value) return
+    if (!AdsState.ready.value || AdsState.isAdFree.value) return
     val widthDp = LocalConfiguration.current.screenWidthDp
     AndroidView(
         modifier = modifier.fillMaxWidth(),
