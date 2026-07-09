@@ -150,13 +150,10 @@ private fun TimelineLanes(
     if (pps != lastZoomedPps) {
         val playheadMs = state.currentTimeMs
         val oldPlayheadPx = playheadMs / 1000f * lastZoomedPps
-        val vp = viewportWidthPx
-        val rawViewportX = oldPlayheadPx - scroll.value
-        val anchorViewportX =
-            if (vp > 0) rawViewportX.coerceIn(0f, vp.toFloat()) else rawViewportX
+        val currentScroll = targetScroll?.toFloat() ?: scroll.value.toFloat()
         
         val newPlayheadPx = playheadMs / 1000f * pps
-        targetScroll = (newPlayheadPx - anchorViewportX).roundToInt().coerceAtLeast(0)
+        targetScroll = (currentScroll + (newPlayheadPx - oldPlayheadPx)).roundToInt().coerceAtLeast(0)
         lastZoomedPps = pps
     }
 
@@ -164,7 +161,7 @@ private fun TimelineLanes(
     // it executes after the layout pass. This creates a 1-frame lag where the timeline draws with
     // the NEW width but the OLD scroll value, causing a visual jump from X=0.
     // By computing the translation difference here, we perfectly compensate for that lag!
-    val translationX = targetScroll?.let { scroll.value.toFloat() - it } ?: 0f
+    val tx = targetScroll?.let { scroll.value.toFloat() - it } ?: 0f
 
     LaunchedEffect(targetScroll) {
         targetScroll?.let { target ->
@@ -282,7 +279,7 @@ private fun TimelineLanes(
             Modifier
                 .fillMaxSize()
                 .horizontalScroll(scroll)
-                .graphicsLayer { this.translationX = translationX }
+                .graphicsLayer { this.translationX = tx }
                 .width(surfaceWidth)
                 // Tap anywhere on the timeline surface (ruler, gaps, below the tracks) to
                 // move the playhead there. Clips sit on top and handle their own taps.

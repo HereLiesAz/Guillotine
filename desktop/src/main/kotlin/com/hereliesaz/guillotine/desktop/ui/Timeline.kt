@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
@@ -143,22 +144,29 @@ private fun TimelineLanes(
     // in the viewport" guarantee — rather than shifting it further off-screen with each zoom step.
     //
     // withFrameNanos before scroll.scrollTo lets the layout pass with the new pps commit first —
-    // otherwise scroll.maxValue is stale from the previous width and the scroll clamps wrong on
-    // zoom-in. roundToInt (not toInt) so a target of e.g. −0.9 doesn't truncate to 0.
     var lastZoomedPps by remember { mutableFloatStateOf(pps) }
-    LaunchedEffect(pps) {
-        if (pps == lastZoomedPps) return@LaunchedEffect
+    var targetScroll by remember { mutableStateOf<Int?>(null) }
+
+    if (pps != lastZoomedPps) {
         val playheadMs = vm.uiState.value.currentTimeMs
         val oldPlayheadPx = playheadMs / 1000f * lastZoomedPps
-        val vp = viewportWidthPx
-        val rawViewportX = oldPlayheadPx - scroll.value
-        val anchorViewportX =
-            if (vp > 0) rawViewportX.coerceIn(0f, vp.toFloat()) else rawViewportX
-        lastZoomedPps = pps
-        androidx.compose.runtime.withFrameNanos {}
+        val currentScroll = targetScroll?.toFloat() ?: scroll.value.toFloat()
+        
         val newPlayheadPx = playheadMs / 1000f * pps
-        val target = (newPlayheadPx - anchorViewportX).roundToInt().coerceAtLeast(0)
-        scroll.scrollTo(target)
+        targetScroll = (currentScroll + (newPlayheadPx - oldPlayheadPx)).roundToInt().coerceAtLeast(0)
+        lastZoomedPps = pps
+    }
+
+    // By computing the translation difference here, we perfectly compensate for that lag!
+    val tx = targetScroll?.let { scroll.value.toFloat() - it } ?: 0f
+
+    LaunchedEffect(targetScroll) {
+        targetScroll?.let { target ->
+            // Wait for layout to finish so scroll.maxValue is updated to the new width
+            androidx.compose.runtime.withFrameNanos {}
+            scroll.scrollTo(target)
+            targetScroll = null
+        }
     }
 
     fun msToDp(ms: Long) = with(density) { (ms / 1000f * pps).toDp() }
@@ -268,6 +276,7 @@ private fun TimelineLanes(
             Modifier
                 .fillMaxSize()
                 .horizontalScroll(scroll)
+                .graphicsLayer { this.translationX = tx }
                 .width(surfaceWidth)
                 // Tap anywhere on the timeline surface (ruler, gaps, below the tracks) to
                 // move the playhead there. Clips sit on top and handle their own taps.
