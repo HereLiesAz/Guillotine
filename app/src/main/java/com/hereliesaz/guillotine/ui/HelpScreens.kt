@@ -260,7 +260,7 @@ private fun parseSections(md: String): List<DocSection> {
 
 /**
  * Read a help doc from the app's assets. These are NOT committed under src/main/assets — the build
- * copies the repo-root TUTORIAL.md / FAQ.md into a generated `help/` asset dir (see app/build.gradle.kts
+ * copies the docs/TUTORIAL.md / docs/FAQ.md into a generated `help/` asset dir (see app/build.gradle.kts
  * copyHelpDocs), so the repo docs are the single source of truth and ship bundled for offline use.
  */
 private fun readDoc(context: Context, fileName: String): String =
