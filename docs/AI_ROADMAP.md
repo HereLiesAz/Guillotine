@@ -199,7 +199,14 @@ Each item is feasible on the current stack or a model listed above.
     `analyze_clip_with_concept(keep_only=true)`; negatives ("that's a different person")
     sharpen it. Auto-blur and non-face-follow reframe remain future work.)**
 18. Text-to-video B-roll to fill gaps; image-gen titles/thumbnails/lower-thirds;
-    generate a thumbnail from the best frame.
+    generate a thumbnail from the best frame. **(free T2V shipped — the keyless
+    "Guillotine (free)" video provider calls our own Hugging Face Space (`hf-space/`,
+    LTX-Video on ZeroGPU; deploy via the *Deploy T2V Space* Action, `HF_TOKEN` secret).
+    Only the text prompt leaves the device. BYO-key providers (Runway/Luma/Veo/Kling/
+    Pika/Sora) remain for longer, higher-quality clips.)** On-device T2V (e.g. the
+    iOS-only [On-device-Sora](https://github.com/eai-lab/On-device-Sora), CoreML) is a
+    *watch* item — no Android-friendly LiteRT/ONNX T2V is fast enough yet; revisit when
+    one lands.
 19. Semantic footage search ("find all clips with a dog/sunset/red car") via the
     existing on-device image embeddings. **(shipped — `search_clips` matches on-device
     image labels across each clip's sampled frames)**

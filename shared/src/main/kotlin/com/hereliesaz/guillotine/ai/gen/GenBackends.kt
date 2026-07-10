@@ -33,6 +33,7 @@ object GenBackends {
         GenProviderType.GEMINI_IMAGEN -> geminiImagen(req, sink)
         GenProviderType.IDEOGRAM -> ideogram(req)
         GenProviderType.RECRAFT -> recraft(req)
+        GenProviderType.GUILLOTINE_FREE -> guillotineFree(req)
         GenProviderType.RUNWAY -> runway(req)
         GenProviderType.LUMA -> luma(req)
         GenProviderType.GEMINI_VEO -> geminiVeo(req)
@@ -221,6 +222,43 @@ object GenBackends {
     }
 
     // ============================================================ VIDEO
+
+    /** Guillotine's own free Hugging Face Space (ZeroGPU). Owner/space lowercased → the `.hf.space` host. */
+    private const val DEFAULT_FREE_T2V_SPACE = "https://hereliesaz-guillotine-t2v.hf.space"
+
+    /**
+     * Free, keyless text-to-video via the Guillotine HF Space's Gradio API. Two-step: POST the prompt
+     * to `/gradio_api/call/generate` for an event id, then read the SSE result stream for the generated
+     * file url (which the sink downloads). Only the text prompt leaves the device — never the user's
+     * media. Shared free GPU, so it can queue; the base host is overridable via `extra["base_url"]`.
+     */
+    private fun guillotineFree(req: GenRequest) = object : GenJob {
+        val base = (req.extra["base_url"]?.takeIf { it.isNotBlank() } ?: DEFAULT_FREE_T2V_SPACE).trimEnd('/')
+        override suspend fun submit(): String {
+            val body = JSONObject().put("data", JSONArray().apply {
+                put(req.prompt)                              // prompt
+                put("")                                      // negative prompt
+                put(req.durationSec.coerceIn(1, 6))          // seconds (kept short for the free tier)
+                put(0)                                       // seed (0 = random on the Space)
+            })
+            val resp = GenHttp.requestJson("POST", "$base/gradio_api/call/generate", emptyMap(), body)
+            return JSONObject(resp).optString("event_id").ifBlank {
+                throw GenException("The free video generator didn't accept the request — it may be waking up. Try again in a minute.")
+            }
+        }
+        override suspend fun poll(handle: String): JobStatus {
+            // The result endpoint streams Server-Sent Events; the final "data:" line carries the output.
+            val sse = GenHttp.requestJson("GET", "$base/gradio_api/call/generate/$handle", emptyMap())
+            val dataLine = sse.lineSequence().lastOrNull { it.startsWith("data:") } ?: return JobStatus.Running()
+            val json = dataLine.removePrefix("data:").trim()
+            if (json.isBlank() || json == "null") {
+                return JobStatus.Failed("The free video generator returned no result — it may have hit its free-GPU quota. Try later or add a key for a paid provider.")
+            }
+            val url = runCatching { firstUrlIn(JSONArray(json)) }.getOrNull()
+            return if (url != null) JobStatus.Done(url)
+            else JobStatus.Failed("The free video generator produced no video (busy or over quota). Try later or add a key for a paid provider.")
+        }
+    }
 
     private fun runway(req: GenRequest) = object : GenJob {
         val hdr = GenHttp.bearer(req.apiKey) + ("X-Runway-Version" to "2024-11-06")

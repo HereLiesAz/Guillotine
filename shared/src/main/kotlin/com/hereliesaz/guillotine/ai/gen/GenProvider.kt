@@ -23,7 +23,7 @@ enum class GenProviderType {
     // ---- image ----
     POLLINATIONS, LEONARDO, OPENAI_IMAGE, STABILITY_IMAGE, BFL_FLUX, GEMINI_IMAGEN, IDEOGRAM, RECRAFT,
     // ---- video ----
-    RUNWAY, LUMA, GEMINI_VEO, MINIMAX, OPENAI_SORA, KLING, PIKA, STABILITY_VIDEO,
+    GUILLOTINE_FREE, RUNWAY, LUMA, GEMINI_VEO, MINIMAX, OPENAI_SORA, KLING, PIKA, STABILITY_VIDEO,
     // ---- music / audio ----
     ELEVENLABS, STABILITY_AUDIO, GEMINI_LYRIA, MUSICGEN_REPLICATE, MUBERT, BEATOVEN, LOUDLY, CASSETTE,
     SUNO_WRAPPER, UDIO_WRAPPER,
@@ -134,6 +134,16 @@ val GenProviderType.meta: GenProviderMeta
             models = img(GenModel("recraftv3", "Recraft V3"), GenModel("recraftv2", "Recraft V2")),
         )
         // ---------------------------------------------------------------- video
+        GenProviderType.GUILLOTINE_FREE -> GenProviderMeta(
+            this, setOf(GenKind.VIDEO), "Guillotine (free)",
+            "No key — runs an open text-to-video model on Guillotine's free Hugging Face Space. " +
+                "Short, low-res clips; shared free GPU means it can queue at busy times. Only your text " +
+                "prompt is sent — never your media.",
+            keyUrl = null, needsKey = false,
+            models = img(GenModel("ltx-video", "LTX-Video (fast)")),
+            disclaimer = "Community free tier on shared GPU (Hugging Face ZeroGPU) — expect short clips " +
+                "and occasional queueing. For longer/higher-quality video, add a key for a paid provider.",
+        )
         GenProviderType.RUNWAY -> GenProviderMeta(
             this, setOf(GenKind.VIDEO), "Runway",
             "Gen-4 / Gen-4 Turbo text- and image-to-video.",
