@@ -68,20 +68,32 @@ object FfmpegFilter {
             "No ffmpeg set. Point Settings → AI Analyzer → FFmpeg filters at an ffmpeg executable."
         }
         require(File(ffmpegPath).let { it.isFile || ffmpegPath == "ffmpeg" }) { "ffmpeg not found at: $ffmpegPath" }
-        // The transition must fit inside clip A, which the offset (A − duration) requires to be non-negative.
-        val dur = durationSec.coerceIn(0.05f, maxOf(0.05f, from.durSec - 0.05f))
+        // The transition must fit inside BOTH clips (offset = A − dur stays valid; B isn't shorter than dur).
+        val maxDur = maxOf(0.1f, minOf(from.durSec, to.durSec) - 0.05f)
+        val dur = durationSec.coerceIn(0.05f, maxDur)
         val offset = (from.durSec - dur).coerceAtLeast(0f)
 
         outDir.mkdirs()
-        val a = localInput(context, from.uri, outDir)
-        val b = localInput(context, to.uri, outDir)
-        val d = "%.3f".format(dur)
-        val off = "%.3f".format(offset)
-        // Video xfade; audio crossfade of duration d. `?` maps [a] only if it exists (silent clips OK).
-        val filter =
-            "[0:v][1:v]xfade=transition=$transition:duration=$d:offset=$off[v];" +
-                "[0:a][1:a]acrossfade=d=$d[a]"
+        var a: File? = null
+        var b: File? = null
         try {
+            a = localInput(context, from.uri, outDir)
+            b = localInput(context, to.uri, outDir)
+            // Referencing [0:a]/[1:a] for a clip with no audio makes ffmpeg fail at filtergraph parse
+            // (not just mapping), so probe each and build the audio branch to match.
+            val hasA = probe(a).second
+            val hasB = probe(b).second
+            val d = "%.3f".format(dur)
+            val off = "%.3f".format(offset)
+            val filter = buildString {
+                append("[0:v][1:v]xfade=transition=$transition:duration=$d:offset=$off[v]")
+                when {
+                    hasA && hasB -> append(";[0:a][1:a]acrossfade=d=$d[a]")
+                    hasA -> append(";[0:a]anull[a]")
+                    // Only B has audio → delay it to the transition point so it stays in sync.
+                    hasB -> append(";[1:a]adelay=delays=${(offset * 1000).toInt()}:all=1[a]")
+                }
+            }
             return execute(
                 ffmpegPath,
                 buildList {
@@ -89,13 +101,15 @@ object FfmpegFilter {
                     add("-i"); add(a.absolutePath)
                     add("-ss"); add("%.3f".format(to.startSec)); add("-t"); add("%.3f".format(to.durSec))
                     add("-i"); add(b.absolutePath)
-                    add("-filter_complex"); add(filter); add("-map"); add("[v]"); add("-map"); add("[a]?")
+                    add("-filter_complex"); add(filter)
+                    add("-map"); add("[v]")
+                    if (hasA || hasB) { add("-map"); add("[a]") }
                 },
                 outDir,
             )
         } finally {
-            cleanupTemp(a, outDir)
-            cleanupTemp(b, outDir)
+            a?.let { cleanupTemp(it, outDir) }
+            b?.let { cleanupTemp(it, outDir) }
         }
     }
 
