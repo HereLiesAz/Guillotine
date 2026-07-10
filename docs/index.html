@@ -11,7 +11,7 @@
 <meta property="og:title" content="Guillotine — AI-native video editor" />
 <meta property="og:description" content="Tell it what to cut, and it cuts. On-device, multi-track video editing for Android, macOS, Windows, and Linux." />
 <meta property="og:type" content="website" />
-<meta property="og:image" content="guillotine_header.webp" />
+<meta property="og:image" content="guillotine_banner.png" />
 
 <link rel="icon" type="image/webp" href="guillotine_icon.webp" />
 <link rel="apple-touch-icon" href="guillotine_icon.webp" />
@@ -120,7 +120,7 @@
   .meta-line b { color: var(--n300); font-weight: 500; }
 
   .hero-art { position: relative; display: flex; justify-content: center; }
-  .hero-art img { width: min(420px, 100%); border-radius: 28px; box-shadow: 0 30px 80px -20px color-mix(in srgb, var(--red) 45%, transparent); }
+  .hero-art img { width: min(520px, 100%); border-radius: 18px; box-shadow: 0 30px 80px -20px color-mix(in srgb, var(--red) 45%, transparent); }
 
   @media (max-width: 860px) {
     .hero .wrap { grid-template-columns: 1fr; gap: 40px; }
@@ -207,7 +207,7 @@
   footer { border-top: 1px solid var(--n900); padding: 40px 0; }
   .foot { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .foot .brand { font-size: 16px; }
-  .foot .links { margin-left: auto; display: flex; gap: 24px; }
+  .foot .links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px 24px; }
   .foot .links a { color: var(--n500); font-size: 14px; }
   .foot .links a:hover { color: var(--white); }
   .foot .note { width: 100%; color: var(--n600); font-size: 12.5px; margin-top: 8px; font-family: var(--mono); }
@@ -266,6 +266,7 @@
       <a href="#ai">AI</a>
       <a href="#how">How it works</a>
       <a href="#faq">FAQ</a>
+      <a href="https://github.com/HereLiesAz/Guillotine/blob/main/docs/MANUAL.md" target="_blank" rel="noopener">Docs</a>
       <a class="ghost" href="https://github.com/HereLiesAz/Guillotine" target="_blank" rel="noopener">GitHub</a>
       <a class="btn btn-red nav-cta" href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener">Download</a>
     </div>
@@ -294,7 +295,7 @@
         <p class="meta-line"><b>Free</b> · <b>BYO AI key or no-key fallback</b> · <b>Android 8.0+</b> · <b>macOS · Windows · Linux</b></p>
       </div>
       <div class="hero-art">
-        <img src="guillotine_header.webp" alt="Guillotine app icon" />
+        <img src="guillotine_banner.png" alt="Guillotine — AI-native video editor" />
       </div>
     </div>
   </section>
@@ -426,6 +427,26 @@
           <h3>Runs in the background</h3>
           <p>Analysis, generative removal and export keep running when you leave the app, with a live progress notification. Pause and resume analysis or generative jobs — or cancel any of them — right from the notification.</p>
         </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="5"/><circle cx="15" cy="15" r="5"/></svg></div>
+          <h3>LUTs, shaders &amp; pro filters</h3>
+          <p>Drop a <code style="font-family:var(--mono);color:var(--red-bright);font-size:13px">.cube</code> LUT or a GLSL/ISF shader onto a clip — a shader's inputs become adjustable sliders right in the popup — and reach the whole FFmpeg/Frei0r filter ecosystem. Graded and rendered on-device.</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l4 4-4 4M20 8l-4 4 4 4"/><path d="M12 4v16"/></svg></div>
+          <h3>Transitions &amp; beat-sync</h3>
+          <p>Overlap two clips to crossfade, or bake in wipes, slides and dissolves via FFmpeg <code style="font-family:var(--mono);color:var(--red-bright);font-size:13px">xfade</code>. Detect a track's beat grid on-device and cut or animate your footage in time with the music.</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4"/><path d="M14 14l2-2 5 5"/><circle cx="8.5" cy="8.5" r="1.5"/></svg></div>
+          <h3>Generate media — free, no key</h3>
+          <p>Text-to-image via Pollinations and text-to-video on Guillotine's free Hugging Face Space — no key, no account. Bring your own key for many more image, video and music providers. Only your prompt is sent, never your media.</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="5" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M7.2 10.8l9.6-4.6M7.2 13.2l9.6 4.6"/></svg></div>
+          <h3>Open to any AI (MCP)</h3>
+          <p>A built-in MCP server (<code style="font-family:var(--mono);color:var(--red-bright);font-size:13px">localhost:6274</code>) lets any external AI, agent or plugin drive the editor through the very same tools — the base of an open plugin, LUT and shader ecosystem.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -449,6 +470,11 @@
           <span class="tag">Free · No key</span>
           <h4>On-device vision</h4>
           <p>ML Kit face &amp; object detection, fully offline — keep/remove by what's on screen.</p>
+        </div>
+        <div class="prov free reveal">
+          <span class="tag">Free · No key</span>
+          <h4>Free generation</h4>
+          <p>Pollinations makes images and Guillotine's free Space makes video — no key, no account. Only your prompt is sent, never your media.</p>
         </div>
         <div class="prov reveal">
           <span class="tag byo">BYO key</span>
@@ -479,6 +505,34 @@
           <span class="tag byo">BYO key</span>
           <h4>xAI · Mistral</h4>
           <p>Grok and Pixtral vision, OpenAI-compatible. Every model id is editable.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRIVACY / ON-DEVICE -->
+  <section class="section" id="privacy">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="kicker">Privacy by architecture</div>
+        <h2>Your footage never leaves your device.</h2>
+        <p>No account to make, nothing to upload, no one strip-mining your media. Every frame is analyzed where it already lives — on your device — and stays there.</p>
+      </div>
+      <div class="grid">
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></div>
+          <h3>All on your device</h3>
+          <p>Import, edit, analyze and export run locally — face, object and scene detection, silence and beat detection, captions and background removal. No account, no upload, no server of ours in the loop.</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h13l-3-3M17 17H4l3 3"/></svg></div>
+          <h3>Cloud AI only sees text</h3>
+          <p>Choose a cloud model and it acts purely as a controller: it receives your instructions and the timeline, and replies with edits. Your frames, your audio, your footage are never sent.</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <h3>Yours, and open</h3>
+          <p>Your content stays yours and so do the rights to it — no data harvesting on your media, no subscription. Guillotine is free and open source under AGPL-3.0.</p>
         </div>
       </div>
     </div>
@@ -619,6 +673,11 @@
     <div class="links">
       <a href="https://github.com/HereLiesAz/Guillotine" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/HereLiesAz/Guillotine/releases/latest" target="_blank" rel="noopener">Releases</a>
+      <a href="https://github.com/HereLiesAz/Guillotine/blob/main/docs/MANUAL.md" target="_blank" rel="noopener">Manual</a>
+      <a href="https://github.com/HereLiesAz/Guillotine/blob/main/docs/TOOLS.md" target="_blank" rel="noopener">Tools</a>
+      <a href="https://github.com/HereLiesAz/Guillotine/blob/main/docs/PROVIDERS.md" target="_blank" rel="noopener">Providers</a>
+      <a href="https://github.com/HereLiesAz/Guillotine/blob/main/docs/MODELS.md" target="_blank" rel="noopener">Models</a>
+      <a href="https://github.com/HereLiesAz/Guillotine/blob/main/docs/SETTINGS.md" target="_blank" rel="noopener">Settings</a>
       <a href="privacy.html">Privacy</a>
       <a href="https://github.com/HereLiesAz/Guillotine/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
     </div>
