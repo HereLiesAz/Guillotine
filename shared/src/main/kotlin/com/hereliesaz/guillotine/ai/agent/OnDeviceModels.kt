@@ -149,12 +149,12 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         label = "Gemma 3 1B Instruct (int4)",
         fileName = "gemma3-1b-it-int4.task",
         sizeBytes = 554_661_243L,
-        license = "Gemma (free sign-in)",
-        gated = true,
-        repoUrl = hfRepo("litert-community/Gemma3-1B-IT"),
-        downloadUrl = null,
+        license = "Gemma",
+        gated = false,
+        repoUrl = hfRepo("HereLiesAz/gemma3-1b-it"),
+        downloadUrl = hfResolve("HereLiesAz/gemma3-1b-it", "gemma3-1b-it-int4.task"),
         abilities = "Compact and fast with good reasoning. Smallest download of the full-capability models.",
-        limitations = "Requires a free Hugging Face sign-in to download (Gemma license).",
+        limitations = "~0.55 GB. Mirrored from Google's Gemma release (Gemma Terms of Use apply).",
     ),
     OnDeviceModel(
         id = "deepseek-r1-qwen-1.5b-q8",
@@ -168,8 +168,8 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         abilities = "Strong step-by-step reasoning for its size (distilled R1). Good for multi-step edits.",
         limitations = "1.86 GB download. Its reasoning traces can be verbose.",
     ),
-    // Note: Qwen3 and Gemma-3n ship only as `.litertlm`, which needs a newer MediaPipe runtime than
-    // this build loads (`.task`), so they're intentionally omitted from the download list for now.
+    // Note: Gemma-3n is offered (re-hosted, un-gated) in the VLM list. Qwen3 ships as `.litertlm`,
+    // which the current MediaPipe runtime (0.10.35) DOES load — it's simply not mirrored yet.
 )
 
 /**
