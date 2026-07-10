@@ -91,17 +91,21 @@ client at `/mcp` with the token — the tool list is self-describing.
 
 ---
 
-## 4. Frei0r & FFmpeg filters — native video filters 🗺 (desktop-first)
+## 4. Frei0r & FFmpeg filters — native video filters ✅ (advanced, bring-your-own ffmpeg)
 
-- **[Frei0r](https://frei0r.dyne.org/):** the minimalist cross-application video-plugin API
-  (`f0r_*` entry points in a shared library) used by FFmpeg, MLT/Shotcut, Kdenlive, PureData.
-- **FFmpeg `-vf` filtergraphs:** the ubiquitous filter chain syntax.
+- **FFmpeg `-vf` filtergraphs:** the ubiquitous filter-chain syntax.
+- **[Frei0r](https://frei0r.dyne.org/):** the cross-application video-plugin API (`f0r_*` entry points),
+  reached **through FFmpeg's `frei0r=<name>:<params>` filter** — so one path covers both ecosystems.
 
-**Plan.** On **desktop** (`:desktop`, JVM), load Frei0r `.so`/`.dll`/`.dylib` plugins and shell out to
-FFmpeg filtergraphs as an export-time effect stage — this is where native plugins and a full FFmpeg
-build are practical. On **Android** these are heavyweight (a bundled mobile FFmpeg + JNI Frei0r host),
-so they're gated as an optional desktop-first capability rather than a default mobile dependency. Both
-run entirely on-device.
+**Shipped — bake an FFmpeg/Frei0r filtergraph.** Point **Settings → AI Analyzer → FFmpeg filters** at an
+`ffmpeg` executable, then `apply_ffmpeg_filter(clip_id, filter)` (MCP) bakes a standard `-vf` graph (e.g.
+`hue=s=0, gblur=sigma=2`, or `frei0r=cartoon`) onto the clip and adds the result as a new clip.
+[`FfmpegFilter`](../app/src/main/java/com/hereliesaz/guillotine/media/FfmpegFilter.kt) runs the process
+on local files only — **on-device, nothing leaves the device**. This is a **bake-to-new-clip** step, not
+a live filter (FFmpeg can't drive GL preview), and **requires the user to supply an ffmpeg binary**
+(desktop-first; on Android, a bundled/downloaded ARM build) — so it's an optional advanced capability,
+not a default mobile dependency. A live-filter (Media3-native) subset of common FFmpeg filters, and a
+`:desktop` Frei0r host that loads `.so`/`.dll`/`.dylib` directly, are possible follow-ups.
 
 ---
 

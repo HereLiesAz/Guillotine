@@ -125,6 +125,9 @@ data class AiSettings(
     val stemModelPath: String = "",
     /** Optional sherpa-onnx GTCRN `.onnx` speech-denoiser file for on-device noise reduction. */
     val denoiseModelPath: String = "",
+    /** Optional path to an `ffmpeg` executable for baking FFmpeg/Frei0r filtergraphs onto a clip (blank =
+     *  feature off). Desktop-first; on Android, point at a bundled/downloaded ffmpeg binary. */
+    val ffmpegPath: String = "",
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */

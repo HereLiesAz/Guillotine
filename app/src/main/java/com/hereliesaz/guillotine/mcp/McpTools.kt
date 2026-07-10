@@ -480,6 +480,21 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "apply_ffmpeg_filter",
+            "Bake a standard **FFmpeg `-vf` filtergraph** onto a clip ON-DEVICE and add the result as a new " +
+                "clip — the whole FFmpeg filter ecosystem, and **Frei0r** plugins via `frei0r=<name>:<params>`. " +
+                "Use for \"apply the ffmpeg filter <graph>\", \"run a frei0r plugin\", \"add a vintage/vhs/" +
+                "chromashift filter\", \"eq/curves/deband this\". `filter` is the raw -vf graph, e.g. " +
+                "\"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Requires an ffmpeg executable set in " +
+                "Settings → AI Analyzer → FFmpeg filters (desktop-first; relay its error if unset). This is " +
+                "a bake-to-new-clip step, not a live filter.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose video to filter"),
+                "filter" to stringProp("An FFmpeg -vf filtergraph (Frei0r via frei0r=name:params)"),
+                required = listOf("clip_id", "filter"),
+            ),
+        ))
+        put(toolDefinition(
             "diarize_clip",
             "Speaker diarization ON-DEVICE (no key): work out WHO spoke WHEN in a clip's audio and return " +
                 "the speaker turns (speaker index + time range). Use for \"who speaks when?\", \"label the " +
@@ -737,6 +752,7 @@ class McpTools(
         "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
         "separate_stems" -> separateStems(args.getString("clip_id"))
         "denoise_clip" -> denoiseClip(args.getString("clip_id"))
+        "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
@@ -1829,6 +1845,38 @@ class McpTools(
             ok().apply {
                 put("clipCount", vm.uiState.value.document.clips.size)
                 put("humanSummary", "Removed background noise and added the cleaned voice as an audio clip.")
+            }
+        }
+    }
+
+    /** Bake an FFmpeg/Frei0r `-vf` filtergraph onto a clip's video, adding the result as a new clip. */
+    private fun applyFfmpegFilter(clipId: String, filterGraph: String): JSONObject {
+        val ffmpeg = settingsProvider().ffmpegPath
+        require(ffmpeg.isNotBlank()) {
+            "No ffmpeg set. Set an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters."
+        }
+        require(filterGraph.isNotBlank()) { "Provide an FFmpeg -vf filtergraph." }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Applying FFmpeg filter…", pausable = false,
+        ) { _ ->
+            val baked = com.hereliesaz.guillotine.media.FfmpegFilter.apply(
+                context, media.uri, filterGraph, ffmpeg, java.io.File(context.cacheDir, "ffmpeg"),
+            )
+            vm.addMedia(
+                listOf(
+                    MediaItem(
+                        newId(), Uri.fromFile(baked.file).toString(), "ffmpeg: ${media.name}",
+                        MediaKind.VIDEO, baked.durationMs, baked.hasAudio,
+                    ),
+                ),
+            )
+            ok().apply {
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Applied the FFmpeg filter and added the result as a new clip.")
             }
         }
     }

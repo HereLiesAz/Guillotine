@@ -122,6 +122,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var diarizeEmbedModelPath by remember { mutableStateOf(current.diarizeEmbedModelPath) }
     var stemModelPath by remember { mutableStateOf(current.stemModelPath) }
     var denoiseModelPath by remember { mutableStateOf(current.denoiseModelPath) }
+    var ffmpegPath by remember { mutableStateOf(current.ffmpegPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -167,6 +168,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
                     stemModelPath = stemModelPath.trim(),
                     denoiseModelPath = denoiseModelPath.trim(),
+                    ffmpegPath = ffmpegPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -198,6 +200,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             diarizeEmbedModelPath = restored.diarizeEmbedModelPath
             stemModelPath = restored.stemModelPath
             denoiseModelPath = restored.denoiseModelPath
+            ffmpegPath = restored.ffmpegPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -613,6 +616,23 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = denoiseModelPath,
                         onUse = { denoiseModelPath = it },
                     )
+
+                    // FFmpeg / Frei0r filtergraph baking (advanced; desktop-first).
+                    Text("FFmpeg / Frei0r filters — bake a -vf graph (advanced)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = ffmpegPath,
+                        onValueChange = { ffmpegPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Path to an ffmpeg executable", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Enables \"apply the ffmpeg filter …\" — bakes a standard FFmpeg -vf filtergraph " +
+                            "(and Frei0r plugins via frei0r=name:params) onto a clip. Needs an ffmpeg " +
+                            "binary; heavy — best on desktop or a capable device.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -780,6 +800,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
                             stemModelPath = stemModelPath.trim(),
                             denoiseModelPath = denoiseModelPath.trim(),
+                            ffmpegPath = ffmpegPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,

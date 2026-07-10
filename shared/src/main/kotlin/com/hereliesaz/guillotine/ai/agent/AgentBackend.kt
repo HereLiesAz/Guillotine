@@ -129,6 +129,13 @@ val AGENT_SYSTEM_PROMPT = """
       grades in preview and export. clear_lut removes it. LUTs are usually picked by the user (clip
       Filters → LUT); apply_lut is for when a path is known.
 
+    FFMPEG / FREI0R FILTERS (on-device, advanced):
+    - "apply the ffmpeg filter <graph>", "run a frei0r plugin", "add a vhs/vintage/chromashift filter",
+      "deband/curves/eq this" → apply_ffmpeg_filter(clip_id, filter) where filter is a raw FFmpeg -vf
+      graph (e.g. "hue=s=0, gblur=sigma=2" or "frei0r=cartoon"). It bakes the filter and adds a new clip.
+      Needs an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters; relay its error if unset.
+      Bake-to-new-clip (not live) and heavy — desktop-first.
+
     GLSL / ISF SHADER EFFECTS (on-device):
     - "apply this ISF shader", "add a glitch/CRT/kaleidoscope shader", "run this .fs/.glsl on the clip" →
       apply_shader(clip_id, path) with a standard ISF (.isf) or raw fragment (.fs/.glsl) file. It runs on
