@@ -790,34 +790,47 @@ private fun ClipView(
             .pointerInput(clip.id, state.tool, pps, sameTypeTracks, state.selectedKeyframeId) {
                 if (state.tool == EditorTool.SELECT && selectedKf == null) {
                     val ids = groupIdsOf(state, clip)
+                    // NB: every handler yields when an edge-trim is active (trimEdge != 0, set at the
+                    // long-press before any drag) so move and trim never both fire — this is
+                    // order-independent, so it doesn't depend on which drag detector the framework
+                    // dispatches first.
                     detectDragGestures(
-                        onDragStart = { dragPx = 0f; dragPy = 0f; holdEdge = 0; autoTrackConsumed = false; onGroupDrag(GroupDrag(ids, 0f, 0f)) },
-                        onDragEnd = {
-                            holdEdge = 0
-                            // If the 1s hold already created a track + moved the clip, don't move again.
-                            if (!autoTrackConsumed) {
-                                // Commit the same snapped delta the live preview showed. Group-aware:
-                                // moveClipBy moves the whole group together.
-                                val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
-                                val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
-                                vm.moveClipBy(clip.id, shift, deltaMs)
+                        onDragStart = {
+                            if (trimEdge == 0) {
+                                dragPx = 0f; dragPy = 0f; holdEdge = 0; autoTrackConsumed = false
+                                onGroupDrag(GroupDrag(ids, 0f, 0f))
                             }
-                            onGroupDrag(null)
+                        },
+                        onDragEnd = {
+                            if (trimEdge == 0) {
+                                holdEdge = 0
+                                // If the 1s hold already created a track + moved the clip, don't move again.
+                                if (!autoTrackConsumed) {
+                                    // Commit the same snapped delta the live preview showed. Group-aware:
+                                    // moveClipBy moves the whole group together.
+                                    val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
+                                    val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
+                                    vm.moveClipBy(clip.id, shift, deltaMs)
+                                }
+                                onGroupDrag(null)
+                            }
                         },
                         onDragCancel = { holdEdge = 0; onGroupDrag(null) },
                         onDrag = { change, drag ->
-                            change.consume(); dragPx += drag.x; dragPy += drag.y
-                            // Live + snapped: the whole group jumps to the magnet as any edge nears it.
-                            onGroupDrag(GroupDrag(ids, snappedDragPx(state, clip, dragPx, pps), dragPy))
-                            // Track whether the clip is currently dragged past the first/last lane of its
-                            // type — holding there for ~1s (see LaunchedEffect) spawns a new track.
-                            val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
-                            val targetIdx = sameTypeTracks.indexOf(clip.trackId) + shift
-                            holdEdge = when {
-                                autoTrackConsumed -> 0
-                                targetIdx < 0 -> -1
-                                targetIdx > sameTypeTracks.lastIndex -> 1
-                                else -> 0
+                            if (trimEdge == 0) {
+                                change.consume(); dragPx += drag.x; dragPy += drag.y
+                                // Live + snapped: the whole group jumps to the magnet as any edge nears it.
+                                onGroupDrag(GroupDrag(ids, snappedDragPx(state, clip, dragPx, pps), dragPy))
+                                // Track whether the clip is currently dragged past the first/last lane of its
+                                // type — holding there for ~1s (see LaunchedEffect) spawns a new track.
+                                val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
+                                val targetIdx = sameTypeTracks.indexOf(clip.trackId) + shift
+                                holdEdge = when {
+                                    autoTrackConsumed -> 0
+                                    targetIdx < 0 -> -1
+                                    targetIdx > sameTypeTracks.lastIndex -> 1
+                                    else -> 0
+                                }
                             }
                         },
                     )
@@ -918,18 +931,6 @@ private fun ClipView(
                 .background(Color.Black.copy(alpha = 0.4f))
                 .padding(horizontal = 4.dp, vertical = 1.dp),
         )
-        // Trim handles at both ends when the clip is selected: long-press one and drag to move that cut
-        // point (regaining or removing frames). Brightens while that edge is being dragged.
-        if (selected) {
-            Box(
-                Modifier.align(Alignment.CenterStart).fillMaxHeight().width(6.dp)
-                    .background(Red500.copy(alpha = if (trimEdge < 0) 0.95f else 0.5f)),
-            )
-            Box(
-                Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(6.dp)
-                    .background(Red500.copy(alpha = if (trimEdge > 0) 0.95f else 0.5f)),
-            )
-        }
         // Edit (keep/remove) overlays — positioned relative to the clip's trimmed window.
         if (clip.edits.isNotEmpty()) {
             Canvas(Modifier.fillMaxSize()) {
