@@ -749,14 +749,9 @@ private fun ClipView(
             // from the current selection to this clip (across tracks, all clips between).
             .pointerInput(clip.id, state.tool, pps, clip.keyframes) {
                 detectTapGestures(
-                    onLongPress = { offset ->
-                        // Near an edge, a long-press starts an edge-trim drag (handled below) — only the
-                        // middle of the clip range-selects.
-                        if (offset.x > edgeThresholdPx && offset.x < size.width - edgeThresholdPx) {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            vm.selectRangeTo(clip.id)
-                        }
-                    },
+                    // NB: no onLongPress here — long-press is owned solely by the edge-trim detector below
+                    // (detectTapGestures.onLongPress would consume the press first and starve it). Middle
+                    // long-press does the range-select there instead.
                     onDoubleTap = {
                         // Double-tap a clip → set the playback / loop region to that clip's span.
                         vm.setPlaybackRegion(clip.startTimeMs, clip.endTimeMs)
@@ -795,34 +790,47 @@ private fun ClipView(
             .pointerInput(clip.id, state.tool, pps, sameTypeTracks, state.selectedKeyframeId) {
                 if (state.tool == EditorTool.SELECT && selectedKf == null) {
                     val ids = groupIdsOf(state, clip)
+                    // NB: every handler yields when an edge-trim is active (trimEdge != 0, set at the
+                    // long-press before any drag) so move and trim never both fire — this is
+                    // order-independent, so it doesn't depend on which drag detector the framework
+                    // dispatches first.
                     detectDragGestures(
-                        onDragStart = { dragPx = 0f; dragPy = 0f; holdEdge = 0; autoTrackConsumed = false; onGroupDrag(GroupDrag(ids, 0f, 0f)) },
-                        onDragEnd = {
-                            holdEdge = 0
-                            // If the 1s hold already created a track + moved the clip, don't move again.
-                            if (!autoTrackConsumed) {
-                                // Commit the same snapped delta the live preview showed. Group-aware:
-                                // moveClipBy moves the whole group together.
-                                val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
-                                val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
-                                vm.moveClipBy(clip.id, shift, deltaMs)
+                        onDragStart = {
+                            if (trimEdge == 0) {
+                                dragPx = 0f; dragPy = 0f; holdEdge = 0; autoTrackConsumed = false
+                                onGroupDrag(GroupDrag(ids, 0f, 0f))
                             }
-                            onGroupDrag(null)
+                        },
+                        onDragEnd = {
+                            if (trimEdge == 0) {
+                                holdEdge = 0
+                                // If the 1s hold already created a track + moved the clip, don't move again.
+                                if (!autoTrackConsumed) {
+                                    // Commit the same snapped delta the live preview showed. Group-aware:
+                                    // moveClipBy moves the whole group together.
+                                    val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
+                                    val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
+                                    vm.moveClipBy(clip.id, shift, deltaMs)
+                                }
+                                onGroupDrag(null)
+                            }
                         },
                         onDragCancel = { holdEdge = 0; onGroupDrag(null) },
                         onDrag = { change, drag ->
-                            change.consume(); dragPx += drag.x; dragPy += drag.y
-                            // Live + snapped: the whole group jumps to the magnet as any edge nears it.
-                            onGroupDrag(GroupDrag(ids, snappedDragPx(state, clip, dragPx, pps), dragPy))
-                            // Track whether the clip is currently dragged past the first/last lane of its
-                            // type — holding there for ~1s (see LaunchedEffect) spawns a new track.
-                            val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
-                            val targetIdx = sameTypeTracks.indexOf(clip.trackId) + shift
-                            holdEdge = when {
-                                autoTrackConsumed -> 0
-                                targetIdx < 0 -> -1
-                                targetIdx > sameTypeTracks.lastIndex -> 1
-                                else -> 0
+                            if (trimEdge == 0) {
+                                change.consume(); dragPx += drag.x; dragPy += drag.y
+                                // Live + snapped: the whole group jumps to the magnet as any edge nears it.
+                                onGroupDrag(GroupDrag(ids, snappedDragPx(state, clip, dragPx, pps), dragPy))
+                                // Track whether the clip is currently dragged past the first/last lane of its
+                                // type — holding there for ~1s (see LaunchedEffect) spawns a new track.
+                                val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
+                                val targetIdx = sameTypeTracks.indexOf(clip.trackId) + shift
+                                holdEdge = when {
+                                    autoTrackConsumed -> 0
+                                    targetIdx < 0 -> -1
+                                    targetIdx > sameTypeTracks.lastIndex -> 1
+                                    else -> 0
+                                }
                             }
                         },
                     )
@@ -832,17 +840,21 @@ private fun ClipView(
             // split/trimmed clip re-extends by dragging its edge outward — trimClipStart/trimClipEnd
             // bound it to the source media. The grabbed edge previews live and commits on release.
             .pointerInput(clip.id, pps, state.tool) {
-                if (state.tool != EditorTool.SELECT) return@pointerInput
-                val edgePx = 24.dp.toPx()
                 detectDragGesturesAfterLongPress(
                     onDragStart = { down ->
-                        trimEdge = when {
-                            down.x <= edgePx -> -1
-                            down.x >= size.width - edgePx -> 1
-                            else -> 0
-                        }
+                        // Edge-trim is a SELECT-tool action; a long-press within 24dp of either end grabs
+                        // that cut point. A middle long-press (or any long-press in another tool) instead
+                        // range-selects — this is the sole long-press handler so it can't be starved.
+                        trimEdge = if (state.tool == EditorTool.SELECT) {
+                            when {
+                                down.x <= edgeThresholdPx -> -1
+                                down.x >= size.width - edgeThresholdPx -> 1
+                                else -> 0
+                            }
+                        } else 0
                         trimStartPx = 0f; trimEndPx = 0f
-                        if (trimEdge != 0) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        if (trimEdge == 0) vm.selectRangeTo(clip.id)
                     },
                     onDrag = { change, drag ->
                         if (trimEdge != 0) {
