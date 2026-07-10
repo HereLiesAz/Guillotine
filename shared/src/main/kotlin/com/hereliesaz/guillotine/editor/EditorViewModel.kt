@@ -1469,18 +1469,20 @@ open class EditorViewModel {
         }
     }
 
-    /** Timeline ms where the current/most-recent playback run began — the return point for [stop]. */
+    /** Where the playhead was last stationary (before playback started) — the return point for [stop]. */
     private var playbackStartMs = 0L
 
     /**
-     * Begin playback, remembering the start as [stop]'s return point. When a playback region is set,
-     * playback jumps to (and later returns to) the region's start; otherwise it starts at the playhead.
+     * Begin playback. [stop] returns the playhead to where it was last stationary — its position the
+     * instant before play was pressed, captured BEFORE any region jump. When a playback region is set,
+     * playback then jumps to the region's start; otherwise it starts at the playhead.
      */
     private fun startPlayback() {
         val total = document.totalDurationMs
         if (total <= 0) return
-        val startAt = _uiState.value.playbackRegion?.first?.coerceIn(0L, total) ?: _uiState.value.currentTimeMs
-        playbackStartMs = startAt
+        val current = _uiState.value.currentTimeMs
+        playbackStartMs = current // last stationary position — where stop() returns to
+        val startAt = _uiState.value.playbackRegion?.first?.coerceIn(0L, total) ?: current
         _uiState.update { it.copy(currentTimeMs = startAt, isPlaying = true) }
     }
 
@@ -1494,13 +1496,13 @@ open class EditorViewModel {
         if (playing) startPlayback() else _uiState.update { it.copy(isPlaying = false) }
     }
 
-    /** Stop — halt playback and return the playhead to where this run started (vs. pause, which stays). */
+    /** Stop — halt playback and return the playhead to where it was last stationary (vs. pause, which stays). */
     fun stop() {
         _uiState.update { it.copy(isPlaying = false) }
         seekTo(playbackStartMs)
     }
 
-    /** Transport toggle used by the volume-up+down combo: stop (return to start) if playing, else play. */
+    /** Transport toggle used by the volume-up+down combo: stop (return to last stationary) if playing, else play. */
     fun playOrStop() {
         if (_uiState.value.isPlaying) stop() else startPlayback()
     }
