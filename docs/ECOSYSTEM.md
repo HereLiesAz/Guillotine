@@ -11,6 +11,10 @@ with a controller — never your media.
 
 Status legend: ✅ shipped · 🛠 in progress · 🗺 planned.
 
+**Applying these in the app:** the manual's [Advanced looks](MANUAL.md#6-advanced-looks) walks the UI,
+and the MCP tools that apply them (`apply_lut`, `apply_shader` / `list_shader_params`,
+`apply_ffmpeg_filter`, `apply_transition`, …) are specified in [TOOLS.md](TOOLS.md).
+
 ---
 
 ## 1. LUTs — `.cube` 3D color grades ✅
@@ -20,7 +24,7 @@ shared in countless free LUT packs.
 
 - **Drop-in:** clip → **Filters → LUT → Pick .cube**. Any standard 3D `.cube` (sizes 2–129,
   `DOMAIN_MIN/MAX` respected) grades the clip in **both live preview and export** — WYSIWYG.
-- **AI:** `apply_lut(clip_id, path)` / `clear_lut(clip_id)` MCP tools.
+- **AI:** `apply_lut(clip_id, path)` / `clear_lut(clip_id)` MCP tools — see [TOOLS.md](TOOLS.md).
 - **How it works:** [`CubeLut`](../shared/src/main/kotlin/com/hereliesaz/guillotine/media/CubeLut.kt)
   (pure-Kotlin, shared) parses the file;
   [`LutCube`](../app/src/main/java/com/hereliesaz/guillotine/media/LutCube.kt) builds a Media3
@@ -31,7 +35,7 @@ shared in countless free LUT packs.
 
 ---
 
-## 2. GLSL / ISF shader effects ✅ · GL-Transitions 🗺 (needs a compositor)
+## 2. GLSL / ISF shader effects ✅ (adjustable) · clip-to-clip transitions ✅ (FFmpeg xfade)
 
 Two widely-used open GLSL standards:
 
@@ -48,9 +52,11 @@ Kotlin) parses the ISF `/*{…}*/` header, maps `INPUTS` to uniforms, and rewrit
 (`IMG_THIS_PIXEL`, `IMG_NORM_PIXEL`, `isf_FragNormCoord`, `RENDERSIZE`, `TIME`) to Media3's conventions;
 [`GlslEffect`](../app/src/main/java/com/hereliesaz/guillotine/media/GlslEffect.kt) is a Media3
 `BaseGlShaderProgram` (1-in/1-out). **Supported subset:** single-pass, single-image ISF filters
-(`float`/`bool`/`long`/`color`/`point2D`/`event` inputs, applied at their defaults for now) and raw
-single-input fragments. **Rejected** (Media3's per-clip effect is 1-in/1-out): multi-pass, persistent/
-feedback buffers, audio inputs, and multiple image inputs.
+(`float`/`bool`/`long`/`color`/`point2D`/`event` inputs) and raw single-input fragments. A shader's
+scalar **`FLOAT` inputs are adjustable, not fixed** — they surface as **sliders** in the Filters →
+Shader popup, and over MCP via `list_shader_params` (read the inputs) and `apply_shader`'s `params` map
+(override them); see [TOOLS.md](TOOLS.md). **Rejected** (Media3's per-clip effect is 1-in/1-out):
+multi-pass, persistent/feedback buffers, audio inputs, and multiple image inputs.
 
 **Transitions between clips — shipped via FFmpeg `xfade` ✅.** True gl-transition *warps* sample two
 frames per pixel, which Media3's per-clip effect chain can't express (single-input; `DefaultVideoCompositor`
@@ -60,18 +66,18 @@ to_clip_id, type, duration_sec)` (MCP) bakes the two clips into one transitioned
 `wipeleft/right/up/down`, `slide*`, `circleopen/close`, `dissolve`, `pixelize`, `radial`, `smoothleft`,
 `distance`, and more. Runs on-device (requires the same ffmpeg binary as §4). A Media3-native, live-preview
 compositor for the *exact* gl-transitions GLSL catalog (custom `VideoCompositor` + `CompositionPlayer`)
-remains a possible follow-up; parameter-control UI for single-input shader `INPUTS` ships (FLOAT sliders).
+remains a possible follow-up.
 
 ---
 
-## 3. MCP plugin protocol — AI-drivable tools 🛠 (foundation ✅ · documented in [PLUGINS.md](PLUGINS.md))
+## 3. MCP plugin protocol — AI-drivable tools 🛠 (foundation ✅ · documented in [PLUGINS.md](PLUGINS.md) + [TOOLS.md](TOOLS.md))
 
 Guillotine's editor is already a standard **[Model Context Protocol](https://modelcontextprotocol.io)**
 server (JSON-RPC 2.0, protocol `2024-11-05`, `tools/list` + `tools/call`, bearer auth on `/mcp`:6274):
 every capability (cut, filter, LUT, denoise, generate, …) is an MCP tool, and controller LLMs drive the
 editor purely through those tools — exchanging **text only**, never media. **See
 [PLUGINS.md](PLUGINS.md)** for the full protocol, how to connect a client, user-defined tool packs, and
-the draft distributable-manifest proposal.
+the draft distributable-manifest proposal, and **[TOOLS.md](TOOLS.md)** for the complete tool catalog.
 
 Already shipped:
 
@@ -85,10 +91,11 @@ Already shipped:
   [`UserToolStore`](../app/src/main/java/com/hereliesaz/guillotine/data/UserToolStore.kt) and shared in
   the settings backup bundle.
 
-**Formalizing the protocol (in progress).** A published `TOOLS.md` schema (the JSON tool definitions
-this build already emits from `McpTools.toolDefinitions()`), a stable versioned tool namespace, and a
-plugin manifest so third-party MCP tool packs can be discovered/installed. Until then, point any MCP
-client at `/mcp` with the token — the tool list is self-describing.
+**Formalizing the protocol (in progress).** The tool catalog is now published as **[TOOLS.md](TOOLS.md)**
+(generated from the JSON tool definitions this build emits from `McpTools`). Still ahead: a stable
+versioned tool namespace and a plugin manifest so third-party MCP tool packs can be discovered/installed.
+Until those land, point any MCP client at `/mcp` with the token — the live `tools/list` catalog is
+self-describing.
 
 ---
 
@@ -113,11 +120,14 @@ not a default mobile dependency. A live-filter (Media3-native) subset of common 
 ## Contributing an extension
 
 - **A LUT:** just export a `.cube` — it already works. Share packs anywhere.
-- **A GL/ISF shader or GL-Transition:** track milestone 2; the target is that an unmodified
-  gl-transitions/ISF shader loads as-is.
-- **An MCP tool/plugin:** build against the `/mcp` surface today; the formal manifest lands with
-  milestone 3.
-- **A Frei0r/FFmpeg filter:** desktop-first, milestone 4.
+- **A GL/ISF shader:** a standard single-input ISF (`.isf`) or raw `.fs`/`.glsl` fragment loads as-is
+  today (§2), with its `FLOAT` inputs exposed as sliders.
+- **A GL-Transition:** clip-to-clip transitions ship now via FFmpeg `xfade` (§2); a Media3-native
+  compositor for the exact gl-transitions GLSL catalog is the remaining follow-up.
+- **An MCP tool/plugin:** build against the `/mcp` surface today ([TOOLS.md](TOOLS.md) is the tool
+  reference); the formal distributable manifest is still draft.
+- **A Frei0r/FFmpeg filter:** works today (§4) — set an `ffmpeg` binary and bake a `-vf` graph (or
+  `frei0r=name:params`); desktop-first.
 
 Everything here is designed so the **existing worldwide libraries** of these formats are Guillotine's
 ecosystem from day one — no waiting for a Guillotine-specific marketplace to fill up.

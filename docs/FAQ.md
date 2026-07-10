@@ -4,9 +4,17 @@
 
 No. **Your video never leaves the device.** All frame and audio analysis runs on-device. Cloud AIs (Gemini / OpenAI / Anthropic) are *controllers only* — they drive the editor as text through the in-app MCP server and never receive your clips or frames.
 
+## Is my footage private? How is this different from a cloud editor?
+
+Yes — that's the whole idea. Guillotine is **on-device first**: all frame and audio analysis (vision, transcription, beat detection, denoise, matting) runs locally, there's **no account and nothing to sign up for**, and nothing is uploaded. If you choose to use a cloud AI, it only ever exchanges **text** — your prompt and the on-device analysis results — never your frames. Your footage and all rights to it stay entirely yours. A typical cloud editor uploads your media to be processed and stored on its servers; Guillotine doesn't. See [PROVIDERS.md](PROVIDERS.md) for exactly what each AI role can and can't see, and the [manual](MANUAL.md) for the editor itself.
+
 ## Do I need an API key or an account?
 
 No. There's a free, no-key, on-device path: ML Kit + MediaPipe vision for keep/remove analysis, an optional on-device LLM brain to drive the editor, a Local silence detector for audio, and free Pollinations.ai image generation. The app is fully usable with zero configuration. Cloud providers are bring-your-own-key and stored encrypted on-device if you choose to use them.
+
+## Can I generate images or video for free?
+
+Yes — with no key and no account. Images use **Pollinations** (keyless); video uses **Guillotine (free)**, a text-to-video model running on Guillotine's own free Hugging Face Space. Both are cloud services, so **only your text prompt is sent** — never your footage — and they're tuned for short, quick results. Add your own key for a paid provider when you want longer or higher-quality output. See [PROVIDERS.md](PROVIDERS.md) for the full provider list.
 
 ## How does "cut every frame with my phone" work?
 
@@ -60,6 +68,10 @@ Yes. Open **Settings → Advanced** and tap **Export settings** to save your AI 
 
 Twelve: **opacity, scale, rotation, offset X, offset Y, brightness, contrast, saturation, hue, sepia, volume, and pan.** Each keyframe supports per-point cubic-bezier easing with draggable handles.
 
+## Is Guillotine free and open source? What license is it under?
+
+Yes — Guillotine is free and open source under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. You're free to use, study, modify, and share it. Because the AGPL is a strong copyleft license, anyone who distributes Guillotine — **including running a modified version as a network service** — must make their complete source available under the same license. If you fork it you must also **preserve attribution** (keep the `NOTICE` file and show "Based on Guillotine (c) HereLiesAz" in your About / credits screen), **mark your version as changed**, and **rename it** — the "Guillotine" name and logo are reserved and can't be reused by forks (you may still state, factually, that your work is "based on Guillotine"). See [`LICENSE`](../LICENSE) and [`NOTICE`](../NOTICE) for the full terms.
+
 ## How do I see what a button does?
 
-Press the **?** (help) button in the toolbar or top-right corner and open the **icon key** — it lists every icon button and what it does. The **Tutorial** and **FAQ** are in the menu (the app icon, top-left).
+Press the **?** (help) button in the toolbar or top-right corner and open the **icon key** — it lists every icon button and what it does. The **Tutorial** and **FAQ** are in the menu (the app icon, top-left). For the complete reference — every screen, control, and option — see the [user manual](MANUAL.md).

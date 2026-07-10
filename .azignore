@@ -16,3 +16,9 @@ docs/ORIGINAL_PROMPTS.md
 # which fetch these same files — listing them in About too would be redundant.
 docs/TUTORIAL.md
 docs/FAQ.md
+
+# Internal strategy notes (market/financial/roadmap) — for the maintainer, not
+# end users. Kept in-repo but never surfaced in-app.
+docs/strategy/MARKET.md
+docs/strategy/FINANCIAL.md
+docs/strategy/ROADMAP.md

@@ -9,6 +9,13 @@ which already has a large tool/client ecosystem.
 **Invariant:** tools exchange **text only** (ids, parameters, summaries). Your video and audio never
 leave the device — a controller drives the editor, it doesn't receive frames.
 
+> **The full tool catalog lives in [TOOLS.md](TOOLS.md)** — every tool's name, description, and JSON
+> schema (generated from the live definitions), alongside the authoritative server spec: port `6274`,
+> bearer auth on `POST /mcp`, the JSON-RPC methods, and the read-only resources. This document is the
+> **plugin / extensibility** side — connecting a client, user-defined tool packs, and the draft
+> manifest. The two don't repeat each other: start here to build a plugin, cross to TOOLS.md for the
+> exact catalog of what's callable.
+
 ---
 
 ## The server
@@ -75,8 +82,10 @@ single shareable JSON file — the simplest way to distribute a "plugin" today. 
 1. **A tool client / agent.** Speak MCP to `/mcp` (or the relay). Call `tools/list`, then `tools/call`.
    Anything the app can do, your plugin can orchestrate. This works today.
 2. **A macro pack.** Ship a settings-backup JSON containing `userTools`; users import it. Works today.
-3. **A native effect** (LUT / shader / filter) — see [ECOSYSTEM.md](ECOSYSTEM.md): `.cube` LUTs already
-   drop in; GL-Transitions/ISF and Frei0r/FFmpeg are the next milestones.
+3. **A native effect** (LUT / shader / filter) — see [ECOSYSTEM.md](ECOSYSTEM.md): `.cube` LUTs, ISF/GLSL
+   shaders (with adjustable sliders), Frei0r/FFmpeg filters, and clip-to-clip `xfade` transitions all
+   drop in today. A live-preview compositor for the exact gl-transitions GLSL catalog is the remaining
+   follow-up.
 
 ### Proposed: distributable tool-pack manifest (draft)
 
@@ -97,3 +106,13 @@ backup), the proposed manifest — **draft, subject to change; feedback welcome*
 
 Until this lands, use the two shipping mechanisms above. The **live `tools/list` catalog is the source
 of truth** for what's callable, so a plugin never has to hard-code a tool list — it introspects.
+
+---
+
+## See also
+
+- **[TOOLS.md](TOOLS.md)** — the full, generated tool catalog and the authoritative MCP server spec
+  (port `6274`, bearer auth, `/mcp`, JSON-RPC methods, resources).
+- **[ECOSYSTEM.md](ECOSYSTEM.md)** — LUTs, shaders, Frei0r/FFmpeg filters, and transitions.
+- **[SETTINGS.md](SETTINGS.md)** — where the MCP access token and the remote relay are configured.
+- **[MANUAL.md](MANUAL.md)** — using the editor and its AI features.
