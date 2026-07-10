@@ -182,6 +182,7 @@ dependencies {
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)
     implementation(libs.play.services.ads)
+    implementation(libs.billing.ktx)
     implementation(libs.user.messaging.platform)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
@@ -193,7 +194,7 @@ dependencies {
 }
 
 // Bundle the repo's help docs into the APK at BUILD time, so the in-app Tutorial/FAQ read them
-// offline from a single source of truth: TUTORIAL.md / FAQ.md at the repo root. The task copies them
+// offline from a single source of truth: docs/TUTORIAL.md / docs/FAQ.md. The task copies them
 // into an AGP-managed generated assets dir (under build/, not committed) registered via the Variant
 // API — no hand-maintained duplicate under src/main/assets. Edit the root .md and the next build picks
 // it up. They land at asset path `help/TUTORIAL.md` / `help/FAQ.md`.
@@ -206,7 +207,7 @@ abstract class CopyHelpDocsTask : DefaultTask() {
     }
 }
 val copyHelpDocs = tasks.register<CopyHelpDocsTask>("copyHelpDocs") {
-    docs.from(rootProject.file("TUTORIAL.md"), rootProject.file("FAQ.md"))
+    docs.from(rootProject.file("docs/TUTORIAL.md"), rootProject.file("docs/FAQ.md"))
 }
 androidComponents {
     onVariants { variant ->

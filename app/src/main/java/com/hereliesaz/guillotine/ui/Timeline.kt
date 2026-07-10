@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -139,25 +140,49 @@ private fun TimelineLanes(
     var viewportWidthPx by remember { mutableIntStateOf(0) }
 
     // Zoom-around-playhead: any pps change (pinch, Ctrl+scroll, TopBar buttons, addMedia fit-all)
-    // recenters the playhead in the viewport and lets the timeline expand/contract on either side of
-    // it. The playhead is the anchor the zoom pivots on — after the new pps commits, scroll so the
-    // playhead sits at the middle of the visible width (clamped to 0 when it would scroll before the
-    // start, e.g. the playhead is near time 0).
-    //
-    // withFrameNanos before scroll.scrollTo lets the layout pass with the new pps commit first —
-    // otherwise scroll.maxValue is stale from the previous width and the scroll clamps wrong on
-    // zoom-in. roundToInt (not toInt) so a target of e.g. −0.9 doesn't truncate to 0.
+    // recenters the playhead to the MIDDLE of the viewport and lets the timeline expand/contract on
+    // either side of it — the playhead is the anchor the zoom pivots on.
     var lastZoomedPps by remember { mutableFloatStateOf(pps) }
-    LaunchedEffect(pps) {
-        if (pps == lastZoomedPps) return@LaunchedEffect
-        val playheadMs = vm.uiState.value.currentTimeMs
-        val vp = viewportWidthPx
-        lastZoomedPps = pps
-        androidx.compose.runtime.withFrameNanos {}
+    var targetScroll by remember { mutableStateOf<Int?>(null) }
+
+    if (pps != lastZoomedPps) {
+        // Center the playhead: scroll so it sits at half the viewport width after the new pps.
+        val playheadMs = state.currentTimeMs
         val newPlayheadPx = playheadMs / 1000f * pps
-        val target = if (vp > 0) (newPlayheadPx - vp / 2f).roundToInt().coerceAtLeast(0)
+        val vp = viewportWidthPx
+        targetScroll = if (vp > 0) (newPlayheadPx - vp / 2f).roundToInt().coerceAtLeast(0)
         else newPlayheadPx.roundToInt().coerceAtLeast(0)
-        scroll.scrollTo(target)
+        lastZoomedPps = pps
+    }
+
+    // Compose's scroll.scrollTo() can only run in a suspend function (LaunchedEffect), which runs
+    // after the layout pass — a 1-frame lag where the timeline draws with the NEW width but the OLD
+    // scroll value, causing a visual jump. Translating the content by the pending delta this frame
+    // compensates for that lag so there's no jump.
+    val tx = targetScroll?.let { scroll.value.toFloat() - it } ?: 0f
+
+    LaunchedEffect(targetScroll) {
+        targetScroll?.let { target ->
+            // Wait for layout to finish so scroll.maxValue is updated to the new width.
+            androidx.compose.runtime.withFrameNanos {}
+            scroll.scrollTo(target)
+            targetScroll = null
+        }
+    }
+
+    // Auto-follow while playing: keep the playhead centered as it advances.
+    LaunchedEffect(state.isPlaying) {
+        if (state.isPlaying) {
+            androidx.compose.runtime.snapshotFlow { state.currentTimeMs }.collect { timeMs ->
+                if (viewportWidthPx > 0) {
+                    val playheadPx = timeMs / 1000f * pps
+                    val centerTarget = (playheadPx - (viewportWidthPx / 2f)).roundToInt().coerceAtLeast(0)
+                    if (kotlin.math.abs(centerTarget - scroll.value) > 1) {
+                        scroll.scrollTo(centerTarget)
+                    }
+                }
+            }
+        }
     }
 
     fun msToDp(ms: Long) = with(density) { (ms / 1000f * pps).toDp() }
@@ -267,6 +292,7 @@ private fun TimelineLanes(
             Modifier
                 .fillMaxSize()
                 .horizontalScroll(scroll)
+                .graphicsLayer { this.translationX = tx }
                 .width(surfaceWidth)
                 // Tap anywhere on the timeline surface (ruler, gaps, below the tracks) to move the
                 // playhead there — whether playing or not. Clips sit on top and handle their own taps.
@@ -353,37 +379,72 @@ private fun TimelineLanes(
                     .background(Red500),
             )
             // Marquee (range-select) overlay: only in MARQUEE mode. Dragging draws a rectangle over a
-            // time range and selects every clip it touches on release. It captures the drag (so the
-            // timeline doesn't scroll), and its local x == content x, so x/pps maps straight to ms.
+            // time range and specific tracks, selecting every clip it touches on release.
+            // It captures the drag (so the timeline doesn't scroll), and its local x == content x,
+            // so x/pps maps straight to ms. Y maps to track lanes.
             if (state.tool == EditorTool.MARQUEE) {
                 var startX by remember { mutableStateOf<Float?>(null) }
+                var startY by remember { mutableStateOf<Float?>(null) }
                 var curX by remember { mutableFloatStateOf(0f) }
+                var curY by remember { mutableFloatStateOf(0f) }
                 Box(
                     Modifier
                         .matchParentSize()
                         .pointerInput(pps) {
                             detectDragGestures(
-                                onDragStart = { off -> startX = off.x; curX = off.x },
-                                onDrag = { change, _ -> change.consume(); curX = change.position.x },
+                                onDragStart = { off -> 
+                                    startX = off.x; curX = off.x
+                                    startY = off.y; curY = off.y 
+                                },
+                                onDrag = { change, _ -> 
+                                    change.consume()
+                                    curX = change.position.x
+                                    curY = change.position.y
+                                },
                                 onDragEnd = {
-                                    startX?.let { s ->
-                                        vm.selectClipsInRange(
-                                            (s / pps * 1000f).toLong(),
+                                    val sx = startX
+                                    val sy = startY
+                                    if (sx != null && sy != null) {
+                                        val minY = kotlin.math.min(sy, curY)
+                                        val maxY = kotlin.math.max(sy, curY)
+                                        val tracks = mutableSetOf<String>()
+                                        var currentY = with(density) { RULER_HEIGHT.toPx() }
+                                        for (trackId in state.document.videoTracks) {
+                                            val h = with(density) { state.trackHeight(trackId).dp.toPx() }
+                                            if (currentY < maxY && currentY + h > minY) tracks.add(trackId)
+                                            currentY += h
+                                        }
+                                        for (trackId in state.document.audioTracks) {
+                                            val h = with(density) { state.trackHeight(trackId).dp.toPx() }
+                                            if (currentY < maxY && currentY + h > minY) tracks.add(trackId)
+                                            currentY += h
+                                        }
+                                        vm.selectClipsInRect(
+                                            (sx / pps * 1000f).toLong(),
                                             (curX / pps * 1000f).toLong(),
+                                            tracks
                                         )
                                     }
                                     startX = null
+                                    startY = null
                                 },
-                                onDragCancel = { startX = null },
+                                onDragCancel = { startX = null; startY = null },
                             )
                         },
                 ) {
-                    startX?.let { s ->
+                    val sx = startX
+                    val sy = startY
+                    if (sx != null && sy != null) {
                         Box(
                             Modifier
-                                .offset(x = with(density) { kotlin.math.min(s, curX).toDp() })
-                                .width(with(density) { kotlin.math.abs(curX - s).toDp() })
-                                .fillMaxHeight()
+                                .offset(
+                                    x = with(density) { kotlin.math.min(sx, curX).toDp() },
+                                    y = with(density) { kotlin.math.min(sy, curY).toDp() }
+                                )
+                                .size(
+                                    width = with(density) { kotlin.math.abs(curX - sx).toDp() },
+                                    height = with(density) { kotlin.math.abs(curY - sy).toDp() }
+                                )
                                 .background(Red500.copy(alpha = 0.18f))
                                 .border(1.dp, Red500),
                         )
@@ -1041,7 +1102,7 @@ private fun keyframeColor(prop: KeyframeProperty): Color = when (prop) {
     KeyframeProperty.OFFSET_X, KeyframeProperty.OFFSET_Y -> Red500
     KeyframeProperty.VOLUME, KeyframeProperty.PAN -> Neutral400
     KeyframeProperty.BRIGHTNESS, KeyframeProperty.CONTRAST, KeyframeProperty.SATURATION,
-    KeyframeProperty.HUE, KeyframeProperty.SEPIA -> Neutral500
+    KeyframeProperty.HUE, KeyframeProperty.SEPIA, KeyframeProperty.SPEED -> Neutral500
 }
 
 /** Canvas position of a keyframe: x by time, y by value (higher value = higher on the clip). */

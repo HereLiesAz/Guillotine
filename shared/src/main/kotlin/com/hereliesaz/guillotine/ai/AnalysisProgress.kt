@@ -14,4 +14,5 @@ data class AnalysisProgress(
     val fraction: Float? = null,
     val segmentsFound: Int = 0,
     val finding: String? = null,
+    val currentMs: Long? = null,
 )

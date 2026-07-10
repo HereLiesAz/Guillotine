@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -202,13 +203,21 @@ fun NleScreen(
         }
     }
 
-    // The project is auto-saved internally; "Save" only names it. Load imports a .gilt copy.
+    // The project is auto-saved internally; "Save" exports it as a .gilt file. Load imports a .gilt copy.
     val openLauncher = rememberOpenProjectLauncher { file ->
         scope.launch {
             val doc = withContext(Dispatchers.IO) {
                 runCatching { DesktopProjectAutosave.loadFromFile(file) }.getOrNull()
             }
             if (doc != null) vm.loadDocument(doc)
+        }
+    }
+    
+    val saveLauncher = rememberSaveProjectLauncher { file ->
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { DesktopProjectAutosave.saveToFile(file, vm.uiState.value.document) }
+            }
         }
     }
 
@@ -313,9 +322,9 @@ fun NleScreen(
             onFitAll = vm::fitAllToViewport,
             onImport = { importTargetTrack = null; importLauncher() },
             onGenerate = { showGenerate = true },
-            onNameProject = { showNameDialog = true },
             onNewProject = { showNewProjectConfirm = true },
             onOpenProject = { openLauncher() },
+            onSaveProject = { saveLauncher() },
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
             onSettings = { showSettings = true },
@@ -463,7 +472,10 @@ fun NleScreen(
                         val file = com.hereliesaz.guillotine.desktop.media.DesktopExporter.export(
                             document = vm.uiState.value.document,
                             config = config,
-                            onProgress = { exportProgress = it },
+                            onProgress = { p, ms ->
+                                exportProgress = p
+                                vm.seekTo(ms)
+                            },
                         )
                         exportDone = "Saved to ${file.absolutePath}"
                         ActivityLog.info("Export complete: ${file.absolutePath}")
@@ -483,7 +495,7 @@ fun NleScreen(
     }
     if (showHelp) HelpKeyDialog(onDismiss = { showHelp = false })
     if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
-    if (showFaq) FaqDialog(onDismiss = { showFaq = false })
+    if (showFaq) FaqDialog(settings = settings, onDismiss = { showFaq = false })
 }
 
 // -------------------------------------------------------------------------------------
@@ -501,9 +513,9 @@ private fun TopBar(
     onFitAll: () -> Unit,
     onImport: () -> Unit,
     onGenerate: () -> Unit,
-    onNameProject: () -> Unit,
     onNewProject: () -> Unit,
     onOpenProject: () -> Unit,
+    onSaveProject: () -> Unit,
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
     onSettings: () -> Unit,
@@ -523,7 +535,7 @@ private fun TopBar(
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 DropdownMenuItem(text = { Text("New") }, onClick = { menuExpanded = false; onNewProject() })
                 DropdownMenuItem(text = { Text("Open") }, onClick = { menuExpanded = false; onOpenProject() })
-                DropdownMenuItem(text = { Text("Save") }, onClick = { menuExpanded = false; onNameProject() })
+                DropdownMenuItem(text = { Text("Save") }, onClick = { menuExpanded = false; onSaveProject() })
                 DropdownMenuItem(text = { Text("Import") }, onClick = { menuExpanded = false; onImport() })
                 DropdownMenuItem(text = { Text("Generate") }, onClick = { menuExpanded = false; onGenerate() })
                 DropdownMenuItem(text = { Text("Render") }, onClick = { menuExpanded = false; onExport() })
@@ -615,11 +627,13 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
         )
         Spacer(Modifier.weight(1f))
         val frameMs = Math.round(state.document.settings.frameDurationMs)
-        IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
-        IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
-        IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
-        IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
-        IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
+            IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
+            IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+            IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
+            IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        }
         Spacer(Modifier.weight(1f))
         val rates = listOf(0.5f, 1f, 1.5f, 2f)
         Text(

@@ -65,7 +65,7 @@ object Exporter {
         context: Context,
         document: Document,
         outputName: String,
-        onProgress: (Float) -> Unit,
+        onProgress: (Float, Long) -> Unit,
         onPhase: (String) -> Unit = {},
     ): Uri = withContext(Dispatchers.Main) {
         fun phase(name: String) {
@@ -155,7 +155,7 @@ object Exporter {
                             while (isActive) {
                                 transformer.getProgress(holder)
                                 val p = (holder.progress / 100f).coerceIn(0f, 1f)
-                                onProgress(p)
+                                onProgress(p, (p * document.totalDurationMs).toLong())
                                 // Emit at 25/50/75/100 so the log tells a story without spamming it.
                                 val ms = (p * 4).toInt()
                                 if (ms > lastMilestone && ms in 1..4) {
@@ -174,7 +174,7 @@ object Exporter {
                 }
             }
 
-            onProgress(1f)
+            onProgress(1f, document.totalDurationMs)
             phase("Saving to gallery…")
             // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
             // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.

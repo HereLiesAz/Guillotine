@@ -115,6 +115,7 @@ import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.data.ProjectAutosave
 import com.hereliesaz.guillotine.data.ProjectStore
 import com.hereliesaz.guillotine.data.rememberOpenProjectLauncher
+import com.hereliesaz.guillotine.data.rememberSaveProjectLauncher
 import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.AndroidEditorViewModel
@@ -222,6 +223,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showHelp by remember { mutableStateOf(false) }
     var showTutorial by remember { mutableStateOf(false) }
     var showFaq by remember { mutableStateOf(false) }
+    var showAdFree by remember { mutableStateOf(false) }
+    
+    val billingManager = remember { com.hereliesaz.guillotine.billing.BillingManager(context, scope).apply { initialize() } }
+    
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf<String?>(null) }
@@ -246,11 +251,17 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             else -> { importTargetTrack = track; importLauncher() }
         }
     }
-    // The project is auto-saved internally; "Save" only names it. Load imports a .gilt copy.
+    // The project is auto-saved internally; "Rename" only names it. Load imports a .gilt copy.
     val openLauncher = rememberOpenProjectLauncher { uri ->
         scope.launch {
             val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
             if (doc != null) vm.loadDocument(doc)
+        }
+    }
+    
+    val saveLauncher = rememberSaveProjectLauncher { uri ->
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { ProjectStore.save(context, uri, vm.uiState.value.document) } }
         }
     }
 
@@ -424,6 +435,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onNameProject = { showNameDialog = true },
             onNewProject = { showNewProjectConfirm = true },
             onOpenProject = { openLauncher() },
+            onSaveProject = { saveLauncher() },
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
             onSettings = { showSettings = true },
@@ -431,6 +443,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
             onFaq = { showFaq = true },
+            onAdFree = { showAdFree = true },
         )
 
         // Analysis/export status & errors now stream into the activity-log bottom sheet below,
@@ -607,8 +620,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         context,
                         vm.uiState.value.document,
                         name,
-                        onProgress = { p ->
+                        onProgress = { p, ms ->
                             scope.launch { exportProgress = p } // hop to the main thread for Compose state
+                            vm.seekTo(ms)
                             sink.report(p, "Exporting…")
                         },
                         onPhase = { phase ->
@@ -627,7 +641,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
     if (showHelp) HelpKeyDialog(onDismiss = { showHelp = false })
     if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
-    if (showFaq) FaqDialog(onDismiss = { showFaq = false })
+    if (showFaq) FaqDialog(settings = settings, onDismiss = { showFaq = false })
+    if (showAdFree) AdFreeDialog(billingManager = billingManager, onDismiss = { showAdFree = false })
     if (showOnboarding) {
         OnboardingDialog(
             onComplete = { selectedModelPath ->
@@ -679,6 +694,7 @@ private fun TopBar(
     onNameProject: () -> Unit,
     onNewProject: () -> Unit,
     onOpenProject: () -> Unit,
+    onSaveProject: () -> Unit,
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
     onSettings: () -> Unit,
@@ -686,6 +702,7 @@ private fun TopBar(
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
     onFaq: () -> Unit,
+    onAdFree: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(end = 8.dp),
@@ -706,7 +723,8 @@ private fun TopBar(
                 azConfig(design = AzDropdownDesign.MENU, headerIconSize = 40.dp, showFooter = true)
                 azItem("New") { onNewProject() }
                 azItem("Open") { onOpenProject() }
-                azItem("Save") { onNameProject() }
+                azItem("Save") { onSaveProject() }
+                azItem("Rename") { onNameProject() }
                 azItem("Import") { onImport() }
                 azItem("Generate") { onGenerate() }
                 azItem("Render") { onExport() }
@@ -717,8 +735,11 @@ private fun TopBar(
                 azItem("Tutorial") { onTutorial() }
                 azItem("FAQ") { onFaq() }
                 azItem("Icon Key") { onHelp() }
+                if (!com.hereliesaz.guillotine.ads.AdsState.isAdFreePermanently.value) {
+                    azItem("Ad-Free") { onAdFree() }
+                }
                 // AzNavRail draws its own primary-tinted divider above the footer (About / Feedback /
-                // @HereLiesAz) automatically when showFooter = true \u2014 an explicit azDivider() here
+                // @HereLiesAz) automatically when showFooter = true — an explicit azDivider() here
                 // would double up as two white/red lines. Let the library handle it.
             }
         }
@@ -795,13 +816,15 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
         )
         Spacer(Modifier.weight(1f))
         val frameMs = Math.round(state.document.settings.frameDurationMs)
-        IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
-        IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
-        IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
-        // Loop toggle: at the end of the playback region (or whole timeline) restart instead of stopping.
-        IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
-        IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
-        IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
+            IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
+            IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+            // Loop toggle: at the end of the playback region (or whole timeline) restart instead of stopping.
+            IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
+            IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
+            IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        }
         // Preview quality: lower = smoother playback, less clarity. Tap to cycle Low→…→Full.
         Text(
             "Q:${state.previewQuality.label}",
@@ -1192,4 +1215,36 @@ private fun fmtSecs(ms: Long): String {
     val abs = ms.coerceAtLeast(0L)
     return if (abs < 60_000L) String.format(java.util.Locale.US, "%.1fs", abs / 1000.0)
     else String.format(java.util.Locale.US, "%d:%02d", abs / 60_000L, (abs % 60_000L) / 1000L)
+}
+
+
+@Composable
+fun AdFreeDialog(billingManager: com.hereliesaz.guillotine.billing.BillingManager, onDismiss: () -> Unit) {
+    val productDetails by billingManager.adFreeProductDetails.collectAsState(initial = null)
+    val context = LocalContext.current as? android.app.Activity
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { androidx.compose.material3.Text("Ad-Free Experience") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                androidx.compose.material3.Text("Enjoy the app without ads! You can unlock the ad-free experience permanently, or temporarily disable ads for this session.")
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                context?.let { billingManager.purchaseAdFree(it) }
+                onDismiss()
+            }) {
+                androidx.compose.material3.Text(productDetails?.oneTimePurchaseOfferDetails?.formattedPrice ?: "Buy Ad-Free")
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                com.hereliesaz.guillotine.ads.AdsState.isAdFree.value = true
+                onDismiss()
+            }) {
+                androidx.compose.material3.Text("Free Session")
+            }
+        }
+    )
 }

@@ -799,15 +799,17 @@ open class EditorViewModel {
     }
 
     /**
-     * Marquee select: select every clip whose time span overlaps [startMs, endMs) — on every track,
-     * regardless of vertical position (the dragged rectangle is a time range). Used by the timeline's
-     * range-select (marquee) tool.
+     * Marquee select: select every clip whose time span overlaps [startMs, endMs) and whose track is
+     * included in [trackIds]. Used by the timeline's range-select (marquee) tool.
      */
-    fun selectClipsInRange(startMs: Long, endMs: Long) {
+    fun selectClipsInRect(startMs: Long, endMs: Long, trackIds: Set<String>) {
         val lo = minOf(startMs, endMs)
         val hi = maxOf(startMs, endMs)
-        if (hi <= lo) return
-        val selected = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo }
+        if (hi <= lo || trackIds.isEmpty()) {
+            _uiState.update { it.copy(selectedClipIds = emptyList()) }
+            return
+        }
+        val selected = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo && it.trackId in trackIds }
         _uiState.update { st ->
             // Selecting a range of clips also defines the playback / loop region over the selected
             // clips' extent (Vegas-style), so the user can immediately loop just that region.
