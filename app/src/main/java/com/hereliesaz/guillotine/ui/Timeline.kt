@@ -749,14 +749,9 @@ private fun ClipView(
             // from the current selection to this clip (across tracks, all clips between).
             .pointerInput(clip.id, state.tool, pps, clip.keyframes) {
                 detectTapGestures(
-                    onLongPress = { offset ->
-                        // Near an edge, a long-press starts an edge-trim drag (handled below) — only the
-                        // middle of the clip range-selects.
-                        if (offset.x > edgeThresholdPx && offset.x < size.width - edgeThresholdPx) {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            vm.selectRangeTo(clip.id)
-                        }
-                    },
+                    // NB: no onLongPress here — long-press is owned solely by the edge-trim detector below
+                    // (detectTapGestures.onLongPress would consume the press first and starve it). Middle
+                    // long-press does the range-select there instead.
                     onDoubleTap = {
                         // Double-tap a clip → set the playback / loop region to that clip's span.
                         vm.setPlaybackRegion(clip.startTimeMs, clip.endTimeMs)
@@ -832,17 +827,21 @@ private fun ClipView(
             // split/trimmed clip re-extends by dragging its edge outward — trimClipStart/trimClipEnd
             // bound it to the source media. The grabbed edge previews live and commits on release.
             .pointerInput(clip.id, pps, state.tool) {
-                if (state.tool != EditorTool.SELECT) return@pointerInput
-                val edgePx = 24.dp.toPx()
                 detectDragGesturesAfterLongPress(
                     onDragStart = { down ->
-                        trimEdge = when {
-                            down.x <= edgePx -> -1
-                            down.x >= size.width - edgePx -> 1
-                            else -> 0
-                        }
+                        // Edge-trim is a SELECT-tool action; a long-press within 24dp of either end grabs
+                        // that cut point. A middle long-press (or any long-press in another tool) instead
+                        // range-selects — this is the sole long-press handler so it can't be starved.
+                        trimEdge = if (state.tool == EditorTool.SELECT) {
+                            when {
+                                down.x <= edgeThresholdPx -> -1
+                                down.x >= size.width - edgeThresholdPx -> 1
+                                else -> 0
+                            }
+                        } else 0
                         trimStartPx = 0f; trimEndPx = 0f
-                        if (trimEdge != 0) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        if (trimEdge == 0) vm.selectRangeTo(clip.id)
                     },
                     onDrag = { change, drag ->
                         if (trimEdge != 0) {
@@ -919,6 +918,18 @@ private fun ClipView(
                 .background(Color.Black.copy(alpha = 0.4f))
                 .padding(horizontal = 4.dp, vertical = 1.dp),
         )
+        // Trim handles at both ends when the clip is selected: long-press one and drag to move that cut
+        // point (regaining or removing frames). Brightens while that edge is being dragged.
+        if (selected) {
+            Box(
+                Modifier.align(Alignment.CenterStart).fillMaxHeight().width(6.dp)
+                    .background(Red500.copy(alpha = if (trimEdge < 0) 0.95f else 0.5f)),
+            )
+            Box(
+                Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(6.dp)
+                    .background(Red500.copy(alpha = if (trimEdge > 0) 0.95f else 0.5f)),
+            )
+        }
         // Edit (keep/remove) overlays — positioned relative to the clip's trimmed window.
         if (clip.edits.isNotEmpty()) {
             Canvas(Modifier.fillMaxSize()) {
