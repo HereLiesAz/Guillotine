@@ -82,13 +82,14 @@ mlkit-segmentation-selfie = { group = "com.google.mlkit", name = "segmentation-s
 vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
 mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipeTasksVision" }
-# AzNavRail is a Kotlin Multiplatform library on JitPack. Depend on the platform AAR directly
-# (group `…AzNavRail`, artifact `aznavrail-cmp-android`) — NOT the root module
-# `com.github.HereLiesAz:AzNavRail`. The root module's Gradle module metadata (.module) is broken on
-# JitPack: it advertises Wasm/JS variants that Gradle then tries to pull into the Android build,
-# failing resolution with incompatible artifacts. Targeting the `-android` artifact resolves via its
-# Maven POM and sidesteps the bad root metadata. Do not "simplify" this back to the root coordinate.
-aznavrail = { group = "com.github.HereLiesAz.AzNavRail", name = "aznavrail-cmp-android", version.ref = "aznavrail" }
+# AzNavRail publishes several modules on JitPack. Use the MAIN Android library module — artifact
+# `aznavrail` (the `:aznavrail` Android module) — NOT the Compose-Multiplatform variant
+# (`aznavrail-cmp-android`) and NOT the root aggregate `com.github.HereLiesAz:AzNavRail`. The CMP
+# variant and the root aggregate carry Gradle module metadata (.module) advertising Wasm/JS variants
+# that Gradle then tries to pull into the Android build, failing resolution. The plain `aznavrail`
+# module resolves cleanly via its Android Maven POM (same `com.hereliesaz.aznavrail` package/API).
+# Do not "simplify" this to the `-cmp-android` artifact or the root coordinate.
+aznavrail = { group = "com.github.HereLiesAz.AzNavRail", name = "aznavrail", version.ref = "aznavrail" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 user-messaging-platform = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "userMessaging" }
 billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
