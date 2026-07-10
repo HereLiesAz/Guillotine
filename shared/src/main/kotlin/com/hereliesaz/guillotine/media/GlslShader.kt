@@ -121,21 +121,17 @@ object GlslShader {
         s = s.replace(Regex("IMG_THIS_PIXEL\\s*\\(\\s*$image\\s*\\)"), "texture2D(uTexSampler, vTexSamplingCoord)")
         s = s.replace(Regex("IMG_THIS_NORM_PIXEL\\s*\\(\\s*$image\\s*\\)"), "texture2D(uTexSampler, vTexSamplingCoord)")
         s = s.replace(Regex("IMG_NORM_PIXEL\\s*\\(\\s*$image\\s*,"), "texture2D(uTexSampler,")
-        // IMG_PIXEL takes pixel coords; convert to normalized by dividing by RENDERSIZE.
-        s = s.replace(Regex("IMG_PIXEL\\s*\\(\\s*$image\\s*,\\s*"), "texture2D(uTexSampler, (") // caller closes ')'
-            .let { withOpen -> balanceImgPixel(withOpen) }
+        // IMG_PIXEL takes PIXEL coords → normalize by /RENDERSIZE. Only the common `gl_FragCoord.xy`
+        // argument is rewritten (as one balanced expression); other pixel-coord forms are left for the
+        // author to write in normalized space (a partial regex rewrite would unbalance parentheses).
+        s = s.replace(
+            Regex("IMG_PIXEL\\s*\\(\\s*$image\\s*,\\s*gl_FragCoord\\.xy\\s*\\)"),
+            "texture2D(uTexSampler, gl_FragCoord.xy / RENDERSIZE)",
+        )
         s = s.replace(Regex("IMG_SIZE\\s*\\(\\s*$image\\s*\\)"), "RENDERSIZE")
         s = s.replace("isf_FragNormCoord", "vTexSamplingCoord")
         return s
     }
-
-    /** IMG_PIXEL(img, X) → texture2D(uTexSampler, (X)/RENDERSIZE): finish the coord normalization. This is a
-     *  best-effort pass; the common `IMG_PIXEL(inputImage, gl_FragCoord.xy)` form is handled. */
-    private fun balanceImgPixel(s: String): String =
-        // The earlier replace turned `IMG_PIXEL(img, EXPR)` into `texture2D(uTexSampler, (EXPR)`; add the
-        // `/RENDERSIZE)` before the matching close paren is impractical with regex, so normalize the common
-        // `gl_FragCoord.xy` argument directly and leave other forms to the raw path.
-        s.replace(Regex("texture2D\\(uTexSampler, \\(gl_FragCoord\\.xy\\)"), "texture2D(uTexSampler, (gl_FragCoord.xy/RENDERSIZE)")
 
     // ---- raw fragment --------------------------------------------------------
 

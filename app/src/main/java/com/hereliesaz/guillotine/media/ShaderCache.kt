@@ -18,15 +18,17 @@ object ShaderCache {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Effect>?): Boolean = size > 8
     }
 
-    @Synchronized
     fun effectFor(path: String): Effect? {
         if (path.isBlank()) return null
         val file = File(path)
         if (!file.isFile) return null
         val key = Key(path, file.lastModified())
-        cache[key]?.let { return it }
-        val effect = runCatching { GlslEffect(GlslShader.parse(file.readText())) }.getOrNull() ?: return null
-        cache[key] = effect
+        synchronized(this) { cache[key]?.let { return it } }
+        // Read + parse OUTSIDE the lock — disk I/O and shader parsing shouldn't block other callers.
+        val text = runCatching { file.readText() }.getOrNull() ?: return null
+        val parsed = runCatching { GlslShader.parse(text) }.getOrNull() ?: return null
+        val effect = GlslEffect(parsed)
+        synchronized(this) { cache[key] = effect }
         return effect
     }
 }

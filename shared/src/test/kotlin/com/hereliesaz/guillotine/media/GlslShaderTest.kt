@@ -78,6 +78,21 @@ class GlslShaderTest {
         assertThrows(IllegalArgumentException::class.java) { GlslShader.parse(audio) }
     }
 
+    @Test fun rewrites_img_pixel_with_balanced_parentheses() {
+        val isf = """
+            /*{ "INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ] }*/
+            void main() { gl_FragColor = IMG_PIXEL(inputImage, gl_FragCoord.xy); }
+        """.trimIndent()
+        val p = GlslShader.parse(isf)
+        assertTrue(p.fragmentShader.contains("texture2D(uTexSampler, gl_FragCoord.xy / RENDERSIZE)"))
+        assertFalse(p.fragmentShader.contains("IMG_PIXEL"))
+        // Parentheses must balance, or the shader won't compile on-device.
+        assertEquals(
+            p.fragmentShader.count { it == '(' },
+            p.fragmentShader.count { it == ')' },
+        )
+    }
+
     @Test fun raw_fragment_gets_media3_header_prepended() {
         val raw = "void main() { gl_FragColor = texture2D(uTexSampler, vTexSamplingCoord); }"
         val p = GlslShader.parse(raw)
