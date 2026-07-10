@@ -27,11 +27,19 @@ when busy. For longer / higher-quality video, the app also supports bring-your-o
 The app calls the Gradio API endpoint `generate` with `[prompt, negative_prompt, seconds, seed]` and
 reads the resulting video file url from the result stream.
 
-## Enabling the GPU
+## Requires Hugging Face Pro
 
-After this Space is created (CPU by default), enable **ZeroGPU** in the Space's *Settings → Hardware*
-(requires a Hugging Face Pro account or a community-GPU grant). The app works against the Space's public
-URL: `https://hereliesaz-guillotine-t2v.hf.space`.
+Hosting a **Gradio** Space (even on `cpu-basic`) and using **ZeroGPU** both require a Hugging Face
+**Pro** subscription on the owning account — creating the Space without it returns `402 Payment
+Required`. So the free-to-the-*user* generator is funded by the app owner's HF Pro plan (one
+subscription serves all app users through this shared Space).
+
+After the Space is created, enable **ZeroGPU** in *Settings → Hardware*. The app then works against the
+Space's public URL: `https://hereliesaz-guillotine-t2v.hf.space`.
+
+If you don't want a Pro subscription, the app's free video provider base URL is overridable (the
+provider's extra field) — point it at any compatible public Gradio text-to-video Space that exposes a
+`generate` endpoint, or just rely on the bring-your-own-key paid providers instead.
 
 ## Deploying
 

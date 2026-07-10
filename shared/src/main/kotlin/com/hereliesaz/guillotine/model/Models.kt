@@ -134,6 +134,8 @@ data class ClipFilters(
     val removeBackground: Boolean = false,
     /** On-device face detection: blur every detected face for privacy/anonymization. */
     val blurFaces: Boolean = false,
+    /** Path to a `.cube` 3D LUT applied as a color grade (blank = none). Standard Resolve/Adobe LUTs. */
+    val lutPath: String = "",
 )
 
 @Serializable

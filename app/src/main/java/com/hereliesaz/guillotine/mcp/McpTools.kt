@@ -265,6 +265,42 @@ class McpTools(
                 required = emptyList(),
             ),
         ))
+        put(toolDefinition(
+            "apply_lut",
+            "Apply a `.cube` 3D LUT color grade to a clip ON-DEVICE — the standard color-grade format " +
+                "exported by DaVinci Resolve / Photoshop and shared in free LUT packs. It grades in both " +
+                "preview and export. Use for \"apply this LUT\", \"grade with a .cube\", \"give it a " +
+                "cinematic/teal-orange look via a LUT\". `path` is a filesystem path to a .cube file " +
+                "(usually one the user picked). clear_lut removes it.",
+            objSchema(
+                "clip_id" to stringProp("The clip to grade; defaults to the video clip at the playhead"),
+                "path" to stringProp("Filesystem path to a .cube 3D LUT file"),
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_lut",
+            "Remove the `.cube` LUT color grade from a clip (undo apply_lut).",
+            objSchema(
+                "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "replace_background",
+            "Replace a clip's background ON-DEVICE with no green screen (ML Kit subject matte): segment " +
+                "the subject and composite it over a new background — a solid color or an image — placed " +
+                "on a new track behind. Use for \"replace the background\", \"put me on a red/blue " +
+                "background\", \"change the backdrop\", \"green-screen me onto this image\". Provide color " +
+                "(hex like #1e90ff or a name like \"blue\") OR image_path; defaults to black. For a " +
+                "generated backdrop, generate an image first, then pass its path.",
+            objSchema(
+                "clip_id" to stringProp("The subject clip; defaults to the video clip at the playhead"),
+                "color" to stringProp("Background color (hex #RRGGBB or a name). Ignored if image_path is set."),
+                "image_path" to stringProp("Filesystem path to a background image (overrides color)"),
+                required = emptyList(),
+            ),
+        ))
 
         // ---- audio-event highlights (YAMNet, on-device) ----
         put(toolDefinition(
@@ -644,6 +680,9 @@ class McpTools(
         "auto_color" -> autoColor(args.optString("clip_id"))
         "match_color" -> matchColor(args.getString("source_clip_id"), args.getString("target_clip_id"))
         "blur_faces" -> blurFaces(args.optString("clip_id"), if (args.has("enabled")) args.getBoolean("enabled") else true)
+        "apply_lut" -> applyLut(args.optString("clip_id"), args.getString("path"))
+        "clear_lut" -> clearLut(args.optString("clip_id"))
+        "replace_background" -> replaceBackgroundTool(args.optString("clip_id"), args.optString("color"), args.optString("image_path"))
         "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
         "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
@@ -2064,6 +2103,80 @@ class McpTools(
                 ),
             )
         }
+    }
+
+    /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). */
+    private fun applyLut(clipId: String, path: String): JSONObject {
+        require(path.isNotBlank()) { "Provide the path to a .cube LUT file." }
+        val file = java.io.File(path)
+        require(file.isFile) { "No .cube file at: $path" }
+        // Parse up front so a bad file fails here with a clear message rather than silently doing nothing.
+        runCatching { com.hereliesaz.guillotine.media.CubeLut.parse(file.readText()) }
+            .onFailure { throw IllegalArgumentException("Not a valid 3D .cube LUT: ${it.message}") }
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(lutPath = file.absolutePath) }
+        return ok().apply { put("humanSummary", "Applied LUT ${file.name} to clip ${clip.id}.") }
+    }
+
+    /** Replace a clip's background: matte the subject and composite it over a solid color or image. */
+    private fun replaceBackgroundTool(clipId: String, color: String, imagePath: String): JSONObject {
+        val fg = resolveClipOrPlayhead(clipId)
+        val bg: MediaItem = if (imagePath.isNotBlank()) {
+            val f = java.io.File(imagePath)
+            require(f.isFile) { "No image at: $imagePath" }
+            MediaItem(newId(), Uri.fromFile(f).toString(), "bg: ${f.name}", MediaKind.IMAGE, fg.durationMs)
+        } else {
+            val hex = color.ifBlank { "#000000" }
+            val argb = runCatching { android.graphics.Color.parseColor(hex) }
+                .getOrElse { throw IllegalArgumentException("Unrecognized color \"$hex\" — use hex like #1e90ff or a name like \"blue\".") }
+            val file = solidColorPng(argb)
+            MediaItem(newId(), Uri.fromFile(file).toString(), "bg: $hex", MediaKind.IMAGE, fg.durationMs)
+        }
+        vm.replaceBackground(fg.id, bg)
+        return ok().apply {
+            put(
+                "humanSummary",
+                "Matted the subject on clip ${fg.id} and put it over " +
+                    (if (imagePath.isNotBlank()) "the image background." else "a ${color.ifBlank { "black" }} background."),
+            )
+        }
+    }
+
+    /** Write a small solid-[argb] PNG to the cache and return the file (a background fill). */
+    private fun solidColorPng(argb: Int): java.io.File {
+        val bmp = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(argb)
+        val dir = java.io.File(context.cacheDir, "bg").apply { mkdirs() }
+        val file = java.io.File(dir, "${newId()}.png")
+        return try {
+            file.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            file
+        } finally {
+            bmp.recycle()
+        }
+    }
+
+    /** Remove a clip's `.cube` LUT grade. */
+    private fun clearLut(clipId: String): JSONObject {
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(lutPath = "") }
+        return ok().apply { put("humanSummary", "Removed the LUT from clip ${clip.id}.") }
+    }
+
+    /**
+     * The clip [clipId], or the video clip under the playhead when blank. A non-blank id that doesn't
+     * match throws (rather than silently editing the playhead clip, which risks the wrong clip on a
+     * stale id). Throws too when blank and nothing is under the playhead.
+     */
+    private fun resolveClipOrPlayhead(clipId: String): com.hereliesaz.guillotine.model.TimelineClip {
+        val st = vm.uiState.value
+        if (clipId.isNotBlank()) {
+            return st.document.clips.firstOrNull { it.id == clipId }
+                ?: throw IllegalArgumentException("Clip not found: $clipId")
+        }
+        return com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, st.currentTimeMs,
+        ) ?: throw IllegalStateException("No clip — scrub onto one or pass clip_id.")
     }
 
     /** Toggle on-device face anonymization (blur every detected face) on a clip. */
