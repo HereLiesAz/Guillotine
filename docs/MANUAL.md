@@ -501,8 +501,7 @@ manage bring-your-own-key credentials (stored encrypted on-device), set on-devic
 and relay, and export or import your whole configuration as a JSON backup. Because it's a large
 surface with its own reference, it lives in a dedicated document — see **[SETTINGS.md](SETTINGS.md)**.
 
-Prefer to run without ads for a bit? Menu → **Ad-Free** lets you buy a permanent ad-free
-unlock, or tap **Free Session** to turn ads off for the current session.
+Prefer no ads? Menu → **Ad-Free** offers a one-time purchase that removes ads permanently.
 
 ---
 
