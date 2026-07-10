@@ -253,6 +253,18 @@ class McpTools(
                 required = listOf("source_clip_id", "target_clip_id"),
             ),
         ))
+        put(toolDefinition(
+            "blur_faces",
+            "Toggle ON-DEVICE face anonymization on a clip (ML Kit face detection, no key): every detected " +
+                "face is blurred in both preview and export, for privacy. Use for \"blur the faces\", " +
+                "\"anonymize people\", \"hide identities\", \"censor faces\". Pass enabled=false to turn it " +
+                "back off. Applies to video and image clips.",
+            objSchema(
+                "clip_id" to stringProp("The clip to blur faces on; defaults to the video clip at the playhead"),
+                "enabled" to boolProp("Turn face-blur on (default true) or off"),
+                required = emptyList(),
+            ),
+        ))
 
         // ---- audio-event highlights (YAMNet, on-device) ----
         put(toolDefinition(
@@ -631,6 +643,7 @@ class McpTools(
         "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
         "auto_color" -> autoColor(args.optString("clip_id"))
         "match_color" -> matchColor(args.getString("source_clip_id"), args.getString("target_clip_id"))
+        "blur_faces" -> blurFaces(args.optString("clip_id"), if (args.has("enabled")) args.getBoolean("enabled") else true)
         "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
         "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
@@ -2050,6 +2063,20 @@ class McpTools(
                     if (saturation != 1f) ", saturation ×%.2f".format(saturation) else "",
                 ),
             )
+        }
+    }
+
+    /** Toggle on-device face anonymization (blur every detected face) on a clip. */
+    private fun blurFaces(clipId: String, enabled: Boolean): JSONObject {
+        val st = vm.uiState.value
+        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, st.currentTimeMs,
+            )
+            ?: throw IllegalStateException("No clip to blur faces on — scrub onto one or pass clip_id.")
+        vm.updateClipFilters(clip.id) { it.copy(blurFaces = enabled) }
+        return ok().apply {
+            put("humanSummary", if (enabled) "Blurring faces on clip ${clip.id}." else "Face blur off for clip ${clip.id}.")
         }
     }
 

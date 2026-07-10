@@ -132,6 +132,8 @@ data class ClipFilters(
     val speed: Float = 1f,        // 0.1..10.0x
     /** On-device subject segmentation: keep the foreground, drop the background so a lower layer shows through. */
     val removeBackground: Boolean = false,
+    /** On-device face detection: blur every detected face for privacy/anonymization. */
+    val blurFaces: Boolean = false,
 )
 
 @Serializable

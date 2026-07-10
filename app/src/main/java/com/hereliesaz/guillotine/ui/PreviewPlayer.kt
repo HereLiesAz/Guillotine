@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -302,6 +301,13 @@ private fun VideoTrackLayer(
     val cutoutB by produceState<ImageBitmap?>(null, incoming?.id, incoming?.filters?.removeBackground, bucket) {
         value = cutoutFor(context, incoming, mediaFor, now)
     }
+    // On-device face-blur overlays (transparent + blurred face patches) for clips that anonymize faces.
+    val faceBlurA by produceState<ImageBitmap?>(null, outgoing?.id, outgoing?.filters?.blurFaces, bucket) {
+        value = faceBlurFor(context, outgoing, mediaFor, now)
+    }
+    val faceBlurB by produceState<ImageBitmap?>(null, incoming?.id, incoming?.filters?.blurFaces, bucket) {
+        value = faceBlurFor(context, incoming, mediaFor, now)
+    }
 
     val trackOpacity = trackSettings.opacity
     // Outgoing fades out as xfade 0 -> 1; a lone clip stays fully opaque.
@@ -313,8 +319,21 @@ private fun VideoTrackLayer(
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
     }?.times(trackOpacity)?.times(xfade ?: 0f) ?: 0f
 
-    VideoSlot(outgoing, playerA, cutoutA, opacityA, now, aspectMod, transparent = false)
-    VideoSlot(incoming, playerB, cutoutB, opacityB, now, aspectMod, transparent = true)
+    VideoSlot(outgoing, playerA, cutoutA, faceBlurA, opacityA, now, aspectMod, transparent = false)
+    VideoSlot(incoming, playerB, cutoutB, faceBlurB, opacityB, now, aspectMod, transparent = true)
+}
+
+/** Compute a face-blur overlay for [clip], or null when the clip doesn't anonymize faces. */
+private suspend fun faceBlurFor(
+    context: android.content.Context,
+    clip: TimelineClip?,
+    mediaFor: (TimelineClip) -> MediaItem?,
+    now: Long,
+): ImageBitmap? {
+    if (clip == null || !clip.filters.blurFaces) return null
+    val media = mediaFor(clip) ?: return null
+    val src = TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0)
+    return com.hereliesaz.guillotine.media.FaceBlurrer.blurOverlay(context, media.uri, media.kind, src)?.asImageBitmap()
 }
 
 /** Compute a background-removal cutout for [clip], or null when the clip doesn't remove its background. */
@@ -340,6 +359,7 @@ private fun VideoSlot(
     clip: TimelineClip?,
     player: ExoPlayer,
     cutout: ImageBitmap?,
+    faceBlur: ImageBitmap?,
     alpha: Float,
     now: Long,
     aspectMod: Modifier,
@@ -347,7 +367,6 @@ private fun VideoSlot(
 ) {
     if (clip == null) return
     val mod = aspectMod
-        .wrapContentSize()
         .graphicsLayer {
             this.alpha = alpha.coerceIn(0f, 1f)
             // Keyframe-aware crop/placement (absolute; the clip's static value is the default).
@@ -359,24 +378,33 @@ private fun VideoSlot(
             translationX = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, rel, clip.offsetX) * size.width
             translationY = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, rel, clip.offsetY) * size.height
         }
-    if (clip.filters.removeBackground) {
-        cutout?.let { cb ->
-            Image(bitmap = cb, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
+    // Picture + optional face-blur overlay share the same transformed box so blurred patches track
+    // the video. Fit is used for both so the overlay (frame-sized) aligns with the fitted picture.
+    Box(modifier = mod, contentAlignment = Alignment.Center) {
+        if (clip.filters.removeBackground) {
+            cutout?.let { cb ->
+                Image(bitmap = cb, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            }
+        } else {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        setBackgroundColor(
+                            if (transparent) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK,
+                        )
+                        this.player = player
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
         }
-    } else {
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    setBackgroundColor(
-                        if (transparent) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK,
-                    )
-                    this.player = player
-                }
-            },
-            modifier = mod,
-        )
+        if (clip.filters.blurFaces) {
+            faceBlur?.let { fb ->
+                Image(bitmap = fb, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            }
+        }
     }
 }
 

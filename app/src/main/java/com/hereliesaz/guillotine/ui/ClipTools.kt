@@ -150,6 +150,19 @@ private fun BackgroundToolButton(vm: EditorViewModel, state: EditorUiState, clip
                 color = Neutral500, fontSize = 10.sp,
             )
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = clip.filters.blurFaces,
+                onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(blurFaces = c) } },
+            )
+            Text("Blur faces (anonymize)", color = Neutral400, fontSize = 12.sp)
+        }
+        if (clip.filters.blurFaces) {
+            Text(
+                "On-device face detection blurs every face in preview and export.",
+                color = Neutral500, fontSize = 10.sp,
+            )
+        }
     }
 }
 
