@@ -1928,11 +1928,10 @@ class McpTools(
         return OperationController.runBlocking(
             context, OperationKind.GENERATE, "Building transition…", pausable = false,
         ) { _ ->
-            val ff = com.hereliesaz.guillotine.media.FfmpegFilter
-            val baked = ff.xfade(
+            val baked = com.hereliesaz.guillotine.media.FfmpegFilter.xfade(
                 context,
-                ff.Segment(fromMedia.uri, from.trimStartMs / 1000f, from.durationMs / 1000f),
-                ff.Segment(toMedia.uri, to.trimStartMs / 1000f, to.durationMs / 1000f),
+                com.hereliesaz.guillotine.media.FfmpegFilter.Segment(fromMedia.uri, from.trimStartMs / 1000f, from.durationMs / 1000f),
+                com.hereliesaz.guillotine.media.FfmpegFilter.Segment(toMedia.uri, to.trimStartMs / 1000f, to.durationMs / 1000f),
                 type, durationSec, ffmpeg, java.io.File(context.cacheDir, "ffmpeg"),
             )
             vm.addMedia(
