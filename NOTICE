@@ -1,0 +1,55 @@
+Guillotine
+Copyright (C) 2025-2026 HereLiesAz <https://github.com/HereLiesAz/Guillotine>
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License, version 3, as published by
+the Free Software Foundation. See the LICENSE file for the full license text.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU AGPL for more details.
+
+
+Additional terms under AGPLv3 Section 7
+=======================================
+
+As permitted by Section 7 of the GNU AGPLv3, the following additional terms
+apply to this work and to any modified version of it. These are limited to the
+kinds of terms Section 7 expressly allows, so the software remains free/libre
+and AGPLv3-compatible.
+
+  (b) Attribution.  You must preserve clear attribution to the original project
+      in the "Appropriate Legal Notices" displayed by the software. Any conveyed
+      version -- original or modified -- must show, in a user-visible About /
+      credits / legal-notices screen or equivalent:
+
+          Based on Guillotine (c) HereLiesAz
+          https://github.com/HereLiesAz/Guillotine
+
+      and must keep this NOTICE file and all copyright notices intact in the
+      source.
+
+  (c) Marking modified versions.  If you modify this software, you must mark
+      your version as changed (with a name and date) and must not misrepresent
+      its origin or imply endorsement by the original author.
+
+Name and logo (not licensed)
+============================
+
+The name "Guillotine" and the Guillotine application icon/logo are NOT licensed
+for use in modified or redistributed versions (AGPLv3 Section 7(e) reserves
+trademark and trade-name rights). Forks and derivatives must adopt a DIFFERENT
+name and a different application icon. You may of course state, factually and
+without implying endorsement, that your work is "based on Guillotine."
+
+Notes
+=====
+
+- The AGPLv3 already requires that recipients receive the complete corresponding
+  source code, including when the software is made available over a network
+  (Section 13). The terms above add attribution and naming requirements on top
+  of -- not in place of -- that obligation.
+- Releases previously dedicated under CC0 1.0 Universal remain in the public
+  domain; the AGPLv3 relicensing applies to subsequent versions only.
+- These terms are provided in good faith by a non-lawyer; have counsel review
+  before relying on them for enforcement.
