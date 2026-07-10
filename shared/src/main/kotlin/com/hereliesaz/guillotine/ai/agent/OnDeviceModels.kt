@@ -36,6 +36,10 @@ enum class ModelCategory {
     DIARIZE_SEG,
     /** sherpa-onnx speaker-embedding `.onnx` — the other half of diarization. */
     DIARIZE_EMBED,
+    /** Low-light enhancement `.tflite` (image→image) — brighten dark frames via apply_image_effect. */
+    LOWLIGHT,
+    /** sherpa-onnx offline speech-denoiser `.onnx` (GTCRN) — clean up noisy speech audio. */
+    DENOISE,
     // --- reserved for upcoming runtimes (not yet shown in the picker) ---
     STYLE, STEM,
 }
@@ -149,12 +153,12 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         label = "Gemma 3 1B Instruct (int4)",
         fileName = "gemma3-1b-it-int4.task",
         sizeBytes = 554_661_243L,
-        license = "Gemma (free sign-in)",
-        gated = true,
-        repoUrl = hfRepo("litert-community/Gemma3-1B-IT"),
-        downloadUrl = null,
+        license = "Gemma",
+        gated = false,
+        repoUrl = hfRepo("HereLiesAz/gemma3-1b-it"),
+        downloadUrl = hfResolve("HereLiesAz/gemma3-1b-it", "gemma3-1b-it-int4.task"),
         abilities = "Compact and fast with good reasoning. Smallest download of the full-capability models.",
-        limitations = "Requires a free Hugging Face sign-in to download (Gemma license).",
+        limitations = "~0.55 GB. Mirrored from Google's Gemma release (Gemma Terms of Use apply).",
     ),
     OnDeviceModel(
         id = "deepseek-r1-qwen-1.5b-q8",
@@ -168,8 +172,20 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         abilities = "Strong step-by-step reasoning for its size (distilled R1). Good for multi-step edits.",
         limitations = "1.86 GB download. Its reasoning traces can be verbose.",
     ),
-    // Note: Qwen3 and Gemma-3n ship only as `.litertlm`, which needs a newer MediaPipe runtime than
-    // this build loads (`.task`), so they're intentionally omitted from the download list for now.
+    OnDeviceModel(
+        id = "qwen3-0.6b-int4",
+        label = "Qwen3 0.6B (int4) — light & modern",
+        fileName = "qwen3_0_6b_mixed_int4.litertlm",
+        sizeBytes = 497_664_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("litert-community/Qwen3-0.6B"),
+        downloadUrl = hfResolve("litert-community/Qwen3-0.6B", "qwen3_0_6b_mixed_int4.litertlm"),
+        abilities = "Small, fast, up-to-date Qwen3 assistant (mixed int4). A good lightweight default; ships as LiteRT-LM (.litertlm).",
+        limitations = "~0.5 GB. Reasons less deeply than the 1.5 B+ options.",
+    ),
+    // Gemma-3n (VLM list) and this Qwen3 entry are both un-gated. Qwen3 ships as LiteRT-LM
+    // (.litertlm), which the current MediaPipe runtime (0.10.35) loads directly.
 )
 
 /**
@@ -209,12 +225,26 @@ val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
 )
 
 /**
- * Recommended face-embedding models for identifying a specific person. "Use" sets `faceEmbedModelPath`.
- * Empty for now: no ready-to-use, MediaPipe-metadata, commercially-licensed 512-d face `.tflite` is
- * published on Hugging Face (MobileFaceNet tflites are 192-d app assets; EdgeFace ships PyTorch under a
- * non-commercial license). Users can still point the face-model path at their own converted model.
+ * Recommended face-recognition models for identifying a specific person. "Use" sets `faceEmbedModelPath`.
+ * These run through the raw-TFLite `FaceRecognizer` (NOT MediaPipe), so a plain face `.tflite` without
+ * MediaPipe metadata is exactly what's wanted: detect a face → square-resize → (x−127.5)/128 → embed →
+ * L2-normalize → cosine. Person concepts route here instead of the generic image embedder.
  */
-val RECOMMENDED_FACE_MODELS: List<OnDeviceModel> = emptyList()
+val RECOMMENDED_FACE_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "mobilefacenet-192",
+        label = "MobileFaceNet — face identity",
+        fileName = "mobilefacenet.tflite",
+        sizeBytes = 5_233_552L,
+        license = "BSD-3-Clause",
+        gated = false,
+        repoUrl = "https://github.com/MCarlomagno/FaceRecognitionAuth",
+        downloadUrl = "https://raw.githubusercontent.com/MCarlomagno/FaceRecognitionAuth/master/assets/mobilefacenet.tflite",
+        abilities = "ArcFace-trained face embedder (112×112 → 192-d). Recognizes a specific *person* far better than the generic image embedder — pair it with a person concept for \"keep only shots with X\".",
+        limitations = "Best with aligned faces; a plain detected-face crop works with somewhat lower accuracy. Weights: sirius-ai/MobileFaceNet_TF (Apache-2.0).",
+        category = ModelCategory.FACE,
+    ),
+)
 
 /**
  * Recommended depth-estimation `.tflite` models for the "depth this frame" effect. "Use" sets
@@ -330,8 +360,9 @@ val RECOMMENDED_TTS_MODELS: List<OnDeviceModel> = listOf(
 
 /**
  * Recommended multimodal VLM `.task` models (MediaPipe `LlmInference` + vision) for rich frame
- * captioning. "Use" sets `vlmModelPath`. Gemma-3n is gated (Gemma license), so these link out to Hugging
- * Face for a free sign-in — the user downloads there and pastes the path.
+ * captioning. "Use" sets `vlmModelPath`. Gemma-3n is re-hosted (un-gated) in our own HF namespace —
+ * mirrored from Google's Gemma release, so it downloads with no sign-in. (Subject to the Gemma Terms
+ * of Use; see the in-app notice.)
  */
 val RECOMMENDED_VLM_MODELS: List<OnDeviceModel> = listOf(
     OnDeviceModel(
@@ -339,12 +370,12 @@ val RECOMMENDED_VLM_MODELS: List<OnDeviceModel> = listOf(
         label = "Gemma 3n E2B (vision) — frame captioning",
         fileName = "gemma-3n-E2B-it-int4.task",
         sizeBytes = 3_136_226_711L,
-        license = "Gemma (free sign-in)",
-        gated = true,
-        repoUrl = hfRepo("google/gemma-3n-E2B-it-litert-preview"),
-        downloadUrl = null,
+        license = "Gemma",
+        gated = false,
+        repoUrl = hfRepo("HereLiesAz/gemma-3n-e2b-it-litertlm"),
+        downloadUrl = hfResolve("HereLiesAz/gemma-3n-e2b-it-litertlm", "gemma-3n-E2B-it-int4.task"),
         abilities = "Natively multimodal: looks at a frame and describes it in rich natural language. Powers \"describe / what's happening in this frame\".",
-        limitations = "~2.9 GB; needs a free Hugging Face sign-in (Gemma license). High-end device recommended.",
+        limitations = "~2.9 GB. High-end device recommended. Mirrored from Google's Gemma release (Gemma Terms of Use apply).",
         category = ModelCategory.VLM,
     ),
     OnDeviceModel(
@@ -352,12 +383,12 @@ val RECOMMENDED_VLM_MODELS: List<OnDeviceModel> = listOf(
         label = "Gemma 3n E4B (vision) — higher quality",
         fileName = "gemma-3n-E4B-it-int4.task",
         sizeBytes = 4_405_655_031L,
-        license = "Gemma (free sign-in)",
-        gated = true,
-        repoUrl = hfRepo("google/gemma-3n-E4B-it-litert-preview"),
-        downloadUrl = null,
+        license = "Gemma",
+        gated = false,
+        repoUrl = hfRepo("HereLiesAz/gemma-3n-e4b-it-litertlm"),
+        downloadUrl = hfResolve("HereLiesAz/gemma-3n-e4b-it-litertlm", "gemma-3n-E4B-it-int4.task"),
         abilities = "The larger, more capable multimodal Gemma-3n — sharper, more detailed frame descriptions.",
-        limitations = "~4.1 GB; free Hugging Face sign-in (Gemma license). Needs a high-end device with plenty of storage.",
+        limitations = "~4.1 GB. Needs a high-end device with plenty of storage. Mirrored from Google's Gemma release (Gemma Terms of Use apply).",
         category = ModelCategory.VLM,
     ),
 )
@@ -428,8 +459,50 @@ val RECOMMENDED_STEM_MODELS: List<OnDeviceModel> = listOf(
     ),
 )
 
+/**
+ * Recommended low-light enhancement `.tflite` (image→image) for `apply_image_effect(effect="lowlight")`.
+ * "Use" sets `effectModelPaths["lowlight"]`. Runs through the generic [TfliteImageModel].
+ */
+val RECOMMENDED_LOWLIGHT_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "mirnet-lowlight-dr",
+        label = "MIRNet — low-light enhance",
+        fileName = "mirnet_fixed_dr.tflite",
+        sizeBytes = 37_217_606L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://github.com/soumik12345/MIRNet",
+        downloadUrl = "https://tfhub.dev/sayakpaul/lite-model/mirnet-fixed/dr/1?lite-format=tflite",
+        abilities = "Brightens and denoises dark / low-light footage. Apply via apply_image_effect(effect=lowlight).",
+        limitations = "~37 MB. Fixed 400×400 (the frame is resized in and back out). CPU-heavy per frame — best on stills or short clips.",
+        category = ModelCategory.LOWLIGHT,
+    ),
+)
+
+/**
+ * Recommended speech-denoiser model for sherpa-onnx `OfflineSpeechDenoiser` (GTCRN). Single `.onnx`;
+ * "Use" sets `denoiseModelPath`. Cleans up noisy voice audio on-device.
+ */
+val RECOMMENDED_DENOISE_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "gtcrn-denoise",
+        label = "GTCRN — speech denoiser",
+        fileName = "gtcrn_simple.onnx",
+        sizeBytes = 535_638L,
+        license = "MIT",
+        gated = false,
+        repoUrl = "https://github.com/Xiaobin-Rong/gtcrn",
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx",
+        abilities = "On-device speech noise reduction — removes hiss, hum, and background noise from voice recordings.",
+        limitations = "~0.5 MB. Outputs 16 kHz. Tuned for speech, not music.",
+        category = ModelCategory.DENOISE,
+    ),
+)
+
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
+    ModelCategory.LOWLIGHT -> RECOMMENDED_LOWLIGHT_MODELS
+    ModelCategory.DENOISE -> RECOMMENDED_DENOISE_MODELS
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
     ModelCategory.RECOGNITION -> RECOMMENDED_RECOGNITION_MODELS
     ModelCategory.FACE -> RECOMMENDED_FACE_MODELS

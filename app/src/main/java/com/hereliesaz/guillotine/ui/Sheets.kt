@@ -121,6 +121,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var diarizeSegModelPath by remember { mutableStateOf(current.diarizeSegModelPath) }
     var diarizeEmbedModelPath by remember { mutableStateOf(current.diarizeEmbedModelPath) }
     var stemModelPath by remember { mutableStateOf(current.stemModelPath) }
+    var denoiseModelPath by remember { mutableStateOf(current.denoiseModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -165,6 +166,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     diarizeSegModelPath = diarizeSegModelPath.trim(),
                     diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
                     stemModelPath = stemModelPath.trim(),
+                    denoiseModelPath = denoiseModelPath.trim(),
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -195,6 +197,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             diarizeSegModelPath = restored.diarizeSegModelPath
             diarizeEmbedModelPath = restored.diarizeEmbedModelPath
             stemModelPath = restored.stemModelPath
+            denoiseModelPath = restored.denoiseModelPath
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -413,6 +416,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         Triple("superres", "Super-resolution model path (.tflite)", ModelCategory.SUPERRES),
                         Triple("style", "Style-transfer model path (.tflite)", ModelCategory.STYLE),
                         Triple("depth", "Depth model path (.tflite)", ModelCategory.DEPTH),
+                        Triple("lowlight", "Low-light enhance model path (.tflite)", ModelCategory.LOWLIGHT),
                     ).forEach { (kind, hint, cat) ->
                         OutlinedTextField(
                             value = effectModelPaths[kind].orEmpty(),
@@ -586,6 +590,29 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = stemModelPath,
                         onUse = { stemModelPath = it },
                     )
+
+                    // Noise reduction / voice isolation (sherpa-onnx GTCRN denoiser).
+                    Text("Noise reduction — clean up voice audio (optional)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = denoiseModelPath,
+                        onValueChange = { denoiseModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Speech-denoiser model (.onnx)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Enables \"remove background noise / clean up the audio\" — strips hiss, hum, and " +
+                            "background noise from voice (GTCRN). Fast, on-device.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+                    ModelPicker(
+                        context = context,
+                        title = "Denoiser models — download, use, or remove",
+                        models = recommendedModelsFor(ModelCategory.DENOISE),
+                        selectedPath = denoiseModelPath,
+                        onUse = { denoiseModelPath = it },
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -752,6 +779,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             diarizeSegModelPath = diarizeSegModelPath.trim(),
                             diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
                             stemModelPath = stemModelPath.trim(),
+                            denoiseModelPath = denoiseModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                             genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
                             genModels = genModels,
@@ -796,6 +824,16 @@ private fun ModelPicker(
     }
 
     Text(title, color = Neutral400, fontSize = 12.sp)
+    // Gemma redistribution notice: shown whenever this group offers a Gemma model. We re-host the
+    // weights un-gated, so we pass through the Gemma Terms of Use per the license.
+    if (models.any { it.license.contains("Gemma", ignoreCase = true) }) {
+        Text(
+            "Built with Gemma — provided under and subject to the Gemma Terms of Use ↗",
+            color = Neutral500,
+            fontSize = 10.sp,
+            modifier = Modifier.clickableText { uriHandler.openUri("https://ai.google.dev/gemma/terms") },
+        )
+    }
     models.forEach { model ->
         // Keyed on bundledReady so the bundled model flips to "Installed" once extraction finishes
         // (without this the row never refreshes after the LaunchedEffect completes).

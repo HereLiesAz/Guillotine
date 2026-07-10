@@ -104,9 +104,23 @@ object Exporter {
             }
         }
 
+        // Face-blur patches are detected off the main thread up front too (not per render frame).
+        val faceBlurCandidates = document.clips.count { it.type == ClipType.VIDEO && it.filters.blurFaces }
+        if (faceBlurCandidates > 0) phase("Precomputing face blur for $faceBlurCandidates clip(s)…")
+        val faceBlur = withContext(Dispatchers.IO) {
+            try {
+                precomputeFaceBlur(context, document)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Throwable) {
+                ActivityLog.error("Face-blur precompute failed (continuing without): ${describeCauseChain(e)}")
+                emptyMap()
+            }
+        }
+
         try {
             phase("Building export composition…")
-            val composition = buildComposition(document, normalizeGains, mattes)
+            val composition = buildComposition(document, normalizeGains, mattes, faceBlur)
             require(composition != null) { "Nothing to export — add a video clip first." }
 
             // Detect whether the composition actually carries audio. Calling setAudioMimeType(AAC)
@@ -292,6 +306,7 @@ object Exporter {
         document: Document,
         normalizeGains: Map<String, Float>,
         mattes: Map<Long, Bitmap>,
+        faceBlur: Map<Long, Bitmap>,
     ): Composition? {
         val geometry = VideoEffects.geometry(document.settings)
 
@@ -314,6 +329,7 @@ object Exporter {
         fun overlaysFor(timelineStartMs: Long): OverlayEffect? {
             val list = mutableListOf<TextureOverlay>()
             if (hasMatte) list += MatteOverlay(mattes, timelineStartMs)
+            if (faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
             textClips.forEach { list += CaptionOverlay(it, timelineStartMs) }
             return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
         }
@@ -658,6 +674,53 @@ object Exporter {
                 }
             }
             t += MatteOverlay.CACHE_MS
+        }
+        return out
+    }
+
+    /**
+     * Pre-detect face-blur patches off the main thread, keyed by timeline bucket
+     * (`timelineMs / FaceBlurOverlay.CACHE_MS`), so [FaceBlurOverlay] is a cheap lookup at render time
+     * instead of running ML Kit face detection per frame on the encoder thread. Covers every video
+     * clip that anonymizes faces (topmost visible track wins at each instant, matching the preview).
+     * Returns empty when no clip blurs faces.
+     */
+    private fun precomputeFaceBlur(context: Context, document: Document): Map<Long, Bitmap> {
+        val disabled = document.disabledTrackIds
+        val blurClips = document.clips.filter {
+            it.type == ClipType.VIDEO && it.trackId !in disabled && it.filters.blurFaces
+        }
+        if (blurClips.isEmpty()) return emptyMap()
+
+        val videoTracks = document.videoTracks
+        // Only detect on frames that survive into the output (kept ranges of each blur clip).
+        val keptTimelineRanges = blurClips.flatMap { clip ->
+            TimelineMath.keptRanges(clip).map { r ->
+                val s = clip.startTimeMs + (r.first - clip.trimStartMs)
+                val e = clip.startTimeMs + (r.last + 1 - clip.trimStartMs)
+                s until e
+            }
+        }
+
+        val out = HashMap<Long, Bitmap>()
+        val minStart = blurClips.minOf { it.startTimeMs }
+        val maxEnd = blurClips.maxOf { it.endTimeMs }
+        var t = minStart
+        while (t < maxEnd) {
+            val bucket = t / FaceBlurOverlay.CACHE_MS
+            if (!out.containsKey(bucket) && keptTimelineRanges.any { t in it }) {
+                val topmost = blurClips
+                    .filter { t >= it.startTimeMs && t < it.endTimeMs }
+                    .minByOrNull { videoTracks.indexOf(it.trackId).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+                val media = topmost?.let { document.mediaFor(it) }
+                if (topmost != null && media != null) {
+                    val src = topmost.trimStartMs + (t - topmost.startTimeMs)
+                    com.hereliesaz.guillotine.media.FaceBlurrer
+                        .blurOverlayBlocking(context, media.uri, media.kind, src)
+                        ?.let { out[bucket] = boundMatte(it) }
+                }
+            }
+            t += FaceBlurOverlay.CACHE_MS
         }
         return out
     }

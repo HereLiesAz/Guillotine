@@ -81,9 +81,12 @@ and need ONNX Runtime instead.
 | **DINOv2 ViT-S/14** | ~22 M, 384-d | Best generic instance features | Apache-2.0 | **ONNX Runtime Mobile** ❌ (ViT) |
 
 **Faces (person identity):** ML Kit face detect + a face embedder beats a generic one.
-**MobileFaceNet-512** (~1–4 MB, MIT community weights) is the safe default; **EdgeFace-XS**
-(Idiap research license) is higher accuracy. Guillotine routes person concepts through the
-face path when a face model is configured (Settings → face model).
+**MobileFaceNet — shipped** (one-tap download, BSD-3-Clause, 5.2 MB, 112×112 → 192-d
+ArcFace) runs through a raw-TFLite `FaceRecognizer` (detect → square-resize → (x−127.5)/128
+→ embed → L2 → cosine). Guillotine routes person concepts to it when a face model is
+configured (Settings → face model), else falls back to the generic image embedder.
+Follow-ups: 5-point landmark alignment for higher accuracy; **EdgeFace-XS** is more accurate
+but ships under the Idiap research (non-commercial) license, so it's not offered.
 
 ### 1.4 Speech (ASR + TTS)
 
@@ -196,7 +199,14 @@ Each item is feasible on the current stack or a model listed above.
     `analyze_clip_with_concept(keep_only=true)`; negatives ("that's a different person")
     sharpen it. Auto-blur and non-face-follow reframe remain future work.)**
 18. Text-to-video B-roll to fill gaps; image-gen titles/thumbnails/lower-thirds;
-    generate a thumbnail from the best frame.
+    generate a thumbnail from the best frame. **(free T2V shipped — the keyless
+    "Guillotine (free)" video provider calls our own Hugging Face Space (`hf-space/`,
+    LTX-Video on ZeroGPU; deploy via the *Deploy T2V Space* Action, `HF_TOKEN` secret).
+    Only the text prompt leaves the device. BYO-key providers (Runway/Luma/Veo/Kling/
+    Pika/Sora) remain for longer, higher-quality clips.)** On-device T2V (e.g. the
+    iOS-only [On-device-Sora](https://github.com/eai-lab/On-device-Sora), CoreML) is a
+    *watch* item — no Android-friendly LiteRT/ONNX T2V is fast enough yet; revisit when
+    one lands.
 19. Semantic footage search ("find all clips with a dog/sunset/red car") via the
     existing on-device image embeddings. **(shipped — `search_clips` matches on-device
     image labels across each clip's sampled frames)**

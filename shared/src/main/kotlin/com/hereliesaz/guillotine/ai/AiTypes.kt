@@ -123,6 +123,8 @@ data class AiSettings(
     val diarizeEmbedModelPath: String = "",
     /** Optional Spleeter model *directory* (ONNX) for stem separation (vocals / accompaniment). */
     val stemModelPath: String = "",
+    /** Optional sherpa-onnx GTCRN `.onnx` speech-denoiser file for on-device noise reduction. */
+    val denoiseModelPath: String = "",
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */

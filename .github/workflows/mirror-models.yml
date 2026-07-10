@@ -1,0 +1,75 @@
+name: Mirror models to HF
+
+# Re-hosts gated Gemma LiteRT models into PUBLIC, ungated repos in our own HF namespace, so the app
+# can download them anonymously (no user sign-in). Runs entirely on the GitHub runner — nothing
+# transfers through anyone's machine. Manual trigger only.
+#
+# Requirements:
+#   - Repo secret HF_TOKEN: a Hugging Face *write* token whose account has ACCEPTED the Gemma license
+#     (Settings → Secrets and variables → Actions → New repository secret → name HF_TOKEN).
+#
+# After it runs, the models are at:
+#   https://huggingface.co/<dest>/resolve/main/<file>
+# Read the exact filenames from the new repos and wire them into OnDeviceModels.kt (gated = false).
+
+on:
+  workflow_dispatch:
+    inputs:
+      make_public:
+        description: "Create the destination repos as public (ungated)"
+        type: boolean
+        default: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install huggingface_hub
+        run: pip install -U "huggingface_hub[hf_transfer]"
+
+      - name: Mirror gated LiteRT models → public HF repos
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_HUB_ENABLE_HF_TRANSFER: "1"
+          MAKE_PUBLIC: ${{ inputs.make_public }}
+        run: |
+          python - <<'PY'
+          import os, shutil, tempfile
+          from huggingface_hub import create_repo, snapshot_download, upload_folder
+
+          assert os.environ.get("HF_TOKEN"), "HF_TOKEN secret is not set"
+          private = os.environ.get("MAKE_PUBLIC", "true").lower() != "true"
+
+          # (source gated repo, destination public repo in our namespace).
+          # Add Gemma 3 1B / Qwen3 / other LiteRT models here later — one line each.
+          MODELS = [
+              ("google/gemma-3n-E2B-it-litert-preview", "HereLiesAz/gemma-3n-e2b-it-litertlm"),
+              ("google/gemma-3n-E4B-it-litert-preview", "HereLiesAz/gemma-3n-e4b-it-litertlm"),
+              ("litert-community/Gemma3-1B-IT",          "HereLiesAz/gemma3-1b-it"),
+          ]
+          # Only grab the model + its config/tokenizer; skip readmes/images/duplicates.
+          PATTERNS = ["*.litertlm", "*.task", "*.json", "*.model", "*.spm", "tokenizer*"]
+
+          for src, dst in MODELS:
+              print(f"::group::{src} -> {dst}")
+              create_repo(dst, repo_type="model", private=private, exist_ok=True)
+              tmp = tempfile.mkdtemp()
+              try:
+                  local = snapshot_download(src, allow_patterns=PATTERNS, local_dir=tmp)
+                  upload_folder(
+                      folder_path=local,
+                      repo_id=dst,
+                      repo_type="model",
+                      commit_message=f"Mirror {src}",
+                  )
+                  print(f"done: https://huggingface.co/{dst}")
+              finally:
+                  shutil.rmtree(tmp, ignore_errors=True)  # free disk before the next model
+              print("::endgroup::")
+          PY

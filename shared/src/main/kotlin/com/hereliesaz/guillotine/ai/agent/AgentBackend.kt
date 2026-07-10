@@ -116,11 +116,23 @@ val AGENT_SYSTEM_PROMPT = """
 
     ON-DEVICE IMAGE EFFECTS:
     - "upscale / enhance this frame" → apply_image_effect(effect="superres"); "stylize / apply a style" →
-      effect="style"; "depth map / show depth" → effect="depth". Each runs an on-device TFLite model on the
-      current frame and adds the result as an image clip. If the model isn't configured it returns an error
-      naming the Settings field — relay it, don't retry. The super-res and depth models are one-tap
-      downloads in Settings → AI Analyzer (MiDaS for depth, Real-ESRGAN for upscale); tell the user to grab
+      effect="style"; "depth map / show depth" → effect="depth"; "brighten / fix this dark (low-light)
+      frame" → effect="lowlight". Each runs an on-device TFLite model on the current frame and adds the
+      result as an image clip. If the model isn't configured it returns an error naming the Settings field —
+      relay it, don't retry. The super-res, depth, and low-light models are one-tap downloads in Settings →
+      AI Analyzer (MiDaS for depth, Real-ESRGAN for upscale, MIRNet for low-light); tell the user to grab
       one there. Style transfer needs a compatible model the user supplies themselves.
+
+    FACE ANONYMIZATION (on-device, no model needed):
+    - "blur the faces", "anonymize people", "hide identities", "censor faces" → blur_faces on the clip (or
+      the clip at the playhead). ML Kit face detection blurs every detected face in both preview and export.
+      blur_faces(enabled=false) turns it back off.
+
+    NOISE REDUCTION (on-device):
+    - "remove background noise", "clean up the audio", "denoise this", "reduce the hiss/hum" → denoise_clip
+      with the clip id. It runs the GTCRN speech denoiser and adds the cleaned voice as a new audio clip.
+      Needs the denoiser model (Settings → AI Analyzer → Noise reduction); if it isn't set it returns an
+      error naming the field — relay it, don't retry.
 
     CAPTIONS / TRANSCRIPTION:
     - "transcribe", "add captions/subtitles" → transcribe_clip: adds timed caption text clips synced to

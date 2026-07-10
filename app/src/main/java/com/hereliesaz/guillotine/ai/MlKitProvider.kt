@@ -199,12 +199,12 @@ class MlKitProvider : ClipAnalyzer {
         embedModelPath: String? = null,
         faceModelPath: String? = null,
     ): FloatArray? {
-        val embed = ImageEmbed(context, embedderModel(isFace, embedModelPath, faceModelPath))
+        val embed = Embedder.create(context, isFace, embedModelPath, faceModelPath)
         try {
             if (!embed.available) return null
             val cropBmp = pickCrop(context, frame, term, isFace)
             return cropBmp?.let { c ->
-                try { embed.embed(c)?.floatEmbedding() } finally { if (c !== frame) c.recycle() }
+                try { embed.embed(c) } finally { if (c !== frame) c.recycle() }
             }
         } finally {
             embed.close()
@@ -223,14 +223,14 @@ class MlKitProvider : ClipAnalyzer {
         embedModelPath: String? = null,
         faceModelPath: String? = null,
     ): List<FloatArray> {
-        val embed = ImageEmbed(context, embedderModel(isFace, embedModelPath, faceModelPath))
+        val embed = Embedder.create(context, isFace, embedModelPath, faceModelPath)
         try {
             if (!embed.available) return emptyList()
             val crops = collectCrops(context, frame, term, isFace).ifEmpty { listOfNotNull(centerCrop(frame)) }
             val keep = crops.take(5)
             crops.drop(5).forEach { if (it !== frame) it.recycle() }
             return keep.mapNotNull { c ->
-                try { embed.embed(c)?.floatEmbedding() } finally { if (c !== frame) c.recycle() }
+                try { embed.embed(c) } finally { if (c !== frame) c.recycle() }
             }
         } finally {
             embed.close()
@@ -276,12 +276,34 @@ class MlKitProvider : ClipAnalyzer {
         }
     }
 
-    /** Which embedding model to use: the face model for person concepts (falling back to the general
-     *  model), else the general model (null → the bundled default). */
-    private fun embedderModel(isFace: Boolean, embedModelPath: String?, faceModelPath: String?): String? {
-        val face = faceModelPath?.takeIf { it.isNotBlank() }
-        val general = embedModelPath?.takeIf { it.isNotBlank() }
-        return if (isFace) face ?: general else general
+    /**
+     * Unifies the general MediaPipe image embedder and the dedicated raw-Interpreter [FaceRecognizer]
+     * behind one embed(bitmap) → L2-normalized vector call. A person concept with a configured face
+     * model uses the face recognizer (real face features); everything else uses the (pluggable) general
+     * embedder — which still works on a face crop, just with generic features, when no face model is set
+     * or the face model fails to load.
+     */
+    private class Embedder private constructor(
+        private val face: FaceRecognizer?,
+        private val image: ImageEmbed?,
+    ) {
+        val available: Boolean get() = face?.available == true || image?.available == true
+        fun embed(bmp: Bitmap): FloatArray? = face?.embed(bmp) ?: image?.embed(bmp)?.floatEmbedding()
+        fun close() { runCatching { face?.close() }; runCatching { image?.close() } }
+
+        companion object {
+            fun create(context: Context, isFace: Boolean, embedModelPath: String?, faceModelPath: String?): Embedder {
+                if (isFace) {
+                    val facePath = faceModelPath?.takeIf { it.isNotBlank() }
+                    if (facePath != null) {
+                        val fr = FaceRecognizer(facePath)
+                        if (fr.available) return Embedder(fr, null)
+                        fr.close() // model didn't load → fall back to the general embedder
+                    }
+                }
+                return Embedder(null, ImageEmbed(context, embedModelPath?.takeIf { it.isNotBlank() }))
+            }
+        }
     }
 
     /**
@@ -307,7 +329,7 @@ class MlKitProvider : ClipAnalyzer {
         require(kind != MediaKind.AUDIO) { "Learned-thing matching needs a video or image clip." }
         require(examples.isNotEmpty()) { "Point the thing out in a frame first (add_reference)." }
         val ov = if (isFace) null else ObjectVision(context)
-        val embed = ImageEmbed(context, embedderModel(isFace, embedModelPath, faceModelPath))
+        val embed = Embedder.create(context, isFace, embedModelPath, faceModelPath)
         try {
             val uriStr = mediaUri.toString()
             val match: (Long, Bitmap) -> Verdict = { atMs, bmp ->
@@ -324,7 +346,7 @@ class MlKitProvider : ClipAnalyzer {
                 try {
                     var hitLabel: String? = null
                     val hit = embed.available && crops.any { (c, label) ->
-                        val v = embed.embed(c)?.floatEmbedding() ?: return@any false
+                        val v = embed.embed(c) ?: return@any false
                         val bestPos = examples.maxOf { cosine(it, v) }
                         // Nearest-prototype: match only when closer to a positive than to any negative,
                         // so a same-kind look-alike (near a negative) is rejected.
