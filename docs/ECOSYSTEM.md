@@ -52,14 +52,15 @@ Kotlin) parses the ISF `/*{…}*/` header, maps `INPUTS` to uniforms, and rewrit
 single-input fragments. **Rejected** (Media3's per-clip effect is 1-in/1-out): multi-pass, persistent/
 feedback buffers, audio inputs, and multiple image inputs.
 
-**Not yet — true GL-Transitions (two-input warps).** A gl-transition samples *two* frames per pixel, but
-Media3's per-clip effect chain (and `ExoPlayer.setVideoEffects`) is strictly single-input. Media3's
-`DefaultVideoCompositor` only does a fixed **alpha-over** composite (via `OverlaySettings`) — there's no
-public hook to inject a transition fragment shader, and Google's docs list item-to-item transitions as
-still roadmap. Delivering the full warp catalog therefore needs a **custom `VideoCompositor`**
-(`@UnstableApi`) plus switching the preview from `ExoPlayer` to `CompositionPlayer` so preview and export
-share one `Composition` — a rendering-core change, tracked separately. (Alpha-based dissolves already
-exist in the app's crossfade.) Parameter-control UI for shader `INPUTS` is a follow-up.
+**Transitions between clips — shipped via FFmpeg `xfade` ✅.** True gl-transition *warps* sample two
+frames per pixel, which Media3's per-clip effect chain can't express (single-input; `DefaultVideoCompositor`
+only does fixed alpha-over). Rather than rewrite the render core, transitions are delivered through
+FFmpeg's **`xfade`** filter, which ships ~50 GL-style transitions: `apply_transition(from_clip_id,
+to_clip_id, type, duration_sec)` (MCP) bakes the two clips into one transitioned clip — `fade`,
+`wipeleft/right/up/down`, `slide*`, `circleopen/close`, `dissolve`, `pixelize`, `radial`, `smoothleft`,
+`distance`, and more. Runs on-device (requires the same ffmpeg binary as §4). A Media3-native, live-preview
+compositor for the *exact* gl-transitions GLSL catalog (custom `VideoCompositor` + `CompositionPlayer`)
+remains a possible follow-up; parameter-control UI for single-input shader `INPUTS` ships (FLOAT sliders).
 
 ---
 
