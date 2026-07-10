@@ -796,6 +796,16 @@ private fun ModelPicker(
     }
 
     Text(title, color = Neutral400, fontSize = 12.sp)
+    // Gemma redistribution notice: shown whenever this group offers a Gemma model. We re-host the
+    // weights un-gated, so we pass through the Gemma Terms of Use per the license.
+    if (models.any { it.license.contains("Gemma", ignoreCase = true) }) {
+        Text(
+            "Built with Gemma — provided under and subject to the Gemma Terms of Use ↗",
+            color = Neutral500,
+            fontSize = 10.sp,
+            modifier = Modifier.clickableText { uriHandler.openUri("https://ai.google.dev/gemma/terms") },
+        )
+    }
     models.forEach { model ->
         // Keyed on bundledReady so the bundled model flips to "Installed" once extraction finishes
         // (without this the row never refreshes after the LaunchedEffect completes).
