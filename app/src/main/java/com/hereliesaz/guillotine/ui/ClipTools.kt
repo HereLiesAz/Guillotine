@@ -208,31 +208,57 @@ private fun ShaderRow(vm: EditorViewModel, clip: TimelineClip) {
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { input.copyTo(it) }
                 }
-                vm.updateClipFilters(clip.id) { it.copy(shaderPath = dest.absolutePath) }
+                vm.updateClipFilters(clip.id) { it.copy(shaderPath = dest.absolutePath, shaderParams = emptyMap()) }
             }
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (current.isNotBlank()) "Shader: ${java.io.File(current).name}" else "Shader: none",
-            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
-        )
-        Text(
-            "Pick .isf/.fs",
-            color = Color(0xFF8AB4F8), fontSize = 12.sp,
-            modifier = Modifier
-                .clickable { picker.launch(arrayOf("*/*")) }
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-        if (current.isNotBlank()) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Clear",
-                color = Neutral500, fontSize = 12.sp,
+                if (current.isNotBlank()) "Shader: ${java.io.File(current).name}" else "Shader: none",
+                color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+            )
+            Text(
+                "Pick .isf/.fs",
+                color = Color(0xFF8AB4F8), fontSize = 12.sp,
                 modifier = Modifier
-                    .clickable { vm.updateClipFilters(clip.id) { it.copy(shaderPath = "") } }
+                    .clickable { picker.launch(arrayOf("*/*")) }
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
+            if (current.isNotBlank()) {
+                Text(
+                    "Clear",
+                    color = Neutral500, fontSize = 12.sp,
+                    modifier = Modifier
+                        .clickable { vm.updateClipFilters(clip.id) { it.copy(shaderPath = "", shaderParams = emptyMap()) } }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
         }
+        if (current.isNotBlank()) ShaderParamSliders(vm, clip, current)
+    }
+}
+
+/** Sliders for a shader's adjustable FLOAT inputs (parsed off the main thread), bound to shaderParams. */
+@Composable
+private fun ShaderParamSliders(vm: EditorViewModel, clip: TimelineClip, path: String) {
+    val inputs by produceState(emptyList<com.hereliesaz.guillotine.media.GlslShader.ShaderUniform>(), path) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                com.hereliesaz.guillotine.media.GlslShader.parse(java.io.File(path).readText())
+                    .uniforms.filter { it.values.size == 1 && it.type == com.hereliesaz.guillotine.media.GlslShader.UniformType.FLOAT }
+            }.getOrDefault(emptyList())
+        }
+    }
+    inputs.forEach { u ->
+        val v = clip.filters.shaderParams[u.name] ?: u.values[0]
+        val range = if (u.max > u.min) u.min..u.max else u.min..(u.min + 1f)
+        Text("${u.name}: ${"%.2f".format(v)}", color = Neutral500, fontSize = 10.sp)
+        Slider(
+            value = v.coerceIn(range.start, range.endInclusive),
+            onValueChange = { nv -> vm.updateClipFilters(clip.id) { it.copy(shaderParams = it.shaderParams + (u.name to nv)) } },
+            valueRange = range,
+        )
     }
 }
 
