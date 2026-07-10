@@ -36,6 +36,10 @@ enum class ModelCategory {
     DIARIZE_SEG,
     /** sherpa-onnx speaker-embedding `.onnx` — the other half of diarization. */
     DIARIZE_EMBED,
+    /** Low-light enhancement `.tflite` (image→image) — brighten dark frames via apply_image_effect. */
+    LOWLIGHT,
+    /** sherpa-onnx offline speech-denoiser `.onnx` (GTCRN) — clean up noisy speech audio. */
+    DENOISE,
     // --- reserved for upcoming runtimes (not yet shown in the picker) ---
     STYLE, STEM,
 }
@@ -455,8 +459,50 @@ val RECOMMENDED_STEM_MODELS: List<OnDeviceModel> = listOf(
     ),
 )
 
+/**
+ * Recommended low-light enhancement `.tflite` (image→image) for `apply_image_effect(effect="lowlight")`.
+ * "Use" sets `effectModelPaths["lowlight"]`. Runs through the generic [TfliteImageModel].
+ */
+val RECOMMENDED_LOWLIGHT_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "mirnet-lowlight-dr",
+        label = "MIRNet — low-light enhance",
+        fileName = "mirnet_fixed_dr.tflite",
+        sizeBytes = 37_217_606L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://github.com/soumik12345/MIRNet",
+        downloadUrl = "https://tfhub.dev/sayakpaul/lite-model/mirnet-fixed/dr/1?lite-format=tflite",
+        abilities = "Brightens and denoises dark / low-light footage. Apply via apply_image_effect(effect=lowlight).",
+        limitations = "~37 MB. Fixed 400×400 (the frame is resized in and back out). CPU-heavy per frame — best on stills or short clips.",
+        category = ModelCategory.LOWLIGHT,
+    ),
+)
+
+/**
+ * Recommended speech-denoiser model for sherpa-onnx `OfflineSpeechDenoiser` (GTCRN). Single `.onnx`;
+ * "Use" sets `denoiseModelPath`. Cleans up noisy voice audio on-device.
+ */
+val RECOMMENDED_DENOISE_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "gtcrn-denoise",
+        label = "GTCRN — speech denoiser",
+        fileName = "gtcrn_simple.onnx",
+        sizeBytes = 535_638L,
+        license = "MIT",
+        gated = false,
+        repoUrl = "https://github.com/Xiaobin-Rong/gtcrn",
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx",
+        abilities = "On-device speech noise reduction — removes hiss, hum, and background noise from voice recordings.",
+        limitations = "~0.5 MB. Outputs 16 kHz. Tuned for speech, not music.",
+        category = ModelCategory.DENOISE,
+    ),
+)
+
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
+    ModelCategory.LOWLIGHT -> RECOMMENDED_LOWLIGHT_MODELS
+    ModelCategory.DENOISE -> RECOMMENDED_DENOISE_MODELS
     ModelCategory.ASSISTANT_LLM -> RECOMMENDED_ON_DEVICE_MODELS
     ModelCategory.RECOGNITION -> RECOMMENDED_RECOGNITION_MODELS
     ModelCategory.FACE -> RECOMMENDED_FACE_MODELS

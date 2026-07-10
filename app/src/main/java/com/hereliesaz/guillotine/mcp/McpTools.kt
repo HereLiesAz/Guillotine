@@ -223,11 +223,12 @@ class McpTools(
         put(toolDefinition(
             "apply_image_effect",
             "Run an ON-DEVICE image model on the current preview frame and add the result as a new image " +
-                "clip. effect = superres (upscale) | style (style transfer) | depth (depth map). Requires " +
-                "that effect's .tflite model to be set in Settings → AI Analyzer → Image effects; if it " +
-                "isn't, returns an error naming the setting (relay it, don't retry).",
+                "clip. effect = superres (upscale) | style (style transfer) | depth (depth map) | lowlight " +
+                "(brighten a dark/low-light frame). Requires that effect's .tflite model to be set in " +
+                "Settings → AI Analyzer → Image effects; if it isn't, returns an error naming the setting " +
+                "(relay it, don't retry).",
             objSchema(
-                "effect" to stringProp("superres | style | depth"),
+                "effect" to stringProp("superres | style | depth | lowlight"),
                 "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
                 required = listOf("effect"),
             ),
@@ -393,6 +394,18 @@ class McpTools(
                 "its error if the model isn't set.",
             objSchema(
                 "clip_id" to stringProp("The clip whose audio to separate"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "denoise_clip",
+            "Remove background noise from a clip's VOICE audio ON-DEVICE (GTCRN speech denoiser, no key) and " +
+                "add the cleaned track as a new audio clip. Strips hiss, hum, air-conditioner drone, and " +
+                "general background noise while keeping speech. Use for \"remove background noise\", \"clean " +
+                "up the audio\", \"denoise this\", \"isolate the voice\", \"reduce the hiss\". Requires the " +
+                "denoiser model in Settings → AI Analyzer → Noise reduction; relay its error if unset.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose voice audio to denoise"),
                 required = listOf("clip_id"),
             ),
         ))
@@ -647,6 +660,7 @@ class McpTools(
         "remove_fillers" -> removeFillers(args.getString("clip_id"))
         "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
         "separate_stems" -> separateStems(args.getString("clip_id"))
+        "denoise_clip" -> denoiseClip(args.getString("clip_id"))
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
@@ -1703,6 +1717,42 @@ class McpTools(
             ok().apply {
                 put("clipCount", vm.uiState.value.document.clips.size)
                 put("humanSummary", "Separated into vocals + accompaniment and added both as audio clips.")
+            }
+        }
+    }
+
+    /** Denoise a clip's voice audio (GTCRN) and add the cleaned track as a new audio clip. */
+    private fun denoiseClip(clipId: String): JSONObject {
+        val model = settingsProvider().denoiseModelPath
+        require(model.isNotBlank()) {
+            "No denoiser model set. Download one in Settings → AI Analyzer → Noise reduction."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = PcmDecoder.decode(context, Uri.parse(media.uri), YamnetClassifier.SAMPLE_RATE)
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to denoise.")
+        val samples = YamnetClassifier.resampleTo16k(pcm.samples, pcm.sampleRate)
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Removing noise…", pausable = false,
+        ) { _ ->
+            val outWav = java.io.File(context.cacheDir, "denoise/${newId()}.wav").apply { parentFile?.mkdirs() }
+            val durationMs = com.hereliesaz.guillotine.ai.SherpaDenoiser.denoiseToWav(
+                model, samples, 16_000, outWav.absolutePath,
+            )
+            require(durationMs > 0) { "Denoiser produced no audio." }
+            vm.addMedia(
+                listOf(
+                    MediaItem(
+                        newId(), Uri.fromFile(outWav).toString(), "clean: ${media.name}",
+                        MediaKind.AUDIO, durationMs,
+                    ),
+                ),
+            )
+            ok().apply {
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Removed background noise and added the cleaned voice as an audio clip.")
             }
         }
     }
