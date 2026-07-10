@@ -297,6 +297,9 @@ class McpTools(
             objSchema(
                 "clip_id" to stringProp("The clip to affect; defaults to the video clip at the playhead"),
                 "path" to stringProp("Filesystem path to an .isf / .fs / .glsl fragment shader"),
+                "params" to objSchema(required = emptyList()).apply {
+                    put("description", "Optional {name: value} overrides for the shader's scalar inputs (see list_shader_params).")
+                },
                 required = listOf("path"),
             ),
         ))
@@ -306,6 +309,15 @@ class McpTools(
             objSchema(
                 "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
                 required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "list_shader_params",
+            "List an ISF/GLSL shader's adjustable scalar inputs (name, type, default, min, max) so you " +
+                "know what to pass to apply_shader's `params`. `path` is a shader file.",
+            objSchema(
+                "path" to stringProp("Filesystem path to an .isf / .fs / .glsl shader"),
+                required = listOf("path"),
             ),
         ))
         put(toolDefinition(
@@ -719,8 +731,9 @@ class McpTools(
         "blur_faces" -> blurFaces(args.optString("clip_id"), if (args.has("enabled")) args.getBoolean("enabled") else true)
         "apply_lut" -> applyLut(args.optString("clip_id"), args.getString("path"))
         "clear_lut" -> clearLut(args.optString("clip_id"))
-        "apply_shader" -> applyShader(args.optString("clip_id"), args.getString("path"))
+        "apply_shader" -> applyShader(args.optString("clip_id"), args.getString("path"), args.optJSONObject("params"))
         "clear_shader" -> clearShader(args.optString("clip_id"))
+        "list_shader_params" -> listShaderParams(args.getString("path"))
         "replace_background" -> replaceBackgroundTool(args.optString("clip_id"), args.optString("color"), args.optString("image_path"))
         "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
@@ -2235,24 +2248,62 @@ class McpTools(
         return ok().apply { put("humanSummary", "Removed the LUT from clip ${clip.id}.") }
     }
 
-    /** Apply a GLSL/ISF shader effect to a clip (path validated + parseable to a single-input program). */
-    private fun applyShader(clipId: String, path: String): JSONObject {
+    /** Apply a GLSL/ISF shader effect to a clip, with optional scalar-input overrides. */
+    private fun applyShader(clipId: String, path: String, params: JSONObject?): JSONObject {
         require(path.isNotBlank()) { "Provide the path to an .isf / .fs / .glsl shader file." }
         val file = java.io.File(path)
         require(file.isFile) { "No shader file at: $path" }
         // Parse up front so unsupported/malformed shaders fail here with a clear message.
-        runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
-            .onFailure { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
+        val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
+            .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
+        // Only accept overrides for the shader's known scalar (single-value) uniforms.
+        val scalar = program.uniforms.filter { it.values.size == 1 }.associateBy { it.name }
+        val overrides = HashMap<String, Float>()
+        params?.keys()?.forEach { k ->
+            scalar[k]?.let { u -> overrides[k] = params.optDouble(k, u.values[0].toDouble()).toFloat() }
+        }
         val clip = resolveClipOrPlayhead(clipId)
-        vm.updateClipFilters(clip.id) { it.copy(shaderPath = file.absolutePath) }
-        return ok().apply { put("humanSummary", "Applied shader ${file.name} to clip ${clip.id}.") }
+        vm.updateClipFilters(clip.id) { it.copy(shaderPath = file.absolutePath, shaderParams = overrides) }
+        return ok().apply {
+            put(
+                "humanSummary",
+                "Applied shader ${file.name}" +
+                    (if (overrides.isNotEmpty()) " with ${overrides.size} param(s)" else "") +
+                    " to clip ${clip.id}.",
+            )
+        }
     }
 
-    /** Remove a clip's GLSL/ISF shader effect. */
+    /** Remove a clip's GLSL/ISF shader effect (and its param overrides). */
     private fun clearShader(clipId: String): JSONObject {
         val clip = resolveClipOrPlayhead(clipId)
-        vm.updateClipFilters(clip.id) { it.copy(shaderPath = "") }
+        vm.updateClipFilters(clip.id) { it.copy(shaderPath = "", shaderParams = emptyMap()) }
         return ok().apply { put("humanSummary", "Removed the shader from clip ${clip.id}.") }
+    }
+
+    /** List a shader's adjustable scalar inputs (name, type, default, min, max). */
+    private fun listShaderParams(path: String): JSONObject {
+        val file = java.io.File(path)
+        require(file.isFile) { "No shader file at: $path" }
+        val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
+            .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
+        val arr = JSONArray()
+        program.uniforms.filter { it.values.size == 1 }.forEach { u ->
+            arr.put(JSONObject().apply {
+                put("name", u.name)
+                put("type", u.type.name.lowercase())
+                put("default", u.values[0].toDouble())
+                put("min", u.min.toDouble())
+                put("max", u.max.toDouble())
+            })
+        }
+        return ok().apply {
+            put("params", arr)
+            put(
+                "humanSummary",
+                if (arr.length() == 0) "This shader has no adjustable scalar inputs." else "${arr.length()} adjustable input(s).",
+            )
+        }
     }
 
     /**

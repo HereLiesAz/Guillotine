@@ -23,8 +23,15 @@ object GlslShader {
 
     enum class UniformType { FLOAT, VEC2, VEC3, VEC4, INT, BOOL }
 
-    /** One shader uniform with its default value (floats; INT/BOOL use [values]`[0]` as 0/1/int). */
-    data class ShaderUniform(val name: String, val type: UniformType, val values: FloatArray) {
+    /** One shader uniform with its default value (floats; INT/BOOL use [values]`[0]` as 0/1/int) plus,
+     *  for scalar inputs, the ISF `MIN`/`MAX` range (for adjustment UI / agent context). */
+    data class ShaderUniform(
+        val name: String,
+        val type: UniformType,
+        val values: FloatArray,
+        val min: Float = 0f,
+        val max: Float = 1f,
+    ) {
         override fun equals(other: Any?) =
             other is ShaderUniform && name == other.name && type == other.type && values.contentEquals(other.values)
         override fun hashCode() = 31 * (31 * name.hashCode() + type.hashCode()) + values.contentHashCode()
@@ -84,7 +91,11 @@ object GlslShader {
                     "float", "long" -> {
                         val isInt = inp.optString("TYPE") == "long"
                         val d = inp.optDouble("DEFAULT", 0.0).toFloat()
-                        uniforms += ShaderUniform(name, if (isInt) UniformType.INT else UniformType.FLOAT, floatArrayOf(d))
+                        val min = inp.optDouble("MIN", 0.0).toFloat()
+                        val max = inp.optDouble("MAX", 1.0).toFloat()
+                        uniforms += ShaderUniform(
+                            name, if (isInt) UniformType.INT else UniformType.FLOAT, floatArrayOf(d), min, max,
+                        )
                         decls.append(if (isInt) "uniform int $name;\n" else "uniform float $name;\n")
                     }
                     "bool", "event" -> {

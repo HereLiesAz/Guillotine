@@ -84,7 +84,7 @@ object VideoEffects {
 
         // Custom GLSL/ISF shader effect, applied last (over everything, including the LUT). Null when unset.
         if (filters.shaderPath.isNotBlank()) {
-            ShaderCache.effectFor(filters.shaderPath)?.let { effects += it }
+            ShaderCache.effectFor(filters.shaderPath, filters.shaderParams)?.let { effects += it }
         }
 
         return effects
@@ -152,7 +152,7 @@ object VideoEffects {
         if (filters.invert >= 50f) out += RgbFilter.createInvertedFilter()
         if (filters.blur > 0f) out += GaussianBlur(filters.blur)
         if (filters.lutPath.isNotBlank()) LutCube.effectFor(filters.lutPath)?.let { out += it }
-        if (filters.shaderPath.isNotBlank()) ShaderCache.effectFor(filters.shaderPath)?.let { out += it }
+        if (filters.shaderPath.isNotBlank()) ShaderCache.effectFor(filters.shaderPath, filters.shaderParams)?.let { out += it }
         return out
     }
 

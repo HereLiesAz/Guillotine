@@ -22,9 +22,12 @@ import com.hereliesaz.guillotine.media.GlslShader.UniformType
  * Two-input effects (gl-transitions) are out of scope — Media3's per-clip effect is 1-in/1-out; see
  * docs/ECOSYSTEM.md for the compositor path.
  */
-class GlslEffect(private val program: GlslShader.Program) : GlEffect {
+class GlslEffect(
+    private val program: GlslShader.Program,
+    private val overrides: Map<String, Float> = emptyMap(),
+) : GlEffect {
     override fun toGlShaderProgram(context: android.content.Context, useHdr: Boolean): GlShaderProgram =
-        GlslShaderProgram(program, useHdr)
+        GlslShaderProgram(program, useHdr, overrides)
 }
 
 private const val VERTEX_SHADER =
@@ -40,9 +43,14 @@ private const val VERTEX_SHADER =
 private class GlslShaderProgram(
     program: GlslShader.Program,
     useHdr: Boolean,
+    overrides: Map<String, Float>,
 ) : BaseGlShaderProgram(/* useHighPrecisionColorComponents= */ useHdr, /* texturePoolCapacity= */ 1) {
 
-    private val uniforms: List<ShaderUniform> = program.uniforms
+    // Apply per-clip overrides on top of each scalar uniform's default; vecs keep their defaults.
+    private val uniforms: List<ShaderUniform> = program.uniforms.map { u ->
+        val v = overrides[u.name]
+        if (v != null && u.values.size == 1) u.copy(values = floatArrayOf(v)) else u
+    }
     private val glProgram: GlProgram = try {
         GlProgram(VERTEX_SHADER, program.fragmentShader)
     } catch (e: GlUtil.GlException) {

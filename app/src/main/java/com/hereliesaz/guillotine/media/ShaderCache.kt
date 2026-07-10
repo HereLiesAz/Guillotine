@@ -12,22 +12,24 @@ import java.io.File
  */
 object ShaderCache {
 
-    private data class Key(val path: String, val mtime: Long)
+    // Params vary per clip, so they're part of the key — otherwise two clips with the same shader but
+    // different knob values would share one baked effect.
+    private data class Key(val path: String, val mtime: Long, val params: Map<String, Float>)
 
-    private val cache = object : LinkedHashMap<Key, Effect>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Effect>?): Boolean = size > 8
+    private val cache = object : LinkedHashMap<Key, Effect>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Effect>?): Boolean = size > 16
     }
 
-    fun effectFor(path: String): Effect? {
+    fun effectFor(path: String, params: Map<String, Float> = emptyMap()): Effect? {
         if (path.isBlank()) return null
         val file = File(path)
         if (!file.isFile) return null
-        val key = Key(path, file.lastModified())
+        val key = Key(path, file.lastModified(), params)
         synchronized(this) { cache[key]?.let { return it } }
         // Read + parse OUTSIDE the lock — disk I/O and shader parsing shouldn't block other callers.
         val text = runCatching { file.readText() }.getOrNull() ?: return null
         val parsed = runCatching { GlslShader.parse(text) }.getOrNull() ?: return null
-        val effect = GlslEffect(parsed)
+        val effect = GlslEffect(parsed, params)
         synchronized(this) { cache[key] = effect }
         return effect
     }

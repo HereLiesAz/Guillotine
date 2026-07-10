@@ -78,6 +78,20 @@ class GlslShaderTest {
         assertThrows(IllegalArgumentException::class.java) { GlslShader.parse(audio) }
     }
 
+    @Test fun parses_float_input_min_max() {
+        val isf = """
+            /*{ "INPUTS": [
+              { "NAME": "inputImage", "TYPE": "image" },
+              { "NAME": "amount", "TYPE": "float", "DEFAULT": 0.4, "MIN": -1.0, "MAX": 3.0 }
+            ] }*/
+            void main() { gl_FragColor = IMG_THIS_PIXEL(inputImage) * amount; }
+        """.trimIndent()
+        val u = GlslShader.parse(isf).uniforms.single { it.name == "amount" }
+        assertEquals(0.4f, u.values[0], 1e-6f)
+        assertEquals(-1.0f, u.min, 1e-6f)
+        assertEquals(3.0f, u.max, 1e-6f)
+    }
+
     @Test fun rewrites_img_pixel_with_balanced_parentheses() {
         val isf = """
             /*{ "INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ] }*/

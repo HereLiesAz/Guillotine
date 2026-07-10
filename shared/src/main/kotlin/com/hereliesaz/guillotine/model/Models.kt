@@ -138,6 +138,8 @@ data class ClipFilters(
     val lutPath: String = "",
     /** Path to a GLSL shader effect (`.isf`/`.fs`/`.glsl`, single-input) applied last (blank = none). */
     val shaderPath: String = "",
+    /** Per-clip overrides for the shader's scalar uniforms (name → value); absent = the shader's default. */
+    val shaderParams: Map<String, Float> = emptyMap(),
 )
 
 @Serializable

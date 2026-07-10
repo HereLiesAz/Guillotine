@@ -138,10 +138,11 @@ val AGENT_SYSTEM_PROMPT = """
 
     GLSL / ISF SHADER EFFECTS (on-device):
     - "apply this ISF shader", "add a glitch/CRT/kaleidoscope shader", "run this .fs/.glsl on the clip" →
-      apply_shader(clip_id, path) with a standard ISF (.isf) or raw fragment (.fs/.glsl) file. It runs on
-      every frame in preview and export. clear_shader removes it. Only single-pass, single-image shaders
-      work (multi-pass/feedback/audio and two-input transition shaders are rejected). Usually the user
-      picks the shader (clip Filters → Shader); apply_shader is for when a path is known.
+      apply_shader(clip_id, path, params?) with a standard ISF (.isf) or raw fragment (.fs/.glsl) file. It
+      runs on every frame in preview and export. To adjust it, first list_shader_params(path) to see the
+      shader's scalar inputs (name/type/default/min/max), then pass params={name: value, …} to apply_shader.
+      clear_shader removes it. Only single-pass, single-image shaders work (multi-pass/feedback/audio and
+      two-input transition shaders are rejected). Usually the user picks the shader (clip Filters → Shader).
 
     FACE ANONYMIZATION (on-device, no model needed):
     - "blur the faces", "anonymize people", "hide identities", "censor faces" → blur_faces on the clip (or
