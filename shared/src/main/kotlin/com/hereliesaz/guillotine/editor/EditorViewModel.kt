@@ -23,11 +23,19 @@ enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP, MARQUEE }
 private const val IMAGE_DEFAULT_DURATION_MS = 5_000L
 private const val MIN_CLIP_DURATION_MS = 100L
 private const val HISTORY_LIMIT = 100
+/** A ruler drag shorter than this (ms) clears the playback region instead of defining a tiny one. */
+private const val MIN_REGION_MS = 50L
 
 data class EditorUiState(
     val document: Document = Document(),
     val currentTimeMs: Long = 0L,
     val isPlaying: Boolean = false,
+    /** Loop playback: at the end of the playback region (or the whole timeline) restart from the
+     *  beginning instead of stopping. Toggled by the loop button next to Play. */
+    val loopPlayback: Boolean = false,
+    /** Optional playback / loop region in timeline ms; null = the whole timeline. Defined by dragging
+     *  the ruler strip, or by marquee-selecting a range of clips. Playback stops (or loops) at its end. */
+    val playbackRegion: LongRange? = null,
     /** Timeline zoom in pixels-per-second (horizontal). */
     val pixelsPerSecond: Float = 100f,
     /** Per-track lane heights in dp (vertical zoom); absent = default. */
@@ -785,8 +793,17 @@ open class EditorViewModel {
         val lo = minOf(startMs, endMs)
         val hi = maxOf(startMs, endMs)
         if (hi <= lo) return
-        val ids = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo }.map { it.id }
-        _uiState.update { it.copy(selectedClipIds = ids) }
+        val selected = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo }
+        _uiState.update { st ->
+            // Selecting a range of clips also defines the playback / loop region over the selected
+            // clips' extent (Vegas-style), so the user can immediately loop just that region.
+            val region = if (selected.isNotEmpty()) {
+                selected.minOf { it.startTimeMs }..selected.maxOf { it.endTimeMs }
+            } else {
+                st.playbackRegion
+            }
+            st.copy(selectedClipIds = selected.map { it.id }, playbackRegion = region)
+        }
     }
 
     /** Delete a single clip by id, including its linked shadow audio and any group members. */
@@ -1408,19 +1425,41 @@ open class EditorViewModel {
         _uiState.update { it.copy(currentTimeMs = clamped) }
     }
 
-    /** Advance the playhead by [deltaMs]; auto-pause at the end of the timeline. */
+    /**
+     * Advance the playhead by [deltaMs], honouring the playback region and loop mode. The effective
+     * playback window is the [playbackRegion] (clamped to content) if set, else the whole timeline. At
+     * the end of that window: loop back to its start when [loopPlayback] is on, otherwise stop there.
+     */
     fun advancePlayhead(deltaMs: Long) {
-        val total = document.totalDurationMs
-        val next = _uiState.value.currentTimeMs + deltaMs
-        if (next >= total) {
-            _uiState.update { it.copy(currentTimeMs = total, isPlaying = false) }
-        } else {
-            _uiState.update { it.copy(currentTimeMs = next.coerceAtLeast(0)) }
+        val st = _uiState.value
+        val total = st.document.totalDurationMs
+        val region = st.playbackRegion
+        val startMs = (region?.first ?: 0L).coerceIn(0L, total)
+        val endMs = (region?.last ?: total).coerceIn(0L, total)
+        val next = st.currentTimeMs + deltaMs
+        when {
+            endMs <= startMs -> _uiState.update { it.copy(isPlaying = false) } // nothing to play
+            next >= endMs ->
+                if (st.loopPlayback) _uiState.update { it.copy(currentTimeMs = startMs) }
+                else _uiState.update { it.copy(currentTimeMs = endMs, isPlaying = false) }
+            else -> _uiState.update { it.copy(currentTimeMs = next.coerceAtLeast(0)) }
         }
     }
 
     fun togglePlay() = _uiState.update { it.copy(isPlaying = !it.isPlaying && it.document.totalDurationMs > 0) }
     fun setPlaying(playing: Boolean) = _uiState.update { it.copy(isPlaying = playing) }
+    /** Loop playback on/off (restart at the window start vs. stop at its end). */
+    fun toggleLoop() = _uiState.update { it.copy(loopPlayback = !it.loopPlayback) }
+
+    /** Define the playback / loop region (timeline ms). A span shorter than [MIN_REGION_MS] clears it. */
+    fun setPlaybackRegion(startMs: Long, endMs: Long) {
+        val lo = minOf(startMs, endMs).coerceAtLeast(0)
+        val hi = maxOf(startMs, endMs)
+        if (hi - lo < MIN_REGION_MS) { clearPlaybackRegion(); return }
+        _uiState.update { it.copy(playbackRegion = lo..hi) }
+    }
+
+    fun clearPlaybackRegion() = _uiState.update { it.copy(playbackRegion = null) }
     fun setPlaybackRate(rate: Float) = _uiState.update { it.copy(playbackRate = rate) }
     /** Visible width (px) of the timeline lanes area; feeds the dynamic zoom-out limit. */
     private var timelineViewportPx = 0f
