@@ -30,7 +30,7 @@ object AdsState {
     /** Flips true after consent is gathered and MobileAds is initialized; gates ad requests. */
     val ready = mutableStateOf(false)
     
-    /** True if the user has purchased Ad-Free or selected the free session option. */
+    /** True if the user owns Ad-Free (the one-time IAP). Set only from a real, owned purchase. */
     val isAdFree = mutableStateOf(false)
     
     /** True ONLY if the user has permanently purchased Ad-Free (so we can hide the menu option). */

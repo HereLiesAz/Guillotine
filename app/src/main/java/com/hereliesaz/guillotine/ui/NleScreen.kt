@@ -1229,7 +1229,7 @@ fun AdFreeDialog(billingManager: com.hereliesaz.guillotine.billing.BillingManage
         title = { androidx.compose.material3.Text("Ad-Free Experience") },
         text = {
             androidx.compose.foundation.layout.Column {
-                androidx.compose.material3.Text("Enjoy the app without ads! You can unlock the ad-free experience permanently, or temporarily disable ads for this session.")
+                androidx.compose.material3.Text("Enjoy the app without ads! Unlock the ad-free experience permanently with a one-time purchase.")
             }
         },
         confirmButton = {
@@ -1241,11 +1241,8 @@ fun AdFreeDialog(billingManager: com.hereliesaz.guillotine.billing.BillingManage
             }
         },
         dismissButton = {
-            androidx.compose.material3.TextButton(onClick = {
-                com.hereliesaz.guillotine.ads.AdsState.isAdFree.value = true
-                onDismiss()
-            }) {
-                androidx.compose.material3.Text("Free Session")
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                androidx.compose.material3.Text("Not now")
             }
         }
     )
