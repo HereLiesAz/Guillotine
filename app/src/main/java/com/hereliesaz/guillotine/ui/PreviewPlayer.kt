@@ -145,6 +145,7 @@ fun PreviewPlayer(
                     now = now,
                     isPlaying = state.isPlaying,
                     playbackRate = state.playbackRate,
+                    maxVideoDim = state.previewQuality.maxDimension,
                     aspectMod = aspectMod,
                 )
             }
@@ -239,6 +240,7 @@ private fun VideoTrackLayer(
     now: Long,
     isPlaying: Boolean,
     playbackRate: Float,
+    maxVideoDim: Int,
     aspectMod: Modifier,
 ) {
     val context = LocalContext.current
@@ -259,6 +261,15 @@ private fun VideoTrackLayer(
             playerA.release()
             playerB.release()
         }
+    }
+    // Preview-quality cap: constrain the players' target video resolution (longest edge). Lower
+    // quality trades clarity for smoother playback; FULL (Int.MAX_VALUE) leaves the source untouched.
+    LaunchedEffect(maxVideoDim) {
+        val params = playerA.trackSelectionParameters.buildUpon()
+            .setMaxVideoSize(maxVideoDim, maxVideoDim)
+            .build()
+        playerA.trackSelectionParameters = params
+        playerB.trackSelectionParameters = params
     }
 
     // This track's active clips, earliest first. Two overlapping = a crossfade region

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.ShowChart
@@ -819,9 +820,17 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
             IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
             IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
             IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+            // Loop toggle: at the end of the playback region (or whole timeline) restart instead of stopping.
+            IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
             IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
             IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
         }
+        // Preview quality: lower = smoother playback, less clarity. Tap to cycle Low→…→Full.
+        Text(
+            "Q:${state.previewQuality.label}",
+            color = Neutral400, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            modifier = Modifier.clickable { vm.cyclePreviewQuality() }.padding(8.dp),
+        )
         Spacer(Modifier.weight(1f))
         val rates = listOf(0.5f, 1f, 1.5f, 2f)
         Text(

@@ -19,15 +19,35 @@ import kotlinx.coroutines.flow.update
 
 enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP, MARQUEE }
 
+/**
+ * Preview render quality: caps the resolution the preview players decode/scale to. Lower levels trade
+ * clarity for smoother playback (lighter decode/composite); [FULL] leaves the source untouched.
+ * [maxDimension] is the longest-edge pixel cap fed to the player's track-selection parameters.
+ */
+enum class PreviewQuality(val label: String, val maxDimension: Int) {
+    LOW("Low", 360),
+    MEDIUM("Medium", 540),
+    HIGH("High", 720),
+    FULL("Full", Int.MAX_VALUE),
+}
+
 /** Default on-timeline duration for still images. */
 private const val IMAGE_DEFAULT_DURATION_MS = 5_000L
 private const val MIN_CLIP_DURATION_MS = 100L
 private const val HISTORY_LIMIT = 100
+/** A ruler drag shorter than this (ms) clears the playback region instead of defining a tiny one. */
+private const val MIN_REGION_MS = 50L
 
 data class EditorUiState(
     val document: Document = Document(),
     val currentTimeMs: Long = 0L,
     val isPlaying: Boolean = false,
+    /** Loop playback: at the end of the playback region (or the whole timeline) restart from the
+     *  beginning instead of stopping. Toggled by the loop button next to Play. */
+    val loopPlayback: Boolean = false,
+    /** Optional playback / loop region in timeline ms; null = the whole timeline. Defined by dragging
+     *  the ruler strip, or by marquee-selecting a range of clips. Playback stops (or loops) at its end. */
+    val playbackRegion: LongRange? = null,
     /** Timeline zoom in pixels-per-second (horizontal). */
     val pixelsPerSecond: Float = 100f,
     /** Per-track lane heights in dp (vertical zoom); absent = default. */
@@ -35,6 +55,8 @@ data class EditorUiState(
     /** New keyframes get a smooth ease by default; off = linear. */
     val autoEase: Boolean = true,
     val playbackRate: Float = 1f,
+    /** Preview render quality (lower = smoother playback, less clarity). */
+    val previewQuality: PreviewQuality = PreviewQuality.HIGH,
     val selectedClipIds: List<String> = emptyList(),
     /** Currently-selected keyframe (shows ease handles on its segment). */
     val selectedKeyframeId: String? = null,
@@ -787,8 +809,17 @@ open class EditorViewModel {
             _uiState.update { it.copy(selectedClipIds = emptyList()) }
             return
         }
-        val ids = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo && it.trackId in trackIds }.map { it.id }
-        _uiState.update { it.copy(selectedClipIds = ids) }
+        val selected = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo && it.trackId in trackIds }
+        _uiState.update { st ->
+            // Selecting a range of clips also defines the playback / loop region over the selected
+            // clips' extent (Vegas-style), so the user can immediately loop just that region.
+            val region = if (selected.isNotEmpty()) {
+                selected.minOf { it.startTimeMs }..selected.maxOf { it.endTimeMs }
+            } else {
+                st.playbackRegion
+            }
+            st.copy(selectedClipIds = selected.map { it.id }, playbackRegion = region)
+        }
     }
 
     /** Delete a single clip by id, including its linked shadow audio and any group members. */
@@ -1410,20 +1441,83 @@ open class EditorViewModel {
         _uiState.update { it.copy(currentTimeMs = clamped) }
     }
 
-    /** Advance the playhead by [deltaMs]; auto-pause at the end of the timeline. */
+    /**
+     * Advance the playhead by [deltaMs], honouring the playback region and loop mode. The effective
+     * playback window is the [playbackRegion] (clamped to content) if set, else the whole timeline. At
+     * the end of that window: loop back to its start when [loopPlayback] is on, otherwise stop there.
+     */
     fun advancePlayhead(deltaMs: Long) {
-        val total = document.totalDurationMs
-        val next = _uiState.value.currentTimeMs + deltaMs
-        if (next >= total) {
-            _uiState.update { it.copy(currentTimeMs = total, isPlaying = false) }
-        } else {
-            _uiState.update { it.copy(currentTimeMs = next.coerceAtLeast(0)) }
+        val st = _uiState.value
+        val total = st.document.totalDurationMs
+        val region = st.playbackRegion
+        val regionStart = (region?.first ?: 0L).coerceIn(0L, total)
+        val regionEnd = (region?.last ?: total).coerceIn(0L, total)
+        // Only enforce the region while the playhead is still within/before it. If playback started
+        // from AFTER the region end, fall back to the whole timeline so content past the region is
+        // still playable, rather than instantly stopping (or looping back into the region).
+        val insideRegion = st.currentTimeMs < regionEnd
+        val startMs = if (insideRegion) regionStart else 0L
+        val endMs = if (insideRegion) regionEnd else total
+        val next = st.currentTimeMs + deltaMs
+        when {
+            endMs <= startMs -> _uiState.update { it.copy(isPlaying = false) } // nothing to play
+            next >= endMs ->
+                if (st.loopPlayback) _uiState.update { it.copy(currentTimeMs = startMs) }
+                else _uiState.update { it.copy(currentTimeMs = endMs, isPlaying = false) }
+            else -> _uiState.update { it.copy(currentTimeMs = next.coerceAtLeast(0)) }
         }
     }
 
-    fun togglePlay() = _uiState.update { it.copy(isPlaying = !it.isPlaying && it.document.totalDurationMs > 0) }
-    fun setPlaying(playing: Boolean) = _uiState.update { it.copy(isPlaying = playing) }
+    /** Timeline ms where the current/most-recent playback run began — the return point for [stop]. */
+    private var playbackStartMs = 0L
+
+    /** Begin playback from the current playhead, remembering it as [stop]'s return point. */
+    private fun startPlayback() {
+        if (document.totalDurationMs <= 0) return
+        playbackStartMs = _uiState.value.currentTimeMs
+        _uiState.update { it.copy(isPlaying = true) }
+    }
+
+    /** Play / pause — pausing leaves the playhead where it is. */
+    fun togglePlay() {
+        if (_uiState.value.isPlaying) _uiState.update { it.copy(isPlaying = false) }
+        else startPlayback()
+    }
+
+    fun setPlaying(playing: Boolean) {
+        if (playing) startPlayback() else _uiState.update { it.copy(isPlaying = false) }
+    }
+
+    /** Stop — halt playback and return the playhead to where this run started (vs. pause, which stays). */
+    fun stop() {
+        _uiState.update { it.copy(isPlaying = false) }
+        seekTo(playbackStartMs)
+    }
+
+    /** Transport toggle used by the volume-up+down combo: stop (return to start) if playing, else play. */
+    fun playOrStop() {
+        if (_uiState.value.isPlaying) stop() else startPlayback()
+    }
+
+    /** Loop playback on/off (restart at the window start vs. stop at its end). */
+    fun toggleLoop() = _uiState.update { it.copy(loopPlayback = !it.loopPlayback) }
+
+    /** Define the playback / loop region (timeline ms). A span shorter than [MIN_REGION_MS] clears it. */
+    fun setPlaybackRegion(startMs: Long, endMs: Long) {
+        val lo = minOf(startMs, endMs).coerceAtLeast(0)
+        val hi = maxOf(startMs, endMs)
+        if (hi - lo < MIN_REGION_MS) { clearPlaybackRegion(); return }
+        _uiState.update { it.copy(playbackRegion = lo..hi) }
+    }
+
+    fun clearPlaybackRegion() = _uiState.update { it.copy(playbackRegion = null) }
     fun setPlaybackRate(rate: Float) = _uiState.update { it.copy(playbackRate = rate) }
+    fun setPreviewQuality(quality: PreviewQuality) = _uiState.update { it.copy(previewQuality = quality) }
+    /** Step the preview quality one level (LOW→MEDIUM→HIGH→FULL→LOW), for the transport-bar toggle. */
+    fun cyclePreviewQuality() = _uiState.update {
+        val vals = PreviewQuality.entries
+        it.copy(previewQuality = vals[(it.previewQuality.ordinal + 1) % vals.size])
+    }
     /** Visible width (px) of the timeline lanes area; feeds the dynamic zoom-out limit. */
     private var timelineViewportPx = 0f
     fun setTimelineViewportPx(px: Float) {
