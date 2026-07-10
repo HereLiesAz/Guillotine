@@ -232,6 +232,26 @@ class McpTools(
                 required = listOf("effect"),
             ),
         ))
+        put(toolDefinition(
+            "auto_color",
+            "Auto color-correct a clip ON-DEVICE (no model): analyze a frame and nudge exposure, contrast, " +
+                "and saturation toward a balanced look, applied as the clip's filters. Use for \"auto color\", " +
+                "\"fix the exposure/levels\", \"balance this shot\".",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "match_color",
+            "Shot-match ON-DEVICE: set the TARGET clip's exposure/contrast/saturation to match the SOURCE " +
+                "clip's look, so two shots cut together consistently. Use for \"match this shot to that one\".",
+            objSchema(
+                "source_clip_id" to stringProp("The clip whose look to match"),
+                "target_clip_id" to stringProp("The clip to adjust"),
+                required = listOf("source_clip_id", "target_clip_id"),
+            ),
+        ))
 
         // ---- audio-event highlights (YAMNet, on-device) ----
         put(toolDefinition(
@@ -596,6 +616,8 @@ class McpTools(
         "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
         "discard_recording" -> discardRecording()
         "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
+        "auto_color" -> autoColor(args.optString("clip_id"))
+        "match_color" -> matchColor(args.getString("source_clip_id"), args.getString("target_clip_id"))
         "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
         "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
@@ -1910,6 +1932,97 @@ class McpTools(
         val f = java.io.File(context.cacheDir, "effect_${System.currentTimeMillis()}.png")
         f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         return Uri.fromFile(f).toString()
+    }
+
+    // ---- auto color-correct / shot-match (on-device DSP, no model) -----------
+
+    /** Tone of a frame (all 0..1): mean luminance, contrast spread (p95−p5), mean HSV saturation. */
+    private data class Tone(val lum: Float, val spread: Float, val sat: Float)
+
+    /** Sample a frame at low res and summarise its tone (for auto-color and shot-match). */
+    private fun toneStats(bmp: android.graphics.Bitmap): Tone {
+        val n = 64
+        val small = android.graphics.Bitmap.createScaledBitmap(bmp, n, n, true)
+        val px = IntArray(n * n)
+        small.getPixels(px, 0, n, 0, 0, n, n)
+        if (small !== bmp) small.recycle()
+        val lums = FloatArray(px.size)
+        var sumL = 0f
+        var sumS = 0f
+        for (i in px.indices) {
+            val p = px[i]
+            val r = ((p shr 16) and 0xFF) / 255f
+            val g = ((p shr 8) and 0xFF) / 255f
+            val b = (p and 0xFF) / 255f
+            lums[i] = 0.299f * r + 0.587f * g + 0.114f * b
+            sumL += lums[i]
+            val mx = maxOf(r, g, b); val mn = minOf(r, g, b)
+            sumS += if (mx > 1e-4f) (mx - mn) / mx else 0f
+        }
+        lums.sort()
+        val p5 = lums[(lums.size * 0.05f).toInt().coerceIn(0, lums.size - 1)]
+        val p95 = lums[(lums.size * 0.95f).toInt().coerceIn(0, lums.size - 1)]
+        return Tone(sumL / px.size, (p95 - p5).coerceIn(0.01f, 1f), sumS / px.size)
+    }
+
+    /** Tone of the frame at a clip's mid-point. */
+    private fun clipTone(clip: com.hereliesaz.guillotine.model.TimelineClip): Tone {
+        val media = vm.uiState.value.document.mediaFor(clip)
+            ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val at = com.hereliesaz.guillotine.model.TimelineMath
+            .sourceTimeMs(clip, clip.startTimeMs + clip.durationMs / 2).coerceAtLeast(0L)
+        val frame = grabFrame(Uri.parse(media.uri), at)
+            ?: throw IllegalStateException("Could not read a frame from clip ${clip.id}.")
+        return try { toneStats(frame) } finally { frame.recycle() }
+    }
+
+    /** Auto color-correct: nudge exposure/contrast/saturation toward a balanced look, via the clip filters. */
+    private fun autoColor(clipId: String): JSONObject {
+        val st = vm.uiState.value
+        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, st.currentTimeMs,
+            )
+            ?: throw IllegalStateException("No video clip to color-correct — scrub onto one or pass clip_id.")
+        val t = clipTone(clip)
+        val brightness = (0.5f / t.lum.coerceAtLeast(0.02f)).coerceIn(0.6f, 1.8f)
+        val contrast = (0.7f / t.spread).coerceIn(0.85f, 1.6f)
+        val saturation = if (t.sat < 0.28f) 1.18f else 1f
+        vm.updateClipFilters(clip.id) { it.copy(brightness = brightness, contrast = contrast, saturation = saturation) }
+        return ok().apply {
+            put("brightness", brightness.toDouble())
+            put("contrast", contrast.toDouble())
+            put("saturation", saturation.toDouble())
+            put(
+                "humanSummary",
+                "Auto color-corrected: exposure ×%.2f, contrast ×%.2f%s.".format(
+                    brightness, contrast,
+                    if (saturation != 1f) ", saturation ×%.2f".format(saturation) else "",
+                ),
+            )
+        }
+    }
+
+    /** Shot-match: set the TARGET clip's tone filters to align its look with the SOURCE clip. */
+    private fun matchColor(sourceClipId: String, targetClipId: String): JSONObject {
+        val st = vm.uiState.value
+        val src = st.document.clips.firstOrNull { it.id == sourceClipId }
+            ?: throw IllegalArgumentException("Source clip not found: $sourceClipId")
+        val tgt = st.document.clips.firstOrNull { it.id == targetClipId }
+            ?: throw IllegalArgumentException("Target clip not found: $targetClipId")
+        val s = clipTone(src)
+        val d = clipTone(tgt)
+        val brightness = (s.lum / d.lum.coerceAtLeast(0.02f)).coerceIn(0.4f, 2.5f)
+        val contrast = (s.spread / d.spread).coerceIn(0.5f, 2f)
+        val saturation = (s.sat / d.sat.coerceAtLeast(0.02f)).coerceIn(0.5f, 2f)
+        vm.updateClipFilters(targetClipId) { it.copy(brightness = brightness, contrast = contrast, saturation = saturation) }
+        return ok().apply {
+            put(
+                "humanSummary",
+                "Matched the target clip's look to the source (exposure ×%.2f, contrast ×%.2f, saturation ×%.2f)."
+                    .format(brightness, contrast, saturation),
+            )
+        }
     }
 
     /** Depth-of-field bokeh: run the depth model on the current frame, blur the far background, add it. */
