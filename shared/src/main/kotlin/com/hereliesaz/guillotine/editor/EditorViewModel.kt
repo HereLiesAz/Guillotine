@@ -19,6 +19,18 @@ import kotlinx.coroutines.flow.update
 
 enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP, MARQUEE }
 
+/**
+ * Preview render quality: caps the resolution the preview players decode/scale to. Lower levels trade
+ * clarity for smoother playback (lighter decode/composite); [FULL] leaves the source untouched.
+ * [maxDimension] is the longest-edge pixel cap fed to the player's track-selection parameters.
+ */
+enum class PreviewQuality(val label: String, val maxDimension: Int) {
+    LOW("Low", 360),
+    MEDIUM("Medium", 540),
+    HIGH("High", 720),
+    FULL("Full", Int.MAX_VALUE),
+}
+
 /** Default on-timeline duration for still images. */
 private const val IMAGE_DEFAULT_DURATION_MS = 5_000L
 private const val MIN_CLIP_DURATION_MS = 100L
@@ -43,6 +55,8 @@ data class EditorUiState(
     /** New keyframes get a smooth ease by default; off = linear. */
     val autoEase: Boolean = true,
     val playbackRate: Float = 1f,
+    /** Preview render quality (lower = smoother playback, less clarity). */
+    val previewQuality: PreviewQuality = PreviewQuality.HIGH,
     val selectedClipIds: List<String> = emptyList(),
     /** Currently-selected keyframe (shows ease handles on its segment). */
     val selectedKeyframeId: String? = null,
@@ -1496,6 +1510,12 @@ open class EditorViewModel {
 
     fun clearPlaybackRegion() = _uiState.update { it.copy(playbackRegion = null) }
     fun setPlaybackRate(rate: Float) = _uiState.update { it.copy(playbackRate = rate) }
+    fun setPreviewQuality(quality: PreviewQuality) = _uiState.update { it.copy(previewQuality = quality) }
+    /** Step the preview quality one level (LOW→MEDIUM→HIGH→FULL→LOW), for the transport-bar toggle. */
+    fun cyclePreviewQuality() = _uiState.update {
+        val vals = PreviewQuality.entries
+        it.copy(previewQuality = vals[(it.previewQuality.ordinal + 1) % vals.size])
+    }
     /** Visible width (px) of the timeline lanes area; feeds the dynamic zoom-out limit. */
     private var timelineViewportPx = 0f
     fun setTimelineViewportPx(px: Float) {

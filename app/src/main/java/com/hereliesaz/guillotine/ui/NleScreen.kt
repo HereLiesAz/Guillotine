@@ -802,6 +802,12 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
         IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
         IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
         IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
+        // Preview quality: lower = smoother playback, less clarity. Tap to cycle Low→…→Full.
+        Text(
+            "Q:${state.previewQuality.label}",
+            color = Neutral400, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            modifier = Modifier.clickable { vm.cyclePreviewQuality() }.padding(8.dp),
+        )
         Spacer(Modifier.weight(1f))
         val rates = listOf(0.5f, 1f, 1.5f, 2f)
         Text(
