@@ -134,6 +134,13 @@ val AGENT_SYSTEM_PROMPT = """
       the clip at the playhead). ML Kit face detection blurs every detected face in both preview and export.
       blur_faces(enabled=false) turns it back off.
 
+    BACKGROUND REPLACE (on-device, no green screen):
+    - "replace the background", "put me on a blue background", "change the backdrop", "green-screen me
+      onto this" → replace_background(clip_id, color=… OR image_path=…). It mattes the subject (ML Kit)
+      and composites it over the new background on a track behind. color is hex (#1e90ff) or a name; for
+      a generated backdrop, generate an image first and pass its path. (Just the subject cutout with a
+      lower track showing through is the existing removeBackground filter in the clip's Background tool.)
+
     NOISE REDUCTION (on-device):
     - "remove background noise", "clean up the audio", "denoise this", "reduce the hiss/hum" → denoise_clip
       with the clip id. It runs the GTCRN speech denoiser and adds the cleaned voice as a new audio clip.

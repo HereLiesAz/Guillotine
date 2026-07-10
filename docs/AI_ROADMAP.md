@@ -192,7 +192,11 @@ Each item is feasible on the current stack or a model listed above.
     `apply_bokeh` blurs the depth-far background; animated 2.5D parallax is a follow-up)**
 14. Super-resolution upscale of old/low-res footage and stills.
 15. Style transfer / AI looks; on-device auto color-correct & shot-match; LUTs.
-16. Background replace without green screen (matting) + generated backgrounds.
+16. Background replace without green screen (matting) + generated backgrounds. **(shipped —
+    the `removeBackground` subject matte composites over lower tracks, and `replace_background`
+    mattes the subject and drops a chosen background (solid color or image) on a new track behind;
+    pass a generated image's path for an AI backdrop. General (non-selfie) matting models remain a
+    future upgrade.)**
 17. Face tools: auto-blur faces (privacy), face-tracking reframe, "keep only shots
     with person X." **("keep only person X" shipped — teach a person by pointing at their
     face across frames (`add_reference`, routed to the face-ID embedder), then

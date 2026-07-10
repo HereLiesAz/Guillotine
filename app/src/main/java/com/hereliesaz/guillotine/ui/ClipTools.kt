@@ -68,6 +68,7 @@ import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral900
 import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
+import kotlinx.coroutines.launch
 
 /**
  * Context-sensitive per-clip tool buttons, shown inline in the editor tool strip
@@ -191,19 +192,23 @@ private fun FiltersToolButton(vm: EditorViewModel, clip: TimelineClip) {
 private fun LutRow(vm: EditorViewModel, clip: TimelineClip) {
     val context = LocalContext.current
     val current = clip.filters.lutPath
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        runCatching {
-            val dir = java.io.File(context.filesDir, "luts").apply { mkdirs() }
-            val name = (uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "grade")
-                .ifBlank { "grade" }.let { if (it.endsWith(".cube", true)) it else "$it.cube" }
-            val dest = java.io.File(dir, name)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                dest.outputStream().use { input.copyTo(it) }
+        // Copy the picked .cube into app storage off the main thread — a large LUT would jank/ANR here.
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val dir = java.io.File(context.filesDir, "luts").apply { mkdirs() }
+                val name = (uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "grade")
+                    .ifBlank { "grade" }.let { if (it.endsWith(".cube", true)) it else "$it.cube" }
+                val dest = java.io.File(dir, name)
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { input.copyTo(it) }
+                }
+                vm.updateClipFilters(clip.id) { it.copy(lutPath = dest.absolutePath) }
             }
-            vm.updateClipFilters(clip.id) { it.copy(lutPath = dest.absolutePath) }
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {

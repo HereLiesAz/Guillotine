@@ -232,6 +232,36 @@ open class EditorViewModel {
         fitZoomToTimeline()
     }
 
+    /**
+     * Background replace (matting): turn on subject segmentation for [foregroundClipId] and drop
+     * [background] on a NEW track *behind* it, spanning the foreground clip's timeline range, so the
+     * subject is composited over the new background. One undo step. No-op if the clip is gone.
+     */
+    fun replaceBackground(foregroundClipId: String, background: MediaItem) {
+        mutateDocument { doc ->
+            val fg = doc.clips.firstOrNull { it.id == foregroundClipId } ?: return@mutateDocument doc
+            // Appending to videoTracks puts the new track at the BOTTOM of the panel — rendered first,
+            // i.e. behind the (now matted) foreground clip.
+            val bgTrack = nextTrackId(doc.videoTracks, "V")
+            val bgClip = TimelineClip(
+                id = newId(),
+                mediaId = background.id,
+                type = ClipType.VIDEO,
+                trackId = bgTrack,
+                startTimeMs = fg.startTimeMs,
+                trimStartMs = 0,
+                durationMs = fg.durationMs,
+            )
+            doc.copy(
+                videoTracks = doc.videoTracks + bgTrack,
+                mediaItems = doc.mediaItems + background,
+                clips = doc.clips.map {
+                    if (it.id == foregroundClipId) it.copy(filters = it.filters.copy(removeBackground = true)) else it
+                } + bgClip,
+            )
+        }
+    }
+
     private fun videoClip(m: MediaItem, startMs: Long, trackId: String = "V1") = TimelineClip(
         id = newId(),
         mediaId = m.id,

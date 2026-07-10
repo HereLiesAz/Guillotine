@@ -38,15 +38,17 @@ object LutCube {
     private fun build(file: File): Effect {
         val lut = CubeLut.parse(file.readText())
         val n = lut.size
-        // Media3 SingleColorLut.createFromCube expects cube[R][G][B] packed as ARGB_8888.
+        val entries = lut.entries
+        // Media3 SingleColorLut.createFromCube expects cube[R][G][B] packed as ARGB_8888. Read the flat
+        // entries array directly — a 64-cube is ~260k cells, so per-cell object allocation would churn GC.
         val cube = Array(n) { Array(n) { IntArray(n) } }
         for (b in 0 until n) for (g in 0 until n) for (r in 0 until n) {
-            val (rf, gf, bf) = lut.at(r, g, b)
+            val i = lut.indexOf(r, g, b)
             cube[r][g][b] = Color.argb(
                 255,
-                (rf * 255f + 0.5f).toInt().coerceIn(0, 255),
-                (gf * 255f + 0.5f).toInt().coerceIn(0, 255),
-                (bf * 255f + 0.5f).toInt().coerceIn(0, 255),
+                (entries[i] * 255f + 0.5f).toInt().coerceIn(0, 255),
+                (entries[i + 1] * 255f + 0.5f).toInt().coerceIn(0, 255),
+                (entries[i + 2] * 255f + 0.5f).toInt().coerceIn(0, 255),
             )
         }
         return SingleColorLut.createFromCube(cube)
