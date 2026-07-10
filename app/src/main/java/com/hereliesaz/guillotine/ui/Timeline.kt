@@ -757,6 +757,10 @@ private fun ClipView(
                             vm.selectRangeTo(clip.id)
                         }
                     },
+                    onDoubleTap = {
+                        // Double-tap a clip → set the playback / loop region to that clip's span.
+                        vm.setPlaybackRegion(clip.startTimeMs, clip.endTimeMs)
+                    },
                     onTap = onTap@{ offset ->
                         // Tap a keyframe diamond: select it + toggle its ease.
                         val h = size.height.toFloat()

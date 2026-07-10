@@ -25,9 +25,10 @@ enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP, MARQUEE }
  * [maxDimension] is the longest-edge pixel cap fed to the player's track-selection parameters.
  */
 enum class PreviewQuality(val label: String, val maxDimension: Int) {
-    LOW("Low", 360),
-    MEDIUM("Medium", 540),
-    HIGH("High", 720),
+    P240("240p", 426),
+    P480("480p", 854),
+    P720("720p", 1280),
+    P1080("1080p", 1920),
     FULL("Full", Int.MAX_VALUE),
 }
 
@@ -56,7 +57,7 @@ data class EditorUiState(
     val autoEase: Boolean = true,
     val playbackRate: Float = 1f,
     /** Preview render quality (lower = smoother playback, less clarity). */
-    val previewQuality: PreviewQuality = PreviewQuality.HIGH,
+    val previewQuality: PreviewQuality = PreviewQuality.P720,
     val selectedClipIds: List<String> = emptyList(),
     /** Currently-selected keyframe (shows ease handles on its segment). */
     val selectedKeyframeId: String? = null,
@@ -1471,11 +1472,16 @@ open class EditorViewModel {
     /** Timeline ms where the current/most-recent playback run began — the return point for [stop]. */
     private var playbackStartMs = 0L
 
-    /** Begin playback from the current playhead, remembering it as [stop]'s return point. */
+    /**
+     * Begin playback, remembering the start as [stop]'s return point. When a playback region is set,
+     * playback jumps to (and later returns to) the region's start; otherwise it starts at the playhead.
+     */
     private fun startPlayback() {
-        if (document.totalDurationMs <= 0) return
-        playbackStartMs = _uiState.value.currentTimeMs
-        _uiState.update { it.copy(isPlaying = true) }
+        val total = document.totalDurationMs
+        if (total <= 0) return
+        val startAt = _uiState.value.playbackRegion?.first?.coerceIn(0L, total) ?: _uiState.value.currentTimeMs
+        playbackStartMs = startAt
+        _uiState.update { it.copy(currentTimeMs = startAt, isPlaying = true) }
     }
 
     /** Play / pause — pausing leaves the playhead where it is. */
