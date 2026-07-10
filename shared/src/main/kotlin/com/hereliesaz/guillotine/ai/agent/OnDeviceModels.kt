@@ -168,8 +168,20 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         abilities = "Strong step-by-step reasoning for its size (distilled R1). Good for multi-step edits.",
         limitations = "1.86 GB download. Its reasoning traces can be verbose.",
     ),
-    // Note: Gemma-3n is offered (re-hosted, un-gated) in the VLM list. Qwen3 ships as `.litertlm`,
-    // which the current MediaPipe runtime (0.10.35) DOES load — it's simply not mirrored yet.
+    OnDeviceModel(
+        id = "qwen3-0.6b-int4",
+        label = "Qwen3 0.6B (int4) — light & modern",
+        fileName = "qwen3_0_6b_mixed_int4.litertlm",
+        sizeBytes = 497_664_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("litert-community/Qwen3-0.6B"),
+        downloadUrl = hfResolve("litert-community/Qwen3-0.6B", "qwen3_0_6b_mixed_int4.litertlm"),
+        abilities = "Small, fast, up-to-date Qwen3 assistant (mixed int4). A good lightweight default; ships as LiteRT-LM (.litertlm).",
+        limitations = "~0.5 GB. Reasons less deeply than the 1.5 B+ options.",
+    ),
+    // Gemma-3n (VLM list) and this Qwen3 entry are both un-gated. Qwen3 ships as LiteRT-LM
+    // (.litertlm), which the current MediaPipe runtime (0.10.35) loads directly.
 )
 
 /**
