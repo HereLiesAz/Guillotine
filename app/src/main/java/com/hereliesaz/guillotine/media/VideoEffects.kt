@@ -77,9 +77,14 @@ object VideoEffects {
             effects += GaussianBlur(filters.blur)
         }
 
-        // 3D LUT color grade (.cube), applied last so it grades the adjusted picture. Null when unset.
+        // 3D LUT color grade (.cube), applied after the adjustments. Null when unset.
         if (filters.lutPath.isNotBlank()) {
             LutCube.effectFor(filters.lutPath)?.let { effects += it }
+        }
+
+        // Custom GLSL/ISF shader effect, applied last (over everything, including the LUT). Null when unset.
+        if (filters.shaderPath.isNotBlank()) {
+            ShaderCache.effectFor(filters.shaderPath)?.let { effects += it }
         }
 
         return effects
@@ -147,6 +152,7 @@ object VideoEffects {
         if (filters.invert >= 50f) out += RgbFilter.createInvertedFilter()
         if (filters.blur > 0f) out += GaussianBlur(filters.blur)
         if (filters.lutPath.isNotBlank()) LutCube.effectFor(filters.lutPath)?.let { out += it }
+        if (filters.shaderPath.isNotBlank()) ShaderCache.effectFor(filters.shaderPath)?.let { out += it }
         return out
     }
 

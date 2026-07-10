@@ -129,6 +129,13 @@ val AGENT_SYSTEM_PROMPT = """
       grades in preview and export. clear_lut removes it. LUTs are usually picked by the user (clip
       Filters → LUT); apply_lut is for when a path is known.
 
+    GLSL / ISF SHADER EFFECTS (on-device):
+    - "apply this ISF shader", "add a glitch/CRT/kaleidoscope shader", "run this .fs/.glsl on the clip" →
+      apply_shader(clip_id, path) with a standard ISF (.isf) or raw fragment (.fs/.glsl) file. It runs on
+      every frame in preview and export. clear_shader removes it. Only single-pass, single-image shaders
+      work (multi-pass/feedback/audio and two-input transition shaders are rejected). Usually the user
+      picks the shader (clip Filters → Shader); apply_shader is for when a path is known.
+
     FACE ANONYMIZATION (on-device, no model needed):
     - "blur the faces", "anonymize people", "hide identities", "censor faces" → blur_faces on the clip (or
       the clip at the playhead). ML Kit face detection blurs every detected face in both preview and export.

@@ -287,6 +287,28 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "apply_shader",
+            "Apply a custom GLSL shader effect to a clip ON-DEVICE — a standard **ISF** (`.isf`) shader or " +
+                "a raw `.fs`/`.glsl` fragment. It runs on every frame in preview and export. Use for " +
+                "\"apply this ISF shader\", \"add a glitch/CRT/kaleidoscope shader\", \"run this .fs on the " +
+                "clip\". Only single-pass, single-image shaders are supported (multi-pass, feedback, audio, " +
+                "and two-input transition shaders are rejected). `path` is a filesystem path (usually a file " +
+                "the user picked). clear_shader removes it.",
+            objSchema(
+                "clip_id" to stringProp("The clip to affect; defaults to the video clip at the playhead"),
+                "path" to stringProp("Filesystem path to an .isf / .fs / .glsl fragment shader"),
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_shader",
+            "Remove the custom GLSL/ISF shader effect from a clip (undo apply_shader).",
+            objSchema(
+                "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
             "replace_background",
             "Replace a clip's background ON-DEVICE with no green screen (ML Kit subject matte): segment " +
                 "the subject and composite it over a new background — a solid color or an image — placed " +
@@ -682,6 +704,8 @@ class McpTools(
         "blur_faces" -> blurFaces(args.optString("clip_id"), if (args.has("enabled")) args.getBoolean("enabled") else true)
         "apply_lut" -> applyLut(args.optString("clip_id"), args.getString("path"))
         "clear_lut" -> clearLut(args.optString("clip_id"))
+        "apply_shader" -> applyShader(args.optString("clip_id"), args.getString("path"))
+        "clear_shader" -> clearShader(args.optString("clip_id"))
         "replace_background" -> replaceBackgroundTool(args.optString("clip_id"), args.optString("color"), args.optString("image_path"))
         "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
@@ -2161,6 +2185,26 @@ class McpTools(
         val clip = resolveClipOrPlayhead(clipId)
         vm.updateClipFilters(clip.id) { it.copy(lutPath = "") }
         return ok().apply { put("humanSummary", "Removed the LUT from clip ${clip.id}.") }
+    }
+
+    /** Apply a GLSL/ISF shader effect to a clip (path validated + parseable to a single-input program). */
+    private fun applyShader(clipId: String, path: String): JSONObject {
+        require(path.isNotBlank()) { "Provide the path to an .isf / .fs / .glsl shader file." }
+        val file = java.io.File(path)
+        require(file.isFile) { "No shader file at: $path" }
+        // Parse up front so unsupported/malformed shaders fail here with a clear message.
+        runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
+            .onFailure { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(shaderPath = file.absolutePath) }
+        return ok().apply { put("humanSummary", "Applied shader ${file.name} to clip ${clip.id}.") }
+    }
+
+    /** Remove a clip's GLSL/ISF shader effect. */
+    private fun clearShader(clipId: String): JSONObject {
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(shaderPath = "") }
+        return ok().apply { put("humanSummary", "Removed the shader from clip ${clip.id}.") }
     }
 
     /**

@@ -182,7 +182,57 @@ private fun FiltersToolButton(vm: EditorViewModel, clip: TimelineClip) {
         FilterSlider(vm, clip.id, "Grayscale", f.grayscale, 0f..100f, "%") { v, ff -> ff.copy(grayscale = v) }
         FilterSlider(vm, clip.id, "Blur", f.blur, 0f..20f, "px") { v, ff -> ff.copy(blur = v) }
         LutRow(vm, clip)
+        ShaderRow(vm, clip)
         PresetRow(vm, clip.id)
+    }
+}
+
+/** Pick / clear a GLSL shader effect (ISF `.isf` or a raw `.fs`/`.glsl` fragment) for the clip. Copied
+ *  into app storage so the Media3 effect can read it by path in preview and export. */
+@Composable
+private fun ShaderRow(vm: EditorViewModel, clip: TimelineClip) {
+    val context = LocalContext.current
+    val current = clip.filters.shaderPath
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val dir = java.io.File(context.filesDir, "shaders").apply { mkdirs() }
+                val name = (uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "effect")
+                    .ifBlank { "effect" }
+                    .let { if (it.substringAfterLast('.', "").lowercase() in setOf("isf", "fs", "glsl", "frag")) it else "$it.fs" }
+                val dest = java.io.File(dir, name)
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { input.copyTo(it) }
+                }
+                vm.updateClipFilters(clip.id) { it.copy(shaderPath = dest.absolutePath) }
+            }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (current.isNotBlank()) "Shader: ${java.io.File(current).name}" else "Shader: none",
+            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+        )
+        Text(
+            "Pick .isf/.fs",
+            color = Color(0xFF8AB4F8), fontSize = 12.sp,
+            modifier = Modifier
+                .clickable { picker.launch(arrayOf("*/*")) }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        if (current.isNotBlank()) {
+            Text(
+                "Clear",
+                color = Neutral500, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable { vm.updateClipFilters(clip.id) { it.copy(shaderPath = "") } }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
     }
 }
 
