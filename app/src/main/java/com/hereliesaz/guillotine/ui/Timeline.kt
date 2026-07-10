@@ -287,15 +287,22 @@ private fun TimelineLanes(
                     awaitPointerEventScope {
                         while (true) {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                            val playheadPx = vm.uiState.value.currentTimeMs / 1000f * pps
+                            val startMs = vm.uiState.value.currentTimeMs
+                            val playheadPx = startMs / 1000f * pps
                             if (kotlin.math.abs(down.position.x - playheadPx) > grabRadiusPx) continue
+                            // Scrub by the RELATIVE drag from the grab point (not the absolute pointer x),
+                            // so grabbing the line up to grabRadiusPx off-centre doesn't snap the playhead
+                            // to the finger — it moves smoothly with the drag.
+                            val downX = down.position.x
                             var dragging = true
                             while (dragging) {
                                 val ev = awaitPointerEvent(PointerEventPass.Initial)
                                 val change = ev.changes.firstOrNull { it.id == down.id } ?: break
                                 if (!change.pressed) { dragging = false; break }
                                 if (change.positionChanged()) {
-                                    vm.seekTo((change.position.x / pps * 1000f).toLong().coerceAtLeast(0))
+                                    val newMs = (startMs + ((change.position.x - downX) / pps * 1000f).toLong())
+                                        .coerceAtLeast(0L)
+                                    vm.seekTo(newMs)
                                     change.consume()
                                 }
                             }
