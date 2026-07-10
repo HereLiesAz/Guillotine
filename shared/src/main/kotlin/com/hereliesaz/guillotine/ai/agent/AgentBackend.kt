@@ -129,6 +129,13 @@ val AGENT_SYSTEM_PROMPT = """
       grades in preview and export. clear_lut removes it. LUTs are usually picked by the user (clip
       Filters → LUT); apply_lut is for when a path is known.
 
+    TRANSITIONS BETWEEN CLIPS (on-device, via ffmpeg):
+    - "add a crossfade/dissolve between these", "wipe from this clip to that", "put a transition here" →
+      apply_transition(from_clip_id, to_clip_id, type, duration_sec). It runs FFmpeg xfade and adds the
+      combined result as a new clip. type ∈ fade, fadeblack/fadewhite, wipeleft/right/up/down, slide*,
+      circleopen/circleclose, dissolve, pixelize, radial, smoothleft, distance, … (default fade);
+      duration_sec is the overlap (default 1). Needs an ffmpeg executable (Settings → FFmpeg filters).
+
     FFMPEG / FREI0R FILTERS (on-device, advanced):
     - "apply the ffmpeg filter <graph>", "run a frei0r plugin", "add a vhs/vintage/chromashift filter",
       "deband/curves/eq this" → apply_ffmpeg_filter(clip_id, filter) where filter is a raw FFmpeg -vf

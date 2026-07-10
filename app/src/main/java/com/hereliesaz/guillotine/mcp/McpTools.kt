@@ -507,6 +507,23 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "apply_transition",
+            "Create a GL-style TRANSITION between two clips ON-DEVICE (FFmpeg `xfade`) and add the combined " +
+                "result as a new clip. Use for \"add a crossfade/dissolve between these\", \"wipe from this " +
+                "to that\", \"put a transition here\". type is any xfade transition: fade, fadeblack, " +
+                "fadewhite, wipeleft/right/up/down, slideleft/right/up/down, circleopen, circleclose, " +
+                "dissolve, pixelize, radial, smoothleft, distance, and more (default fade). duration_sec " +
+                "is the overlap (default 1). Requires an ffmpeg executable (Settings → AI Analyzer → FFmpeg " +
+                "filters); relay its error if unset. Bake-to-new-clip, desktop-first.",
+            objSchema(
+                "from_clip_id" to stringProp("The outgoing (first) clip"),
+                "to_clip_id" to stringProp("The incoming (second) clip"),
+                "type" to stringProp("xfade transition type (default fade)"),
+                "duration_sec" to numberProp("Transition/overlap length in seconds (default 1)"),
+                required = listOf("from_clip_id", "to_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
             "diarize_clip",
             "Speaker diarization ON-DEVICE (no key): work out WHO spoke WHEN in a clip's audio and return " +
                 "the speaker turns (speaker index + time range). Use for \"who speaks when?\", \"label the " +
@@ -766,6 +783,7 @@ class McpTools(
         "separate_stems" -> separateStems(args.getString("clip_id"))
         "denoise_clip" -> denoiseClip(args.getString("clip_id"))
         "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
+        "apply_transition" -> applyTransition(args.getString("from_clip_id"), args.getString("to_clip_id"), args.optString("type", "fade"), args.optDouble("duration_sec", 1.0).toFloat())
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
@@ -1890,6 +1908,44 @@ class McpTools(
             ok().apply {
                 put("clipCount", vm.uiState.value.document.clips.size)
                 put("humanSummary", "Applied the FFmpeg filter and added the result as a new clip.")
+            }
+        }
+    }
+
+    /** Build a GL-style transition between two clips via FFmpeg xfade, adding the result as a new clip. */
+    private fun applyTransition(fromClipId: String, toClipId: String, type: String, durationSec: Float): JSONObject {
+        val ffmpeg = settingsProvider().ffmpegPath
+        require(ffmpeg.isNotBlank()) {
+            "No ffmpeg set. Set an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters."
+        }
+        val doc = vm.uiState.value.document
+        val from = doc.clips.firstOrNull { it.id == fromClipId }
+            ?: throw IllegalArgumentException("Clip not found: $fromClipId")
+        val to = doc.clips.firstOrNull { it.id == toClipId }
+            ?: throw IllegalArgumentException("Clip not found: $toClipId")
+        val fromMedia = doc.mediaFor(from) ?: throw IllegalArgumentException("No media for clip: $fromClipId")
+        val toMedia = doc.mediaFor(to) ?: throw IllegalArgumentException("No media for clip: $toClipId")
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Building transition…", pausable = false,
+        ) { _ ->
+            val baked = com.hereliesaz.guillotine.media.FfmpegFilter.xfade(
+                context,
+                com.hereliesaz.guillotine.media.FfmpegFilter.Segment(fromMedia.uri, from.trimStartMs / 1000f, from.durationMs / 1000f),
+                com.hereliesaz.guillotine.media.FfmpegFilter.Segment(toMedia.uri, to.trimStartMs / 1000f, to.durationMs / 1000f),
+                type, durationSec, ffmpeg, java.io.File(context.cacheDir, "ffmpeg"),
+            )
+            vm.addMedia(
+                listOf(
+                    MediaItem(
+                        newId(), Uri.fromFile(baked.file).toString(),
+                        "transition: ${fromMedia.name} → ${toMedia.name}",
+                        MediaKind.VIDEO, baked.durationMs, baked.hasAudio,
+                    ),
+                ),
+            )
+            ok().apply {
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Made a '$type' transition between the two clips and added it as a new clip.")
             }
         }
     }

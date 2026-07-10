@@ -39,27 +39,100 @@ object FfmpegFilter {
 
         outDir.mkdirs()
         val input = localInput(context, inputUri, outDir)
-        val out = File(outDir, "ff_${System.nanoTime()}.mp4")
         try {
-            val process = ProcessBuilder(
-                ffmpegPath, "-y", "-i", input.absolutePath,
-                "-vf", filterGraph, "-c:a", "copy", out.absolutePath,
-            ).redirectErrorStream(true).start()
-
-            val log = process.inputStream.bufferedReader().readText()
-            val finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES)
-            if (!finished) {
-                process.destroyForcibly()
-                throw IllegalStateException("ffmpeg timed out after $TIMEOUT_MINUTES min.")
-            }
-            check(process.exitValue() == 0 && out.isFile && out.length() > 0) {
-                "ffmpeg failed: ${log.takeLast(400).trim()}"
-            }
-            val (durationMs, hasAudio) = probe(out)
-            return Baked(out, durationMs, hasAudio)
+            return execute(ffmpegPath, listOf("-i", input.absolutePath, "-vf", filterGraph, "-c:a", "copy"), outDir)
         } finally {
-            if (input.parentFile == outDir && input.name.startsWith("ff_in_")) input.delete()
+            cleanupTemp(input, outDir)
         }
+    }
+
+    /**
+     * Combine two clips with a **GL-style transition** via FFmpeg's `xfade` video filter (plus `acrossfade`
+     * for audio), producing one new clip. [transition] is any xfade type (`fade`, `wipeleft`, `slideup`,
+     * `circleopen`, `dissolve`, `pixelize`, `radial`, …). [offsetSec] is when the transition starts in the
+     * timeline of clip A (typically A's duration − [durationSec]). On-device; requires an ffmpeg binary.
+     */
+    /** One clip's source segment: media [uri], [startSec] into it, and [durSec] long (its timeline trim). */
+    data class Segment(val uri: String, val startSec: Float, val durSec: Float)
+
+    fun xfade(
+        context: Context,
+        from: Segment,
+        to: Segment,
+        transition: String,
+        durationSec: Float,
+        ffmpegPath: String,
+        outDir: File,
+    ): Baked {
+        require(ffmpegPath.isNotBlank()) {
+            "No ffmpeg set. Point Settings → AI Analyzer → FFmpeg filters at an ffmpeg executable."
+        }
+        require(File(ffmpegPath).let { it.isFile || ffmpegPath == "ffmpeg" }) { "ffmpeg not found at: $ffmpegPath" }
+        // The transition must fit inside BOTH clips (offset = A − dur stays valid; B isn't shorter than dur).
+        val maxDur = maxOf(0.1f, minOf(from.durSec, to.durSec) - 0.05f)
+        val dur = durationSec.coerceIn(0.05f, maxDur)
+        val offset = (from.durSec - dur).coerceAtLeast(0f)
+
+        outDir.mkdirs()
+        var a: File? = null
+        var b: File? = null
+        try {
+            a = localInput(context, from.uri, outDir)
+            b = localInput(context, to.uri, outDir)
+            // Referencing [0:a]/[1:a] for a clip with no audio makes ffmpeg fail at filtergraph parse
+            // (not just mapping), so probe each and build the audio branch to match.
+            val hasA = probe(a).second
+            val hasB = probe(b).second
+            val d = "%.3f".format(dur)
+            val off = "%.3f".format(offset)
+            val filter = buildString {
+                append("[0:v][1:v]xfade=transition=$transition:duration=$d:offset=$off[v]")
+                when {
+                    hasA && hasB -> append(";[0:a][1:a]acrossfade=d=$d[a]")
+                    hasA -> append(";[0:a]anull[a]")
+                    // Only B has audio → delay it to the transition point so it stays in sync.
+                    hasB -> append(";[1:a]adelay=delays=${(offset * 1000).toInt()}:all=1[a]")
+                }
+            }
+            return execute(
+                ffmpegPath,
+                buildList {
+                    add("-ss"); add("%.3f".format(from.startSec)); add("-t"); add("%.3f".format(from.durSec))
+                    add("-i"); add(a.absolutePath)
+                    add("-ss"); add("%.3f".format(to.startSec)); add("-t"); add("%.3f".format(to.durSec))
+                    add("-i"); add(b.absolutePath)
+                    add("-filter_complex"); add(filter)
+                    add("-map"); add("[v]")
+                    if (hasA || hasB) { add("-map"); add("[a]") }
+                },
+                outDir,
+            )
+        } finally {
+            a?.let { cleanupTemp(it, outDir) }
+            b?.let { cleanupTemp(it, outDir) }
+        }
+    }
+
+    /** Run ffmpeg with [args] between `-y` and the generated output path; probe + return the result. */
+    private fun execute(ffmpegPath: String, args: List<String>, outDir: File): Baked {
+        val out = File(outDir, "ff_${System.nanoTime()}.mp4")
+        val cmd = buildList { add(ffmpegPath); add("-y"); addAll(args); add(out.absolutePath) }
+        val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
+        val log = process.inputStream.bufferedReader().readText()
+        val finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES)
+        if (!finished) {
+            process.destroyForcibly()
+            throw IllegalStateException("ffmpeg timed out after $TIMEOUT_MINUTES min.")
+        }
+        check(process.exitValue() == 0 && out.isFile && out.length() > 0) {
+            "ffmpeg failed: ${log.takeLast(400).trim()}"
+        }
+        val (durationMs, hasAudio) = probe(out)
+        return Baked(out, durationMs, hasAudio)
+    }
+
+    private fun cleanupTemp(file: File, outDir: File) {
+        if (file.parentFile == outDir && file.name.startsWith("ff_in_")) file.delete()
     }
 
     /** ffmpeg needs a real path; copy a content:// source to a temp file, else use the file path. */
