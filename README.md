@@ -140,3 +140,7 @@ and **use a different name and icon** — the "Guillotine" name and logo are res
 
 Releases previously dedicated under **CC0 1.0** remain public domain; the AGPL-3.0 licensing applies to
 subsequent versions.
+
+Alongside the license, the project keeps a **non-binding, good-faith companion** — the
+[Open-Source Open-Mind covenant](docs/OPEN-SOURCE-OPEN-MIND.md). It's not a condition of anything; it just
+asks that the real author's statement, if one is ever sent, be heard once. *Be OSOM to each other.*

@@ -53,3 +53,8 @@ Notes
   domain; the AGPLv3 relicensing applies to subsequent versions only.
 - These terms are provided in good faith by a non-lawyer; have counsel review
   before relying on them for enforcement.
+- Separately, and NON-bindingly, the project keeps an "Open-Source Open-Mind"
+  covenant (docs/OPEN-SOURCE-OPEN-MIND.md): a good-faith request -- not a
+  license condition -- that a reuser present the Author's statement, if one is
+  ever sent, once at their next directional meeting. It does not affect any
+  rights under the AGPL. Be OSOM to each other.
