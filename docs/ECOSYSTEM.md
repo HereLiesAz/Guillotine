@@ -31,21 +31,35 @@ shared in countless free LUT packs.
 
 ---
 
-## 2. GL Transitions & ISF shaders — GLSL effects/transitions 🗺
+## 2. GLSL / ISF shader effects ✅ · GL-Transitions 🗺 (needs a compositor)
 
 Two widely-used open GLSL standards:
 
-- **[GL Transitions](https://gl-transitions.com/):** a community library of transition shaders, each a
-  `vec4 transition(vec2 uv)` function over `getFromColor`/`getToColor` uniforms with typed parameters.
 - **[ISF](https://isf.video/) (Interactive Shader Format):** a JSON-header-over-GLSL convention for
-  effect/generator shaders with declared `INPUTS`, used by VDMX, Resolume, and others.
+  per-clip effect shaders with declared `INPUTS`, used by VDMX, Resolume, and others.
+- **[GL Transitions](https://gl-transitions.com/):** a community library of *transition* shaders, each a
+  `vec4 transition(vec2 uv)` sampling both `getFromColor` and `getToColor`.
 
-**Plan.** A `GlslEffect` wrapping Media3's `GlShaderProgram`/`GlEffect` so the same shader runs in
-preview and export, plus small adapters that map a GL-Transitions `transition()` into a crossfade
-between two clips, and an ISF header into declared uniform controls. Transitions attach at a clip
-boundary; ISF effects attach per-clip like a LUT. Shader source stays on-device.
+**Shipped — single-input shader effects.** Drop a standard **`.isf`** shader (or a raw `.fs`/`.glsl`
+fragment) onto a clip via **Filters → Shader**, or the `apply_shader` / `clear_shader` MCP tools. It
+runs on every frame in **both preview and export**.
+[`GlslShader`](../shared/src/main/kotlin/com/hereliesaz/guillotine/media/GlslShader.kt) (shared, pure
+Kotlin) parses the ISF `/*{…}*/` header, maps `INPUTS` to uniforms, and rewrites ISF built-ins
+(`IMG_THIS_PIXEL`, `IMG_NORM_PIXEL`, `isf_FragNormCoord`, `RENDERSIZE`, `TIME`) to Media3's conventions;
+[`GlslEffect`](../app/src/main/java/com/hereliesaz/guillotine/media/GlslEffect.kt) is a Media3
+`BaseGlShaderProgram` (1-in/1-out). **Supported subset:** single-pass, single-image ISF filters
+(`float`/`bool`/`long`/`color`/`point2D`/`event` inputs, applied at their defaults for now) and raw
+single-input fragments. **Rejected** (Media3's per-clip effect is 1-in/1-out): multi-pass, persistent/
+feedback buffers, audio inputs, and multiple image inputs.
 
-Tracking: this is the next ecosystem milestone after LUTs.
+**Not yet — true GL-Transitions (two-input warps).** A gl-transition samples *two* frames per pixel, but
+Media3's per-clip effect chain (and `ExoPlayer.setVideoEffects`) is strictly single-input. Media3's
+`DefaultVideoCompositor` only does a fixed **alpha-over** composite (via `OverlaySettings`) — there's no
+public hook to inject a transition fragment shader, and Google's docs list item-to-item transitions as
+still roadmap. Delivering the full warp catalog therefore needs a **custom `VideoCompositor`**
+(`@UnstableApi`) plus switching the preview from `ExoPlayer` to `CompositionPlayer` so preview and export
+share one `Composition` — a rendering-core change, tracked separately. (Alpha-based dissolves already
+exist in the app's crossfade.) Parameter-control UI for shader `INPUTS` is a follow-up.
 
 ---
 
@@ -77,17 +91,21 @@ client at `/mcp` with the token — the tool list is self-describing.
 
 ---
 
-## 4. Frei0r & FFmpeg filters — native video filters 🗺 (desktop-first)
+## 4. Frei0r & FFmpeg filters — native video filters ✅ (advanced, bring-your-own ffmpeg)
 
-- **[Frei0r](https://frei0r.dyne.org/):** the minimalist cross-application video-plugin API
-  (`f0r_*` entry points in a shared library) used by FFmpeg, MLT/Shotcut, Kdenlive, PureData.
-- **FFmpeg `-vf` filtergraphs:** the ubiquitous filter chain syntax.
+- **FFmpeg `-vf` filtergraphs:** the ubiquitous filter-chain syntax.
+- **[Frei0r](https://frei0r.dyne.org/):** the cross-application video-plugin API (`f0r_*` entry points),
+  reached **through FFmpeg's `frei0r=<name>:<params>` filter** — so one path covers both ecosystems.
 
-**Plan.** On **desktop** (`:desktop`, JVM), load Frei0r `.so`/`.dll`/`.dylib` plugins and shell out to
-FFmpeg filtergraphs as an export-time effect stage — this is where native plugins and a full FFmpeg
-build are practical. On **Android** these are heavyweight (a bundled mobile FFmpeg + JNI Frei0r host),
-so they're gated as an optional desktop-first capability rather than a default mobile dependency. Both
-run entirely on-device.
+**Shipped — bake an FFmpeg/Frei0r filtergraph.** Point **Settings → AI Analyzer → FFmpeg filters** at an
+`ffmpeg` executable, then `apply_ffmpeg_filter(clip_id, filter)` (MCP) bakes a standard `-vf` graph (e.g.
+`hue=s=0, gblur=sigma=2`, or `frei0r=cartoon`) onto the clip and adds the result as a new clip.
+[`FfmpegFilter`](../app/src/main/java/com/hereliesaz/guillotine/media/FfmpegFilter.kt) runs the process
+on local files only — **on-device, nothing leaves the device**. This is a **bake-to-new-clip** step, not
+a live filter (FFmpeg can't drive GL preview), and **requires the user to supply an ffmpeg binary**
+(desktop-first; on Android, a bundled/downloaded ARM build) — so it's an optional advanced capability,
+not a default mobile dependency. A live-filter (Media3-native) subset of common FFmpeg filters, and a
+`:desktop` Frei0r host that loads `.so`/`.dll`/`.dylib` directly, are possible follow-ups.
 
 ---
 

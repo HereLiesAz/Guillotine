@@ -29,6 +29,7 @@ data class SettingsBundle(
     val diarizeEmbedModelPath: String = "",
     val stemModelPath: String = "",
     val denoiseModelPath: String = "",
+    val ffmpegPath: String = "",
     val frameAnalysisCacheSize: Int = 200,
     val genKeys: Map<String, String> = emptyMap(),
     val genModels: Map<String, String> = emptyMap(),
@@ -65,6 +66,7 @@ object SettingsBackup {
             diarizeEmbedModelPath = settings.diarizeEmbedModelPath,
             stemModelPath = settings.stemModelPath,
             denoiseModelPath = settings.denoiseModelPath,
+            ffmpegPath = settings.ffmpegPath,
             frameAnalysisCacheSize = settings.frameAnalysisCacheSize,
             genKeys = settings.genKeys.mapKeys { it.key.name },
             genModels = settings.genModels.mapKeys { it.key.name },
@@ -106,6 +108,7 @@ object SettingsBackup {
             diarizeEmbedModelPath = bundle.diarizeEmbedModelPath,
             stemModelPath = bundle.stemModelPath,
             denoiseModelPath = bundle.denoiseModelPath,
+            ffmpegPath = bundle.ffmpegPath,
             frameAnalysisCacheSize = bundle.frameAnalysisCacheSize,
             genKeys = bundle.genKeys.mapNotNull { (k, v) ->
                 runCatching { GenProviderType.valueOf(k) to v }.getOrNull()

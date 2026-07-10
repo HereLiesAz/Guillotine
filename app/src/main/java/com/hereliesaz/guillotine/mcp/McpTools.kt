@@ -287,6 +287,40 @@ class McpTools(
             ),
         ))
         put(toolDefinition(
+            "apply_shader",
+            "Apply a custom GLSL shader effect to a clip ON-DEVICE — a standard **ISF** (`.isf`) shader or " +
+                "a raw `.fs`/`.glsl` fragment. It runs on every frame in preview and export. Use for " +
+                "\"apply this ISF shader\", \"add a glitch/CRT/kaleidoscope shader\", \"run this .fs on the " +
+                "clip\". Only single-pass, single-image shaders are supported (multi-pass, feedback, audio, " +
+                "and two-input transition shaders are rejected). `path` is a filesystem path (usually a file " +
+                "the user picked). clear_shader removes it.",
+            objSchema(
+                "clip_id" to stringProp("The clip to affect; defaults to the video clip at the playhead"),
+                "path" to stringProp("Filesystem path to an .isf / .fs / .glsl fragment shader"),
+                "params" to objSchema(required = emptyList()).apply {
+                    put("description", "Optional {name: value} overrides for the shader's scalar inputs (see list_shader_params).")
+                },
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_shader",
+            "Remove the custom GLSL/ISF shader effect from a clip (undo apply_shader).",
+            objSchema(
+                "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "list_shader_params",
+            "List an ISF/GLSL shader's adjustable scalar inputs (name, type, default, min, max) so you " +
+                "know what to pass to apply_shader's `params`. `path` is a shader file.",
+            objSchema(
+                "path" to stringProp("Filesystem path to an .isf / .fs / .glsl shader"),
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
             "replace_background",
             "Replace a clip's background ON-DEVICE with no green screen (ML Kit subject matte): segment " +
                 "the subject and composite it over a new background — a solid color or an image — placed " +
@@ -455,6 +489,21 @@ class McpTools(
             objSchema(
                 "clip_id" to stringProp("The clip whose voice audio to denoise"),
                 required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_ffmpeg_filter",
+            "Bake a standard **FFmpeg `-vf` filtergraph** onto a clip ON-DEVICE and add the result as a new " +
+                "clip — the whole FFmpeg filter ecosystem, and **Frei0r** plugins via `frei0r=<name>:<params>`. " +
+                "Use for \"apply the ffmpeg filter <graph>\", \"run a frei0r plugin\", \"add a vintage/vhs/" +
+                "chromashift filter\", \"eq/curves/deband this\". `filter` is the raw -vf graph, e.g. " +
+                "\"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Requires an ffmpeg executable set in " +
+                "Settings → AI Analyzer → FFmpeg filters (desktop-first; relay its error if unset). This is " +
+                "a bake-to-new-clip step, not a live filter.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose video to filter"),
+                "filter" to stringProp("An FFmpeg -vf filtergraph (Frei0r via frei0r=name:params)"),
+                required = listOf("clip_id", "filter"),
             ),
         ))
         put(toolDefinition(
@@ -682,6 +731,9 @@ class McpTools(
         "blur_faces" -> blurFaces(args.optString("clip_id"), if (args.has("enabled")) args.getBoolean("enabled") else true)
         "apply_lut" -> applyLut(args.optString("clip_id"), args.getString("path"))
         "clear_lut" -> clearLut(args.optString("clip_id"))
+        "apply_shader" -> applyShader(args.optString("clip_id"), args.getString("path"), args.optJSONObject("params"))
+        "clear_shader" -> clearShader(args.optString("clip_id"))
+        "list_shader_params" -> listShaderParams(args.getString("path"))
         "replace_background" -> replaceBackgroundTool(args.optString("clip_id"), args.optString("color"), args.optString("image_path"))
         "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
@@ -713,6 +765,7 @@ class McpTools(
         "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
         "separate_stems" -> separateStems(args.getString("clip_id"))
         "denoise_clip" -> denoiseClip(args.getString("clip_id"))
+        "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
@@ -1809,6 +1862,38 @@ class McpTools(
         }
     }
 
+    /** Bake an FFmpeg/Frei0r `-vf` filtergraph onto a clip's video, adding the result as a new clip. */
+    private fun applyFfmpegFilter(clipId: String, filterGraph: String): JSONObject {
+        val ffmpeg = settingsProvider().ffmpegPath
+        require(ffmpeg.isNotBlank()) {
+            "No ffmpeg set. Set an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters."
+        }
+        require(filterGraph.isNotBlank()) { "Provide an FFmpeg -vf filtergraph." }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Applying FFmpeg filter…", pausable = false,
+        ) { _ ->
+            val baked = com.hereliesaz.guillotine.media.FfmpegFilter.apply(
+                context, media.uri, filterGraph, ffmpeg, java.io.File(context.cacheDir, "ffmpeg"),
+            )
+            vm.addMedia(
+                listOf(
+                    MediaItem(
+                        newId(), Uri.fromFile(baked.file).toString(), "ffmpeg: ${media.name}",
+                        MediaKind.VIDEO, baked.durationMs, baked.hasAudio,
+                    ),
+                ),
+            )
+            ok().apply {
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Applied the FFmpeg filter and added the result as a new clip.")
+            }
+        }
+    }
+
     /** Diarize a clip's audio into speaker turns (who spoke when), mapped to timeline ms. */
     private fun diarizeClip(clipId: String, numSpeakers: Int): JSONObject {
         val settings = settingsProvider()
@@ -2161,6 +2246,64 @@ class McpTools(
         val clip = resolveClipOrPlayhead(clipId)
         vm.updateClipFilters(clip.id) { it.copy(lutPath = "") }
         return ok().apply { put("humanSummary", "Removed the LUT from clip ${clip.id}.") }
+    }
+
+    /** Apply a GLSL/ISF shader effect to a clip, with optional scalar-input overrides. */
+    private fun applyShader(clipId: String, path: String, params: JSONObject?): JSONObject {
+        require(path.isNotBlank()) { "Provide the path to an .isf / .fs / .glsl shader file." }
+        val file = java.io.File(path)
+        require(file.isFile) { "No shader file at: $path" }
+        // Parse up front so unsupported/malformed shaders fail here with a clear message.
+        val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
+            .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
+        // Only accept overrides for the shader's known scalar (single-value) uniforms.
+        val scalar = program.uniforms.filter { it.values.size == 1 }.associateBy { it.name }
+        val overrides = HashMap<String, Float>()
+        params?.keys()?.forEach { k ->
+            scalar[k]?.let { u -> overrides[k] = params.optDouble(k, u.values[0].toDouble()).toFloat() }
+        }
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(shaderPath = file.absolutePath, shaderParams = overrides) }
+        return ok().apply {
+            put(
+                "humanSummary",
+                "Applied shader ${file.name}" +
+                    (if (overrides.isNotEmpty()) " with ${overrides.size} param(s)" else "") +
+                    " to clip ${clip.id}.",
+            )
+        }
+    }
+
+    /** Remove a clip's GLSL/ISF shader effect (and its param overrides). */
+    private fun clearShader(clipId: String): JSONObject {
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(shaderPath = "", shaderParams = emptyMap()) }
+        return ok().apply { put("humanSummary", "Removed the shader from clip ${clip.id}.") }
+    }
+
+    /** List a shader's adjustable scalar inputs (name, type, default, min, max). */
+    private fun listShaderParams(path: String): JSONObject {
+        val file = java.io.File(path)
+        require(file.isFile) { "No shader file at: $path" }
+        val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
+            .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
+        val arr = JSONArray()
+        program.uniforms.filter { it.values.size == 1 }.forEach { u ->
+            arr.put(JSONObject().apply {
+                put("name", u.name)
+                put("type", u.type.name.lowercase())
+                put("default", u.values[0].toDouble())
+                put("min", u.min.toDouble())
+                put("max", u.max.toDouble())
+            })
+        }
+        return ok().apply {
+            put("params", arr)
+            put(
+                "humanSummary",
+                if (arr.length() == 0) "This shader has no adjustable scalar inputs." else "${arr.length()} adjustable input(s).",
+            )
+        }
     }
 
     /**
