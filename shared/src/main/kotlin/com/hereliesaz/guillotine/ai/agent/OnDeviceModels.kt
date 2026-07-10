@@ -209,12 +209,26 @@ val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
 )
 
 /**
- * Recommended face-embedding models for identifying a specific person. "Use" sets `faceEmbedModelPath`.
- * Empty for now: no ready-to-use, MediaPipe-metadata, commercially-licensed 512-d face `.tflite` is
- * published on Hugging Face (MobileFaceNet tflites are 192-d app assets; EdgeFace ships PyTorch under a
- * non-commercial license). Users can still point the face-model path at their own converted model.
+ * Recommended face-recognition models for identifying a specific person. "Use" sets `faceEmbedModelPath`.
+ * These run through the raw-TFLite `FaceRecognizer` (NOT MediaPipe), so a plain face `.tflite` without
+ * MediaPipe metadata is exactly what's wanted: detect a face → square-resize → (x−127.5)/128 → embed →
+ * L2-normalize → cosine. Person concepts route here instead of the generic image embedder.
  */
-val RECOMMENDED_FACE_MODELS: List<OnDeviceModel> = emptyList()
+val RECOMMENDED_FACE_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "mobilefacenet-192",
+        label = "MobileFaceNet — face identity",
+        fileName = "mobilefacenet.tflite",
+        sizeBytes = 5_233_552L,
+        license = "BSD-3-Clause",
+        gated = false,
+        repoUrl = "https://github.com/MCarlomagno/FaceRecognitionAuth",
+        downloadUrl = "https://raw.githubusercontent.com/MCarlomagno/FaceRecognitionAuth/master/assets/mobilefacenet.tflite",
+        abilities = "ArcFace-trained face embedder (112×112 → 192-d). Recognizes a specific *person* far better than the generic image embedder — pair it with a person concept for \"keep only shots with X\".",
+        limitations = "Best with aligned faces; a plain detected-face crop works with somewhat lower accuracy. Weights: sirius-ai/MobileFaceNet_TF (Apache-2.0).",
+        category = ModelCategory.FACE,
+    ),
+)
 
 /**
  * Recommended depth-estimation `.tflite` models for the "depth this frame" effect. "Use" sets

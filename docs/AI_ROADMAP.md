@@ -81,9 +81,12 @@ and need ONNX Runtime instead.
 | **DINOv2 ViT-S/14** | ~22 M, 384-d | Best generic instance features | Apache-2.0 | **ONNX Runtime Mobile** ❌ (ViT) |
 
 **Faces (person identity):** ML Kit face detect + a face embedder beats a generic one.
-**MobileFaceNet-512** (~1–4 MB, MIT community weights) is the safe default; **EdgeFace-XS**
-(Idiap research license) is higher accuracy. Guillotine routes person concepts through the
-face path when a face model is configured (Settings → face model).
+**MobileFaceNet — shipped** (one-tap download, BSD-3-Clause, 5.2 MB, 112×112 → 192-d
+ArcFace) runs through a raw-TFLite `FaceRecognizer` (detect → square-resize → (x−127.5)/128
+→ embed → L2 → cosine). Guillotine routes person concepts to it when a face model is
+configured (Settings → face model), else falls back to the generic image embedder.
+Follow-ups: 5-point landmark alignment for higher accuracy; **EdgeFace-XS** is more accurate
+but ships under the Idiap research (non-commercial) license, so it's not offered.
 
 ### 1.4 Speech (ASR + TTS)
 
