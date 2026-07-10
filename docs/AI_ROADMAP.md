@@ -12,6 +12,11 @@ Everything in the "on-device" sections runs locally; cloud is only ever the
 generation providers the user explicitly configures with their own key, or the
 text-only "controller" LLMs that drive the editor over MCP without seeing pixels.
 
+> **What has already shipped** is catalogued in the reference docs: the on-device model files in
+> **[MODELS.md](MODELS.md)**, the cloud generation providers in **[PROVIDERS.md](PROVIDERS.md)**, and
+> the assistant's tools in **[TOOLS.md](TOOLS.md)**. This roadmap marks shipped items inline
+> (**shipped**) and keeps the rest as forward-looking candidates.
+
 ---
 
 ## 1. On-device model candidates (2025–2026)
@@ -26,16 +31,17 @@ Google's **AI Edge Gallery** app is a good compatibility oracle for what runs we
 | Model | Size | Task | License | Android feasibility |
 |---|---|---|---|---|
 | **Gemma 3n E2B / E4B** — **shipped** (vision, `caption_frame`) | ~2B / ~4B effective (MatFormer + PLE) | Multimodal LLM: text + **image + audio** in | Gemma (commercial OK) | **Top pick.** On-device frame captioning via MediaPipe LlmInference + vision modality. Official `.task` (gated, links out for the free Gemma sign-in). Audio-in remains future work. |
-| **Gemma 3 1B** | 1B | Text LLM | Gemma | Excellent, very light, `.task` available. |
-| **Llama 3.2 1B / 3B** | 1B / 3B | Text LLM | Llama 3.2 Community | Good; `.task` (MediaPipe) + ExecuTorch (Meta's official mobile path). |
-| **Qwen2.5 0.5–3B / Qwen3 0.6–4B** | 0.5–4B | Text LLM | Apache-2.0 (small); Qwen2.5-3B is Research License | Strong. Qwen2.5-1.5B ships as `.litertlm` in AI Edge Gallery. |
-| **SmolLM2 360M / 1.7B** | 0.36 / 1.7B | Text LLM | Apache-2.0 | Very light; 1.7B is a good quality/size sweet spot (135M already bundled). |
-| **Phi-3.5-mini / Phi-4-mini** | 3.8B | Reasoning LLM | MIT | Feasible on 8 GB+; Phi-4-mini already supported. |
-| **DeepSeek-R1-Distill-Qwen-1.5B** | 1.5B | Reasoning LLM | MIT | Runs via LiteRT-LM; good for chain-of-thought planning. |
+| **Gemma 3 1B** — **shipped** | 1B | Text LLM | Gemma | Excellent, very light; ships as an assistant `.task` (via the Gemma mirror). |
+| **Llama 3.2 1B / 3B** | 1B / 3B | Text LLM | Llama 3.2 Community | Good; `.task` (MediaPipe) + ExecuTorch (Meta's official mobile path). Candidate — not yet in the catalog. |
+| **Qwen2.5 0.5B / 1.5B · Qwen3 0.6B** — **shipped** | 0.5–1.5B | Text LLM | Apache-2.0 | In the on-device assistant catalog (Qwen2.5 as `.task`, Qwen3 as `.litertlm`). Qwen2.5-3B (Research License) is not offered. |
+| **SmolLM2 360M / 1.7B** | 0.36 / 1.7B | Text LLM | Apache-2.0 | Very light; 1.7B is a good quality/size sweet spot (SmolLM 135M already bundled as the starter). |
+| **Phi-3.5-mini / Phi-4-mini** — **shipped** (Phi-4-mini) | 3.8B | Reasoning LLM | MIT | Phi-4-mini ships in the assistant catalog; needs a high-end device (8 GB+). |
+| **DeepSeek-R1-Distill-Qwen-1.5B** — **shipped** | 1.5B | Reasoning LLM | MIT | In the assistant catalog; strong step-by-step planning (verbose traces). |
 
-**Recommendation:** add **Gemma 3n**, **Qwen2.5-1.5B**, and **SmolLM2-1.7B** to
-`shared/.../ai/agent/OnDeviceModels.kt` alongside the current set. Gemma 3n is the
-standout because it is natively multimodal.
+**Update:** **Gemma 3n** (now the multimodal VLM behind `caption_frame`), **Qwen2.5 0.5B/1.5B**,
+**Gemma 3 1B**, **Phi-4-mini**, **DeepSeek-R1-Distill-Qwen-1.5B**, and **Qwen3 0.6B** all ship in
+`shared/.../ai/agent/OnDeviceModels.kt` — see **[MODELS.md](MODELS.md)** for the exact files, sizes,
+and licenses. **SmolLM2-1.7B** remains a good quality/size candidate still worth adding.
 
 ### 1.2 Audio / music analysis (beat, tempo, key, onset, stems)
 
@@ -106,14 +112,20 @@ music providers are **async (submit → poll → download)**; Guillotine's share
 `AsyncJobPoller` handles that uniformly. Generated media is downloaded to a local
 file and imported as an ordinary timeline clip.
 
+Two **keyless free** tiers need no account at all: **Pollinations** (image) and **Guillotine (free)**
+(video — LTX-Video on a shared Hugging Face ZeroGPU Space). Only the prompt is ever sent. The full,
+shipped provider matrix — enums, default model ids, and get-a-key links — is in
+**[PROVIDERS.md](PROVIDERS.md)**.
+
 ### 2.1 Image
 Pollinations (free, keyless) · Leonardo · OpenAI `gpt-image-1`/DALL·E 3 · Stability
 (Stable Image / SD 3.5) · **Black Forest Labs FLUX** (+ FLUX.1 Kontext editing) ·
 Google Imagen (Gemini key) · Ideogram (best text rendering) · Recraft (raster+vector).
 
 ### 2.2 Video (async)
-Runway (Gen-4) · Luma Dream Machine (Ray2/Ray3) · Google Veo 3.1 (Gemini key, native
-audio) · MiniMax/Hailuo · OpenAI Sora · Kling · Pika · Stability image-to-video.
+**Guillotine (free)** (keyless — LTX-Video on Guillotine's Hugging Face ZeroGPU Space) · Runway (Gen-4) ·
+Luma Dream Machine (Ray2/Ray3) · Google Veo 3.1 (Gemini key, native audio) · MiniMax/Hailuo · OpenAI
+Sora · Kling · Pika · Stability image-to-video.
 
 ### 2.3 Music / audio
 **ElevenLabs** (Eleven Music + Sound Effects + TTS — the most BYO-friendly) ·
@@ -166,10 +178,12 @@ Each item is feasible on the current stack or a model listed above.
 3. Auto-ducking / sidechain: lower music under speech via VAD + RMS. **(shipped — `auto_duck`
    writes VOLUME keyframes on the music under detected speech, on-device, no model)**
 4. AI soundtrack: generate a mood- and length-matched score; AI SFX timed to
-   actions/transitions (ElevenLabs SFX).
+   actions/transitions (ElevenLabs SFX). **(text-to-music / SFX generation shipped — `generate_music`,
+   cloud BYO-key; auto-scoring timed to on-screen actions is the future part.)**
 5. Loudness normalization to platform targets (−14 LUFS YouTube) on export. **(shipped —
    `normalize_loudness` uses BS.1770 K-weighted LUFS; `normalize_levels` is the quick RMS match)**
-6. Noise reduction / de-reverb / voice isolation on-device (sherpa-onnx).
+6. Noise reduction / de-reverb / voice isolation on-device (sherpa-onnx). **(shipped — `denoise_clip`
+   via the on-device GTCRN speech denoiser; de-reverb and full voice-isolation remain future work.)**
 7. Multicam sync by audio-waveform correlation **(shipped — `sync_by_audio`)**; filler-word
    ("um") removal **(shipped — `remove_fillers` via offline Whisper word timings)**.
 
@@ -191,17 +205,21 @@ Each item is feasible on the current stack or a model listed above.
 13. Depth effects: portrait/bokeh blur, 2.5D parallax "3D Ken Burns," fake dolly. **(bokeh shipped —
     `apply_bokeh` blurs the depth-far background; animated 2.5D parallax is a follow-up)**
 14. Super-resolution upscale of old/low-res footage and stills.
-15. Style transfer / AI looks; on-device auto color-correct & shot-match; LUTs.
+15. Style transfer / AI looks; on-device auto color-correct & shot-match; LUTs. **(shipped —
+    `auto_color` (on-device auto color-correct), `match_color` (shot-match), and `.cube` LUTs (see
+    [ECOSYSTEM.md](ECOSYSTEM.md)); ML style-transfer looks remain future — the STYLE model slot ships
+    with no bundled model.)**
 16. Background replace without green screen (matting) + generated backgrounds. **(shipped —
     the `removeBackground` subject matte composites over lower tracks, and `replace_background`
     mattes the subject and drops a chosen background (solid color or image) on a new track behind;
     pass a generated image's path for an AI backdrop. General (non-selfie) matting models remain a
     future upgrade.)**
 17. Face tools: auto-blur faces (privacy), face-tracking reframe, "keep only shots
-    with person X." **("keep only person X" shipped — teach a person by pointing at their
-    face across frames (`add_reference`, routed to the face-ID embedder), then
-    `analyze_clip_with_concept(keep_only=true)`; negatives ("that's a different person")
-    sharpen it. Auto-blur and non-face-follow reframe remain future work.)**
+    with person X." **(shipped — auto-blur via `blur_faces` (on-device ML Kit face detection, blurred
+    in both preview and export); "keep only person X" by teaching a person from their face across
+    frames (`add_reference`, routed to the face-ID embedder) then
+    `analyze_clip_with_concept(keep_only=true)`, with negatives ("that's a different person") to sharpen
+    it. Non-face (saliency) auto-reframe remains future work.)**
 18. Text-to-video B-roll to fill gaps; image-gen titles/thumbnails/lower-thirds;
     generate a thumbnail from the best frame. **(free T2V shipped — the keyless
     "Guillotine (free)" video provider calls our own Hugging Face Space (`hf-space/`,
@@ -225,5 +243,7 @@ Each item is feasible on the current stack or a model listed above.
 23. Platform export presets (TikTok/Reels/Shorts) with safe-zones + direct share. **(shipped —
     `set_export_preset` sets the aspect; the preview shows platform safe-zone guides in Crop mode for
     vertical/square projects; the export dialog has a Share button.)**
-24. Kinetic-caption & meme templates, emoji reactions timed to speech.
+24. Kinetic-caption & meme templates, emoji reactions timed to speech. **(kinetic captions shipped —
+    `animated_transcribe_clip`, per-syllable scale-keyframed captions; meme templates and emoji
+    reactions remain future.)**
 25. Teachable-tool marketplace — share user-defined AI editing tools.

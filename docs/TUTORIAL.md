@@ -1,6 +1,6 @@
 # Guillotine tutorial
 
-A walkthrough of everything the app does, from getting media in to a finished video. Each step builds on the last.
+A quick, hands-on tour from getting media in to a finished video — each step builds on the last. This is the fast path; for the complete reference (every screen, control, gesture, and option) see the **[full manual](MANUAL.md)**, and the **[FAQ](FAQ.md)** for quick answers.
 
 ## 1. Import or create your media
 
@@ -32,6 +32,8 @@ Or use the **assistant bar**: type an instruction in plain language and an agent
 
 Use the **Crop / transform** tool to pinch-scale, drag-place, and twist-rotate a clip right on the preview. Open a clip's tools to adjust brightness/contrast/saturation/hue/sepia/blur, volume/pan, remove its background (on-device), or repaint an object out generatively (Leonardo, BYO key) while keeping the length.
 
+For deeper looks — **`.cube` LUTs**, adjustable **GLSL/ISF shaders**, and clip-to-clip **transitions** — see the manual's [Advanced looks](MANUAL.md#6-advanced-looks).
+
 ## 7. Animate with keyframes
 
 Drop a **keyframe** at the playhead to record a clip's current look, move the playhead, change it, and keyframe again — the value animates between them. Tap a keyframe to select it and toggle its ease; drag the bezier handles in the inspector to shape the curve. Keyframes work for **12 properties**: opacity, scale, rotation, offset X/Y, brightness, contrast, saturation, hue, sepia, volume, and pan.
@@ -60,4 +62,4 @@ When it looks right, open the menu and choose **Render**. Guillotine renders a r
 
 The Export dialog narrates every phase (analyzing audio, precomputing mattes, encoding, saving) in the activity-log sheet. If the render fails you'll see the failure phase with a stack-frame diagnostic and a **Report** button — one tap opens a pre-filled GitHub issue so the bug lands in the tracker without you copy-pasting anything.
 
-That's the whole loop — import, arrange, cut, enhance, animate, caption, teach, and render. Explore the icon key (the **?** button) any time you forget what a button does.
+That's the whole loop — import, arrange, cut, enhance, animate, caption, teach, and render. Explore the icon key (the **?** button) any time you forget what a button does, and see the **[full manual](MANUAL.md)** when you want the complete reference.
