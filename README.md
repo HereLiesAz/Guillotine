@@ -83,8 +83,16 @@ attached to the matching GitHub Release.
   **Pause/Resume** (analysis + generative) and **Cancel** from the notification; export is cancel-only.
 - **Background removal (on-device, ML Kit):** segment a clip's subject and composite it over the
   layer below — in the live preview and baked into the export.
-- **Image generation:** free **Pollinations.ai** (no key) or **Leonardo.ai** (BYO key, model
-  selectable).
+- **Looks, LUTs, shaders & filters:** apply `.cube` **LUTs**, adjustable **GLSL/ISF shaders** (with
+  slider parameters), and the **FFmpeg / Frei0r** filter ecosystem to a clip — all on-device. See
+  [`docs/ECOSYSTEM.md`](docs/ECOSYSTEM.md).
+- **Transitions & beat-sync:** clip-to-clip transitions (crossfade / wipe / slide / dissolve, via
+  FFmpeg `xfade`) and beat-synced editing tools (detect the beat map, cut and act on the beat).
+- **Media generation:** **images** — free **Pollinations.ai** (no key) or BYO-key (Leonardo, OpenAI,
+  Stability, FLUX, Imagen, Ideogram, Recraft); **video** — a free keyless **Guillotine** Hugging Face
+  Space (LTX-Video) or BYO-key (Runway, Luma, Veo, Sora, Kling, Pika, …); **music / audio** — BYO-key
+  (ElevenLabs, Stability Audio, Lyria, MusicGen, …). Only your text prompt is sent — never your media.
+  See [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
 - **Real mp4 export** (Media3 Transformer on Android; FFmpeg on desktop): cuts removed ranges,
   composites every video track, positions clips on the timeline, applies per-clip filters
   (brightness/contrast/saturation/hue/sepia/blur/grayscale/invert) and the crop-tool transform
@@ -110,6 +118,25 @@ attached to the matching GitHub Release.
   and **icon key** (the **?** button) for self-contained help.
 
 
+## Documentation
+
+- [**Manual**](docs/MANUAL.md) — the full user guide, every screen and option.
+- [**Tools**](docs/TOOLS.md) — every AI/MCP tool and the MCP server (for plugin / AI authors).
+- [**Settings**](docs/SETTINGS.md) · [**Providers**](docs/PROVIDERS.md) · [**Models**](docs/MODELS.md)
+  — the settings reference, AI providers (keyless + BYO-key), and the on-device model catalog.
+- [**Ecosystem**](docs/ECOSYSTEM.md) — LUTs, shaders, FFmpeg/Frei0r, transitions ·
+  [**Plugins**](docs/PLUGINS.md) — the MCP plugin protocol.
+- [**Tutorial**](docs/TUTORIAL.md) · [**FAQ**](docs/FAQ.md) · [**AI roadmap**](docs/AI_ROADMAP.md) ·
+  [**Building**](docs/BUILDING.md).
+
 ## License
 
-See [LICENSE](LICENSE).
+Guillotine is free software under the **GNU AGPL-3.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+© 2025–2026 HereLiesAz.
+
+Forks and derivatives must: keep the source open under AGPL-3.0 (including for network use); preserve
+attribution — a visible "Based on Guillotine" credit in the app's About / legal notices (AGPLv3 §7(b));
+and **use a different name and icon** — the "Guillotine" name and logo are reserved (§7(e)).
+
+Releases previously dedicated under **CC0 1.0** remain public domain; the AGPL-3.0 licensing applies to
+subsequent versions.
