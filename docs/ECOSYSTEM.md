@@ -49,11 +49,14 @@ Tracking: this is the next ecosystem milestone after LUTs.
 
 ---
 
-## 3. MCP plugin protocol — AI-drivable tools 🛠 (foundation ✅)
+## 3. MCP plugin protocol — AI-drivable tools 🛠 (foundation ✅ · documented in [PLUGINS.md](PLUGINS.md))
 
-Guillotine's editor is already a **Model Context Protocol** surface: every capability (cut, filter,
-LUT, denoise, generate, …) is an MCP tool, and controller LLMs drive the editor purely through those
-tools — exchanging **text only**, never media.
+Guillotine's editor is already a standard **[Model Context Protocol](https://modelcontextprotocol.io)**
+server (JSON-RPC 2.0, protocol `2024-11-05`, `tools/list` + `tools/call`, bearer auth on `/mcp`:6274):
+every capability (cut, filter, LUT, denoise, generate, …) is an MCP tool, and controller LLMs drive the
+editor purely through those tools — exchanging **text only**, never media. **See
+[PLUGINS.md](PLUGINS.md)** for the full protocol, how to connect a client, user-defined tool packs, and
+the draft distributable-manifest proposal.
 
 Already shipped:
 
