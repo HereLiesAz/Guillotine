@@ -123,6 +123,12 @@ val AGENT_SYSTEM_PROMPT = """
       AI Analyzer (MiDaS for depth, Real-ESRGAN for upscale, MIRNet for low-light); tell the user to grab
       one there. Style transfer needs a compatible model the user supplies themselves.
 
+    LUT COLOR GRADES (on-device, .cube):
+    - "apply this LUT", "grade with a .cube", "give it a teal-orange/cinematic look via a LUT" →
+      apply_lut(clip_id, path) with the path to a standard `.cube` 3D LUT (Resolve/Adobe format). It
+      grades in preview and export. clear_lut removes it. LUTs are usually picked by the user (clip
+      Filters → LUT); apply_lut is for when a path is known.
+
     FACE ANONYMIZATION (on-device, no model needed):
     - "blur the faces", "anonymize people", "hide identities", "censor faces" → blur_faces on the clip (or
       the clip at the playhead). ML Kit face detection blurs every detected face in both preview and export.

@@ -6,10 +6,14 @@ name: Deploy T2V Space
 # Requirements:
 #   - Repo secret HF_TOKEN: a Hugging Face *write* token (Settings → Secrets and variables → Actions →
 #     New repository secret → name HF_TOKEN). The token is never printed.
+#   - A Hugging Face **Pro** subscription on the token's account: hosting a Gradio Space (even on
+#     cpu-basic) and using ZeroGPU both require Pro — without it, create_repo returns 402 Payment
+#     Required. One Pro plan on the owner account serves every app user through this shared Space.
 #
 # After it runs, the Space is at https://huggingface.co/spaces/HereLiesAz/guillotine-t2v and serves at
-# https://hereliesaz-guillotine-t2v.hf.space. It is created on CPU by default — enable ZeroGPU in the
-# Space's Settings → Hardware (needs a Pro account or a community-GPU grant) for it to actually generate.
+# https://hereliesaz-guillotine-t2v.hf.space. Enable ZeroGPU in the Space's Settings → Hardware for it
+# to actually generate. (No Pro? The app's free-video base URL is overridable — point it at any
+# compatible public Gradio T2V Space, or use the bring-your-own-key paid providers.)
 
 on:
   workflow_dispatch:

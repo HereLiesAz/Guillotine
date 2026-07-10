@@ -265,6 +265,27 @@ class McpTools(
                 required = emptyList(),
             ),
         ))
+        put(toolDefinition(
+            "apply_lut",
+            "Apply a `.cube` 3D LUT color grade to a clip ON-DEVICE — the standard color-grade format " +
+                "exported by DaVinci Resolve / Photoshop and shared in free LUT packs. It grades in both " +
+                "preview and export. Use for \"apply this LUT\", \"grade with a .cube\", \"give it a " +
+                "cinematic/teal-orange look via a LUT\". `path` is a filesystem path to a .cube file " +
+                "(usually one the user picked). clear_lut removes it.",
+            objSchema(
+                "clip_id" to stringProp("The clip to grade; defaults to the video clip at the playhead"),
+                "path" to stringProp("Filesystem path to a .cube 3D LUT file"),
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_lut",
+            "Remove the `.cube` LUT color grade from a clip (undo apply_lut).",
+            objSchema(
+                "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
 
         // ---- audio-event highlights (YAMNet, on-device) ----
         put(toolDefinition(
@@ -644,6 +665,8 @@ class McpTools(
         "auto_color" -> autoColor(args.optString("clip_id"))
         "match_color" -> matchColor(args.getString("source_clip_id"), args.getString("target_clip_id"))
         "blur_faces" -> blurFaces(args.optString("clip_id"), if (args.has("enabled")) args.getBoolean("enabled") else true)
+        "apply_lut" -> applyLut(args.optString("clip_id"), args.getString("path"))
+        "clear_lut" -> clearLut(args.optString("clip_id"))
         "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
         "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
@@ -2064,6 +2087,36 @@ class McpTools(
                 ),
             )
         }
+    }
+
+    /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). */
+    private fun applyLut(clipId: String, path: String): JSONObject {
+        require(path.isNotBlank()) { "Provide the path to a .cube LUT file." }
+        val file = java.io.File(path)
+        require(file.isFile) { "No .cube file at: $path" }
+        // Parse up front so a bad file fails here with a clear message rather than silently doing nothing.
+        runCatching { com.hereliesaz.guillotine.media.CubeLut.parse(file.readText()) }
+            .onFailure { throw IllegalArgumentException("Not a valid 3D .cube LUT: ${it.message}") }
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(lutPath = file.absolutePath) }
+        return ok().apply { put("humanSummary", "Applied LUT ${file.name} to clip ${clip.id}.") }
+    }
+
+    /** Remove a clip's `.cube` LUT grade. */
+    private fun clearLut(clipId: String): JSONObject {
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(lutPath = "") }
+        return ok().apply { put("humanSummary", "Removed the LUT from clip ${clip.id}.") }
+    }
+
+    /** The clip [clipId], or the video clip under the playhead when blank. Throws if neither resolves. */
+    private fun resolveClipOrPlayhead(clipId: String): com.hereliesaz.guillotine.model.TimelineClip {
+        val st = vm.uiState.value
+        return (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, st.currentTimeMs,
+            )
+            ?: throw IllegalStateException("No clip — scrub onto one or pass clip_id.")
     }
 
     /** Toggle on-device face anonymization (blur every detected face) on a clip. */

@@ -180,7 +180,53 @@ private fun FiltersToolButton(vm: EditorViewModel, clip: TimelineClip) {
         FilterSlider(vm, clip.id, "Invert", f.invert, 0f..100f, "%") { v, ff -> ff.copy(invert = v) }
         FilterSlider(vm, clip.id, "Grayscale", f.grayscale, 0f..100f, "%") { v, ff -> ff.copy(grayscale = v) }
         FilterSlider(vm, clip.id, "Blur", f.blur, 0f..20f, "px") { v, ff -> ff.copy(blur = v) }
+        LutRow(vm, clip)
         PresetRow(vm, clip.id)
+    }
+}
+
+/** Pick / clear a `.cube` 3D LUT color grade for the clip. The file is copied into app storage so the
+ *  Media3 effect can read it by path in preview and export. */
+@Composable
+private fun LutRow(vm: EditorViewModel, clip: TimelineClip) {
+    val context = LocalContext.current
+    val current = clip.filters.lutPath
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            val dir = java.io.File(context.filesDir, "luts").apply { mkdirs() }
+            val name = (uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "grade")
+                .ifBlank { "grade" }.let { if (it.endsWith(".cube", true)) it else "$it.cube" }
+            val dest = java.io.File(dir, name)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { input.copyTo(it) }
+            }
+            vm.updateClipFilters(clip.id) { it.copy(lutPath = dest.absolutePath) }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (current.isNotBlank()) "LUT: ${java.io.File(current).name}" else "LUT: none",
+            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+        )
+        Text(
+            "Pick .cube",
+            color = Color(0xFF8AB4F8), fontSize = 12.sp,
+            modifier = Modifier
+                .clickable { picker.launch(arrayOf("*/*")) }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        if (current.isNotBlank()) {
+            Text(
+                "Clear",
+                color = Neutral500, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable { vm.updateClipFilters(clip.id) { it.copy(lutPath = "") } }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
     }
 }
 

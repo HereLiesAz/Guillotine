@@ -77,6 +77,11 @@ object VideoEffects {
             effects += GaussianBlur(filters.blur)
         }
 
+        // 3D LUT color grade (.cube), applied last so it grades the adjusted picture. Null when unset.
+        if (filters.lutPath.isNotBlank()) {
+            LutCube.effectFor(filters.lutPath)?.let { effects += it }
+        }
+
         return effects
     }
 
@@ -135,12 +140,13 @@ object VideoEffects {
             emptyList()
         }
 
-    /** Filters that can't be keyframed (fixed Media3 config): binary grayscale/invert + Gaussian blur. */
+    /** Filters that can't be keyframed (fixed Media3 config): binary grayscale/invert + Gaussian blur + LUT. */
     private fun nonColorStatic(filters: ClipFilters): List<Effect> {
         val out = mutableListOf<Effect>()
         if (filters.grayscale >= 50f) out += RgbFilter.createGrayscaleFilter()
         if (filters.invert >= 50f) out += RgbFilter.createInvertedFilter()
         if (filters.blur > 0f) out += GaussianBlur(filters.blur)
+        if (filters.lutPath.isNotBlank()) LutCube.effectFor(filters.lutPath)?.let { out += it }
         return out
     }
 
