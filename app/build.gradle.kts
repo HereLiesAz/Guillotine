@@ -14,30 +14,18 @@ plugins {
 
 // ---- Four-part version: Major.Minor.Patch.Build ----
 //   • Major / Minor — hand-edited in version.properties.
-//   • Patch — the number of commits on this branch since the last time versionMinor changed
-//             (auto-derived from git; resets to 0 the first commit after a Minor bump).
-//   • Build — the total commit count on this branch, plus a fixed offset that absorbs the gap
-//             between where the old file-based counter left off and where git-count is today
-//             (see [VERSION_CODE_OFFSET]). This is the monotonic versionCode.
+//   • Patch / Build — AUTO-INCREMENTED on disk on EVERY Gradle configuration, i.e. every single
+//     compile/build, with no exceptions. Persisted to version.properties so the bump survives across
+//     builds and lands in git when committed. Build is the monotonic versionCode.
 //
-// Nothing is auto-incremented on disk. Every commit advances the counter automatically because
-// `git rev-list --count HEAD` is monotonic; a failed CI run can no longer strand a bump the way
-// the old "increment the file → persist back after Play accepts" flow could.
-//
-// The counter comes entirely from `git`, so a shallow checkout (fetch-depth: 1) would break it —
-// every workflow that builds does a full-depth checkout (`fetch-depth: 0`).
-
-// Bridge from the old file-based counter (which last landed at versionBuild=291) to git rev-count
-// (which is currently 228 for this branch). 100 + 228 = 328 keeps the versionCode strictly above
-// the last value Play saw (291). This offset is a constant — DO NOT change it after the first
-// build that uses it, or Play will reject the next upload as non-monotonic.
-val VERSION_CODE_OFFSET = 100
-
+// The increment runs at configuration time below, so any `./gradlew` build/compile of `:app` bumps
+// both counters and writes them back to disk. Build never regresses below the git-derived floor
+// (100 + commit count), so uploads to Play stay strictly increasing even across machines/checkouts.
 val versionPropsFile = rootProject.file("version.properties")
 val versionProps = Properties().apply {
     if (versionPropsFile.exists()) versionPropsFile.inputStream().use { load(it) }
 }
-val verMajor = versionProps.getProperty("versionMajor", "1").trim().toIntOrNull() ?: 1
+val verMajor = versionProps.getProperty("versionMajor", "0").trim().toIntOrNull() ?: 0
 val verMinor = versionProps.getProperty("versionMinor", "0").trim().toIntOrNull() ?: 0
 
 fun runGit(vararg args: String): String? = runCatching {
@@ -47,25 +35,35 @@ fun runGit(vararg args: String): String? = runCatching {
     }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
 }.getOrNull()
 
-// Total commit count on HEAD — monotonic per push. On a shallow checkout returns something small
-// but consistent for that checkout; CI does full-depth so this is the real number in real builds.
-val gitCommitCount = runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0
+// Monotonic floor for versionCode: never below 100 + commit count (the value earlier git-based and
+// file-based flows would have produced), so Play never rejects an upload as non-monotonic.
+val gitFloor = 100 + (runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0)
 
-// Commits since the commit that most recently touched `versionMinor=` in version.properties.
-// This is what makes Patch reset to 0 on a Minor bump: bumping Minor is a fresh commit, so the
-// range HEAD..that-commit is 0 immediately after. `git blame` fingers the commit; `rev-list
-// --count` counts commits from it to HEAD (exclusive of the commit itself).
-val patchCommits: Int = run {
-    val blame = runGit("blame", "-l", "-L", "/versionMinor=/,+1", "version.properties")
-        ?: return@run 0
+// First-run seed for Patch only (when version.properties has no versionPatch yet): commits since
+// versionMinor last changed, so Patch continues from today's value instead of restarting at 1.
+val patchSeed: Int = run {
+    val blame = runGit("blame", "-l", "-L", "/versionMinor=/,+1", "version.properties") ?: return@run 0
     val sha = blame.substringBefore(' ').trimStart('^').takeIf { it.length >= 7 } ?: return@run 0
     runGit("rev-list", "--count", "$sha..HEAD")?.toIntOrNull() ?: 0
 }
 
-val verPatch = patchCommits
-val verBuild = VERSION_CODE_OFFSET + gitCommitCount
+// Increment BOTH counters on every configuration. Persisted + monotonic.
+val verPatch = (versionProps.getProperty("versionPatch")?.trim()?.toIntOrNull() ?: patchSeed) + 1
+val verBuild = maxOf(versionProps.getProperty("versionBuild")?.trim()?.toIntOrNull() ?: 0, gitFloor) + 1
 
-// Android requires versionCode >= 1; a shallow/broken git checkout could yield 0.
+// Persist the bumped values straight back to disk (keeping the human-edited Major/Minor + header).
+versionPropsFile.writeText(
+    buildString {
+        appendLine("# Major and Minor are human-edited. Patch and Build AUTO-INCREMENT on every Gradle")
+        appendLine("# build/compile (see app/build.gradle.kts) — do not hand-edit them.")
+        appendLine("versionMajor=$verMajor")
+        appendLine("versionMinor=$verMinor")
+        appendLine("versionPatch=$verPatch")
+        appendLine("versionBuild=$verBuild")
+    },
+)
+
+// Android requires versionCode >= 1.
 val computedVersionCode = maxOf(1, verBuild)
 val computedVersionName = "$verMajor.$verMinor.$verPatch.$verBuild"
 
