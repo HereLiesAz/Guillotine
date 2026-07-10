@@ -42,8 +42,7 @@ curl -s http://<device-ip>:6274/mcp \
 curl -s http://<device-ip>:6274/mcp \
   -H "Authorization: Bearer $GUILLOTINE_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call",
-       "params":{"name":"apply_lut","arguments":{"path":"/sdcard/luts/teal.cube"}}}'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"apply_lut","arguments":{"path":"/sdcard/luts/teal.cube"}}}'
 ```
 
 Point any MCP client at that endpoint + token and it sees the editor's tools like any other MCP server.
