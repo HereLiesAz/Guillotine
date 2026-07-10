@@ -344,8 +344,9 @@ val RECOMMENDED_TTS_MODELS: List<OnDeviceModel> = listOf(
 
 /**
  * Recommended multimodal VLM `.task` models (MediaPipe `LlmInference` + vision) for rich frame
- * captioning. "Use" sets `vlmModelPath`. Gemma-3n is gated (Gemma license), so these link out to Hugging
- * Face for a free sign-in — the user downloads there and pastes the path.
+ * captioning. "Use" sets `vlmModelPath`. Gemma-3n is re-hosted (un-gated) in our own HF namespace —
+ * mirrored from Google's Gemma release, so it downloads with no sign-in. (Subject to the Gemma Terms
+ * of Use; see the in-app notice.)
  */
 val RECOMMENDED_VLM_MODELS: List<OnDeviceModel> = listOf(
     OnDeviceModel(
@@ -353,12 +354,12 @@ val RECOMMENDED_VLM_MODELS: List<OnDeviceModel> = listOf(
         label = "Gemma 3n E2B (vision) — frame captioning",
         fileName = "gemma-3n-E2B-it-int4.task",
         sizeBytes = 3_136_226_711L,
-        license = "Gemma (free sign-in)",
-        gated = true,
-        repoUrl = hfRepo("google/gemma-3n-E2B-it-litert-preview"),
-        downloadUrl = null,
+        license = "Gemma",
+        gated = false,
+        repoUrl = hfRepo("HereLiesAz/gemma-3n-e2b-it-litertlm"),
+        downloadUrl = hfResolve("HereLiesAz/gemma-3n-e2b-it-litertlm", "gemma-3n-E2B-it-int4.task"),
         abilities = "Natively multimodal: looks at a frame and describes it in rich natural language. Powers \"describe / what's happening in this frame\".",
-        limitations = "~2.9 GB; needs a free Hugging Face sign-in (Gemma license). High-end device recommended.",
+        limitations = "~2.9 GB. High-end device recommended. Mirrored from Google's Gemma release (Gemma Terms of Use apply).",
         category = ModelCategory.VLM,
     ),
     OnDeviceModel(
@@ -366,12 +367,12 @@ val RECOMMENDED_VLM_MODELS: List<OnDeviceModel> = listOf(
         label = "Gemma 3n E4B (vision) — higher quality",
         fileName = "gemma-3n-E4B-it-int4.task",
         sizeBytes = 4_405_655_031L,
-        license = "Gemma (free sign-in)",
-        gated = true,
-        repoUrl = hfRepo("google/gemma-3n-E4B-it-litert-preview"),
-        downloadUrl = null,
+        license = "Gemma",
+        gated = false,
+        repoUrl = hfRepo("HereLiesAz/gemma-3n-e4b-it-litertlm"),
+        downloadUrl = hfResolve("HereLiesAz/gemma-3n-e4b-it-litertlm", "gemma-3n-E4B-it-int4.task"),
         abilities = "The larger, more capable multimodal Gemma-3n — sharper, more detailed frame descriptions.",
-        limitations = "~4.1 GB; free Hugging Face sign-in (Gemma license). Needs a high-end device with plenty of storage.",
+        limitations = "~4.1 GB. Needs a high-end device with plenty of storage. Mirrored from Google's Gemma release (Gemma Terms of Use apply).",
         category = ModelCategory.VLM,
     ),
 )

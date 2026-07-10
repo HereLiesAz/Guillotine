@@ -51,6 +51,7 @@ jobs:
           MODELS = [
               ("google/gemma-3n-E2B-it-litert-preview", "HereLiesAz/gemma-3n-e2b-it-litertlm"),
               ("google/gemma-3n-E4B-it-litert-preview", "HereLiesAz/gemma-3n-e4b-it-litertlm"),
+              ("litert-community/Gemma3-1B-IT",          "HereLiesAz/gemma3-1b-it"),
           ]
           # Only grab the model + its config/tokenizer; skip readmes/images/duplicates.
           PATTERNS = ["*.litertlm", "*.task", "*.json", "*.model", "*.spm", "tokenizer*"]
