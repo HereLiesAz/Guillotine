@@ -1,5 +1,6 @@
 package com.hereliesaz.guillotine.desktop.media
 
+import com.hereliesaz.guillotine.media.CubeLut
 import java.awt.image.BufferedImage
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -127,6 +128,64 @@ object DesktopColorMatrix {
             val nb = (m20 * r + m21 * g + m22 * b + offB).roundToInt().coerceIn(0, 255)
 
             pixels[i] = (a shl 24) or (nr shl 16) or (ng shl 8) or nb
+        }
+
+        image.setRGB(0, 0, w, h, pixels, 0, w)
+    }
+
+    /**
+     * Apply a `.cube` 3D LUT to a BufferedImage in-place using **trilinear interpolation** over the
+     * LUT lattice. Each pixel's normalized RGB is placed inside the `size`³ cube; the 8 surrounding
+     * grid entries are blended by the fractional position. Mirrors the Android LUT grade (Media3's
+     * `SingleColorLut`). Alpha is preserved. Applied AFTER the color matrix (matching Android's order).
+     */
+    fun applyLut(image: BufferedImage, lut: CubeLut.Lut3d) {
+        val size = lut.size
+        if (size < 2 || lut.entries.isEmpty()) return
+        val entries = lut.entries
+        val maxIdx = size - 1
+        val w = image.width
+        val h = image.height
+        val pixels = IntArray(w * h)
+        image.getRGB(0, 0, w, h, pixels, 0, w)
+
+        for (i in pixels.indices) {
+            val argb = pixels[i]
+            val a = (argb ushr 24) and 0xFF
+            val rf = ((argb ushr 16) and 0xFF) / 255f
+            val gf = ((argb ushr 8) and 0xFF) / 255f
+            val bf = (argb and 0xFF) / 255f
+
+            // Position within the lattice (grid coords), and the low corner + fractional offset.
+            val x = rf * maxIdx
+            val y = gf * maxIdx
+            val z = bf * maxIdx
+            val x0 = x.toInt().coerceIn(0, maxIdx); val x1 = (x0 + 1).coerceAtMost(maxIdx)
+            val y0 = y.toInt().coerceIn(0, maxIdx); val y1 = (y0 + 1).coerceAtMost(maxIdx)
+            val z0 = z.toInt().coerceIn(0, maxIdx); val z1 = (z0 + 1).coerceAtMost(maxIdx)
+            val fx = x - x0; val fy = y - y0; val fz = z - z0
+
+            // Blend the 8 cube corners (corner bit c: 1=x, 2=y, 4=z picks the high grid index).
+            var nr = 0f; var ng = 0f; var nb = 0f
+            for (c in 0 until 8) {
+                val xi = if (c and 1 == 0) x0 else x1
+                val yi = if (c and 2 == 0) y0 else y1
+                val zi = if (c and 4 == 0) z0 else z1
+                val wx = if (c and 1 == 0) 1f - fx else fx
+                val wy = if (c and 2 == 0) 1f - fy else fy
+                val wz = if (c and 4 == 0) 1f - fz else fz
+                val weight = wx * wy * wz
+                if (weight == 0f) continue
+                val idx = lut.indexOf(xi, yi, zi)
+                nr += entries[idx] * weight
+                ng += entries[idx + 1] * weight
+                nb += entries[idx + 2] * weight
+            }
+
+            val ir = (nr * 255f).roundToInt().coerceIn(0, 255)
+            val ig = (ng * 255f).roundToInt().coerceIn(0, 255)
+            val ib = (nb * 255f).roundToInt().coerceIn(0, 255)
+            pixels[i] = (a shl 24) or (ir shl 16) or (ig shl 8) or ib
         }
 
         image.setRGB(0, 0, w, h, pixels, 0, w)

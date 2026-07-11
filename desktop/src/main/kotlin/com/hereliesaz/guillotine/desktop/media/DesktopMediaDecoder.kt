@@ -193,6 +193,19 @@ object DesktopMediaDecoder {
             result
         }
 
+    /**
+     * Grab a single decoded frame from [uri] at source-ms [atMs] as a [BufferedImage] (null if it
+     * can't be read). Reuses the same JavaCV frame extraction as thumbnails; falls back to reading a
+     * still image for image media. Feeds the on-device color tools (auto_color / match_color) that
+     * sample a clip's tone. On-device only.
+     */
+    suspend fun grabFrame(uri: String, atMs: Long, maxPx: Int = 320): BufferedImage? =
+        withContext(Dispatchers.IO) {
+            val file = uriToFile(uri) ?: return@withContext null
+            runCatching { extractVideoFrame(file, atMs, maxPx) }.getOrNull()
+                ?: runCatching { ImageIO.read(file)?.let { downscale(it, maxPx) } }.getOrNull()
+        }
+
     private fun extractVideoFrame(file: File, atMs: Long, maxPx: Int): BufferedImage? {
         val converter = Java2DFrameConverter()
         val grabber = FFmpegFrameGrabber(file)

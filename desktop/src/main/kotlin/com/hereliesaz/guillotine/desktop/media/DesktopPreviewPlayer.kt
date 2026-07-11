@@ -285,6 +285,11 @@ private fun applyColorEffects(img: BufferedImage, clip: TimelineClip, sourceMs: 
         val matrix = DesktopColorMatrix.buildMatrix(brightness, contrast, saturation, hue, sepia)
         DesktopColorMatrix.applyToImage(img, matrix)
     }
+    // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). Parsed once and
+    // cached by path so the LUT isn't re-parsed per frame.
+    if (f.lutPath.isNotBlank()) {
+        DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
+    }
 }
 
 @Composable

@@ -286,6 +286,11 @@ object DesktopExporter {
             val matrix = DesktopColorMatrix.buildMatrix(brightness, contrast, saturation, hue, sepia)
             DesktopColorMatrix.applyToImage(img, matrix)
         }
+        // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). The LUT is
+        // parsed once and cached by path, so it isn't re-parsed for every exported frame.
+        if (f.lutPath.isNotBlank()) {
+            DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
+        }
 
         // Keyframed transforms
         val scale = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
