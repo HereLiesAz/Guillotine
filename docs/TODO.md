@@ -64,5 +64,10 @@ The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the
 - **AppImage / Flatpak / Snap** — `.deb` covers the mainstream case; broader Linux coverage is
   open.
 - **Auto-update framework** — currently users download new releases from GitHub Releases by hand.
-- **On-device vision on desktop** — currently omitted (ML Kit is Android-only). Cloud BYO still
-  works; ONNX Runtime port is open.
+- **On-device ML on desktop** — the ONNX-Runtime-for-JVM foundation has landed: stem separation
+  (Spleeter), speech captions (Vosk), audio sync, and the color/LUT render all run on-device on
+  desktop. The remaining on-device gap is the **vision / face / speech-model tools** (image
+  labeling, face detect/segment, Whisper ASR, TTS, diarization, VLM captioning). Each needs a
+  desktop ONNX model wired the same way as stems: a model path in Settings + an inference helper.
+  `search_clips` is the first wired (ONNX ImageNet labeler); the rest return an honest "needs a
+  model" stub until their model is bundled/pointed at. Cloud BYO still works for all.

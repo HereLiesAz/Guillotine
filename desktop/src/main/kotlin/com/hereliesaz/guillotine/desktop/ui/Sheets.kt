@@ -90,6 +90,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
     var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
+    var labelModelPath by remember { mutableStateOf(current.labelModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     val uriHandler = LocalUriHandler.current
 
@@ -205,10 +206,21 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         color = Neutral500, fontSize = 10.sp,
                     )
 
-                    Text("On-device model", color = Neutral400, fontSize = 12.sp)
+                    Text("Footage search (on-device)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = labelModelPath,
+                        onValueChange = { labelModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Image-classifier model (.onnx)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
                     Text(
-                        "On-device model support is not yet available on desktop. " +
-                            "Use a cloud provider above.",
+                        "Point at an ONNX ImageNet classifier (e.g. MobileNet/ResNet) to enable on-device " +
+                            "footage search (\"find clips with a dog\"). Put a labels file — one class per " +
+                            "line — next to it, named \"<model>.txt\", \"labels.txt\", or " +
+                            "\"imagenet_classes.txt\". Blank = footage search off. Other on-device vision " +
+                            "tools use a cloud provider above.",
                         color = Neutral500, fontSize = 10.sp,
                     )
                 }
@@ -264,6 +276,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             leonardoModel = leonardoModel,
                             speechModelPath = speechModelPath.trim(),
                             agentModelPath = agentModelPath.trim(),
+                            labelModelPath = labelModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                         ),
                     )

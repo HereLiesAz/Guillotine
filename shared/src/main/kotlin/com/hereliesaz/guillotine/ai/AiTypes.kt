@@ -109,6 +109,10 @@ data class AiSettings(
     val faceEmbedModelPath: String = "",
     /** Paths to on-device TFLite image-effect models, keyed by effect ("superres"/"style"/"depth"). */
     val effectModelPaths: Map<String, String> = emptyMap(),
+    /** Optional on-device image-labeling classifier for footage search. On Android this is ML Kit's
+     *  built-in labeler (no path needed); on desktop it's an ONNX ImageNet classifier the user points
+     *  at here (blank = `search_clips` returns a "needs a model" stub). */
+    val labelModelPath: String = "",
     /** Optional on-device YAMNet audio-event `.tflite` for highlight detection; blank = feature off. */
     val audioEventModelPath: String = "",
     /** Optional sherpa-onnx offline ASR model *directory* (extracted bundle); blank = feature off. */

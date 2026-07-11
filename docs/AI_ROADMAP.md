@@ -257,22 +257,40 @@ separately (`DesktopMcpTools`), so it trailed Android's 66 tools. The editor cor
 transitions, color, text, FFmpeg export, cloud assistant) is at parity; the remaining gap is the
 AI-tool surface.
 
-**Shipped on desktop (38/66):** the timeline/edit/user-tool tools, plus cloud generation
-(`generate_image` / `generate_video` / `generate_music`), the beat suite (`get_beat_map`,
-`cut_to_beats`, `apply_on_beat`, `align_clips_to_beats`, `assemble_music_video`, on shared pure-JVM
-DSP), and FFmpeg/DSP (`normalize_levels`, `normalize_loudness`, `detect_scenes`, `auto_duck`,
-`apply_ffmpeg_filter` via in-process JavaCV).
+All **66** tools are now *defined* on desktop (the schema is discoverable via `tools/list`), and the
+majority are fully functional; the remainder are honest stubs that return a clear "needs an on-device
+model" error until their model is wired.
 
-**Desktop parity — phase 2 (follow-up):**
-- **`apply_transition`** — a two-input `xfade`+`acrossfade` filtergraph via JavaCV `FFmpegFrameFilter`
-  with offset/PTS sync (needs a real-clip smoke test before shipping).
-- **LUT / shader / auto-color render** — `apply_lut` / `clear_lut` (sample a `.cube` via the shared
-  `CubeLut` into the desktop `BufferedImage` pipeline), `auto_color` / `match_color` (frame-tone
-  histogram), `list_shader_params` (parse via shared `GlslShader`). Actual **GLSL shader rendering** on
-  desktop needs a GL/Skia pass, not the per-pixel `BufferedImage` path.
-- **On-device ML tools** (vision / face / speech / separation — ~15 tools) — Android uses ML Kit /
-  MediaPipe / TFLite / Sherpa-Vosk, which have no desktop-JVM equivalent. Desktop route: **ONNX
-  Runtime-for-JVM + bundled models** (keeps the on-device/private promise; larger installer) or **cloud
-  fallback** (fast, but would send frames/audio off-device on desktop — breaking the privacy invariant
-  there). Decision pending. The learned-concept *store* (`shared/model/LearnedConcept.kt`) is already
-  shared, so only the embedders/detectors are platform-bound.
+**Functional on desktop:** the timeline/edit/user-tool tools; cloud generation (`generate_image` /
+`generate_video` / `generate_music`); the beat suite (`get_beat_map`, `cut_to_beats`, `apply_on_beat`,
+`align_clips_to_beats`, `assemble_music_video`, on shared pure-JVM DSP); FFmpeg/DSP (`normalize_levels`,
+`normalize_loudness`, `detect_scenes`, `auto_duck`, `apply_ffmpeg_filter` via in-process JavaCV); the
+color/LUT render (`apply_lut` / `clear_lut` sampling a `.cube` through the shared `CubeLut` into the
+`BufferedImage` pipeline, `auto_color` / `match_color` frame-tone histograms, `list_shader_params` via
+shared `GlslShader`); on-device speech captions (`transcribe_clip` / `animated_transcribe_clip` via
+Vosk-JVM), multicam `sync_by_audio`, and on-device source separation (`remove_vocals`, `separate_stems`
+via Spleeter on ONNX Runtime-for-JVM).
+
+**ONNX-for-JVM foundation (shipped):** `DesktopOnnx` wraps ONNX Runtime; models are pointed at from
+Settings exactly like Android (a model *path*, not a bundled binary), so desktop keeps the
+on-device/private promise — only the model download touches the network, inference is local. Stem
+separation and image labeling already ride this path.
+
+**Remaining desktop stubs (each: an ONNX model path in Settings + an inference helper):**
+- **Vision / labeling** — `search_clips` is wired to an ONNX ImageNet classifier
+  (`DesktopImageLabeler`); `analyze_clip` (prompt-driven cut analysis), `analyze_clip_with_concept`,
+  `describe_current_frame`, `caption_frame` (VLM), and `find_highlights` (YAMNet audio-event) remain.
+- **Face / segmentation** — `blur_faces`, `auto_reframe`, `replace_background` need an ONNX
+  face-detector / selfie-segmentation model.
+- **Speech models** — `transcribe_precise`, `add_voiceover`, `diarize_clip`, `remove_fillers` use
+  sherpa-onnx on Android, which has no clean desktop-JVM artifact yet; wire when one lands (or run the
+  underlying ONNX graphs directly).
+- **Image models / inpaint** — `apply_image_effect`, `apply_bokeh` (TFLite depth on Android),
+  `remove_object_generative`, `add_reference` (image/face embedder).
+- **`apply_transition`** — a two-input `xfade`+`acrossfade` JavaCV `FFmpegFrameFilter` graph exists but
+  needs a real-clip smoke test before it's promoted from stub.
+- **GLSL shader rendering** — `apply_shader` records params but doesn't render; desktop needs a
+  GL/Skia pass, not the per-pixel `BufferedImage` path.
+
+The learned-concept *store* (`shared/model/LearnedConcept.kt`) is already shared, so only the
+embedders/detectors are platform-bound.
