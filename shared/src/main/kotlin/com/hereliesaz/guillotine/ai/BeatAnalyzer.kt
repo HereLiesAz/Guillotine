@@ -1,10 +1,6 @@
 package com.hereliesaz.guillotine.ai
 
-import android.content.Context
-import android.net.Uri
 import com.hereliesaz.guillotine.model.BeatMap
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -12,11 +8,13 @@ import kotlin.math.sqrt
 
 /**
  * On-device beat / tempo / onset detection. Fully local (the audio never leaves the device), no
- * native dependency: it decodes to mono PCM via [PcmDecoder], builds a **spectral-flux onset
- * envelope**, estimates tempo by **autocorrelation**, then phase-aligns a beat grid. Good enough to
- * drive "edit to the beat"; can later be swapped for a TFLite BeatNet/TempoCNN for tougher material.
+ * native dependency: given already-decoded **mono PCM** it builds a **spectral-flux onset envelope**,
+ * estimates tempo by **autocorrelation**, then phase-aligns a beat grid. Good enough to drive "edit to
+ * the beat"; can later be swapped for a TFLite BeatNet/TempoCNN for tougher material.
  *
- * All timestamps in the returned [BeatMap] are source-media milliseconds.
+ * This is pure JVM DSP with no platform dependency — each platform decodes PCM its own way (Android via
+ * `PcmDecoder`, desktop via `DesktopMediaDecoder`) and passes the samples in. All timestamps in the
+ * returned [BeatMap] are source-media milliseconds.
  */
 object BeatAnalyzer {
 
@@ -25,13 +23,13 @@ object BeatAnalyzer {
     private const val MIN_BPM = 70f
     private const val MAX_BPM = 180f
 
-    suspend fun analyze(context: Context, uri: Uri): BeatMap = withContext(Dispatchers.IO) {
-        val pcm = PcmDecoder.decode(context, uri) ?: return@withContext BeatMap(0f, emptyList(), emptyList(), emptyList())
-        val sr = pcm.sampleRate
-        if (pcm.samples.size < FFT * 2 || sr <= 0) return@withContext BeatMap(0f, emptyList(), emptyList(), emptyList())
+    /** Analyze already-decoded **mono** [samples] (normalized [-1,1]) at [sampleRate] Hz. */
+    fun analyze(samples: FloatArray, sampleRate: Int): BeatMap {
+        val sr = sampleRate
+        if (samples.size < FFT * 2 || sr <= 0) return BeatMap(0f, emptyList(), emptyList(), emptyList())
 
-        val flux = onsetEnvelope(pcm.samples)
-        if (flux.isEmpty()) return@withContext BeatMap(0f, emptyList(), emptyList(), emptyList())
+        val flux = onsetEnvelope(samples)
+        if (flux.isEmpty()) return BeatMap(0f, emptyList(), emptyList(), emptyList())
         val frameMs = HOP * 1000.0 / sr
 
         val bpm = estimateTempo(flux, frameMs)
@@ -41,7 +39,7 @@ object BeatAnalyzer {
         val downbeats = downbeatsFrom(beatsMs, flux, frameMs)
         val onsetsMs = pickOnsets(flux, frameMs)
 
-        BeatMap(bpm = bpm, beatsMs = beatsMs, downbeatsMs = downbeats, onsetsMs = onsetsMs)
+        return BeatMap(bpm = bpm, beatsMs = beatsMs, downbeatsMs = downbeats, onsetsMs = onsetsMs)
     }
 
     // ---- onset envelope (spectral flux) ------------------------------------

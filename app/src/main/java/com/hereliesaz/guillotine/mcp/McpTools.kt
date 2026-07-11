@@ -1131,12 +1131,19 @@ class McpTools(
 
     // ---- rhythm / edit-to-the-beat ------------------------------------------
 
+    /** Decode a clip's audio to mono PCM on-device, then run the shared beat/tempo analyzer. */
+    private fun beatMapFor(uri: Uri): com.hereliesaz.guillotine.model.BeatMap {
+        val pcm = PcmDecoder.decode(context, uri)
+            ?: return com.hereliesaz.guillotine.model.BeatMap(0f, emptyList(), emptyList(), emptyList())
+        return BeatAnalyzer.analyze(pcm.samples, pcm.sampleRate)
+    }
+
     private fun getBeatMap(clipId: String): JSONObject {
         val doc = vm.uiState.value.document
         val clip = doc.clips.firstOrNull { it.id == clipId }
             ?: throw IllegalArgumentException("Clip not found: $clipId")
         val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
-        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val map = beatMapFor(Uri.parse(media.uri))
         return JSONObject().apply {
             put("ok", true); put("clipId", clipId); put("bpm", map.bpm)
             put("beatCount", map.beatsMs.size)
@@ -1171,7 +1178,7 @@ class McpTools(
         val audio = doc.clips.firstOrNull { it.id == audioClipId }
             ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
         val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
-        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val map = beatMapFor(Uri.parse(media.uri))
         val cuts = beatTimelinePositions(audio, map, mode, everyN.coerceAtLeast(1))
             .filter { it > video.startTimeMs && it < video.endTimeMs }
         if (cuts.isEmpty()) {
@@ -1195,7 +1202,7 @@ class McpTools(
         val audio = doc.clips.firstOrNull { it.id == audioClipId }
             ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
         val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
-        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val map = beatMapFor(Uri.parse(media.uri))
         val positions = beatTimelinePositions(audio, map, mode, 1)
             .filter { it in video.startTimeMs..video.endTimeMs }
         if (positions.isEmpty()) {
@@ -1230,7 +1237,7 @@ class McpTools(
         val audio = doc.clips.firstOrNull { it.id == audioClipId }
             ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
         val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
-        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val map = beatMapFor(Uri.parse(media.uri))
         val beats = beatTimelinePositions(audio, map, mode, 1)
         if (beats.isEmpty()) {
             return JSONObject().apply {
@@ -1743,7 +1750,7 @@ class McpTools(
         val audio = doc.clips.firstOrNull { it.id == audioClipId }
             ?: throw IllegalArgumentException("Audio clip not found: $audioClipId")
         val media = doc.mediaFor(audio) ?: throw IllegalArgumentException("No media for audio clip: $audioClipId")
-        val map = runBlocking { BeatAnalyzer.analyze(context, Uri.parse(media.uri)) }
+        val map = beatMapFor(Uri.parse(media.uri))
         val every = beatsPerClip.coerceAtLeast(1)
         // Beat times → timeline positions (on the audio clip), thinned to every Nth beat.
         val grid = map.points(mode)

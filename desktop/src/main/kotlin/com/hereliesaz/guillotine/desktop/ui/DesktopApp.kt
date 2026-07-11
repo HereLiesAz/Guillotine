@@ -1,7 +1,6 @@
 package com.hereliesaz.guillotine.desktop.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import com.hereliesaz.guillotine.desktop.platform.DesktopKeyStore
 import com.hereliesaz.guillotine.desktop.ui.theme.GuillotineTheme
 import com.hereliesaz.guillotine.editor.EditorViewModel
@@ -11,9 +10,8 @@ import com.hereliesaz.guillotine.mcp.McpToolsSurface
 fun DesktopApp(
     editor: EditorViewModel,
     mcpTools: McpToolsSurface,
+    keyStore: DesktopKeyStore,
 ) {
-    val keyStore = remember { DesktopKeyStore() }
-
     GuillotineTheme {
         NleScreen(
             vm = editor,
