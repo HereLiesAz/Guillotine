@@ -41,6 +41,11 @@ dependencies {
     // runtime) — powers on-device ML tools on desktop. See jlink note in nativeDistributions below.
     implementation(libs.onnxruntime.jvm)
 
+    // Vosk (offline speech-to-text) for the JVM — powers on-device transcription/captions. Bundles
+    // JNA-loaded natives (linux-x86_64 / windows-x86_64 / macOS), extracted from the jar at runtime
+    // like ORT. Apple-Silicon (osx-arm64) coverage should be confirmed on hardware (see libs toml).
+    implementation(libs.vosk.jvm)
+
     // Core Java wrappers (no natives).
     implementation(libs.javacv)
     // Host-only natives — matches the runner's OS/arch, keeps the installer ~4× smaller than

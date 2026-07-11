@@ -15,6 +15,7 @@ import com.hereliesaz.guillotine.ai.gen.meta
 import com.hereliesaz.guillotine.desktop.media.DesktopFfmpegFilter
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaImport
+import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.mcp.boolProp
@@ -67,10 +68,73 @@ class DesktopMcpTools(
         put(toolDefinition("remove_object_generative", "Remove object with inpainting (not yet available on desktop).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("describe_current_frame", "Describe the current preview frame (not yet available on desktop).", emptySchema()))
-        put(toolDefinition("transcribe_clip", "Transcribe a clip's audio (not yet available on desktop).",
-            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
-        put(toolDefinition("animated_transcribe_clip", "Animated per-syllable captions (not yet available on desktop).",
-            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+        put(toolDefinition(
+            "transcribe_clip",
+            "Transcribe a clip's audio ON-DEVICE (offline Vosk, no key/network) and add timed caption " +
+                "text clips to the timeline, grouped with the source clip. Each caption appears and " +
+                "disappears in sync with the spoken words. Requires a Vosk model in Settings → " +
+                "Transcription; if it isn't set it returns an error naming the setting — relay it.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "animated_transcribe_clip",
+            "Transcribe a clip's audio ON-DEVICE (offline Vosk) and create ANIMATED per-syllable " +
+                "captions: each word is split into syllables placed on separate video tracks so they all " +
+                "appear simultaneously, with SCALE keyframes that ramp each syllable from small to large " +
+                "as it is spoken — a \"grow as said\" kinetic typography effect. Use when the user asks " +
+                "for animated, kinetic, per-word, or per-syllable text/captions. Requires a Vosk model in " +
+                "Settings → Transcription; relay its error if unset.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "transcribe_precise",
+            "Transcribe a clip's audio ON-DEVICE with an offline Whisper (sherpa-onnx) model and return " +
+                "the transcript text. NOTE: not yet available on desktop — sherpa-onnx has no clean JVM " +
+                "distribution, so this returns an error pointing at transcribe_clip (Vosk) instead.",
+            objSchema("clip_id" to stringProp("The clip whose audio to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "add_voiceover",
+            "Synthesize speech from text ON-DEVICE (offline neural TTS via sherpa-onnx) and add it to the " +
+                "timeline as an audio clip. NOTE: not yet available on desktop (no clean sherpa-onnx JVM " +
+                "distribution); returns an error rather than faking it.",
+            objSchema(
+                "text" to stringProp("The words to speak"),
+                "speed" to numberProp("Speaking rate (default 1.0; <1 slower, >1 faster)"),
+                required = listOf("text"),
+            ),
+        ))
+        put(toolDefinition(
+            "diarize_clip",
+            "Speaker diarization ON-DEVICE (who spoke when). NOTE: not yet available on desktop (no clean " +
+                "sherpa-onnx JVM distribution); returns an error rather than faking it.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to diarize"),
+                "num_speakers" to intProp("Known speaker count (0 = infer automatically)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "remove_fillers",
+            "Remove filler words (\"um\", \"uh\", \"er\", \"hmm\") from a clip ON-DEVICE using offline " +
+                "Whisper (sherpa-onnx) word timings. NOTE: not yet available on desktop (no clean " +
+                "sherpa-onnx JVM distribution); returns an error rather than faking it.",
+            objSchema("clip_id" to stringProp("The clip to de-filler"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "sync_by_audio",
+            "Sync two clips by their audio ON-DEVICE (no key): cross-correlates the two audio tracks to " +
+                "find the time offset and moves the second clip so its audio lines up with the reference " +
+                "(multicam / dual-recording sync). Use for \"sync these two clips by audio\", \"line up " +
+                "the multicam angles\", \"match the second camera to the audio recorder\". Both clips need " +
+                "audio of the same moment.",
+            objSchema(
+                "reference_clip_id" to stringProp("The clip to keep fixed (the reference)"),
+                "clip_id" to stringProp("The clip to move so its audio aligns to the reference"),
+                "max_offset_sec" to intProp("Max search offset in seconds (default 15)"),
+                required = listOf("reference_clip_id", "clip_id"),
+            ),
+        ))
             
         put(toolDefinition(
             "set_clip_filter", "Sets static values for a clip filter (e.g., brightness = 1.2, speed = 2.0).",
@@ -385,11 +449,195 @@ class DesktopMcpTools(
                 required = listOf("prompt"),
             ),
         ))
-        // TODO(desktop): apply_transition (FFmpeg xfade between two clips) is not wired here. Android
-        // shells an external ffmpeg with a two-input `xfade`+`acrossfade` filter_complex; a faithful
-        // in-process port needs a two-input FFmpegFrameFilter with precise offset/PTS synchronization
-        // that can't be verified in this environment, so it is intentionally left out rather than
-        // shipped unverified. Single-input filtering (apply_ffmpeg_filter) IS wired.
+        // ---- learned concepts (teach a specific thing by pointing at it) ----
+        // list_concepts / delete_concept are pure data ops on the shared LearnedConcept store — REAL on
+        // desktop. add_reference needs an on-device image/face embedder (ML Kit/TFLite) → honest stub.
+        put(toolDefinition(
+            "add_reference",
+            "Teach the app a SPECIFIC thing by pointing at it in the CURRENT preview frame: captures an " +
+                "on-device fingerprint of what's there and adds it as an example of a named concept. Call " +
+                "it once per frame the user points the thing out in (\"this is my dog Rex\", \"here he is " +
+                "again\") — more examples = more robust recognition. Pass `term` (the kind of thing, e.g. " +
+                "\"dog\") if the user said it, to help pick the right object in the frame. Set " +
+                "negative=true for a NON-example (\"this frame does NOT have Rex\", \"that's a different " +
+                "dog\") — it fingerprints the same-kind look-alikes so recognition can reject them.",
+            objSchema(
+                "name" to stringProp("Short name for the thing, e.g. \"Rex\""),
+                "term" to stringProp("Optional kind of object, e.g. \"dog\", \"mug\""),
+                "negative" to JSONObject().apply {
+                    put("type", "boolean"); put("description", "True if this frame does NOT contain the thing (a look-alike to reject)")
+                },
+                required = listOf("name"),
+            ),
+        ))
+        put(toolDefinition(
+            "list_concepts",
+            "List the things the user has taught by pointing them out (learned concepts): name + how many " +
+                "examples each has.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "delete_concept",
+            "Forget a learned thing by name.",
+            objSchema("name" to stringProp(), required = listOf("name")),
+        ))
+        put(toolDefinition(
+            "analyze_clip_with_concept",
+            "Keep or cut a clip by a LEARNED thing (taught via add_reference): finds frames containing that " +
+                "specific instance and cuts for real. keep_only=true keeps ONLY the frames with it (removes " +
+                "the rest — \"keep only shots with Rex\"); keep_only=false removes the frames with it (\"cut " +
+                "everything with Rex\"). Prefer this over analyze_clip when the user taught the thing by " +
+                "pointing at it.",
+            objSchema(
+                "clip_id" to stringProp(), "name" to stringProp("The learned thing's name"),
+                "keep_only" to JSONObject().apply {
+                    put("type", "boolean"); put("description", "Keep only frames with it (else remove them)")
+                },
+                required = listOf("clip_id", "name"),
+            ),
+        ))
+
+        // ---- vision / face / image-model tools: defined for discoverability, honest stubs on desktop
+        // (ML Kit / MediaPipe VLM / TFLite have no clean desktop-JVM equivalent). ----
+        put(toolDefinition(
+            "apply_image_effect",
+            "Run an ON-DEVICE image model on the current preview frame and add the result as a new image " +
+                "clip. effect = superres (upscale) | style (style transfer) | depth (depth map) | lowlight " +
+                "(brighten a dark/low-light frame). Requires that effect's .tflite model to be set in " +
+                "Settings → AI Analyzer → Image effects; if it isn't, returns an error naming the setting " +
+                "(relay it, don't retry).",
+            objSchema(
+                "effect" to stringProp("superres | style | depth | lowlight"),
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                required = listOf("effect"),
+            ),
+        ))
+        put(toolDefinition(
+            "blur_faces",
+            "Toggle ON-DEVICE face anonymization on a clip (ML Kit face detection, no key): every detected " +
+                "face is blurred in both preview and export, for privacy. Use for \"blur the faces\", " +
+                "\"anonymize people\", \"hide identities\", \"censor faces\". Pass enabled=false to turn it " +
+                "back off. Applies to video and image clips.",
+            objSchema(
+                "clip_id" to stringProp("The clip to blur faces on; defaults to the video clip at the playhead"),
+                "enabled" to boolProp("Turn face-blur on (default true) or off"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "replace_background",
+            "Replace a clip's background ON-DEVICE with no green screen (ML Kit subject matte): segment " +
+                "the subject and composite it over a new background — a solid color or an image — placed " +
+                "on a new track behind. Use for \"replace the background\", \"put me on a red/blue " +
+                "background\", \"change the backdrop\", \"green-screen me onto this image\". Provide color " +
+                "(hex like #1e90ff or a name like \"blue\") OR image_path; defaults to black. For a " +
+                "generated backdrop, generate an image first, then pass its path.",
+            objSchema(
+                "clip_id" to stringProp("The subject clip; defaults to the video clip at the playhead"),
+                "color" to stringProp("Background color (hex #RRGGBB or a name). Ignored if image_path is set."),
+                "image_path" to stringProp("Filesystem path to a background image (overrides color)"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "find_highlights",
+            "Scan a clip's AUDIO on-device (YAMNet) for exciting moments — applause, cheering, laughter, " +
+                "music, screaming, a roaring crowd — and return them as timestamped ranges. By default it " +
+                "also splits the clip at each highlight boundary so every best-moment becomes its own clip " +
+                "(pass split=false to only report). Use for \"find the best moments / highlights\", " +
+                "\"make a highlight reel\", \"where does the crowd cheer?\". Requires the YAMNet model set " +
+                "in Settings → AI Analyzer → Audio highlights; if it isn't, returns an error naming the " +
+                "setting (relay it, don't retry).",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to scan"),
+                "threshold" to numberProp("Detection confidence 0–1 (default 0.3; lower finds more)"),
+                "split" to boolProp("Split the clip at highlight boundaries (default true)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_bokeh",
+            "Add a depth-of-field / portrait \"bokeh\" blur to the current frame ON-DEVICE: runs the depth " +
+                "model, keeps the near subject sharp and blurs the far background, and adds the result as " +
+                "an image clip. Use for \"blur the background\", \"portrait mode\", \"add bokeh / depth of " +
+                "field\", \"cinematic blur\". strength scales the blur (default 1.0). Requires the depth " +
+                "model in Settings → AI Analyzer → Image effects (depth); relay its error if unset.",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                "strength" to numberProp("Blur strength (default 1.0; higher = more blur)"),
+            ),
+        ))
+        put(toolDefinition(
+            "denoise_clip",
+            "Remove background noise from a clip's VOICE audio ON-DEVICE (GTCRN speech denoiser, no key) and " +
+                "add the cleaned track as a new audio clip. Strips hiss, hum, air-conditioner drone, and " +
+                "general background noise while keeping speech. Use for \"remove background noise\", \"clean " +
+                "up the audio\", \"denoise this\", \"isolate the voice\", \"reduce the hiss\". Requires the " +
+                "denoiser model in Settings → AI Analyzer → Noise reduction; relay its error if unset.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose voice audio to denoise"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_transition",
+            "Create a GL-style TRANSITION between two clips ON-DEVICE (FFmpeg `xfade`) and add the combined " +
+                "result as a new clip. Use for \"add a crossfade/dissolve between these\", \"wipe from this " +
+                "to that\", \"put a transition here\". type is any xfade transition: fade, fadeblack, " +
+                "fadewhite, wipeleft/right/up/down, slideleft/right/up/down, circleopen, circleclose, " +
+                "dissolve, pixelize, radial, smoothleft, distance, and more (default fade). duration_sec " +
+                "is the overlap (default 1). NOTE: not yet wired on desktop — a faithful in-process " +
+                "two-input xfade needs precise offset/PTS synchronization that can't be verified here, so " +
+                "this returns an error rather than a bad cut. Single-input filtering (apply_ffmpeg_filter) " +
+                "IS wired.",
+            objSchema(
+                "from_clip_id" to stringProp("The outgoing (first) clip"),
+                "to_clip_id" to stringProp("The incoming (second) clip"),
+                "type" to stringProp("xfade transition type (default fade)"),
+                "duration_sec" to numberProp("Transition/overlap length in seconds (default 1)"),
+                required = listOf("from_clip_id", "to_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "auto_reframe",
+            "Auto-reframe a clip to keep the subject centered ON-DEVICE (no key): detects the main face " +
+                "across the clip and pans a punched-in crop to follow it — the classic \"make it work " +
+                "vertically / follow the speaker\" reframe. Use for \"auto-reframe this\", \"keep the " +
+                "subject centered\", \"follow the face\", \"reframe for vertical/Reels\". zoom is the " +
+                "punch-in (default 1.3). Sets the clip's scale and writes OFFSET_X keyframes that track " +
+                "the face; needs faces in the footage (returns an error if none are found).",
+            objSchema(
+                "clip_id" to stringProp("The clip to reframe"),
+                "zoom" to numberProp("Punch-in scale (default 1.3; more = tighter, more room to pan)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "search_clips",
+            "Find which video clips contain something ON-DEVICE (no key): samples each clip's frames and " +
+                "matches them against [query] using on-device image labels (~400 common things/scenes — " +
+                "e.g. dog, car, beach, sunset, food, crowd). Use for \"find the clips with a dog\", " +
+                "\"which shots have a sunset?\", \"where's the beach footage?\". Returns the matching " +
+                "clips with the matched label and a timestamp; it does not edit anything.",
+            objSchema(
+                "query" to stringProp("What to look for, e.g. \"dog\" or \"sunset\""),
+                required = listOf("query"),
+            ),
+        ))
+        put(toolDefinition(
+            "caption_frame",
+            "Describe a frame in rich natural language using the ON-DEVICE multimodal VLM (Gemma-3n). " +
+                "Prefer this over describe_current_frame when the user wants a real description / " +
+                "understanding of the scene (\"what's happening in this frame?\", \"describe this shot\", " +
+                "\"what is this a picture of?\") rather than just a list of detected objects. Optionally " +
+                "pass a specific question as prompt. Requires the VLM model in Settings → AI Analyzer → " +
+                "Frame captioning (VLM); if it isn't set it returns an error naming the setting — relay " +
+                "it, don't retry (you can still fall back to describe_current_frame).",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                "prompt" to stringProp("Optional question about the frame (default: describe it)"),
+            ),
+        ))
     }
 
     override fun call(name: String, args: JSONObject): JSONObject = when (name) {
@@ -401,8 +649,45 @@ class DesktopMcpTools(
         "segment_clip" -> segmentClipTool(args.getString("clip_id"))
         "delete_clip" -> deleteClipTool(args.getString("clip_id"))
         "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
-        "analyze_clip", "analyze_clip_with_reference", "remove_object_generative",
-        "describe_current_frame", "transcribe_clip", "animated_transcribe_clip" -> notAvailable(name)
+        // ---- vision (ML Kit labeling / MediaPipe VLM) → honest stubs ----
+        "analyze_clip", "analyze_clip_with_reference" ->
+            visionToolUnavailable(name, "an on-device vision/labeling model")
+        "analyze_clip_with_concept" ->
+            visionToolUnavailable(name, "an on-device vision/embedding model")
+        "describe_current_frame" ->
+            visionToolUnavailable(name, "an on-device object-detection model")
+        "caption_frame" ->
+            visionToolUnavailable(name, "an on-device multimodal VLM (Gemma-3n)")
+        "find_highlights" ->
+            visionToolUnavailable(name, "the on-device YAMNet audio-event model")
+        "search_clips" ->
+            visionToolUnavailable(name, "an on-device image-labeling model")
+        // ---- face / segmentation (ML Kit) → honest stubs ----
+        "blur_faces", "auto_reframe" ->
+            visionToolUnavailable(name, "an on-device face-detection model")
+        "replace_background" ->
+            visionToolUnavailable(name, "an on-device subject-segmentation model")
+        // ---- concept embedder / image models / inpaint → honest stubs ----
+        "add_reference" ->
+            visionToolUnavailable(name, "an on-device image/face embedder")
+        "remove_object_generative" ->
+            visionToolUnavailable(name, "an on-device object mask (ML Kit) before cloud repaint")
+        "apply_image_effect", "apply_bokeh" ->
+            visionToolUnavailable(name, "an on-device TFLite image model")
+        "denoise_clip" ->
+            visionToolUnavailable(name, "the on-device GTCRN speech-denoiser model")
+        "apply_transition" ->
+            visionToolUnavailable(name, "a verified two-input FFmpeg xfade path")
+        // ---- learned-concept data ops → REAL (shared LearnedConcept store) ----
+        "list_concepts" -> listConcepts()
+        "delete_concept" -> deleteConcept(args.getString("name"))
+        "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
+        "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
+        "transcribe_precise" -> speechToolUnavailable("transcribe_precise", "an offline Whisper (sherpa-onnx) ASR model")
+        "add_voiceover" -> speechToolUnavailable("add_voiceover", "an offline neural TTS (sherpa-onnx) voice")
+        "diarize_clip" -> speechToolUnavailable("diarize_clip", "the sherpa-onnx speaker-diarization models")
+        "remove_fillers" -> speechToolUnavailable("remove_fillers", "an offline Whisper (sherpa-onnx) ASR model")
+        "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
         "create_user_tool" -> createUserTool(args.getString("name"), args.getString("description"))
         "list_user_tools" -> listUserTools()
         "delete_user_tool" -> deleteUserTool(args.getString("name"))
@@ -458,9 +743,191 @@ class DesktopMcpTools(
         else -> throw IllegalArgumentException("Unknown resource: $uri")
     }
 
-    private fun notAvailable(tool: String) = JSONObject().apply {
-        put("error", "$tool is not yet available on desktop (requires media pipeline).")
-        put("humanSummary", "$tool is not yet available on desktop.")
+    /**
+     * Honest stub for the vision / face / segmentation / image-model / inpaint tools that depend on
+     * ML Kit, MediaPipe, or TFLite — all Android-only with no clean desktop-JVM equivalent. Never fakes
+     * success: returns a clear error naming what's missing, mirroring the sherpa speech stubs.
+     */
+    private fun visionToolUnavailable(tool: String, needs: String) = JSONObject().apply {
+        // TODO(desktop): wire once an on-device vision/face/image model has a clean desktop-JVM path.
+        // ML Kit and MediaPipe are Android-only; there is no drop-in JVM replacement, so this can't be
+        // shipped reliably here (unlike the ONNX/FFmpeg-backed tools that ARE wired).
+        val msg = "$tool needs $needs, which isn't available on desktop yet " +
+            "(ML Kit / MediaPipe are Android-only with no on-device desktop equivalent here)."
+        put("error", msg)
+        put("humanSummary", msg)
+    }
+
+    // ---- learned concepts: pure data ops on the shared LearnedConcept store (REAL on desktop) ----
+
+    private fun listConcepts(): JSONObject {
+        val concepts = DesktopLearnedConceptStore.load()
+        return JSONObject().apply {
+            put("ok", true)
+            put("concepts", JSONArray().apply {
+                concepts.forEach {
+                    put(JSONObject().apply {
+                        put("name", it.name); put("exampleCount", it.exampleCount)
+                        if (it.terms.isNotEmpty()) put("terms", JSONArray(it.terms))
+                    })
+                }
+            })
+            put(
+                "humanSummary",
+                if (concepts.isEmpty()) "Nothing learned yet — point something out with add_reference."
+                else "Learned things: " + concepts.joinToString { "${it.name} (${it.exampleCount})" } + ".",
+            )
+        }
+    }
+
+    private fun deleteConcept(name: String): JSONObject {
+        DesktopLearnedConceptStore.remove(name)
+        return ok().apply { put("humanSummary", "Forgot \"$name\".") }
+    }
+
+    // ---- offline speech: transcription (Vosk) + honest stubs ----------------
+
+    /**
+     * Honest stub for the sherpa-onnx-backed speech tools that have no clean JVM distribution yet
+     * (transcribe_precise / add_voiceover / diarize_clip / remove_fillers). Never fakes success.
+     */
+    private fun speechToolUnavailable(tool: String, needs: String) = JSONObject().apply {
+        // TODO(desktop): wire once sherpa-onnx ships a clean desktop-JVM artifact (bundled natives).
+        // sherpa-onnx currently distributes JVM only as GitHub-release jars + separate per-platform
+        // JNI natives (no Maven coordinate), so this can't be shipped reliably here.
+        val msg = "$tool needs $needs, which isn't available on desktop yet " +
+            "(sherpa-onnx has no on-device desktop model here). For transcription, use transcribe_clip, " +
+            "which runs offline via a Vosk model set in Settings → Transcription."
+        put("error", msg)
+        put("humanSummary", msg)
+    }
+
+    /** Decode a clip's audio to 16 kHz mono, transcribe with the Vosk model, and add timed captions. */
+    private fun transcribeClip(clipId: String): JSONObject {
+        val model = settingsProvider().speechModelPath
+        require(model.isNotBlank()) {
+            "No on-device speech model set. Set a Vosk model in Settings → Transcription."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 16_000) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to transcribe.")
+        val cues = DesktopVoskTranscriber.transcribe(model, pcm.samples)
+        if (cues.isEmpty()) return ok().apply {
+            put("captions", 0)
+            put("humanSummary", "Transcribed clip — no speech detected.")
+        }
+        vm.addTextClipsFromTranscript(clipId, cues)
+        val n = vm.uiState.value.document.clips.count { it.type == ClipType.TEXT }
+        return ok().apply {
+            put("captions", cues.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Transcribed and added ${cues.size} caption(s) ($n text clips total).")
+        }
+    }
+
+    /** Transcribe with Vosk and add ANIMATED per-syllable captions (grow-as-said kinetic typography). */
+    private fun animatedTranscribeClip(clipId: String): JSONObject {
+        val model = settingsProvider().speechModelPath
+        require(model.isNotBlank()) {
+            "No on-device speech model set. Set a Vosk model in Settings → Transcription."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 16_000) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to transcribe.")
+        val cues = DesktopVoskTranscriber.transcribe(model, pcm.samples)
+        val wordCues = cues.flatMap { it.words }
+        if (wordCues.isEmpty()) return ok().apply {
+            put("words", 0)
+            put("humanSummary", "Transcribed clip — no per-word timing available for animation.")
+        }
+        vm.addAnimatedCaptionsFromTranscript(clipId, wordCues)
+        val n = vm.uiState.value.document.clips.count { it.type == ClipType.TEXT }
+        val tracks = vm.uiState.value.document.videoTracks.size
+        return ok().apply {
+            put("words", wordCues.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("videoTracks", tracks)
+            put(
+                "humanSummary",
+                "Created animated captions for ${wordCues.size} word(s) — syllables on $tracks video track(s) " +
+                    "with per-syllable scale keyframes ($n text clips total).",
+            )
+        }
+    }
+
+    // ---- audio sync (on-device cross-correlation, no model) -----------------
+
+    private val ENV_RATE = 100
+
+    /**
+     * Sync [clipId] to [refClipId] by cross-correlating their audio envelopes and moving the clip so
+     * its audio lines up with the reference. Mirrors Android's `sync_by_audio` exactly (10 ms env bins).
+     */
+    private fun syncByAudio(refClipId: String, clipId: String, maxOffsetSec: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        val ref = doc.clips.firstOrNull { it.id == refClipId }
+            ?: throw IllegalArgumentException("Reference clip not found: $refClipId")
+        val mov = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val envA = audioEnvelope(ref) ?: throw IllegalStateException("No audio in the reference clip to sync on.")
+        val envB = audioEnvelope(mov) ?: throw IllegalStateException("No audio in \"$clipId\" to sync on.")
+        val maxLag = (maxOffsetSec.coerceIn(1, 120) * ENV_RATE)
+        // Find the lag L (in env samples) maximizing Σ envA[k] * envB[k+L]. envA[k] ≈ envB[k+L] means the
+        // same event is at index k in A and k+L in B, so B should start L*10ms earlier than A.
+        var bestLag = 0
+        var bestScore = -Double.MAX_VALUE
+        for (lag in -maxLag..maxLag) {
+            var sum = 0.0
+            var count = 0
+            var k = maxOf(0, -lag)
+            val kEnd = minOf(envA.size, envB.size - lag)
+            while (k < kEnd) { sum += envA[k] * envB[k + lag]; count++; k++ }
+            if (count > ENV_RATE) { // need at least ~1s of overlap to trust a score
+                val score = sum / count
+                if (score > bestScore) { bestScore = score; bestLag = lag }
+            }
+        }
+        // No window had ≥1s of overlap → never scored. Fail loudly instead of silently "syncing" at 0.
+        check(bestScore != -Double.MAX_VALUE) {
+            "Could not find a reliable audio match between the clips within the search window."
+        }
+        val offsetMs = bestLag.toLong() * (1000L / ENV_RATE)
+        val newStart = (ref.startTimeMs - offsetMs).coerceAtLeast(0L)
+        vm.updateClip(clipId) { it.copy(startTimeMs = newStart) }
+        return ok().apply {
+            put("offsetMs", offsetMs)
+            put("newStartMs", newStart)
+            put("humanSummary", "Synced by audio: moved the clip to ${msFmt(newStart)} (offset ${offsetMs}ms) so its audio matches the reference.")
+        }
+    }
+
+    /** Normalized (zero-mean, unit-std) RMS envelope of [clip]'s audio at [ENV_RATE], or null if none. */
+    private fun audioEnvelope(clip: TimelineClip): FloatArray? {
+        val media = vm.uiState.value.document.mediaFor(clip) ?: return null
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 4_000) } ?: return null
+        if (pcm.sampleRate <= 0 || pcm.samples.isEmpty()) return null
+        val win = (pcm.sampleRate / ENV_RATE).coerceAtLeast(1)
+        val n = pcm.samples.size / win
+        if (n < ENV_RATE) return null
+        val env = FloatArray(n)
+        for (i in 0 until n) {
+            var s = 0.0
+            val base = i * win
+            for (j in 0 until win) { val v = pcm.samples[base + j]; s += v * v }
+            env[i] = kotlin.math.sqrt(s / win).toFloat()
+        }
+        val mean = env.average().toFloat()
+        var varSum = 0.0
+        for (v in env) varSum += (v - mean) * (v - mean)
+        val std = kotlin.math.sqrt(varSum / env.size).toFloat().coerceAtLeast(1e-6f)
+        for (i in env.indices) env[i] = (env[i] - mean) / std
+        return env
     }
 
     private fun getTimeline(): JSONObject {
