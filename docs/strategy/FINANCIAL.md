@@ -6,9 +6,6 @@
 
 ## Bottom line up front
 
-- The code already released under **CC0 is public domain forever** — anyone can take it, close it, and
-  sell it, and that cannot be undone. Relicensing only binds **future** versions, which the maintainer
-  (sole copyright holder today) is free to do.
 - The chosen structure is **open-core on AGPL-3.0**: the whole editor stays genuinely open source; a
   future **paid/hosted layer** sits on top as a **separate PolyForm/commercial component**. Monetization
   comes from *structure*, not from the license fighting the open-source identity.
@@ -21,7 +18,7 @@
 
 ## The license decision (what we did, and why)
 
-**Relicensed CC0 → AGPL-3.0** for future versions, structured for open-core monetization:
+**AGPL-3.0** structured for open-core monetization:
 
 - **Core app = AGPL-3.0.** Genuinely open source (keeps NLnet grant eligibility, F-Droid, community
   goodwill, and the privacy-**and**-open-source brand that is the actual wedge). Copyleft — especially
@@ -99,10 +96,6 @@ goodwill income, not a plan.
 
 ### F · Ecosystem marketplace — *later*
 LUTs/shaders/plugins with a revenue share, once there's an install base. Needs scale first.
-
-### Off the table
-Retroactive relicensing of the already-CC0 code; a pure SaaS/"managed cloud" play (no server to sell for
-an on-device app).
 
 ## Realistic expectations
 
