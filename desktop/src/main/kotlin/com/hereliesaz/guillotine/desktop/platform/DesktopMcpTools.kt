@@ -3,6 +3,8 @@ package com.hereliesaz.guillotine.desktop.platform
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.BeatAnalyzer
 import com.hereliesaz.guillotine.ai.Loudness
+import com.hereliesaz.guillotine.ai.Spleeter
+import com.hereliesaz.guillotine.ai.VocalIsolator
 import com.hereliesaz.guillotine.ai.gen.AsyncJobPoller
 import com.hereliesaz.guillotine.ai.gen.GenBackends
 import com.hereliesaz.guillotine.ai.gen.GenKind
@@ -288,6 +290,34 @@ class DesktopMcpTools(
             ),
         ))
 
+        // ---- vocal / stem separation (on-device) ----
+        put(toolDefinition(
+            "remove_vocals",
+            "Remove the lead vocals from a clip's audio ON-DEVICE (no model/key) and add the resulting " +
+                "instrumental as a new audio clip — for karaoke / backing tracks. Use for \"remove the " +
+                "vocals\", \"make a karaoke / instrumental version\", \"strip the singing\". Uses stereo " +
+                "center-channel cancellation, so it needs a STEREO track (returns an error on mono); it's " +
+                "a lightweight instrumental extractor, not a full multi-stem split.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to process"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "separate_stems",
+            "Split a clip's music into VOCALS and ACCOMPANIMENT (instrumental) tracks ON-DEVICE (Spleeter " +
+                "via ONNX, no key) and add both as audio clips — true ML stem separation for remixes, " +
+                "karaoke, or isolating either part. Use for \"separate the stems\", \"split vocals and " +
+                "instrumental\", \"isolate the vocals\", \"give me the acapella / instrumental\". (For a " +
+                "quick stereo karaoke without a model, use remove_vocals.) Requires the Spleeter model in " +
+                "Settings → AI Analyzer → Stem separation; heavy — best on moderate clip lengths. Relay " +
+                "its error if the model isn't set.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to separate"),
+                required = listOf("clip_id"),
+            ),
+        ))
+
         // ---- shot / scene detection (on-device, no model) ----
         put(toolDefinition(
             "detect_scenes",
@@ -399,6 +429,8 @@ class DesktopMcpTools(
         "normalize_levels" -> normalizeLevels()
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
         "auto_duck" -> autoDuck(args.getString("music_clip_id"), args.getString("voice_clip_id"), args.optDouble("amount", 0.3).toFloat())
+        "remove_vocals" -> removeVocals(args.getString("clip_id"))
+        "separate_stems" -> separateStems(args.getString("clip_id"))
         "detect_scenes" -> detectScenes(args.getString("clip_id"), args.optDouble("sensitivity", 0.5).toFloat(), args.optBoolean("split", true))
         "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
         "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
@@ -1233,6 +1265,67 @@ class DesktopMcpTools(
             else merged += r
         }
         return merged.filter { it.second - it.first >= 150L }
+    }
+
+    // ---- vocal / stem separation (on-device) -------------------------------
+
+    /**
+     * Remove a clip's lead vocals via on-device stereo center-channel cancellation (no model) and add
+     * the instrumental as a new audio clip. Mirrors Android's `remove_vocals`: needs a stereo track.
+     */
+    private fun removeVocals(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val stereo = runBlocking { DesktopMediaDecoder.decodePcmStereo(media.uri) }
+        val outDir = File(DesktopStorage.dataDir, "stems").apply { mkdirs() }
+        val out = File(outDir, "instrumental_${System.currentTimeMillis()}.wav")
+        val duration = (if (stereo == null || stereo.channels < 2) null
+            else VocalIsolator.removeVocals(stereo.left, stereo.right, stereo.sampleRate, out.absolutePath))
+            ?: throw IllegalStateException(
+                "Couldn't remove vocals — the clip needs a stereo audio track (center-channel " +
+                    "cancellation can't work on mono).",
+            )
+        val probed = DesktopMediaImport.probe(out)
+            ?: throw IllegalStateException("The instrumental couldn't be read.")
+        vm.addMedia(listOf(probed.copy(name = "Instrumental: ${media.name}")))
+        return ok().apply {
+            put("durationMs", duration)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Added a ${msFmt(duration)} vocals-removed (instrumental) track.")
+        }
+    }
+
+    /** Separate a clip's music into vocals + accompaniment via on-device Spleeter (ONNX); add both. */
+    private fun separateStems(clipId: String): JSONObject {
+        val dir = settingsProvider().stemModelPath
+        require(dir.isNotBlank()) {
+            "No stem model set. Download Spleeter in Settings → AI Analyzer → Stem separation."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val stereo = runBlocking { DesktopMediaDecoder.decodePcmStereo(media.uri) }
+            ?: throw IllegalStateException("Couldn't separate — the clip needs decodable audio.")
+        val stems = Spleeter.separate(
+            stereo.left, stereo.right, stereo.sampleRate, dir, File(DesktopStorage.dataDir, "stems"),
+        ) ?: throw IllegalStateException("Couldn't separate — the clip needs decodable audio.")
+        val vocals = DesktopMediaImport.probe(File(stems.vocalsWav))
+            ?: throw IllegalStateException("The separated vocals couldn't be read.")
+        val instrumental = DesktopMediaImport.probe(File(stems.accompanimentWav))
+            ?: throw IllegalStateException("The separated accompaniment couldn't be read.")
+        vm.addMedia(
+            listOf(
+                vocals.copy(name = "vocals: ${media.name}"),
+                instrumental.copy(name = "instrumental: ${media.name}"),
+            ),
+        )
+        return ok().apply {
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Separated into vocals + accompaniment and added both as audio clips.")
+        }
     }
 
     // ---- shot / scene detection --------------------------------------------

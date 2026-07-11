@@ -32,9 +32,15 @@ object DesktopOnnx {
         synchronized(lock) {
             sessions[modelPath]?.let { return it }
             val opts = options ?: OrtSession.SessionOptions()
-            val created = environment.createSession(modelPath, opts)
-            sessions[modelPath] = created
-            return created
+            try {
+                val created = environment.createSession(modelPath, opts)
+                sessions[modelPath] = created
+                return created
+            } finally {
+                // SessionOptions holds native memory and is only needed during session init; close
+                // one we allocated here. A caller-supplied options object is theirs to close.
+                if (options == null) opts.close()
+            }
         }
     }
 
