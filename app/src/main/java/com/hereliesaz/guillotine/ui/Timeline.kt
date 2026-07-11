@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -348,6 +349,9 @@ private fun TimelineLanes(
             // hit-testing siblings behind a non-sharing pointer-input node). Accumulated deltas
             // (dx), not absolute position — the strip itself moves with currentTimeMs during the
             // drag, so absolute local x would be self-referential and stick.
+            // rememberUpdatedState so the long-lived (pps-keyed) pointerInput reads the latest
+            // playhead time at drag-start without capturing a stale value or restarting on every seek.
+            val currentPlayheadMs by rememberUpdatedState(state.currentTimeMs)
             val grabW = 20.dp
             Box(
                 Modifier
@@ -358,7 +362,7 @@ private fun TimelineLanes(
                         var startMs = 0L
                         var dx = 0f
                         detectDragGestures(
-                            onDragStart = { startMs = vm.uiState.value.currentTimeMs; dx = 0f },
+                            onDragStart = { startMs = currentPlayheadMs; dx = 0f },
                             onDrag = { change, amount ->
                                 change.consume()
                                 dx += amount.x

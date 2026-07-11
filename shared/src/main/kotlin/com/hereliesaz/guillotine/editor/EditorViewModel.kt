@@ -1435,8 +1435,10 @@ open class EditorViewModel {
         val st = _uiState.value
         val total = document.totalDurationMs
         val region = st.playbackRegion
-        val startBound = region?.first ?: 0L
-        val endBound = region?.last ?: total
+        // Coerce to the current total: if the timeline shrank (clips deleted) after the region was
+        // set, its stale bounds must not let playback run past the actual content into empty space.
+        val startBound = (region?.first ?: 0L).coerceAtMost(total)
+        val endBound = (region?.last ?: total).coerceAtMost(total)
         val next = st.currentTimeMs + deltaMs
         if (next >= endBound) {
             if (st.loopEnabled) {
