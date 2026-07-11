@@ -165,22 +165,23 @@ object DesktopColorMatrix {
             val z0 = z.toInt().coerceIn(0, maxIdx); val z1 = (z0 + 1).coerceAtMost(maxIdx)
             val fx = x - x0; val fy = y - y0; val fz = z - z0
 
-            // Blend the 8 cube corners (corner bit c: 1=x, 2=y, 4=z picks the high grid index).
-            var nr = 0f; var ng = 0f; var nb = 0f
-            for (c in 0 until 8) {
-                val xi = if (c and 1 == 0) x0 else x1
-                val yi = if (c and 2 == 0) y0 else y1
-                val zi = if (c and 4 == 0) z0 else z1
-                val wx = if (c and 1 == 0) 1f - fx else fx
-                val wy = if (c and 2 == 0) 1f - fy else fy
-                val wz = if (c and 4 == 0) 1f - fz else fz
-                val weight = wx * wy * wz
-                if (weight == 0f) continue
-                val idx = lut.indexOf(xi, yi, zi)
-                nr += entries[idx] * weight
-                ng += entries[idx + 1] * weight
-                nb += entries[idx + 2] * weight
-            }
+            // Blend the 8 cube corners (trilinear), unrolled to a flat, branchless expression — this
+            // runs per pixel per frame, so the loop/branches are removed to let the JIT keep it fast.
+            val i000 = lut.indexOf(x0, y0, z0); val i100 = lut.indexOf(x1, y0, z0)
+            val i010 = lut.indexOf(x0, y1, z0); val i110 = lut.indexOf(x1, y1, z0)
+            val i001 = lut.indexOf(x0, y0, z1); val i101 = lut.indexOf(x1, y0, z1)
+            val i011 = lut.indexOf(x0, y1, z1); val i111 = lut.indexOf(x1, y1, z1)
+            val gx = 1f - fx; val gy = 1f - fy; val gz = 1f - fz
+            val w000 = gx * gy * gz; val w100 = fx * gy * gz
+            val w010 = gx * fy * gz; val w110 = fx * fy * gz
+            val w001 = gx * gy * fz; val w101 = fx * gy * fz
+            val w011 = gx * fy * fz; val w111 = fx * fy * fz
+            val nr = entries[i000] * w000 + entries[i100] * w100 + entries[i010] * w010 + entries[i110] * w110 +
+                entries[i001] * w001 + entries[i101] * w101 + entries[i011] * w011 + entries[i111] * w111
+            val ng = entries[i000 + 1] * w000 + entries[i100 + 1] * w100 + entries[i010 + 1] * w010 + entries[i110 + 1] * w110 +
+                entries[i001 + 1] * w001 + entries[i101 + 1] * w101 + entries[i011 + 1] * w011 + entries[i111 + 1] * w111
+            val nb = entries[i000 + 2] * w000 + entries[i100 + 2] * w100 + entries[i010 + 2] * w010 + entries[i110 + 2] * w110 +
+                entries[i001 + 2] * w001 + entries[i101 + 2] * w101 + entries[i011 + 2] * w011 + entries[i111 + 2] * w111
 
             val ir = (nr * 255f).roundToInt().coerceIn(0, 255)
             val ig = (ng * 255f).roundToInt().coerceIn(0, 255)
