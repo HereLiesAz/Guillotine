@@ -16,22 +16,21 @@ plugins {
 //   • Major / Minor — hand-edited in version.properties.
 //   • Patch — the number of commits on this branch since the last time versionMinor changed
 //             (auto-derived from git; resets to 0 the first commit after a Minor bump).
-//   • Build — the total commit count on this branch, plus a fixed offset that absorbs the gap
-//             between where the old file-based counter left off and where git-count is today
-//             (see [VERSION_CODE_OFFSET]). This is the monotonic versionCode.
+//   • Build — seconds since a fixed epoch, recomputed on EVERY build. This is the versionCode.
 //
-// Nothing is auto-incremented on disk. Every commit advances the counter automatically because
-// `git rev-list --count HEAD` is monotonic; a failed CI run can no longer strand a bump the way
-// the old "increment the file → persist back after Play accepts" flow could.
+// Why time-based: the versionCode MUST strictly increase on every build, successful or not. A
+// git-commit-count code repeats whenever the same commit is built more than once (CI re-runs,
+// retries, local rebuilds), and Play then rejects the upload ("You cannot rollout this release
+// because it does not allow any existing users to upgrade to the newly added APKs"). Wall-clock
+// seconds always advance, so each build gets a fresh, higher code with no on-disk state to strand
+// and nothing to persist back after a publish.
 //
-// The counter comes entirely from `git`, so a shallow checkout (fetch-depth: 1) would break it —
-// every workflow that builds does a full-depth checkout (`fetch-depth: 0`).
-
-// Bridge from the old file-based counter (which last landed at versionBuild=291) to git rev-count
-// (which is currently 228 for this branch). 100 + 228 = 328 keeps the versionCode strictly above
-// the last value Play saw (291). This offset is a constant — DO NOT change it after the first
-// build that uses it, or Play will reject the next upload as non-monotonic.
-val VERSION_CODE_OFFSET = 100
+// Range: seconds-since-2020 is ~1.9e8 today — far above every git-count code we ever shipped (low
+// hundreds), so the switchover stays strictly monotonic for Play, and it stays under Android's
+// 2,100,000,000 versionCode cap until ~2086.
+//
+// NOTE: intentionally non-reproducible. Do NOT enable Gradle's configuration cache without wrapping
+// the timestamp read in a ValueSource, or the cached value would stop incrementing between builds.
 
 val versionPropsFile = rootProject.file("version.properties")
 val versionProps = Properties().apply {
@@ -47,10 +46,6 @@ fun runGit(vararg args: String): String? = runCatching {
     }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
 }.getOrNull()
 
-// Total commit count on HEAD — monotonic per push. On a shallow checkout returns something small
-// but consistent for that checkout; CI does full-depth so this is the real number in real builds.
-val gitCommitCount = runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0
-
 // Commits since the commit that most recently touched `versionMinor=` in version.properties.
 // This is what makes Patch reset to 0 on a Minor bump: bumping Minor is a fresh commit, so the
 // range HEAD..that-commit is 0 immediately after. `git blame` fingers the commit; `rev-list
@@ -63,10 +58,15 @@ val patchCommits: Int = run {
 }
 
 val verPatch = patchCommits
-val verBuild = VERSION_CODE_OFFSET + gitCommitCount
 
-// Android requires versionCode >= 1; a shallow/broken git checkout could yield 0.
-val computedVersionCode = maxOf(1, verBuild)
+// Monotonic per-build code: seconds since 2020-01-01T00:00:00Z. Always advances between builds
+// (successful or not), so Play never sees a repeated versionCode. Read once here at configuration
+// time, so a single build uses one consistent value everywhere.
+val VERSION_EPOCH_SECONDS = 1_577_836_800L // 2020-01-01T00:00:00Z
+val verBuild = ((System.currentTimeMillis() / 1000L) - VERSION_EPOCH_SECONDS).coerceAtLeast(1L)
+
+// Android requires versionCode in 1..2_100_000_000; verBuild stays well inside that range.
+val computedVersionCode = verBuild.toInt()
 val computedVersionName = "$verMajor.$verMinor.$verPatch.$verBuild"
 
 android {
