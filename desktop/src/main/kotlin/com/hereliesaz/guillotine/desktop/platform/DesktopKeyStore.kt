@@ -61,6 +61,7 @@ class DesktopKeyStore {
                 speechModelPath = json.optString("speech_model_path", ""),
                 agentModelPath = json.optString("agent_model_path", ""),
                 labelModelPath = json.optString("label_model_path", ""),
+                audioEventModelPath = json.optString("audio_event_model_path", ""),
                 frameAnalysisCacheSize = json.optInt(
                     "frame_analysis_cache_size",
                     FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
@@ -81,6 +82,7 @@ class DesktopKeyStore {
             put("speech_model_path", settings.speechModelPath)
             put("agent_model_path", settings.agentModelPath)
             put("label_model_path", settings.labelModelPath)
+            put("audio_event_model_path", settings.audioEventModelPath)
             put("frame_analysis_cache_size", settings.frameAnalysisCacheSize)
         }
         dataFile.writeBytes(encrypt(json.toString()))
