@@ -7,6 +7,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.hereliesaz.guillotine.desktop.platform.DesktopKeyStore
 import com.hereliesaz.guillotine.desktop.platform.DesktopMcpAuth
 import com.hereliesaz.guillotine.desktop.platform.DesktopMcpTools
 import com.hereliesaz.guillotine.desktop.platform.DesktopProjectAutosave
@@ -18,7 +19,8 @@ import kotlinx.coroutines.withContext
 
 fun main() = application {
     val editor = remember { EditorViewModel() }
-    val mcpTools = remember { DesktopMcpTools(editor) }
+    val keyStore = remember { DesktopKeyStore() }
+    val mcpTools = remember { DesktopMcpTools(editor) { keyStore.settings.value } }
     val server = remember { McpServer(7865) }
 
     LaunchedEffect(Unit) {
@@ -41,6 +43,6 @@ fun main() = application {
         title = "Guillotine",
         state = rememberWindowState(width = 1280.dp, height = 800.dp),
     ) {
-        DesktopApp(editor, mcpTools)
+        DesktopApp(editor, mcpTools, keyStore)
     }
 }

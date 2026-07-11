@@ -247,3 +247,32 @@ Each item is feasible on the current stack or a model listed above.
     `animated_transcribe_clip`, per-syllable scale-keyframed captions; meme templates and emoji
     reactions remain future.)**
 25. Teachable-tool marketplace — share user-defined AI editing tools.
+
+---
+
+## Desktop parity
+
+The desktop app (Compose Desktop) shares `:shared` with Android but implements the MCP tool surface
+separately (`DesktopMcpTools`), so it trailed Android's 66 tools. The editor core (timeline, keyframes,
+transitions, color, text, FFmpeg export, cloud assistant) is at parity; the remaining gap is the
+AI-tool surface.
+
+**Shipped on desktop (38/66):** the timeline/edit/user-tool tools, plus cloud generation
+(`generate_image` / `generate_video` / `generate_music`), the beat suite (`get_beat_map`,
+`cut_to_beats`, `apply_on_beat`, `align_clips_to_beats`, `assemble_music_video`, on shared pure-JVM
+DSP), and FFmpeg/DSP (`normalize_levels`, `normalize_loudness`, `detect_scenes`, `auto_duck`,
+`apply_ffmpeg_filter` via in-process JavaCV).
+
+**Desktop parity — phase 2 (follow-up):**
+- **`apply_transition`** — a two-input `xfade`+`acrossfade` filtergraph via JavaCV `FFmpegFrameFilter`
+  with offset/PTS sync (needs a real-clip smoke test before shipping).
+- **LUT / shader / auto-color render** — `apply_lut` / `clear_lut` (sample a `.cube` via the shared
+  `CubeLut` into the desktop `BufferedImage` pipeline), `auto_color` / `match_color` (frame-tone
+  histogram), `list_shader_params` (parse via shared `GlslShader`). Actual **GLSL shader rendering** on
+  desktop needs a GL/Skia pass, not the per-pixel `BufferedImage` path.
+- **On-device ML tools** (vision / face / speech / separation — ~15 tools) — Android uses ML Kit /
+  MediaPipe / TFLite / Sherpa-Vosk, which have no desktop-JVM equivalent. Desktop route: **ONNX
+  Runtime-for-JVM + bundled models** (keeps the on-device/private promise; larger installer) or **cloud
+  fallback** (fast, but would send frames/audio off-device on desktop — breaking the privacy invariant
+  there). Decision pending. The learned-concept *store* (`shared/model/LearnedConcept.kt`) is already
+  shared, so only the embedders/detectors are platform-bound.
