@@ -4,13 +4,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -65,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.editor.TIMELINE_BOTTOM_GUTTER_DP
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.EditAction
 import com.hereliesaz.guillotine.model.Keyframe
@@ -134,26 +132,18 @@ private fun TimelineLanes(
     var viewportWidthPx by remember { mutableIntStateOf(0) }
 
     // Zoom-around-playhead: any pps change (pinch, Ctrl+scroll, TopBar buttons, addMedia fit-all)
-    // solves for a scroll that KEEPS THE PLAYHEAD AT THE SAME ON-SCREEN X. Zoom is precision — the
-    // frame under the user's fingers must not slide out from under them.
-    //
-    // We compute the playhead's pre-zoom viewport-X and preserve it: after the new pps takes effect,
-    // scroll to (newPlayheadPx − anchorViewportX). If the playhead was already visible, its on-screen
-    // position doesn't change at all. If it was scrolled off-screen we CLAMP the anchor into
-    // [0, viewport] so the zoom always leaves the playhead at the nearest visible edge — the "stays
-    // in the viewport" guarantee — rather than shifting it further off-screen with each zoom step.
+    // CENTERS THE PLAYHEAD in the viewport and lets the timeline expand/contract around it — the
+    // playhead is the anchor of the zoom (Vegas-style). Near t=0 the scroll can't go negative, so
+    // the playhead sits left of center there; that's expected.
     //
     // withFrameNanos before scroll.scrollTo lets the layout pass with the new pps commit first —
     var lastZoomedPps by remember { mutableFloatStateOf(pps) }
     var targetScroll by remember { mutableStateOf<Int?>(null) }
 
     if (pps != lastZoomedPps) {
-        val playheadMs = vm.uiState.value.currentTimeMs
-        val oldPlayheadPx = playheadMs / 1000f * lastZoomedPps
-        val currentScroll = targetScroll?.toFloat() ?: scroll.value.toFloat()
-        
-        val newPlayheadPx = playheadMs / 1000f * pps
-        targetScroll = (currentScroll + (newPlayheadPx - oldPlayheadPx)).roundToInt().coerceAtLeast(0)
+        val newPlayheadPx = vm.uiState.value.currentTimeMs / 1000f * pps
+        val center = if (viewportWidthPx > 0) viewportWidthPx / 2f else 0f
+        targetScroll = (newPlayheadPx - center).roundToInt().coerceAtLeast(0)
         lastZoomedPps = pps
     }
 
@@ -293,48 +283,20 @@ private fun TimelineLanes(
                 .graphicsLayer { this.translationX = tx }
                 .width(surfaceWidth)
                 // Tap anywhere on the timeline surface (ruler, gaps, below the tracks) to
-                // move the playhead there. Clips sit on top and handle their own taps.
+                // move the playhead there — regardless of play state. Clips sit on top and handle
+                // their own taps; a pure tap on the playhead grab-strip (below) isn't consumed by
+                // its drag detector, so it bubbles up here and still seeks. Playhead dragging is
+                // owned by the grab-strip overlay (see the playhead Box below), which occludes the
+                // clips beneath it and so wins the drag anywhere along the playhead's height.
                 .pointerInput(pps) {
                     detectTapGestures { offset ->
                         vm.clearSelection()
                         vm.seekTo((offset.x / pps * 1000f).toLong())
                     }
-                }
-                // Playhead drag: grab the red line anywhere along its height (not just from
-                // the ruler strip). Gate by proximity: if the initial down is within ±16 dp of
-                // the playhead's surface X, we own this pointer and seek as it drags. Otherwise
-                // we bail out immediately, so clip taps/long-presses under the playhead still
-                // reach their own detectors (Compose hit-testing wouldn't propagate through a
-                // covering sibling Box, so we handle the drag from the parent surface instead).
-                //
-                // startMs + (x − downX) rather than accumulating dragAmount keeps the math local
-                // to positions the pointer scope already gives us — no per-event delta lookups.
-                .pointerInput(pps, state.currentTimeMs) {
-                    val hitRadiusPx = 16.dp.toPx()
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val playheadPx = state.currentTimeMs / 1000f * pps
-                        if (kotlin.math.abs(down.position.x - playheadPx) > hitRadiusPx) {
-                            return@awaitEachGesture
-                        }
-                        val startMs = vm.uiState.value.currentTimeMs
-                        val downX = down.position.x
-                        val seekTo: (Float) -> Unit = { x ->
-                            val newMs = (startMs + ((x - downX) / pps * 1000f).toLong())
-                                .coerceAtLeast(0L)
-                            vm.seekTo(newMs)
-                        }
-                        val slop = awaitTouchSlopOrCancellation(down.id) { change, _ ->
-                            change.consume(); seekTo(change.position.x)
-                        } ?: return@awaitEachGesture
-                        drag(slop.id) { change ->
-                            change.consume(); seekTo(change.position.x)
-                        }
-                    }
                 },
         ) {
             Column(Modifier.fillMaxSize()) {
-                Ruler(vm, totalMs, pps, contentWidth)
+                Ruler(vm, totalMs, pps, contentWidth, state.playbackRegion)
                 Column(
                     Modifier
                         .weight(1f)
@@ -351,18 +313,54 @@ private fun TimelineLanes(
                     state.document.audioTracks.forEach { trackId ->
                         Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
                     }
+                    // Always-present clip-free gutter below the last track. Being inside the
+                    // horizontally-scrolled content with no gesture handler of its own, a horizontal
+                    // drag here pans the timeline (via horizontalScroll) instead of scrubbing/moving
+                    // clips — so the user can always scroll side-to-side, even when tracks are zoomed
+                    // tall enough to fill the viewport.
+                    Box(Modifier.fillMaxWidth().height(TIMELINE_BOTTOM_GUTTER_DP.dp))
                 }
             }
-            // Playhead overlay spanning the visible lanes. Drag is captured on the parent
-            // surface (see .pointerInput above) so the hit region isn't a covering sibling —
-            // Compose wouldn't propagate through it to underlying clips.
+            // Playback/loop region band across the lanes. Background only (no pointerInput) so it
+            // does NOT block clip interaction beneath it — a translucent overlay only intercepts
+            // pointers if it carries a pointer-input node, which this deliberately doesn't.
+            state.playbackRegion?.let { region ->
+                Box(
+                    Modifier
+                        .offset(x = msToDp(region.first))
+                        .width(msToDp(region.last - region.first))
+                        .fillMaxHeight()
+                        .background(Red500.copy(alpha = 0.10f)),
+                )
+            }
+            // Playhead: a wide TRANSPARENT grab strip carrying the drag, with the visible 2dp red
+            // line centered inside. Being the topmost sibling, the strip occludes the clips beneath
+            // it so the drag is owned here anywhere along the playhead's height (Compose stops
+            // hit-testing siblings behind a non-sharing pointer-input node). Accumulated deltas
+            // (dx), not absolute position — the strip itself moves with currentTimeMs during the
+            // drag, so absolute local x would be self-referential and stick.
+            val grabW = 20.dp
             Box(
                 Modifier
-                    .offset(x = msToDp(state.currentTimeMs))
-                    .width(2.dp)
+                    .offset(x = msToDp(state.currentTimeMs) - grabW / 2)
+                    .width(grabW)
                     .fillMaxHeight()
-                    .background(Red500),
-            )
+                    .pointerInput(pps) {
+                        var startMs = 0L
+                        var dx = 0f
+                        detectDragGestures(
+                            onDragStart = { startMs = vm.uiState.value.currentTimeMs; dx = 0f },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dx += amount.x
+                                vm.seekTo((startMs + (dx / pps * 1000f).toLong()).coerceAtLeast(0L))
+                            },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.width(2.dp).fillMaxHeight().background(Red500))
+            }
             // Marquee (range-select) overlay: only in MARQUEE mode. Dragging draws a rectangle over a
             // time range and selects every clip it touches on release. It captures the drag (so the
             // timeline doesn't scroll), and its local x == content x, so x/pps maps straight to ms.
@@ -549,7 +547,13 @@ private fun TrackAction(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Ruler(vm: EditorViewModel, totalMs: Long, pps: Float, contentWidth: androidx.compose.ui.unit.Dp) {
+private fun Ruler(
+    vm: EditorViewModel,
+    totalMs: Long,
+    pps: Float,
+    contentWidth: androidx.compose.ui.unit.Dp,
+    region: LongRange?,
+) {
     val fps = vm.uiState.value.document.settings.fps
     val majorColor = Neutral500
     val minorColor = Neutral700
@@ -558,23 +562,35 @@ private fun Ruler(vm: EditorViewModel, totalMs: Long, pps: Float, contentWidth: 
             .width(contentWidth)
             .height(RULER_HEIGHT)
             .background(Neutral950)
+            // Tap the ruler: clear any playback region and move the playhead there (Vegas-style).
             .pointerInput(pps) {
                 detectTapGestures { off ->
+                    vm.clearPlaybackRegion()
                     vm.seekTo((off.x / pps * 1000f).toLong().coerceAtLeast(0))
                 }
             }
+            // Drag along the ruler: define the playback/loop region. onDragStart only fires after
+            // touch slop, so a pure tap never spuriously creates a region.
             .pointerInput(pps) {
+                var startMs = 0L
                 detectDragGestures(
                     onDragStart = { off ->
-                        vm.seekTo((off.x / pps * 1000f).toLong().coerceAtLeast(0))
+                        startMs = (off.x / pps * 1000f).toLong().coerceAtLeast(0)
                     },
                     onDrag = { change, _ ->
                         change.consume()
-                        vm.seekTo((change.position.x / pps * 1000f).toLong().coerceAtLeast(0))
+                        val cur = (change.position.x / pps * 1000f).toLong().coerceAtLeast(0)
+                        vm.setPlaybackRegion(startMs, cur)
                     },
                 )
             },
     ) {
+        // Shaded region band on the ruler.
+        region?.let { r ->
+            val startX = r.first / 1000f * pps
+            val w = (r.last - r.first) / 1000f * pps
+            drawRect(Red500.copy(alpha = 0.25f), Offset(startX, 0f), Size(w, size.height))
+        }
         val endMs = totalMs + 4000L
         val grid = gridIncrementMs(pps, fps)
         val secondMs = 1000L

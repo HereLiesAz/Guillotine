@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Loop
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.SkipNext
@@ -819,6 +820,7 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
             IconToolButton(Icons.Filled.SkipPrevious, "Start") { vm.seekTo(0) }
             IconToolButton(Icons.Filled.ChevronLeft, "Back 1 frame") { vm.seekTo(state.currentTimeMs - frameMs) }
             IconToolButton(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play/Pause") { vm.togglePlay() }
+            IconToolButton(Icons.Filled.Loop, "Loop", active = state.loopEnabled) { vm.toggleLoop() }
             IconToolButton(Icons.Filled.ChevronRight, "Forward 1 frame") { vm.seekTo(state.currentTimeMs + frameMs) }
             IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
         }

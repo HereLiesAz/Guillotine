@@ -22,12 +22,18 @@ enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP, MARQUEE }
 /** Default on-timeline duration for still images. */
 private const val IMAGE_DEFAULT_DURATION_MS = 5_000L
 private const val MIN_CLIP_DURATION_MS = 100L
+/** Minimum span (ms) for a playback region; a shorter drag clears it instead. */
+private const val MIN_REGION_MS = 50L
 private const val HISTORY_LIMIT = 100
 
 data class EditorUiState(
     val document: Document = Document(),
     val currentTimeMs: Long = 0L,
     val isPlaying: Boolean = false,
+    /** When true, playback wraps to the start of the region/timeline instead of stopping at the end. */
+    val loopEnabled: Boolean = false,
+    /** Optional loop/playback region in timeline ms; null = whole timeline. Bounds playback + looping. */
+    val playbackRegion: LongRange? = null,
     /** Timeline zoom in pixels-per-second (horizontal). */
     val pixelsPerSecond: Float = 100f,
     /** Per-track lane heights in dp (vertical zoom); absent = default. */
@@ -63,6 +69,13 @@ data class EditorUiState(
 const val DEFAULT_TRACK_HEIGHT = 64f
 const val MIN_TRACK_HEIGHT = 44f
 const val MAX_TRACK_HEIGHT = 240f
+/**
+ * Empty gutter (dp) always kept below the bottom-most track. It is reserved by fit-all and rendered
+ * as an always-present spacer at the end of the lanes, giving the user a clip-free strip to drag
+ * for horizontal panning (scroll side-to-side) without scrubbing the playhead — even when the tracks
+ * are zoomed tall enough to fill or overflow the viewport.
+ */
+const val TIMELINE_BOTTOM_GUTTER_DP = 56f
 private const val MAX_PROMPT_HISTORY = 7
 
 /** Animated caption scale range: syllables start at BASE and grow to PEAK when spoken. */
@@ -784,11 +797,14 @@ open class EditorViewModel {
         val lo = minOf(startMs, endMs)
         val hi = maxOf(startMs, endMs)
         if (hi <= lo || trackIds.isEmpty()) {
-            _uiState.update { it.copy(selectedClipIds = emptyList()) }
+            _uiState.update { it.copy(selectedClipIds = emptyList(), playbackRegion = null) }
             return
         }
-        val ids = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo && it.trackId in trackIds }.map { it.id }
-        _uiState.update { it.copy(selectedClipIds = ids) }
+        val selected = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo && it.trackId in trackIds }
+        // Selecting a region of clips also defines the playback/loop region, spanning those clips.
+        val region = if (selected.isEmpty()) null
+            else selected.minOf { it.startTimeMs }..selected.maxOf { it.endTimeMs }
+        _uiState.update { it.copy(selectedClipIds = selected.map { c -> c.id }, playbackRegion = region) }
     }
 
     /** Delete a single clip by id, including its linked shadow audio and any group members. */
@@ -1410,12 +1426,24 @@ open class EditorViewModel {
         _uiState.update { it.copy(currentTimeMs = clamped) }
     }
 
-    /** Advance the playhead by [deltaMs]; auto-pause at the end of the timeline. */
+    /**
+     * Advance the playhead by [deltaMs]. Bounds are the playback region if one is set, else the whole
+     * timeline. On reaching the end: wrap to the start bound when [EditorUiState.loopEnabled] is on,
+     * otherwise pin to the end bound and stop.
+     */
     fun advancePlayhead(deltaMs: Long) {
+        val st = _uiState.value
         val total = document.totalDurationMs
-        val next = _uiState.value.currentTimeMs + deltaMs
-        if (next >= total) {
-            _uiState.update { it.copy(currentTimeMs = total, isPlaying = false) }
+        val region = st.playbackRegion
+        val startBound = region?.first ?: 0L
+        val endBound = region?.last ?: total
+        val next = st.currentTimeMs + deltaMs
+        if (next >= endBound) {
+            if (st.loopEnabled) {
+                _uiState.update { it.copy(currentTimeMs = startBound) }
+            } else {
+                _uiState.update { it.copy(currentTimeMs = endBound, isPlaying = false) }
+            }
         } else {
             _uiState.update { it.copy(currentTimeMs = next.coerceAtLeast(0)) }
         }
@@ -1423,6 +1451,23 @@ open class EditorViewModel {
 
     fun togglePlay() = _uiState.update { it.copy(isPlaying = !it.isPlaying && it.document.totalDurationMs > 0) }
     fun setPlaying(playing: Boolean) = _uiState.update { it.copy(isPlaying = playing) }
+
+    /** Toggle looped playback (wrap to start instead of stopping at the end). */
+    fun toggleLoop() = _uiState.update { it.copy(loopEnabled = !it.loopEnabled) }
+
+    /**
+     * Define the playback/loop region spanning [startMs]..[endMs] (order-independent), clamped to the
+     * timeline. A span shorter than [MIN_REGION_MS] is treated as "no region" (cleared) so a tiny drag
+     * doesn't trap playback in a sliver.
+     */
+    fun setPlaybackRegion(startMs: Long, endMs: Long) {
+        val total = document.totalDurationMs
+        val lo = minOf(startMs, endMs).coerceIn(0L, if (total > 0) total else Long.MAX_VALUE)
+        val hi = maxOf(startMs, endMs).coerceIn(0L, if (total > 0) total else Long.MAX_VALUE)
+        _uiState.update { it.copy(playbackRegion = if (hi - lo < MIN_REGION_MS) null else lo..hi) }
+    }
+
+    fun clearPlaybackRegion() = _uiState.update { it.copy(playbackRegion = null) }
     fun setPlaybackRate(rate: Float) = _uiState.update { it.copy(playbackRate = rate) }
     /** Visible width (px) of the timeline lanes area; feeds the dynamic zoom-out limit. */
     private var timelineViewportPx = 0f
@@ -1451,7 +1496,9 @@ open class EditorViewModel {
         val laneH = timelineLanesHeightDp
         val ids = document.videoTracks + document.audioTracks
         if (laneH <= 0f || ids.isEmpty()) return
-        val per = (laneH / ids.size).coerceIn(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT)
+        // Reserve the bottom gutter so fit-all leaves a visible clip-free strip below the last track.
+        val usable = (laneH - TIMELINE_BOTTOM_GUTTER_DP).coerceAtLeast(MIN_TRACK_HEIGHT)
+        val per = (usable / ids.size).coerceIn(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT)
         _uiState.update { st ->
             val hm = st.trackHeights.toMutableMap()
             ids.forEach { hm[it] = per }
@@ -1581,7 +1628,8 @@ open class EditorViewModel {
         val ids = doc.clips
             .filter { c -> c.trackId in tracksInRange && c.startTimeMs < timeEnd && c.endTimeMs > timeStart }
             .map { it.id }
-        _uiState.update { it.copy(selectedClipIds = expandGroups(doc, ids)) }
+        // A range selection also defines the playback/loop region spanning the covered clips.
+        _uiState.update { it.copy(selectedClipIds = expandGroups(doc, ids), playbackRegion = timeStart..timeEnd) }
     }
 
     fun clearSelection() = _uiState.update { it.copy(selectedClipIds = emptyList(), selectedKeyframeId = null) }
@@ -1594,6 +1642,8 @@ open class EditorViewModel {
                 document = doc,
                 currentTimeMs = 0,
                 isPlaying = false,
+                // The old region's ms coordinates don't map onto a different document.
+                playbackRegion = null,
                 selectedClipIds = emptyList(),
                 promptHistory = doc.promptHistory, // restore the project's prompt history
                 // Resume at the project's saved zoom. If nothing was persisted (new project /
