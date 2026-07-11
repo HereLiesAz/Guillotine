@@ -13,6 +13,7 @@ import com.hereliesaz.guillotine.ai.gen.GenRequest
 import com.hereliesaz.guillotine.ai.gen.PollConfig
 import com.hereliesaz.guillotine.ai.gen.meta
 import com.hereliesaz.guillotine.desktop.media.DesktopFfmpegFilter
+import com.hereliesaz.guillotine.desktop.media.DesktopImageLabeler
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaImport
 import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
@@ -660,8 +661,7 @@ class DesktopMcpTools(
             visionToolUnavailable(name, "an on-device multimodal VLM (Gemma-3n)")
         "find_highlights" ->
             visionToolUnavailable(name, "the on-device YAMNet audio-event model")
-        "search_clips" ->
-            visionToolUnavailable(name, "an on-device image-labeling model")
+        "search_clips" -> searchClips(args.getString("query"))
         // ---- face / segmentation (ML Kit) → honest stubs ----
         "blur_faces", "auto_reframe" ->
             visionToolUnavailable(name, "an on-device face-detection model")
@@ -756,6 +756,65 @@ class DesktopMcpTools(
             "(ML Kit / MediaPipe are Android-only with no on-device desktop equivalent here)."
         put("error", msg)
         put("humanSummary", msg)
+    }
+
+    /**
+     * Footage search ("find all clips with a dog") via the on-device ONNX image labeler — the desktop
+     * analogue of Android's ML Kit `search_clips`. Samples 4 frames across each video clip, labels each
+     * through [DesktopImageLabeler], and matches the labels against [query] (substring either way, as on
+     * Android). Requires the classifier set in Settings → AI Analyzer → Footage search; relays its error
+     * (missing model / missing labels file) rather than faking a result.
+     */
+    private fun searchClips(query: String): JSONObject {
+        val q = query.trim().lowercase()
+        require(q.isNotBlank()) { "Give something to search for, e.g. \"dog\"." }
+        val model = settingsProvider().labelModelPath
+        require(model.isNotBlank()) {
+            "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search."
+        }
+        val doc = vm.uiState.value.document
+        val videoClips = doc.clips.filter { it.type == ClipType.VIDEO }
+        val matches = JSONArray()
+        var found = 0
+        for (clip in videoClips) {
+            val media = doc.mediaFor(clip) ?: continue
+            var bestLabel: String? = null
+            var bestScore = 0f
+            var bestTimeline = clip.startTimeMs
+            // Sample 4 frames across the clip's source range (matches the Android cadence).
+            for (k in 1..4) {
+                val sourceMs = clip.trimStartMs + clip.durationMs * k / 5
+                val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs) } ?: continue
+                val labels = DesktopImageLabeler.labels(model, frame)
+                val hit = labels.firstOrNull {
+                    val t = it.text.lowercase()
+                    t.contains(q) || q.contains(t)
+                }
+                if (hit != null && hit.confidence > bestScore) {
+                    bestScore = hit.confidence
+                    bestLabel = hit.text
+                    bestTimeline = clip.startTimeMs + (sourceMs - clip.trimStartMs)
+                }
+            }
+            if (bestLabel != null) {
+                found++
+                matches.put(JSONObject().apply {
+                    put("clipId", clip.id)
+                    put("name", media.name)
+                    put("label", bestLabel)
+                    put("confidence", (bestScore * 100).toInt())
+                    put("timelineMs", bestTimeline)
+                })
+            }
+        }
+        return ok().apply {
+            put("matchCount", found)
+            put("matches", matches)
+            put(
+                "humanSummary",
+                if (found == 0) "No clips matched \"$query\"." else "Found $found clip(s) matching \"$query\".",
+            )
+        }
     }
 
     // ---- learned concepts: pure data ops on the shared LearnedConcept store (REAL on desktop) ----
