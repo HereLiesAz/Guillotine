@@ -107,6 +107,9 @@ json = { group = "org.json", name = "json", version.ref = "json" }
 tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflowLite" }
 sherpa-onnx = { group = "com.github.k2-fsa", name = "sherpa-onnx", version.ref = "sherpaOnnx" }
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
+# Desktop/JVM ORT. The plain `onnxruntime` artifact (unlike `-android`) bundles the win/linux/mac
+# native libs, extracted to a temp dir via JNI at runtime — so it works on the JVM desktop build.
+onnxruntime-jvm = { group = "com.microsoft.onnxruntime", name = "onnxruntime", version.ref = "onnxruntime" }
 commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
 javacv = { group = "org.bytedeco", name = "javacv", version.ref = "javacv" }
 javacpp = { group = "org.bytedeco", name = "javacpp", version.ref = "javacpp" }
