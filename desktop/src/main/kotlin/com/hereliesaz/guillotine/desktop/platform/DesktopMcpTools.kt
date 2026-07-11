@@ -15,6 +15,7 @@ import com.hereliesaz.guillotine.ai.gen.meta
 import com.hereliesaz.guillotine.desktop.media.DesktopFfmpegFilter
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaImport
+import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.mcp.boolProp
@@ -67,10 +68,73 @@ class DesktopMcpTools(
         put(toolDefinition("remove_object_generative", "Remove object with inpainting (not yet available on desktop).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("describe_current_frame", "Describe the current preview frame (not yet available on desktop).", emptySchema()))
-        put(toolDefinition("transcribe_clip", "Transcribe a clip's audio (not yet available on desktop).",
-            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
-        put(toolDefinition("animated_transcribe_clip", "Animated per-syllable captions (not yet available on desktop).",
-            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+        put(toolDefinition(
+            "transcribe_clip",
+            "Transcribe a clip's audio ON-DEVICE (offline Vosk, no key/network) and add timed caption " +
+                "text clips to the timeline, grouped with the source clip. Each caption appears and " +
+                "disappears in sync with the spoken words. Requires a Vosk model in Settings → " +
+                "Transcription; if it isn't set it returns an error naming the setting — relay it.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "animated_transcribe_clip",
+            "Transcribe a clip's audio ON-DEVICE (offline Vosk) and create ANIMATED per-syllable " +
+                "captions: each word is split into syllables placed on separate video tracks so they all " +
+                "appear simultaneously, with SCALE keyframes that ramp each syllable from small to large " +
+                "as it is spoken — a \"grow as said\" kinetic typography effect. Use when the user asks " +
+                "for animated, kinetic, per-word, or per-syllable text/captions. Requires a Vosk model in " +
+                "Settings → Transcription; relay its error if unset.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "transcribe_precise",
+            "Transcribe a clip's audio ON-DEVICE with an offline Whisper (sherpa-onnx) model and return " +
+                "the transcript text. NOTE: not yet available on desktop — sherpa-onnx has no clean JVM " +
+                "distribution, so this returns an error pointing at transcribe_clip (Vosk) instead.",
+            objSchema("clip_id" to stringProp("The clip whose audio to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "add_voiceover",
+            "Synthesize speech from text ON-DEVICE (offline neural TTS via sherpa-onnx) and add it to the " +
+                "timeline as an audio clip. NOTE: not yet available on desktop (no clean sherpa-onnx JVM " +
+                "distribution); returns an error rather than faking it.",
+            objSchema(
+                "text" to stringProp("The words to speak"),
+                "speed" to numberProp("Speaking rate (default 1.0; <1 slower, >1 faster)"),
+                required = listOf("text"),
+            ),
+        ))
+        put(toolDefinition(
+            "diarize_clip",
+            "Speaker diarization ON-DEVICE (who spoke when). NOTE: not yet available on desktop (no clean " +
+                "sherpa-onnx JVM distribution); returns an error rather than faking it.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to diarize"),
+                "num_speakers" to intProp("Known speaker count (0 = infer automatically)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "remove_fillers",
+            "Remove filler words (\"um\", \"uh\", \"er\", \"hmm\") from a clip ON-DEVICE using offline " +
+                "Whisper (sherpa-onnx) word timings. NOTE: not yet available on desktop (no clean " +
+                "sherpa-onnx JVM distribution); returns an error rather than faking it.",
+            objSchema("clip_id" to stringProp("The clip to de-filler"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "sync_by_audio",
+            "Sync two clips by their audio ON-DEVICE (no key): cross-correlates the two audio tracks to " +
+                "find the time offset and moves the second clip so its audio lines up with the reference " +
+                "(multicam / dual-recording sync). Use for \"sync these two clips by audio\", \"line up " +
+                "the multicam angles\", \"match the second camera to the audio recorder\". Both clips need " +
+                "audio of the same moment.",
+            objSchema(
+                "reference_clip_id" to stringProp("The clip to keep fixed (the reference)"),
+                "clip_id" to stringProp("The clip to move so its audio aligns to the reference"),
+                "max_offset_sec" to intProp("Max search offset in seconds (default 15)"),
+                required = listOf("reference_clip_id", "clip_id"),
+            ),
+        ))
             
         put(toolDefinition(
             "set_clip_filter", "Sets static values for a clip filter (e.g., brightness = 1.2, speed = 2.0).",
@@ -402,7 +466,14 @@ class DesktopMcpTools(
         "delete_clip" -> deleteClipTool(args.getString("clip_id"))
         "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
         "analyze_clip", "analyze_clip_with_reference", "remove_object_generative",
-        "describe_current_frame", "transcribe_clip", "animated_transcribe_clip" -> notAvailable(name)
+        "describe_current_frame" -> notAvailable(name)
+        "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
+        "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
+        "transcribe_precise" -> speechToolUnavailable("transcribe_precise", "an offline Whisper (sherpa-onnx) ASR model")
+        "add_voiceover" -> speechToolUnavailable("add_voiceover", "an offline neural TTS (sherpa-onnx) voice")
+        "diarize_clip" -> speechToolUnavailable("diarize_clip", "the sherpa-onnx speaker-diarization models")
+        "remove_fillers" -> speechToolUnavailable("remove_fillers", "an offline Whisper (sherpa-onnx) ASR model")
+        "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
         "create_user_tool" -> createUserTool(args.getString("name"), args.getString("description"))
         "list_user_tools" -> listUserTools()
         "delete_user_tool" -> deleteUserTool(args.getString("name"))
@@ -461,6 +532,147 @@ class DesktopMcpTools(
     private fun notAvailable(tool: String) = JSONObject().apply {
         put("error", "$tool is not yet available on desktop (requires media pipeline).")
         put("humanSummary", "$tool is not yet available on desktop.")
+    }
+
+    // ---- offline speech: transcription (Vosk) + honest stubs ----------------
+
+    /**
+     * Honest stub for the sherpa-onnx-backed speech tools that have no clean JVM distribution yet
+     * (transcribe_precise / add_voiceover / diarize_clip / remove_fillers). Never fakes success.
+     */
+    private fun speechToolUnavailable(tool: String, needs: String) = JSONObject().apply {
+        // TODO(desktop): wire once sherpa-onnx ships a clean desktop-JVM artifact (bundled natives).
+        // sherpa-onnx currently distributes JVM only as GitHub-release jars + separate per-platform
+        // JNI natives (no Maven coordinate), so this can't be shipped reliably here.
+        val msg = "$tool needs $needs, which isn't available on desktop yet " +
+            "(sherpa-onnx has no on-device desktop model here). For transcription, use transcribe_clip, " +
+            "which runs offline via a Vosk model set in Settings → Transcription."
+        put("error", msg)
+        put("humanSummary", msg)
+    }
+
+    /** Decode a clip's audio to 16 kHz mono, transcribe with the Vosk model, and add timed captions. */
+    private fun transcribeClip(clipId: String): JSONObject {
+        val model = settingsProvider().speechModelPath
+        require(model.isNotBlank()) {
+            "No on-device speech model set. Set a Vosk model in Settings → Transcription."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 16_000) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to transcribe.")
+        val cues = DesktopVoskTranscriber.transcribe(model, pcm.samples)
+        if (cues.isEmpty()) return ok().apply {
+            put("captions", 0)
+            put("humanSummary", "Transcribed clip — no speech detected.")
+        }
+        vm.addTextClipsFromTranscript(clipId, cues)
+        val n = vm.uiState.value.document.clips.count { it.type == ClipType.TEXT }
+        return ok().apply {
+            put("captions", cues.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Transcribed and added ${cues.size} caption(s) ($n text clips total).")
+        }
+    }
+
+    /** Transcribe with Vosk and add ANIMATED per-syllable captions (grow-as-said kinetic typography). */
+    private fun animatedTranscribeClip(clipId: String): JSONObject {
+        val model = settingsProvider().speechModelPath
+        require(model.isNotBlank()) {
+            "No on-device speech model set. Set a Vosk model in Settings → Transcription."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 16_000) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to transcribe.")
+        val cues = DesktopVoskTranscriber.transcribe(model, pcm.samples)
+        val wordCues = cues.flatMap { it.words }
+        if (wordCues.isEmpty()) return ok().apply {
+            put("words", 0)
+            put("humanSummary", "Transcribed clip — no per-word timing available for animation.")
+        }
+        vm.addAnimatedCaptionsFromTranscript(clipId, wordCues)
+        val n = vm.uiState.value.document.clips.count { it.type == ClipType.TEXT }
+        val tracks = vm.uiState.value.document.videoTracks.size
+        return ok().apply {
+            put("words", wordCues.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("videoTracks", tracks)
+            put(
+                "humanSummary",
+                "Created animated captions for ${wordCues.size} word(s) — syllables on $tracks video track(s) " +
+                    "with per-syllable scale keyframes ($n text clips total).",
+            )
+        }
+    }
+
+    // ---- audio sync (on-device cross-correlation, no model) -----------------
+
+    private val ENV_RATE = 100
+
+    /**
+     * Sync [clipId] to [refClipId] by cross-correlating their audio envelopes and moving the clip so
+     * its audio lines up with the reference. Mirrors Android's `sync_by_audio` exactly (10 ms env bins).
+     */
+    private fun syncByAudio(refClipId: String, clipId: String, maxOffsetSec: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        val ref = doc.clips.firstOrNull { it.id == refClipId }
+            ?: throw IllegalArgumentException("Reference clip not found: $refClipId")
+        val mov = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val envA = audioEnvelope(ref) ?: throw IllegalStateException("No audio in the reference clip to sync on.")
+        val envB = audioEnvelope(mov) ?: throw IllegalStateException("No audio in \"$clipId\" to sync on.")
+        val maxLag = (maxOffsetSec.coerceIn(1, 120) * ENV_RATE)
+        // Find the lag L (in env samples) maximizing Σ envA[k] * envB[k+L]. envA[k] ≈ envB[k+L] means the
+        // same event is at index k in A and k+L in B, so B should start L*10ms earlier than A.
+        var bestLag = 0
+        var bestScore = -Double.MAX_VALUE
+        for (lag in -maxLag..maxLag) {
+            var sum = 0.0
+            var count = 0
+            var k = maxOf(0, -lag)
+            val kEnd = minOf(envA.size, envB.size - lag)
+            while (k < kEnd) { sum += envA[k] * envB[k + lag]; count++; k++ }
+            if (count > ENV_RATE) { // need at least ~1s of overlap to trust a score
+                val score = sum / count
+                if (score > bestScore) { bestScore = score; bestLag = lag }
+            }
+        }
+        val offsetMs = bestLag.toLong() * (1000L / ENV_RATE)
+        val newStart = (ref.startTimeMs - offsetMs).coerceAtLeast(0L)
+        vm.updateClip(clipId) { it.copy(startTimeMs = newStart) }
+        return ok().apply {
+            put("offsetMs", offsetMs)
+            put("newStartMs", newStart)
+            put("humanSummary", "Synced by audio: moved the clip to ${msFmt(newStart)} (offset ${offsetMs}ms) so its audio matches the reference.")
+        }
+    }
+
+    /** Normalized (zero-mean, unit-std) RMS envelope of [clip]'s audio at [ENV_RATE], or null if none. */
+    private fun audioEnvelope(clip: TimelineClip): FloatArray? {
+        val media = vm.uiState.value.document.mediaFor(clip) ?: return null
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 4_000) } ?: return null
+        if (pcm.sampleRate <= 0 || pcm.samples.isEmpty()) return null
+        val win = (pcm.sampleRate / ENV_RATE).coerceAtLeast(1)
+        val n = pcm.samples.size / win
+        if (n < ENV_RATE) return null
+        val env = FloatArray(n)
+        for (i in 0 until n) {
+            var s = 0.0
+            val base = i * win
+            for (j in 0 until win) { val v = pcm.samples[base + j]; s += v * v }
+            env[i] = kotlin.math.sqrt(s / win).toFloat()
+        }
+        val mean = env.average().toFloat()
+        var varSum = 0.0
+        for (v in env) varSum += (v - mean) * (v - mean)
+        val std = kotlin.math.sqrt(varSum / env.size).toFloat().coerceAtLeast(1e-6f)
+        for (i in env.indices) env[i] = (env[i] - mean) / std
+        return env
     }
 
     private fun getTimeline(): JSONObject {

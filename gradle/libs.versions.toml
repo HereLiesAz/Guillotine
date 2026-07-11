@@ -29,6 +29,12 @@ mlkitImageLabeling = "17.0.9"
 mlkitFaceDetection = "16.1.7"
 mlkitSelfieSegmentation = "16.0.0-beta6"
 vosk = "0.3.75"
+# Desktop/JVM Vosk (offline speech-to-text). SEPARATE from `vosk` above (which is vosk-ANDROID, an
+# AAR). The plain `vosk` artifact bundles JNA-loaded native libs for linux-x86_64 / windows-x86_64 /
+# macOS, extracted from the jar to a temp dir at runtime (same load model as onnxruntime-jvm). CAVEAT:
+# confirm the Apple-Silicon (osx-arm64) native ships in this build — if absent, arm64 Macs would hit
+# UnsatisfiedLinkError; linux-x86_64 (CI) and windows-x86_64 are covered.
+voskJvm = "0.3.45"
 mediapipeTasksGenai = "0.10.35"
 # Pin EXACTLY to match tasks-genai (aligns MPImage/vision-modality + native libs). Do NOT use a dynamic
 # version: tasks-vision's Maven metadata advertises the old 0.20230731 as <release>, and version
@@ -83,6 +89,9 @@ mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", ve
 mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFaceDetection" }
 mlkit-segmentation-selfie = { group = "com.google.mlkit", name = "segmentation-selfie", version.ref = "mlkitSelfieSegmentation" }
 vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
+# Desktop/JVM Vosk — bundles JNA-loaded natives (linux-x86_64 / windows-x86_64 / macOS). Pulls
+# net.java.dev.jna transitively. See the Apple-Silicon caveat on the `voskJvm` version above.
+vosk-jvm = { group = "com.alphacephei", name = "vosk", version.ref = "voskJvm" }
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
 mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipeTasksVision" }
 # AzNavRail publishes several modules on JitPack. Use the MAIN Android library module — artifact
