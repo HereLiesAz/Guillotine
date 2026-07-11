@@ -772,6 +772,7 @@ class DesktopMcpTools(
         require(model.isNotBlank()) {
             "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search."
         }
+        require(File(model).isFile) { "The image-labeling model file does not exist at: $model" }
         val doc = vm.uiState.value.document
         val videoClips = doc.clips.filter { it.type == ClipType.VIDEO }
         val matches = JSONArray()

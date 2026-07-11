@@ -63,25 +63,26 @@ object DesktopImageLabeler {
     /** Resize to [w]×[h], convert to NCHW float, and apply ImageNet mean/std normalization (RGB). */
     private fun preprocess(src: BufferedImage, w: Int, h: Int): FloatArray {
         val scaled = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
-        scaled.createGraphics().apply {
-            setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-            drawImage(src, 0, 0, w, h, null)
-            dispose()
+        val g2d = scaled.createGraphics()
+        try {
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            g2d.drawImage(src, 0, 0, w, h, null)
+        } finally {
+            g2d.dispose()
         }
         val plane = w * h
+        // Bulk-read all pixels once (far cheaper than per-pixel getRGB), then split into planes.
+        val rgb = IntArray(plane)
+        scaled.getRGB(0, 0, w, h, rgb, 0, w)
         val out = FloatArray(3 * plane)
-        var p = 0
-        for (y in 0 until h) {
-            for (x in 0 until w) {
-                val rgb = scaled.getRGB(x, y)
-                val r = ((rgb ushr 16) and 0xFF) / 255f
-                val g = ((rgb ushr 8) and 0xFF) / 255f
-                val b = (rgb and 0xFF) / 255f
-                out[p] = (r - MEAN[0]) / STD[0]                    // R plane
-                out[plane + p] = (g - MEAN[1]) / STD[1]            // G plane
-                out[2 * plane + p] = (b - MEAN[2]) / STD[2]        // B plane
-                p++
-            }
+        for (i in 0 until plane) {
+            val px = rgb[i]
+            val r = ((px ushr 16) and 0xFF) / 255f
+            val g = ((px ushr 8) and 0xFF) / 255f
+            val b = (px and 0xFF) / 255f
+            out[i] = (r - MEAN[0]) / STD[0]                    // R plane
+            out[plane + i] = (g - MEAN[1]) / STD[1]            // G plane
+            out[2 * plane + i] = (b - MEAN[2]) / STD[2]        // B plane
         }
         return out
     }
@@ -100,7 +101,7 @@ object DesktopImageLabeler {
     /** Numerically stable softmax; safe to apply to raw logits or already-normalized probabilities. */
     private fun softmax(logits: FloatArray): FloatArray {
         if (logits.isEmpty()) return logits
-        val max = logits.max()
+        val max = logits.maxOrNull() ?: 0f
         var sum = 0.0
         val exps = DoubleArray(logits.size) { exp((logits[it] - max).toDouble()).also { e -> sum += e } }
         return FloatArray(logits.size) { (exps[it] / sum).toFloat() }
