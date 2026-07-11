@@ -32,29 +32,24 @@ object DesktopVoskTranscriber {
         val pcm = ShortArray(samples16k.size) { i ->
             (samples16k[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
         }
-        val model = Model(modelPath)
-        return try {
-            val rec = Recognizer(model, TARGET_RATE.toFloat())
-            // Nested try/finally so the recognizer is closed even if a chunk throws — the outer
-            // finally only closes the model.
-            try {
+        // Model + Recognizer are native-backed AutoCloseables — .use frees them even if a chunk
+        // throws. Reuse a single 4000-sample buffer instead of allocating per iteration.
+        return Model(modelPath).use { model ->
+            Recognizer(model, TARGET_RATE.toFloat()).use { rec ->
                 rec.setWords(true)
                 val cues = mutableListOf<TranscriptCue>()
-                var i = 0
                 val chunk = 4000
+                val buf = ShortArray(chunk)
+                var i = 0
                 while (i < pcm.size) {
                     val len = min(chunk, pcm.size - i)
-                    val buf = if (i == 0 && len == pcm.size) pcm else pcm.copyOfRange(i, i + len)
+                    pcm.copyInto(buf, 0, i, i + len)
                     if (rec.acceptWaveForm(buf, len)) parseResult(rec.result)?.let { cues += it }
                     i += len
                 }
                 parseResult(rec.finalResult)?.let { cues += it }
                 cues
-            } finally {
-                rec.close()
             }
-        } finally {
-            model.close()
         }
     }
 
