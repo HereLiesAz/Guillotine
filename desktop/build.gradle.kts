@@ -37,6 +37,10 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.json)
 
+    // ONNX Runtime for the JVM (bundles win/linux/mac natives, extracted to a temp dir via JNI at
+    // runtime) — powers on-device ML tools on desktop. See jlink note in nativeDistributions below.
+    implementation(libs.onnxruntime.jvm)
+
     // Core Java wrappers (no natives).
     implementation(libs.javacv)
     // Host-only natives — matches the runner's OS/arch, keeps the installer ~4× smaller than
@@ -63,6 +67,11 @@ compose.desktop {
             //  - java.sql: kotlinx.serialization uses java.sql.Date reflectively.
             //  - jdk.unsupported: JavaCPP uses sun.misc.Unsafe.
             //  - java.naming: Compose Desktop / logging uses javax.naming.
+            // ONNX Runtime needs NO extra module here: it loads its natives via JNI by extracting
+            // the bundled libs to java.io.tmpdir + System.load (filesystem, not a JPMS module), and
+            // its only notable JDK dep — java.util.logging (OrtEnvironment's Logger) — is already in
+            // the image via java.sql's `requires transitive java.logging`. If a runtime
+            // NoClassDefFoundError ever points at java.util.logging, add "java.logging" explicitly.
             modules("java.sql", "jdk.unsupported", "java.naming")
 
             macOS {

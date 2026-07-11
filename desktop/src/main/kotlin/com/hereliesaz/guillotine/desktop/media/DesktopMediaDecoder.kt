@@ -31,6 +31,57 @@ object DesktopMediaDecoder {
     /** Decoded mono PCM: normalized [-1,1] samples plus the sample rate they were resampled to. */
     data class Pcm(val samples: FloatArray, val sampleRate: Int)
 
+    /** Decoded stereo PCM at the source rate: L/R normalized [-1,1] plus the track's channel count. */
+    data class StereoPcm(val left: FloatArray, val right: FloatArray, val sampleRate: Int, val channels: Int)
+
+    /**
+     * Decode a media file's first audio track to **stereo** normalized PCM at the source sample rate
+     * (a mono track is duplicated to both channels; extra channels beyond L/R are dropped). Feeds the
+     * shared stereo on-device tools ([com.hereliesaz.guillotine.ai.Spleeter] stem separation,
+     * [com.hereliesaz.guillotine.ai.VocalIsolator] center-cancellation) — the shared DSP resamples/mixes
+     * as it needs. Returns null if there's no decodable audio. On-device only.
+     */
+    suspend fun decodePcmStereo(uri: String): StereoPcm? =
+        withContext(Dispatchers.IO) {
+            val file = uriToFile(uri) ?: return@withContext null
+            runCatching { decodeStereo(file) }.getOrNull()
+        }
+
+    private fun decodeStereo(file: File): StereoPcm? {
+        val grabber = FFmpegFrameGrabber(file)
+        // Interleaved 16-bit; leave sampleRate/channels at the source so we get native stereo.
+        grabber.sampleFormat = avutil.AV_SAMPLE_FMT_S16
+        grabber.start()
+        try {
+            val sr = grabber.sampleRate
+            val channels = grabber.audioChannels.coerceAtLeast(1)
+            val left = ArrayList<Float>(1 shl 18)
+            val right = ArrayList<Float>(1 shl 18)
+            while (true) {
+                val frame = grabber.grabSamples() ?: break
+                val samples = frame.samples ?: continue
+                if (samples.isEmpty()) continue
+                val buf = samples[0] as? ShortBuffer ?: continue
+                buf.rewind()
+                if (channels == 1) {
+                    while (buf.hasRemaining()) { val s = buf.get() / 32768f; left.add(s); right.add(s) }
+                } else {
+                    while (buf.remaining() >= channels) {
+                        val l = buf.get() / 32768f
+                        val r = buf.get() / 32768f
+                        for (ch in 2 until channels) buf.get() // drop surround channels
+                        left.add(l); right.add(r)
+                    }
+                }
+            }
+            if (left.isEmpty()) return null
+            return StereoPcm(left.toFloatArray(), right.toFloatArray(), sr, channels)
+        } finally {
+            grabber.stop()
+            grabber.release()
+        }
+    }
+
     /**
      * Decode a media file's first audio track to **mono** normalized PCM at [targetRate] Hz, using
      * JavaCV's FFmpeg to resample/downmix. Returns null if there's no decodable audio. Feeds the shared
@@ -191,6 +242,19 @@ object DesktopMediaDecoder {
                 }
             }
             result
+        }
+
+    /**
+     * Grab a single decoded frame from [uri] at source-ms [atMs] as a [BufferedImage] (null if it
+     * can't be read). Reuses the same JavaCV frame extraction as thumbnails; falls back to reading a
+     * still image for image media. Feeds the on-device color tools (auto_color / match_color) that
+     * sample a clip's tone. On-device only.
+     */
+    suspend fun grabFrame(uri: String, atMs: Long, maxPx: Int = 320): BufferedImage? =
+        withContext(Dispatchers.IO) {
+            val file = uriToFile(uri) ?: return@withContext null
+            runCatching { extractVideoFrame(file, atMs, maxPx) }.getOrNull()
+                ?: runCatching { ImageIO.read(file)?.let { downscale(it, maxPx) } }.getOrNull()
         }
 
     private fun extractVideoFrame(file: File, atMs: Long, maxPx: Int): BufferedImage? {

@@ -3,6 +3,8 @@ package com.hereliesaz.guillotine.desktop.platform
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.BeatAnalyzer
 import com.hereliesaz.guillotine.ai.Loudness
+import com.hereliesaz.guillotine.ai.Spleeter
+import com.hereliesaz.guillotine.ai.VocalIsolator
 import com.hereliesaz.guillotine.ai.gen.AsyncJobPoller
 import com.hereliesaz.guillotine.ai.gen.GenBackends
 import com.hereliesaz.guillotine.ai.gen.GenKind
@@ -90,6 +92,83 @@ class DesktopMcpTools(
                 "clip_id" to stringProp(), "property" to stringProp(),
                 required = listOf("clip_id", "property")
             )
+        ))
+
+        // ---- color grading: auto-correct / shot-match / LUT / shader (on-device) ----
+        put(toolDefinition(
+            "auto_color",
+            "Auto color-correct a clip ON-DEVICE (no model): analyze a frame and nudge exposure, contrast, " +
+                "and saturation toward a balanced look, applied as the clip's filters. Use for \"auto color\", " +
+                "\"fix the exposure/levels\", \"balance this shot\".",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "match_color",
+            "Shot-match ON-DEVICE: set the TARGET clip's exposure/contrast/saturation to match the SOURCE " +
+                "clip's look, so two shots cut together consistently. Use for \"match this shot to that one\".",
+            objSchema(
+                "source_clip_id" to stringProp("The clip whose look to match"),
+                "target_clip_id" to stringProp("The clip to adjust"),
+                required = listOf("source_clip_id", "target_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_lut",
+            "Apply a `.cube` 3D LUT color grade to a clip ON-DEVICE — the standard color-grade format " +
+                "exported by DaVinci Resolve / Photoshop and shared in free LUT packs. It grades in both " +
+                "preview and export. Use for \"apply this LUT\", \"grade with a .cube\", \"give it a " +
+                "cinematic/teal-orange look via a LUT\". `path` is a filesystem path to a .cube file " +
+                "(usually one the user picked). clear_lut removes it.",
+            objSchema(
+                "clip_id" to stringProp("The clip to grade; defaults to the video clip at the playhead"),
+                "path" to stringProp("Filesystem path to a .cube 3D LUT file"),
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_lut",
+            "Remove the `.cube` LUT color grade from a clip (undo apply_lut).",
+            objSchema(
+                "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_shader",
+            "Record a custom GLSL shader effect (a standard **ISF** `.isf` shader or a raw `.fs`/`.glsl` " +
+                "fragment) on a clip. Only single-pass, single-image shaders are accepted (multi-pass, " +
+                "feedback, audio, and two-input transition shaders are rejected). `path` is a filesystem " +
+                "path (usually a file the user picked). NOTE: on desktop the shader is saved on the clip " +
+                "but the live GLSL renderer is not implemented yet, so it is NOT visible in preview or " +
+                "export. clear_shader removes it.",
+            objSchema(
+                "clip_id" to stringProp("The clip to affect; defaults to the video clip at the playhead"),
+                "path" to stringProp("Filesystem path to an .isf / .fs / .glsl fragment shader"),
+                "params" to objSchema(required = emptyList()).apply {
+                    put("description", "Optional {name: value} overrides for the shader's scalar inputs (see list_shader_params).")
+                },
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_shader",
+            "Remove the custom GLSL/ISF shader effect from a clip (undo apply_shader).",
+            objSchema(
+                "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "list_shader_params",
+            "List an ISF/GLSL shader's adjustable scalar inputs (name, type, default, min, max) so you " +
+                "know what to pass to apply_shader's `params`. `path` is a shader file.",
+            objSchema(
+                "path" to stringProp("Filesystem path to an .isf / .fs / .glsl shader"),
+                required = listOf("path"),
+            ),
         ))
 
         // User tools — fully functional on desktop.
@@ -211,6 +290,34 @@ class DesktopMcpTools(
             ),
         ))
 
+        // ---- vocal / stem separation (on-device) ----
+        put(toolDefinition(
+            "remove_vocals",
+            "Remove the lead vocals from a clip's audio ON-DEVICE (no model/key) and add the resulting " +
+                "instrumental as a new audio clip — for karaoke / backing tracks. Use for \"remove the " +
+                "vocals\", \"make a karaoke / instrumental version\", \"strip the singing\". Uses stereo " +
+                "center-channel cancellation, so it needs a STEREO track (returns an error on mono); it's " +
+                "a lightweight instrumental extractor, not a full multi-stem split.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to process"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "separate_stems",
+            "Split a clip's music into VOCALS and ACCOMPANIMENT (instrumental) tracks ON-DEVICE (Spleeter " +
+                "via ONNX, no key) and add both as audio clips — true ML stem separation for remixes, " +
+                "karaoke, or isolating either part. Use for \"separate the stems\", \"split vocals and " +
+                "instrumental\", \"isolate the vocals\", \"give me the acapella / instrumental\". (For a " +
+                "quick stereo karaoke without a model, use remove_vocals.) Requires the Spleeter model in " +
+                "Settings → AI Analyzer → Stem separation; heavy — best on moderate clip lengths. Relay " +
+                "its error if the model isn't set.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to separate"),
+                required = listOf("clip_id"),
+            ),
+        ))
+
         // ---- shot / scene detection (on-device, no model) ----
         put(toolDefinition(
             "detect_scenes",
@@ -306,6 +413,13 @@ class DesktopMcpTools(
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
+        "auto_color" -> autoColor(args.optString("clip_id"))
+        "match_color" -> matchColor(args.getString("source_clip_id"), args.getString("target_clip_id"))
+        "apply_lut" -> applyLut(args.optString("clip_id"), args.getString("path"))
+        "clear_lut" -> clearLut(args.optString("clip_id"))
+        "apply_shader" -> applyShader(args.optString("clip_id"), args.getString("path"), args.optJSONObject("params"))
+        "clear_shader" -> clearShader(args.optString("clip_id"))
+        "list_shader_params" -> listShaderParams(args.getString("path"))
         "set_export_preset" -> setExportPreset(args.getString("preset"))
         "get_beat_map" -> getBeatMap(args.getString("audio_clip_id"))
         "cut_to_beats" -> cutToBeats(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("every_n", 1))
@@ -315,6 +429,8 @@ class DesktopMcpTools(
         "normalize_levels" -> normalizeLevels()
         "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
         "auto_duck" -> autoDuck(args.getString("music_clip_id"), args.getString("voice_clip_id"), args.optDouble("amount", 0.3).toFloat())
+        "remove_vocals" -> removeVocals(args.getString("clip_id"))
+        "separate_stems" -> separateStems(args.getString("clip_id"))
         "detect_scenes" -> detectScenes(args.getString("clip_id"), args.optDouble("sensitivity", 0.5).toFloat(), args.optBoolean("split", true))
         "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
         "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
@@ -590,6 +706,205 @@ class DesktopMcpTools(
         }
         
         return ok().apply { put("humanSummary", "Cleared all $property keyframes on clip $clipId.") }
+    }
+
+    // ---- color grading: auto-correct / shot-match / LUT / shader ------------
+
+    /** Tone of a frame (all 0..1): mean luminance, contrast spread (p95−p5), mean HSV saturation. */
+    private data class Tone(val lum: Float, val spread: Float, val sat: Float)
+
+    /** Sample a frame at low res and summarise its tone (for auto-color and shot-match). Mirrors the
+     *  Android `toneStats`, reading a [java.awt.image.BufferedImage] instead of a Bitmap. */
+    private fun toneStats(image: java.awt.image.BufferedImage): Tone {
+        val n = 64
+        val small = java.awt.image.BufferedImage(n, n, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        val g = small.createGraphics()
+        g.setRenderingHint(
+            java.awt.RenderingHints.KEY_INTERPOLATION,
+            java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
+        )
+        g.drawImage(image, 0, 0, n, n, null)
+        g.dispose()
+        val px = IntArray(n * n)
+        small.getRGB(0, 0, n, n, px, 0, n)
+        val lums = FloatArray(px.size)
+        var sumL = 0f
+        var sumS = 0f
+        for (i in px.indices) {
+            val p = px[i]
+            val r = ((p shr 16) and 0xFF) / 255f
+            val gc = ((p shr 8) and 0xFF) / 255f
+            val b = (p and 0xFF) / 255f
+            lums[i] = 0.299f * r + 0.587f * gc + 0.114f * b
+            sumL += lums[i]
+            val mx = maxOf(r, gc, b); val mn = minOf(r, gc, b)
+            sumS += if (mx > 1e-4f) (mx - mn) / mx else 0f
+        }
+        lums.sort()
+        val p5 = lums[(lums.size * 0.05f).toInt().coerceIn(0, lums.size - 1)]
+        val p95 = lums[(lums.size * 0.95f).toInt().coerceIn(0, lums.size - 1)]
+        return Tone(sumL / px.size, (p95 - p5).coerceIn(0.01f, 1f), sumS / px.size)
+    }
+
+    /** Tone of the frame at a clip's mid-point (frame pulled in-process via JavaCV). */
+    private fun clipTone(clip: TimelineClip): Tone {
+        val media = vm.uiState.value.document.mediaFor(clip)
+            ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val at = com.hereliesaz.guillotine.model.TimelineMath
+            .sourceTimeMs(clip, clip.startTimeMs + clip.durationMs / 2).coerceAtLeast(0L)
+        return runBlocking { DesktopMediaDecoder.grabFrame(media.uri, at) }
+            ?.let { toneStats(it) }
+            ?: throw IllegalStateException("Could not read a frame from clip ${clip.id}.")
+    }
+
+    /**
+     * The clip [clipId], or the video clip under the playhead when blank. A non-blank id that doesn't
+     * match throws (rather than silently editing the playhead clip on a stale id). Throws too when
+     * blank and nothing is under the playhead. Mirrors Android's `resolveClipOrPlayhead`.
+     */
+    private fun resolveClipOrPlayhead(clipId: String): TimelineClip {
+        val st = vm.uiState.value
+        if (clipId.isNotBlank()) {
+            return st.document.clips.firstOrNull { it.id == clipId }
+                ?: throw IllegalArgumentException("Clip not found: $clipId")
+        }
+        return com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips, ClipType.VIDEO, st.currentTimeMs,
+        ) ?: throw IllegalStateException("No clip — scrub onto one or pass clip_id.")
+    }
+
+    /** Auto color-correct: nudge exposure/contrast/saturation toward a balanced look, via clip filters. */
+    private fun autoColor(clipId: String): JSONObject {
+        val st = vm.uiState.value
+        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+                st.document.clips, ClipType.VIDEO, st.currentTimeMs,
+            )
+            ?: throw IllegalStateException("No video clip to color-correct — scrub onto one or pass clip_id.")
+        val t = clipTone(clip)
+        val brightness = (0.5f / t.lum.coerceAtLeast(0.02f)).coerceIn(0.6f, 1.8f)
+        val contrast = (0.7f / t.spread).coerceIn(0.85f, 1.6f)
+        val saturation = if (t.sat < 0.28f) 1.18f else 1f
+        vm.updateClipFilters(clip.id) { it.copy(brightness = brightness, contrast = contrast, saturation = saturation) }
+        return ok().apply {
+            put("brightness", brightness.toDouble())
+            put("contrast", contrast.toDouble())
+            put("saturation", saturation.toDouble())
+            put(
+                "humanSummary",
+                "Auto color-corrected: exposure ×%.2f, contrast ×%.2f%s.".format(
+                    brightness, contrast,
+                    if (saturation != 1f) ", saturation ×%.2f".format(saturation) else "",
+                ),
+            )
+        }
+    }
+
+    /** Shot-match: set the TARGET clip's tone filters to align its look with the SOURCE clip. */
+    private fun matchColor(sourceClipId: String, targetClipId: String): JSONObject {
+        val st = vm.uiState.value
+        val src = st.document.clips.firstOrNull { it.id == sourceClipId }
+            ?: throw IllegalArgumentException("Source clip not found: $sourceClipId")
+        val tgt = st.document.clips.firstOrNull { it.id == targetClipId }
+            ?: throw IllegalArgumentException("Target clip not found: $targetClipId")
+        val s = clipTone(src)
+        val d = clipTone(tgt)
+        val brightness = (s.lum / d.lum.coerceAtLeast(0.02f)).coerceIn(0.4f, 2.5f)
+        val contrast = (s.spread / d.spread).coerceIn(0.5f, 2f)
+        val saturation = (s.sat / d.sat.coerceAtLeast(0.02f)).coerceIn(0.5f, 2f)
+        vm.updateClipFilters(targetClipId) { it.copy(brightness = brightness, contrast = contrast, saturation = saturation) }
+        return ok().apply {
+            put(
+                "humanSummary",
+                "Matched the target clip's look to the source (exposure ×%.2f, contrast ×%.2f, saturation ×%.2f)."
+                    .format(brightness, contrast, saturation),
+            )
+        }
+    }
+
+    /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). Renders in preview + export. */
+    private fun applyLut(clipId: String, path: String): JSONObject {
+        require(path.isNotBlank()) { "Provide the path to a .cube LUT file." }
+        val file = File(path)
+        require(file.isFile) { "No .cube file at: $path" }
+        // Parse up front so a bad file fails here with a clear message rather than silently doing nothing.
+        runCatching { com.hereliesaz.guillotine.media.CubeLut.parse(file.readText()) }
+            .onFailure { throw IllegalArgumentException("Not a valid 3D .cube LUT: ${it.message}") }
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(lutPath = file.absolutePath) }
+        return ok().apply { put("humanSummary", "Applied LUT ${file.name} to clip ${clip.id}.") }
+    }
+
+    /** Remove a clip's `.cube` LUT grade. */
+    private fun clearLut(clipId: String): JSONObject {
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(lutPath = "") }
+        return ok().apply { put("humanSummary", "Removed the LUT from clip ${clip.id}.") }
+    }
+
+    /**
+     * Record a GLSL/ISF shader (with optional scalar-input overrides) on a clip. The shader is validated
+     * and stored on the clip's filters, BUT desktop has no live GLSL renderer yet, so it does NOT render
+     * in preview or export — the humanSummary says so explicitly (don't claim it's visually applied).
+     */
+    private fun applyShader(clipId: String, path: String, params: JSONObject?): JSONObject {
+        require(path.isNotBlank()) { "Provide the path to an .isf / .fs / .glsl shader file." }
+        val file = File(path)
+        require(file.isFile) { "No shader file at: $path" }
+        // Parse up front so unsupported/malformed shaders fail here with a clear message.
+        val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
+            .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
+        // Only accept overrides for the shader's known scalar (single-value) uniforms.
+        val scalar = program.uniforms.filter { it.values.size == 1 }.associateBy { it.name }
+        val overrides = HashMap<String, Float>()
+        params?.keys()?.forEach { k ->
+            scalar[k]?.let { u -> overrides[k] = params.optDouble(k, u.values[0].toDouble()).toFloat() }
+        }
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(shaderPath = file.absolutePath, shaderParams = overrides) }
+        // TODO(desktop): no GLSL/Skia render pass exists yet, so the shader is recorded but not rendered.
+        return ok().apply {
+            put("shaderRendered", false)
+            put(
+                "humanSummary",
+                "Recorded shader ${file.name}" +
+                    (if (overrides.isNotEmpty()) " with ${overrides.size} param(s)" else "") +
+                    " on clip ${clip.id}. Note: the shader is saved on the clip, but the live GLSL render " +
+                    "on desktop is still pending — it is NOT yet visible in preview or export.",
+            )
+        }
+    }
+
+    /** Remove a clip's GLSL/ISF shader effect (and its param overrides). */
+    private fun clearShader(clipId: String): JSONObject {
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(shaderPath = "", shaderParams = emptyMap()) }
+        return ok().apply { put("humanSummary", "Removed the shader from clip ${clip.id}.") }
+    }
+
+    /** List a shader's adjustable scalar inputs (name, type, default, min, max). No render needed. */
+    private fun listShaderParams(path: String): JSONObject {
+        val file = File(path)
+        require(file.isFile) { "No shader file at: $path" }
+        val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
+            .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
+        val arr = JSONArray()
+        program.uniforms.filter { it.values.size == 1 }.forEach { u ->
+            arr.put(JSONObject().apply {
+                put("name", u.name)
+                put("type", u.type.name.lowercase())
+                put("default", u.values[0].toDouble())
+                put("min", u.min.toDouble())
+                put("max", u.max.toDouble())
+            })
+        }
+        return ok().apply {
+            put("params", arr)
+            put(
+                "humanSummary",
+                if (arr.length() == 0) "This shader has no adjustable scalar inputs." else "${arr.length()} adjustable input(s).",
+            )
+        }
     }
 
     // ---- output / export config --------------------------------------------
@@ -950,6 +1265,67 @@ class DesktopMcpTools(
             else merged += r
         }
         return merged.filter { it.second - it.first >= 150L }
+    }
+
+    // ---- vocal / stem separation (on-device) -------------------------------
+
+    /**
+     * Remove a clip's lead vocals via on-device stereo center-channel cancellation (no model) and add
+     * the instrumental as a new audio clip. Mirrors Android's `remove_vocals`: needs a stereo track.
+     */
+    private fun removeVocals(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val stereo = runBlocking { DesktopMediaDecoder.decodePcmStereo(media.uri) }
+        val outDir = File(DesktopStorage.dataDir, "stems").apply { mkdirs() }
+        val out = File(outDir, "instrumental_${System.currentTimeMillis()}.wav")
+        val duration = (if (stereo == null || stereo.channels < 2) null
+            else VocalIsolator.removeVocals(stereo.left, stereo.right, stereo.sampleRate, out.absolutePath))
+            ?: throw IllegalStateException(
+                "Couldn't remove vocals — the clip needs a stereo audio track (center-channel " +
+                    "cancellation can't work on mono).",
+            )
+        val probed = DesktopMediaImport.probe(out)
+            ?: throw IllegalStateException("The instrumental couldn't be read.")
+        vm.addMedia(listOf(probed.copy(name = "Instrumental: ${media.name}")))
+        return ok().apply {
+            put("durationMs", duration)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Added a ${msFmt(duration)} vocals-removed (instrumental) track.")
+        }
+    }
+
+    /** Separate a clip's music into vocals + accompaniment via on-device Spleeter (ONNX); add both. */
+    private fun separateStems(clipId: String): JSONObject {
+        val dir = settingsProvider().stemModelPath
+        require(dir.isNotBlank()) {
+            "No stem model set. Download Spleeter in Settings → AI Analyzer → Stem separation."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val stereo = runBlocking { DesktopMediaDecoder.decodePcmStereo(media.uri) }
+            ?: throw IllegalStateException("Couldn't separate — the clip needs decodable audio.")
+        val stems = Spleeter.separate(
+            stereo.left, stereo.right, stereo.sampleRate, dir, File(DesktopStorage.dataDir, "stems"),
+        ) ?: throw IllegalStateException("Couldn't separate — the clip needs decodable audio.")
+        val vocals = DesktopMediaImport.probe(File(stems.vocalsWav))
+            ?: throw IllegalStateException("The separated vocals couldn't be read.")
+        val instrumental = DesktopMediaImport.probe(File(stems.accompanimentWav))
+            ?: throw IllegalStateException("The separated accompaniment couldn't be read.")
+        vm.addMedia(
+            listOf(
+                vocals.copy(name = "vocals: ${media.name}"),
+                instrumental.copy(name = "instrumental: ${media.name}"),
+            ),
+        )
+        return ok().apply {
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Separated into vocals + accompaniment and added both as audio clips.")
+        }
     }
 
     // ---- shot / scene detection --------------------------------------------

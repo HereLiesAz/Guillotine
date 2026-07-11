@@ -1487,7 +1487,9 @@ class McpTools(
             context, OperationKind.GENERATE, "Removing vocals…", pausable = false,
         ) { _ ->
             val out = java.io.File(context.cacheDir, "instrumental_${System.currentTimeMillis()}.wav")
-            val duration = VocalIsolator.removeVocals(context, Uri.parse(media.uri), out.absolutePath)
+            val stereo = com.hereliesaz.guillotine.ai.StereoPcmDecoder.decode(context, Uri.parse(media.uri))
+            val duration = (if (stereo == null || stereo.channels < 2) null
+                else VocalIsolator.removeVocals(stereo.left, stereo.right, stereo.sampleRate, out.absolutePath))
                 ?: throw IllegalStateException(
                     "Couldn't remove vocals — the clip needs a stereo audio track (center-channel " +
                         "cancellation can't work on mono).",
@@ -1835,8 +1837,10 @@ class McpTools(
         return OperationController.runBlocking(
             context, OperationKind.GENERATE, "Separating stems…", pausable = false,
         ) { _ ->
+            val stereo = com.hereliesaz.guillotine.ai.StereoPcmDecoder.decode(context, Uri.parse(media.uri))
+                ?: throw IllegalStateException("Couldn't separate — the clip needs decodable audio.")
             val stems = com.hereliesaz.guillotine.ai.Spleeter.separate(
-                context, Uri.parse(media.uri), dir, java.io.File(context.cacheDir, "stems"),
+                stereo.left, stereo.right, stereo.sampleRate, dir, java.io.File(context.cacheDir, "stems"),
             ) ?: throw IllegalStateException("Couldn't separate — the clip needs decodable audio.")
             vm.addMedia(
                 listOf(

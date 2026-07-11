@@ -3,11 +3,6 @@ package com.hereliesaz.guillotine.ai
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import android.content.Context
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.net.Uri
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -17,14 +12,18 @@ import kotlin.math.cos
 import kotlin.math.sqrt
 
 /**
- * On-device 2-stem music source separation (Deezer Spleeter, run via ONNX Runtime). Splits a clip's
- * stereo audio into **vocals** and **accompaniment** WAVs. Pipeline (verified against sherpa-onnx's
- * Spleeter implementation): STFT (44.1 kHz, 4096-pt Hann, hop 1024, no center-pad; keep the first 1024
- * of 2049 bins) → two ONNX models estimate each stem's magnitude → power-ratio soft mask applied to the
- * original complex STFT (phase preserved) → iSTFT overlap-add. On-device only.
+ * On-device 2-stem music source separation (Deezer Spleeter, run via ONNX Runtime). Splits already-
+ * decoded stereo PCM into **vocals** and **accompaniment** WAVs. Pipeline (verified against sherpa-onnx's
+ * Spleeter implementation): resample to 44.1 kHz → STFT (4096-pt Hann, hop 1024, no center-pad; keep the
+ * first 1024 of 2049 bins) → two ONNX models estimate each stem's magnitude → power-ratio soft mask
+ * applied to the original complex STFT (phase preserved) → iSTFT overlap-add. On-device only.
+ *
+ * Pure JVM + raw `ai.onnxruntime` + the shared [Fft] — no platform dependency. Each platform decodes the
+ * clip's audio its own way (Android via `MediaCodec`, desktop via JavaCV) and passes the stereo samples
+ * in; the DSP + inference run here.
  *
  * Heavy: the model input is `[2, num_splits, 512, 1024]` float32, so a multi-minute song allocates
- * hundreds of MB. Best on a capable device and moderate clip lengths.
+ * hundreds of MB. Best on a capable machine and moderate clip lengths.
  */
 object Spleeter {
 
@@ -38,17 +37,26 @@ object Spleeter {
     data class Stems(val vocalsWav: String, val accompanimentWav: String, val durationMs: Long)
 
     /**
-     * Separate [uri]'s audio into vocals + accompaniment using the two Spleeter ONNX models in
-     * [modelDir] (`vocals*.onnx` and `accompaniment*.onnx`), writing WAVs under [outDir]. Returns their
-     * paths, or null if there's no usable audio.
+     * Separate already-decoded stereo PCM ([leftIn]/[rightIn], normalized [-1,1] at [srcSampleRate] Hz)
+     * into vocals + accompaniment using the two Spleeter ONNX models in [modelDir] (`vocals*.onnx` and
+     * `accompaniment*.onnx`), writing stereo WAVs under [outDir]. Returns their paths, or null if the
+     * models are missing or there isn't enough audio.
      */
-    fun separate(context: Context, uri: Uri, modelDir: String, outDir: File): Stems? {
+    fun separate(
+        leftIn: FloatArray,
+        rightIn: FloatArray,
+        srcSampleRate: Int,
+        modelDir: String,
+        outDir: File,
+    ): Stems? {
         val dir = File(modelDir)
         val onnx = dir.listFiles { f -> f.isFile && f.name.endsWith(".onnx") }?.toList() ?: emptyList()
         val vocalsModel = onnx.firstOrNull { it.name.contains("vocals") } ?: return null
         val accModel = onnx.firstOrNull { it.name.contains("accompaniment") || it.name.contains("accomp") } ?: return null
 
-        val (left, right) = decodeStereo44k(context, uri) ?: return null
+        // The pipeline is fixed at 44.1 kHz; resample the incoming PCM to match.
+        val left = resample(leftIn, srcSampleRate, SR)
+        val right = resample(rightIn, srcSampleRate, SR)
         val n = minOf(left.size, right.size)
         if (n < NFFT) return null
 
@@ -162,61 +170,6 @@ object Spleeter {
             result[i] = (if (norm[i] > 1e-8) out[i] / norm[i] else 0.0).toFloat().coerceIn(-1f, 1f)
         }
         return result
-    }
-
-    /** Decode [uri]'s first audio track to stereo float PCM resampled to 44.1 kHz. Null if no audio. */
-    private fun decodeStereo44k(context: Context, uri: Uri): Pair<FloatArray, FloatArray>? {
-        val extractor = MediaExtractor()
-        try { extractor.setDataSource(context, uri, null) } catch (_: Exception) {
-            runCatching { extractor.release() }; return null
-        }
-        var track = -1; var format: MediaFormat? = null
-        for (t in 0 until extractor.trackCount) {
-            val f = extractor.getTrackFormat(t)
-            if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) { track = t; format = f; break }
-        }
-        if (track < 0 || format == null) { extractor.release(); return null }
-        val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
-            format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1) else 1
-        val srcRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-        extractor.selectTrack(track)
-        val left = ArrayList<Float>(1 shl 20); val right = ArrayList<Float>(1 shl 20)
-        val info = MediaCodec.BufferInfo()
-        var inputDone = false; var outputDone = false; var ch = 0; var l = 0f; var r = 0f
-        var codec: MediaCodec? = null
-        try {
-            val dec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!).also { codec = it }
-            dec.configure(format, null, null, 0); dec.start()
-            while (!outputDone) {
-                if (!inputDone) {
-                    val idx = dec.dequeueInputBuffer(10_000)
-                    if (idx >= 0) {
-                        val buf = dec.getInputBuffer(idx)!!
-                        val sz = extractor.readSampleData(buf, 0)
-                        if (sz < 0) { dec.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inputDone = true }
-                        else { dec.queueInputBuffer(idx, 0, sz, extractor.sampleTime, 0); extractor.advance() }
-                    }
-                }
-                val oi = dec.dequeueOutputBuffer(info, 10_000)
-                if (oi >= 0) {
-                    val ob = dec.getOutputBuffer(oi)
-                    if (ob != null && info.size > 0) {
-                        val sh = ob.asShortBuffer()
-                        while (sh.hasRemaining()) {
-                            val s = sh.get() / 32768f
-                            if (channels == 1) { left.add(s); right.add(s) }
-                            else { when (ch) { 0 -> l = s; 1 -> r = s }; ch++; if (ch >= channels) { left.add(l); right.add(r); ch = 0 } }
-                        }
-                    }
-                    dec.releaseOutputBuffer(oi, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
-                }
-            }
-        } finally {
-            runCatching { codec?.stop() }; runCatching { codec?.release() }; runCatching { extractor.release() }
-        }
-        if (left.isEmpty()) return null
-        return resample(left.toFloatArray(), srcRate, SR) to resample(right.toFloatArray(), srcRate, SR)
     }
 
     private fun resample(src: FloatArray, from: Int, to: Int): FloatArray {
