@@ -359,6 +359,9 @@ fun NleScreen(
         // Integrated activity log (AI chat, running process, progress, errors) -- anchored to
         // the bottom of the editor Box.
         ActivityLogPanel(
+            // Actually dock it to the bottom: this Box has no contentAlignment, so without an
+            // explicit align the height-wrapping panel defaults to top-start (the reported bug).
+            modifier = Modifier.align(Alignment.BottomCenter),
             panelState = logPanelState,
             entries = logEntries,
             processLabel = processLabel,
