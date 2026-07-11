@@ -29,12 +29,21 @@ name: Release AAB to Play
 # Implemented in `.github/scripts/publish_play.py` because Play rejects re-uploading the same
 # versionCode, so a single Edit is the only way to hand one bundle to multiple tracks.
 #
-# versionCode is derived from `git rev-list --count HEAD` inside `app/build.gradle.kts` — every commit
-# advances it automatically, nothing is written back to the repo during a build. That means CI needs a
-# full-depth checkout (see `fetch-depth: 0` below) to see the whole commit history.
+# versionCode is derived from wall-clock time (seconds since 2020) inside `app/build.gradle.kts` — it
+# increases on every build, successful or not, so Play never sees a repeated versionCode even when the
+# same commit is built more than once (CI re-runs, retries). Nothing is written back to the repo.
 
 on:
   push:
+    # Don't run a Play publish for pure chores — docs, store metadata, licence, the version-bump
+    # commit. A push touching ONLY these paths is skipped; any real code change still publishes.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'fastlane/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'version.properties'
   workflow_dispatch:
     inputs:
       publish:
@@ -106,7 +115,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          # versionCode = VERSION_CODE_OFFSET + git rev-list --count HEAD (see app/build.gradle.kts).
+          # versionCode = seconds since 2020 epoch (see app/build.gradle.kts) — unique per build.
           ./gradlew bundleRelease \
             -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.jks \
             -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \

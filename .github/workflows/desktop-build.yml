@@ -7,7 +7,13 @@ name: Desktop Build
 on:
   push:
     branches: ['**']
+    # Pure chores shouldn't trigger desktop packaging — docs, store metadata, licence, version bumps.
     paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'fastlane/**'
+      - 'LICENSE'
+      - '.gitignore'
       - version.properties
   pull_request:
     branches: [main]

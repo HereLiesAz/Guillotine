@@ -3,9 +3,13 @@ name: Merged Build & Release
 on:
   push:
     branches: [ "**" ]
-    # The release-aab workflow commits the auto-incremented versionCode back; that commit
-    # only touches version.properties and shouldn't trigger a full rebuild here.
+    # Pure chores shouldn't trigger a full rebuild — docs, store metadata, licence, version bumps.
     paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'fastlane/**'
+      - 'LICENSE'
+      - '.gitignore'
       - version.properties
   pull_request:
     branches: [ "main" ]
