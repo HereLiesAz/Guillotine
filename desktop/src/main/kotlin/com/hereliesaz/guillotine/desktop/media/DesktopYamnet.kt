@@ -58,23 +58,21 @@ object DesktopYamnet {
         val session = DesktopOnnx.session(modelPath)
         val hop = hopSamples.coerceAtLeast(FRAME / 4)
         val frame = FloatArray(FRAME)
+        val shape = longArrayOf(FRAME.toLong())   // fixed per call — hoisted out of the frame loop
         val hits = ArrayList<Hit>()
         var offset = 0
         while (offset + FRAME <= pcm16k.size) {
             System.arraycopy(pcm16k, offset, frame, 0, FRAME)
-            val scores = runCatching {
-                DesktopOnnx.runSingle(session, frame, longArrayOf(FRAME.toLong()))
-            }.getOrNull()
-            if (scores != null) {
-                var bestIdx = -1
-                var bestScore = 0f
-                for ((idx, _) in HIGHLIGHT_CLASSES) {
-                    val s = scores.getOrElse(idx) { 0f }
-                    if (s > bestScore) { bestScore = s; bestIdx = idx }
-                }
-                if (bestIdx >= 0 && bestScore >= threshold) {
-                    hits += Hit(offset * 1000L / SAMPLE_RATE, HIGHLIGHT_CLASSES.getValue(bestIdx), bestScore)
-                }
+            // Let a bad/corrupt model surface a clear error rather than silently yielding no highlights.
+            val scores = DesktopOnnx.runSingle(session, frame, shape)
+            var bestIdx = -1
+            var bestScore = 0f
+            for ((idx, _) in HIGHLIGHT_CLASSES) {
+                val s = scores.getOrElse(idx) { 0f }
+                if (s > bestScore) { bestScore = s; bestIdx = idx }
+            }
+            if (bestIdx >= 0 && bestScore >= threshold) {
+                hits += Hit(offset * 1000L / SAMPLE_RATE, HIGHLIGHT_CLASSES.getValue(bestIdx), bestScore)
             }
             offset += hop
         }

@@ -842,15 +842,19 @@ class DesktopMcpTools(
         val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
         val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, DesktopYamnet.SAMPLE_RATE) }
             ?: throw IllegalStateException("No audio track in \"${media.name}\" to analyze.")
+        // decodePcmMono decodes the WHOLE media, so drop hits outside the clip's trimmed source window
+        // (else a trimmed-out highlight maps to a zero-length range at the clip boundary).
+        val frameMs = DesktopYamnet.FRAME * 1000L / DesktopYamnet.SAMPLE_RATE
+        val srcStart = clip.trimStartMs
+        val srcEnd = clip.trimStartMs + clip.durationMs
         val hits = DesktopYamnet.scanHighlights(path, pcm.samples, threshold.coerceIn(0.05f, 0.95f))
+            .filter { it.startMs < srcEnd && it.startMs + frameMs > srcStart }
         if (hits.isEmpty()) {
             return ok().apply {
                 put("highlightCount", 0)
                 put("humanSummary", "No highlight-worthy audio events found (try a lower threshold).")
             }
         }
-        // Merge consecutive detections (<=1.5 s gap) into ranges, tracking each range's dominant label.
-        val frameMs = DesktopYamnet.FRAME * 1000L / DesktopYamnet.SAMPLE_RATE
         class Range(val startMs: Long, var endMs: Long, val labels: MutableMap<String, Int>)
         val ranges = ArrayList<Range>()
         for (h in hits.sortedBy { it.startMs }) {
