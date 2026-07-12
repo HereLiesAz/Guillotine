@@ -12,6 +12,7 @@ import com.hereliesaz.guillotine.ai.gen.GenProviderType
 import com.hereliesaz.guillotine.ai.gen.GenRequest
 import com.hereliesaz.guillotine.ai.gen.PollConfig
 import com.hereliesaz.guillotine.ai.gen.meta
+import com.hereliesaz.guillotine.desktop.media.DesktopFaceBlur
 import com.hereliesaz.guillotine.desktop.media.DesktopFaceDetector
 import com.hereliesaz.guillotine.desktop.media.DesktopFfmpegFilter
 import com.hereliesaz.guillotine.desktop.media.DesktopImageLabeler
@@ -20,6 +21,7 @@ import com.hereliesaz.guillotine.desktop.media.DesktopMediaImport
 import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
 import com.hereliesaz.guillotine.desktop.media.DesktopYamnet
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.editor.FACE_BLUR_PREFIX
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.mcp.boolProp
 import com.hereliesaz.guillotine.mcp.intProp
@@ -517,10 +519,10 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "blur_faces",
-            "Toggle ON-DEVICE face anonymization on a clip (ML Kit face detection, no key): every detected " +
-                "face is blurred in both preview and export, for privacy. Use for \"blur the faces\", " +
-                "\"anonymize people\", \"hide identities\", \"censor faces\". Pass enabled=false to turn it " +
-                "back off. Applies to video and image clips.",
+            "ON-DEVICE face anonymization: tracks the main face across the clip and drops a pre-blurred " +
+                "patch that follows it on a track above (keyframed, so it renders in preview and export and " +
+                "stays editable), for privacy. Use for \"blur the faces\", \"anonymize people\", \"hide " +
+                "identities\", \"censor faces\". Pass enabled=false to remove it. Needs the face-detection model.",
             objSchema(
                 "clip_id" to stringProp("The clip to blur faces on; defaults to the video clip at the playhead"),
                 "enabled" to boolProp("Turn face-blur on (default true) or off"),
@@ -666,9 +668,11 @@ class DesktopMcpTools(
             args.optBoolean("split", true),
         )
         "search_clips" -> searchClips(args.getString("query"))
-        // ---- face / segmentation (ML Kit) → honest stubs ----
-        "blur_faces" ->
-            visionToolUnavailable(name, "an on-device face-detection model")
+        // ---- face / segmentation ----
+        "blur_faces" -> blurFaces(
+            args.optString("clip_id"),
+            if (args.has("enabled")) args.getBoolean("enabled") else true,
+        )
         "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
         "replace_background" ->
             visionToolUnavailable(name, "an on-device subject-segmentation model")
@@ -982,6 +986,42 @@ class DesktopMcpTools(
             put(
                 "humanSummary",
                 if (topDesc.isBlank()) "Couldn't recognize the frame's contents." else "This frame looks like: $topDesc.",
+            )
+        }
+    }
+
+    /**
+     * On-device privacy face-blur via tracking (the desktop approach): track the largest face across
+     * the clip, generate a pre-blurred patch of it, and drop that patch on a new track ABOVE the clip
+     * with OFFSET_X / OFFSET_Y / SCALE keyframes that follow the face ([DesktopFaceBlur] +
+     * [EditorViewModel.addFaceBlurOverlay]). Rides the keyframe system, so it renders in preview and
+     * export and stays editable. `enabled=false` removes the overlay. Requires the face-detection model.
+     */
+    private fun blurFaces(clipId: String, enabled: Boolean): JSONObject {
+        val clip = resolveClipOrPlayhead(clipId)
+        if (!enabled) {
+            vm.removeFaceBlurOverlay(clip.id)
+            return ok().apply { put("humanSummary", "Removed face blur from clip ${clip.id}.") }
+        }
+        val model = settingsProvider().faceDetectModelPath
+        require(model.isNotBlank()) {
+            "No face-detection model set. Add an ONNX face detector in Settings → AI Analyzer → Face detection."
+        }
+        require(File(model).isFile) { "The face-detection model file does not exist at: $model" }
+        val media = vm.uiState.value.document.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: ${clip.id}")
+        val track = DesktopFaceBlur.build(model, media.uri, clip, File(DesktopStorage.dataDir, "faceblur"))
+            ?: throw IllegalStateException("No faces found to blur — auto-blur needs a face in the shot.")
+        val probed = DesktopMediaImport.probe(track.patch)
+            ?: throw IllegalStateException("Couldn't load the generated blur patch.")
+        val patchMedia = probed.copy(name = "$FACE_BLUR_PREFIX${clip.id}", durationMs = clip.durationMs)
+        val overlayId = vm.addFaceBlurOverlay(clip.id, patchMedia, track.offsetX, track.offsetY, track.scale)
+        return ok().apply {
+            put("overlayClipId", overlayId ?: JSONObject.NULL)
+            put("keyframes", track.offsetX.size)
+            put(
+                "humanSummary",
+                "Tracked the face across ${track.offsetX.size} points and added a blur patch that follows it on a track above.",
             )
         }
     }
