@@ -129,6 +129,12 @@ attached to the matching GitHub Release.
 - [**Tutorial**](docs/TUTORIAL.md) · [**FAQ**](docs/FAQ.md) · [**AI roadmap**](docs/AI_ROADMAP.md) ·
   [**Building**](docs/BUILDING.md).
 
+## Contributing & governance
+
+Patches, bug reports, and docs are welcome. Start with [**CONTRIBUTING.md**](CONTRIBUTING.md) (the
+workflow + the one-line CLA sign-off), the [**Governance & Charter**](GOVERNANCE.md) (values and how
+decisions get made), and the [**Contributor License Agreement**](CLA.md).
+
 ## License
 
 Guillotine is free software under the **GNU AGPL-3.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
