@@ -281,8 +281,10 @@ separation and image labeling already ride this path.
   (`DesktopImageLabeler`) and `find_highlights` to an ONNX YAMNet audio-event model
   (`DesktopYamnet`); `analyze_clip` (prompt-driven cut analysis), `analyze_clip_with_concept`,
   `describe_current_frame`, and `caption_frame` (VLM) remain.
-- **Face / segmentation** — `blur_faces`, `auto_reframe`, `replace_background` need an ONNX
-  face-detector / selfie-segmentation model.
+- **Face / segmentation** — `auto_reframe` is wired to an ONNX UltraFace-style face detector
+  (`DesktopFaceDetector`, follows the main face with OFFSET_X keyframes); `blur_faces` (needs a
+  per-frame blur pass in preview + export) and `replace_background` (needs a selfie-segmentation
+  matte composite) remain.
 - **Speech models** — `transcribe_precise`, `add_voiceover`, `diarize_clip`, `remove_fillers` use
   sherpa-onnx on Android, which has no clean desktop-JVM artifact yet; wire when one lands (or run the
   underlying ONNX graphs directly).

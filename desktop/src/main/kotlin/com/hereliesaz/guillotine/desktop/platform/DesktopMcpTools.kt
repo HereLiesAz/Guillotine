@@ -12,6 +12,7 @@ import com.hereliesaz.guillotine.ai.gen.GenProviderType
 import com.hereliesaz.guillotine.ai.gen.GenRequest
 import com.hereliesaz.guillotine.ai.gen.PollConfig
 import com.hereliesaz.guillotine.ai.gen.meta
+import com.hereliesaz.guillotine.desktop.media.DesktopFaceDetector
 import com.hereliesaz.guillotine.desktop.media.DesktopFfmpegFilter
 import com.hereliesaz.guillotine.desktop.media.DesktopImageLabeler
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
@@ -667,8 +668,9 @@ class DesktopMcpTools(
         )
         "search_clips" -> searchClips(args.getString("query"))
         // ---- face / segmentation (ML Kit) → honest stubs ----
-        "blur_faces", "auto_reframe" ->
+        "blur_faces" ->
             visionToolUnavailable(name, "an on-device face-detection model")
+        "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
         "replace_background" ->
             visionToolUnavailable(name, "an on-device subject-segmentation model")
         // ---- concept embedder / image models / inpaint → honest stubs ----
@@ -889,6 +891,62 @@ class DesktopMcpTools(
             put("highlights", arr)
             put("clipCount", vm.uiState.value.document.clips.size)
             put("humanSummary", "Found ${ranges.size} highlight moment(s) — $topLabels.$splitInfo")
+        }
+    }
+
+    /**
+     * Vertical auto-reframe ("follow the subject") via the on-device ONNX face detector — the desktop
+     * analogue of Android's ML Kit `auto_reframe`. Punches in by [zoom] and pans OFFSET_X keyframes so
+     * the largest face stays centred as it moves. Samples ~60 frames, finds the main face's centre X
+     * per frame ([DesktopFaceDetector]), smooths (3-tap moving average), and maps each to a pan offset
+     * bounded so the punched-in crop never leaves the frame. Requires the face-detection model in
+     * Settings → AI Analyzer → Face detection; relays its error rather than faking a result.
+     */
+    private fun autoReframe(clipId: String, zoom: Float): JSONObject {
+        val model = settingsProvider().faceDetectModelPath
+        require(model.isNotBlank()) {
+            "No face-detection model set. Add an ONNX face detector in Settings → AI Analyzer → Face detection."
+        }
+        require(File(model).isFile) { "The face-detection model file does not exist at: $model" }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val z = zoom.coerceIn(1.05f, 3f)
+        val durationMs = clip.durationMs
+        require(durationMs > 0) { "Clip has no duration to reframe." }
+
+        val step = maxOf(300L, durationMs / 60) // ~every 0.3s, capped ~60 samples
+        // Max pan (normalized) that keeps the punched-in crop inside the frame.
+        val maxPan = ((z - 1f) / (2f * z)).coerceIn(0f, 0.5f)
+        val samples = ArrayList<Pair<Long, Float>>() // relMs -> centerX (0..1)
+        var srcMs = clip.trimStartMs
+        val endSrc = clip.trimStartMs + durationMs
+        while (srcMs <= endSrc) {
+            val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, srcMs) }
+            if (frame != null) {
+                DesktopFaceDetector.largestFaceCenterX(model, frame)?.let { cx ->
+                    samples += (srcMs - clip.trimStartMs) to cx
+                }
+            }
+            srcMs += step
+        }
+        check(samples.isNotEmpty()) { "No faces found to follow — auto-reframe needs a face in the shot." }
+
+        // Smooth the centers (moving average of 3) to avoid jitter, then map to a pan offset.
+        val ease = CubicBezier()
+        val points = samples.mapIndexed { i, (relMs, _) ->
+            val lo = maxOf(0, i - 1); val hi = minOf(samples.size - 1, i + 1)
+            val avgCx = (lo..hi).map { samples[it].second }.average().toFloat()
+            // Subject right of center → pan the image left (negative offset) to recenter.
+            val offsetX = ((0.5f - avgCx) * 2f * maxPan).coerceIn(-maxPan, maxPan)
+            Triple(relMs, offsetX, ease)
+        }
+        vm.updateClip(clipId) { it.copy(scale = z) }
+        vm.insertKeyframes(clipId, KeyframeProperty.OFFSET_X, points)
+        return ok().apply {
+            put("keyframes", points.size)
+            put("humanSummary", "Auto-reframed: punched in ${z}× and panned across ${points.size} points to follow the face.")
         }
     }
 

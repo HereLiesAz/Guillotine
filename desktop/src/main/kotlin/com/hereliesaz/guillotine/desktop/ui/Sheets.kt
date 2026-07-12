@@ -92,6 +92,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
     var labelModelPath by remember { mutableStateOf(current.labelModelPath) }
     var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
+    var faceDetectModelPath by remember { mutableStateOf(current.faceDetectModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     val uriHandler = LocalUriHandler.current
 
@@ -239,6 +240,21 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "(\"find the best moments\" — applause, cheering, laughter, music). Blank = off.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+
+                    Text("Face detection (on-device)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = faceDetectModelPath,
+                        onValueChange = { faceDetectModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Face-detector model (.onnx, UltraFace-style)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Point at an UltraFace-style ONNX face detector to enable on-device " +
+                            "auto-reframe (punch in and pan to follow the main face). Blank = off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 1 -> {
                     Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
@@ -294,6 +310,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             agentModelPath = agentModelPath.trim(),
                             labelModelPath = labelModelPath.trim(),
                             audioEventModelPath = audioEventModelPath.trim(),
+                            faceDetectModelPath = faceDetectModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                         ),
                     )
