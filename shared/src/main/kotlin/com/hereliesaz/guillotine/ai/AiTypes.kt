@@ -111,6 +111,9 @@ data class AiSettings(
      *  model above). On Android this is ML Kit's built-in detector; on desktop it's an ONNX
      *  UltraFace-style model the user points at, used by `auto_reframe` (blank = feature off there). */
     val faceDetectModelPath: String = "",
+    /** Optional on-device subject-SEGMENTATION model. On Android this is ML Kit selfie segmentation;
+     *  on desktop it's an ONNX segmenter the user points at, used to matte `replace_background`. */
+    val segModelPath: String = "",
     /** Paths to on-device TFLite image-effect models, keyed by effect ("superres"/"style"/"depth"). */
     val effectModelPaths: Map<String, String> = emptyMap(),
     /** Optional on-device image-labeling classifier for footage search. On Android this is ML Kit's

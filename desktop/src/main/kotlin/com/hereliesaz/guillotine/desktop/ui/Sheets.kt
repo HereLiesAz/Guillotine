@@ -94,6 +94,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
     var faceDetectModelPath by remember { mutableStateOf(current.faceDetectModelPath) }
     var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
+    var segModelPath by remember { mutableStateOf(current.segModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     val uriHandler = LocalUriHandler.current
 
@@ -271,6 +272,21 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "vector) to teach and find things (add_reference / analyze_clip_with_concept). Blank = off.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+
+                    Text("Background removal (on-device)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = segModelPath,
+                        onValueChange = { segModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Subject-segmentation model (.onnx)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Point at an ONNX subject segmenter (selfie-seg / U2Net / MODNet) to matte the " +
+                            "subject for replace_background (applied on export). Blank = off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 1 -> {
                     Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
@@ -328,6 +344,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             audioEventModelPath = audioEventModelPath.trim(),
                             faceDetectModelPath = faceDetectModelPath.trim(),
                             idEmbedModelPath = idEmbedModelPath.trim(),
+                            segModelPath = segModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                         ),
                     )

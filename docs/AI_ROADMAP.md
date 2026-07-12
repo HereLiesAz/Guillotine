@@ -287,8 +287,9 @@ separation and image labeling already ride this path.
   detector (`DesktopFaceDetector`). `auto_reframe` follows the main face with OFFSET_X keyframes;
   `blur_faces` tracks the face and drops a pre-blurred patch on a track above it, keyframed to follow
   (`DesktopFaceBlur` + `EditorViewModel.addFaceBlurOverlay`) — so it renders in preview + export via
-  the keyframe system, no per-frame render pass. `replace_background` (needs a selfie-segmentation
-  matte composite) remains.
+  the keyframe system, no per-frame render pass. `replace_background` is wired to an ONNX subject
+  segmenter (`DesktopSegmenter`): the export render mattes the subject over a colour/image dropped on a
+  track behind (preview shows the un-matted clip — an export-only parity gap for now).
 - **Speech models** — `transcribe_precise` and `remove_fillers` are wired via the on-device Vosk
   transcriber (word timings → real cuts for filler removal). `add_voiceover` (neural TTS) and
   `diarize_clip` (speaker diarization) still need sherpa-onnx models with no clean desktop-JVM artifact.

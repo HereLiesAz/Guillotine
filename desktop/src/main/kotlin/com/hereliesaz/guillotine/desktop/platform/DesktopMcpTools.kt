@@ -24,6 +24,9 @@ import com.hereliesaz.guillotine.desktop.media.DesktopYamnet
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.editor.FACE_BLUR_PREFIX
 import com.hereliesaz.guillotine.model.LearnedConcept
+import com.hereliesaz.guillotine.model.MediaItem
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.mcp.boolProp
 import com.hereliesaz.guillotine.mcp.intProp
@@ -673,8 +676,9 @@ class DesktopMcpTools(
             if (args.has("enabled")) args.getBoolean("enabled") else true,
         )
         "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
-        "replace_background" ->
-            visionToolUnavailable(name, "an on-device subject-segmentation model")
+        "replace_background" -> replaceBackgroundTool(
+            args.optString("clip_id"), args.optString("color"), args.optString("image_path"),
+        )
         // ---- concept embedder / image models / inpaint → honest stubs ----
         "add_reference" -> addReference(
             args.getString("name"), args.optString("term"), args.optBoolean("negative", false),
@@ -1253,6 +1257,63 @@ class DesktopMcpTools(
     /** Caption the playhead frame. Desktop has no on-device VLM, so this is the honest label-based
      *  description (same as describe_current_frame); [clipId] is accepted for API parity. */
     private fun captionFrameTool(clipId: String): JSONObject = describeCurrentFrame()
+
+    /**
+     * Replace a clip's background: matte the subject via the on-device segmentation model (on export)
+     * and drop a solid colour or an image on a NEW track behind it ([EditorViewModel.replaceBackground]).
+     * Requires the subject-segmentation model (Settings → AI Analyzer → Background removal), else the
+     * matte can't apply. The matte is applied in the export render; the preview shows the un-matted clip.
+     */
+    private fun replaceBackgroundTool(clipId: String, color: String, imagePath: String): JSONObject {
+        require(settingsProvider().segModelPath.isNotBlank()) {
+            "No subject-segmentation model set. Add an ONNX segmenter in Settings → AI Analyzer → Background removal."
+        }
+        val clip = resolveClipOrPlayhead(clipId)
+        val bg: MediaItem = when {
+            imagePath.isNotBlank() -> {
+                val f = File(imagePath)
+                require(f.isFile) { "Background image not found: $imagePath" }
+                DesktopMediaImport.probe(f)?.copy(durationMs = clip.durationMs)
+                    ?: throw IllegalStateException("Couldn't load background image: $imagePath")
+            }
+            color.isNotBlank() -> {
+                val file = makeSolidColorImage(parseColor(color), File(DesktopStorage.dataDir, "bg"))
+                DesktopMediaImport.probe(file)?.copy(name = "bg: $color", durationMs = clip.durationMs)
+                    ?: throw IllegalStateException("Couldn't create the background colour image.")
+            }
+            else -> throw IllegalArgumentException("Give a background color (e.g. #202020) or an image_path.")
+        }
+        vm.replaceBackground(clip.id, bg)
+        return ok().apply {
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Replaced the background behind clip ${clip.id} — the subject is matted on export.")
+        }
+    }
+
+    /** Parse "#RRGGBB" / "0xRRGGBB" / a few colour names into a packed RGB int (defaults to black). */
+    private fun parseColor(spec: String): Int {
+        val s = spec.trim().lowercase()
+        mapOf(
+            "black" to 0x000000, "white" to 0xFFFFFF, "red" to 0xFF0000, "green" to 0x00AA00,
+            "blue" to 0x0000FF, "gray" to 0x808080, "grey" to 0x808080, "yellow" to 0xFFFF00,
+            "cyan" to 0x00FFFF, "magenta" to 0xFF00FF,
+        )[s]?.let { return it }
+        val hex = s.removePrefix("#").removePrefix("0x")
+        return runCatching { hex.toInt(16) and 0xFFFFFF }.getOrDefault(0x000000)
+    }
+
+    /** Write a small solid-colour PNG (uniform, so any size fills the frame) and return the file. */
+    private fun makeSolidColorImage(rgb: Int, outDir: File): File {
+        outDir.mkdirs()
+        val img = BufferedImage(320, 180, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = java.awt.Color(rgb)
+        g.fillRect(0, 0, 320, 180)
+        g.dispose()
+        val file = File(outDir, "bg_${Integer.toHexString(rgb)}.png")
+        ImageIO.write(img, "png", file)
+        return file
+    }
 
     // ---- learned concepts: pure data ops on the shared LearnedConcept store (REAL on desktop) ----
 

@@ -292,6 +292,14 @@ object DesktopExporter {
             DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
         }
 
+        // Subject matte: replace the background with alpha so the track beneath shows through. Applied
+        // after colour/LUT; only when the clip has removeBackground on AND a segmentation model is set.
+        val drawImg = if (f.removeBackground && DesktopRenderConfig.segModelPath.isNotBlank()) {
+            DesktopSegmenter.matte(img, DesktopRenderConfig.segModelPath)
+        } else {
+            img
+        }
+
         // Keyframed transforms
         val scale = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
         val rotation = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
@@ -317,7 +325,7 @@ object DesktopExporter {
         transform.scale(fitScale * scale, fitScale * scale)
 
         g.transform = transform
-        g.drawImage(img, 0, 0, null)
+        g.drawImage(drawImg, 0, 0, null)
         g.transform = prevTransform
         g.composite = prevComposite
     }
