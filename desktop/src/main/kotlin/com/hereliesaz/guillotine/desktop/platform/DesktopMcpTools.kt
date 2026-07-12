@@ -68,7 +68,7 @@ class DesktopMcpTools(
             objSchema("start_ms" to intProp(), "end_ms" to intProp(), required = listOf("start_ms", "end_ms"))))
 
         // Media-dependent tools: defined so the schema is discoverable, but return stubs on desktop.
-        put(toolDefinition("analyze_clip", "Run vision analysis on a clip (not yet available on desktop).",
+        put(toolDefinition("analyze_clip", "Prompt-driven cut analysis ON-DEVICE: label the clip's frames and keep the parts matching its prompt (set_prompt first), cutting the rest. Label-based (needs the footage-search model).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("analyze_clip_with_reference", "Analyze using reference frame (not yet available on desktop).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
@@ -588,15 +588,11 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "apply_transition",
-            "Create a GL-style TRANSITION between two clips ON-DEVICE (FFmpeg `xfade`) and add the combined " +
-                "result as a new clip. Use for \"add a crossfade/dissolve between these\", \"wipe from this " +
-                "to that\", \"put a transition here\". type is any xfade transition: fade, fadeblack, " +
-                "fadewhite, wipeleft/right/up/down, slideleft/right/up/down, circleopen, circleclose, " +
-                "dissolve, pixelize, radial, smoothleft, distance, and more (default fade). duration_sec " +
-                "is the overlap (default 1). NOTE: not yet wired on desktop — a faithful in-process " +
-                "two-input xfade needs precise offset/PTS synchronization that can't be verified here, so " +
-                "this returns an error rather than a bad cut. Single-input filtering (apply_ffmpeg_filter) " +
-                "IS wired.",
+            "Add a cross-dissolve TRANSITION between two clips ON-DEVICE. Use for \"add a crossfade/" +
+                "dissolve between these\", \"put a transition here\". Overlaps the two clips on one track " +
+                "by duration_sec (default 1) so the renderer's built-in crossfade blends them, in both " +
+                "preview and export. type is accepted for API parity but desktop does an opacity " +
+                "cross-dissolve (not per-style xfade wipes).",
             objSchema(
                 "from_clip_id" to stringProp("The outgoing (first) clip"),
                 "to_clip_id" to stringProp("The incoming (second) clip"),
@@ -657,14 +653,14 @@ class DesktopMcpTools(
         "delete_clip" -> deleteClipTool(args.getString("clip_id"))
         "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
         // ---- vision (ML Kit labeling / MediaPipe VLM) → honest stubs ----
-        "analyze_clip", "analyze_clip_with_reference" ->
+        "analyze_clip" -> analyzeClipByPrompt(args.getString("clip_id"))
+        "analyze_clip_with_reference" ->
             visionToolUnavailable(name, "an on-device vision/labeling model")
         "analyze_clip_with_concept" -> analyzeClipWithConcept(
             args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false),
         )
         "describe_current_frame" -> describeCurrentFrame()
-        "caption_frame" ->
-            visionToolUnavailable(name, "an on-device multimodal VLM (Gemma-3n)")
+        "caption_frame" -> captionFrameTool(args.optString("clip_id"))
         "find_highlights" -> findHighlights(
             args.getString("clip_id"),
             args.optDouble("threshold", 0.3).toFloat(),
@@ -689,17 +685,18 @@ class DesktopMcpTools(
             visionToolUnavailable(name, "an on-device TFLite image model")
         "denoise_clip" ->
             visionToolUnavailable(name, "the on-device GTCRN speech-denoiser model")
-        "apply_transition" ->
-            visionToolUnavailable(name, "a verified two-input FFmpeg xfade path")
+        "apply_transition" -> applyTransition(
+            args.getString("from_clip_id"), args.getString("to_clip_id"), args.optDouble("duration_sec", 1.0).toFloat(),
+        )
         // ---- learned-concept data ops → REAL (shared LearnedConcept store) ----
         "list_concepts" -> listConcepts()
         "delete_concept" -> deleteConcept(args.getString("name"))
         "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
         "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
-        "transcribe_precise" -> speechToolUnavailable("transcribe_precise", "an offline Whisper (sherpa-onnx) ASR model")
+        "transcribe_precise" -> transcribeClip(args.getString("clip_id"))
         "add_voiceover" -> speechToolUnavailable("add_voiceover", "an offline neural TTS (sherpa-onnx) voice")
         "diarize_clip" -> speechToolUnavailable("diarize_clip", "the sherpa-onnx speaker-diarization models")
-        "remove_fillers" -> speechToolUnavailable("remove_fillers", "an offline Whisper (sherpa-onnx) ASR model")
+        "remove_fillers" -> removeFillers(args.getString("clip_id"))
         "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
         "create_user_tool" -> createUserTool(args.getString("name"), args.getString("description"))
         "list_user_tools" -> listUserTools()
@@ -1142,6 +1139,120 @@ class DesktopMcpTools(
             )
         }
     }
+
+    /**
+     * Cross-dissolve transition: overlap [toClipId] onto the end of [fromClipId] on the same track so
+     * the desktop renderer's built-in crossfade blends them (it already fades two overlapping clips).
+     * Real — no FFmpeg bake. `type` is ignored (desktop does an opacity cross-dissolve).
+     */
+    private fun applyTransition(fromClipId: String, toClipId: String, durationSec: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        val from = doc.clips.firstOrNull { it.id == fromClipId }
+            ?: throw IllegalArgumentException("Clip not found: $fromClipId")
+        val to = doc.clips.firstOrNull { it.id == toClipId }
+            ?: throw IllegalArgumentException("Clip not found: $toClipId")
+        val durMs = (durationSec.coerceIn(0.1f, 5f) * 1000f).toLong().coerceAtMost(minOf(from.durationMs, to.durationMs))
+        val newStart = (from.endTimeMs - durMs).coerceAtLeast(0)
+        vm.updateClip(toClipId) { it.copy(startTimeMs = newStart, trackId = from.trackId) }
+        return ok().apply {
+            put("overlapMs", durMs)
+            put("humanSummary", "Cross-dissolve: overlapped the clips by ${msFmt(durMs)} so they blend on-device.")
+        }
+    }
+
+    /** Remove filler words ("um", "uh", …) using on-device Vosk word timings + real cuts. */
+    private fun removeFillers(clipId: String): JSONObject {
+        val model = settingsProvider().speechModelPath
+        require(model.isNotBlank()) { "No on-device speech model set. Set a Vosk model in Settings → Transcription." }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 16_000) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to analyze.")
+        val fillers = setOf("um", "umm", "uh", "uhh", "erm", "er", "ah", "hmm", "mmm", "like")
+        val srcStart = clip.trimStartMs
+        val srcEnd = clip.trimStartMs + clip.durationMs
+        val words = DesktopVoskTranscriber.transcribe(model, pcm.samples)
+            .flatMap { it.words }
+            .filter { it.word.trim().lowercase().trim('.', ',', '?', '!') in fillers }
+            .filter { it.startMs in srcStart until srcEnd }
+            .sortedBy { it.startMs }
+        if (words.isEmpty()) return ok().apply { put("humanSummary", "No filler words found.") }
+        val edits = ArrayList<EditSegment>()
+        for (w in words) {
+            val last = edits.lastOrNull()
+            if (last != null && w.startMs <= last.endMs + 150) {
+                edits[edits.size - 1] = last.copy(endMs = maxOf(last.endMs, w.endMs))
+            } else {
+                edits += EditSegment(w.startMs, w.endMs, com.hereliesaz.guillotine.model.EditAction.REMOVE, "filler: ${w.word}")
+            }
+        }
+        vm.applyCuts(clipId, edits)
+        val removedMs = edits.sumOf { it.endMs - it.startMs }
+        return ok().apply {
+            put("removed", words.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Removed ${words.size} filler word(s) (${msFmt(removedMs)}).")
+        }
+    }
+
+    /**
+     * Prompt-driven analysis via the on-device labeler — desktop's take on `analyze_clip`. Labels
+     * sampled windows and keeps the ones whose labels match the clip's prompt, cutting the rest (only
+     * when at least one window matches, so a total miss never nukes the clip). Label-based, not a VLM.
+     */
+    private fun analyzeClipByPrompt(clipId: String): JSONObject {
+        val model = settingsProvider().labelModelPath
+        require(model.isNotBlank()) { "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search." }
+        require(File(model).isFile) { "The image-labeling model file does not exist at: $model" }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        require(clip.prompt.isNotBlank()) { "Clip has no prompt. Use set_prompt first, e.g. \"the parts with a dog\"." }
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val promptWords = clip.prompt.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 2 }.toSet()
+        val dur = clip.durationMs
+        require(dur > 0) { "Clip has no duration to analyze." }
+        val step = maxOf(500L, dur / 40)
+        data class Win(val start: Long, val end: Long, val match: Boolean)
+        val wins = ArrayList<Win>()
+        var srcMs = clip.trimStartMs
+        val endSrc = clip.trimStartMs + dur
+        while (srcMs < endSrc) {
+            val winEnd = minOf(srcMs + step, endSrc)
+            val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, srcMs) }
+            val match = frame != null && DesktopImageLabeler.labels(model, frame, topK = 5).any { lbl ->
+                val lw = lbl.text.lowercase()
+                promptWords.any { pw -> pw in lw } || lw.split(Regex("[^a-z0-9]+")).any { it.length > 2 && it in promptWords }
+            }
+            wins += Win(srcMs, winEnd, match)
+            srcMs = winEnd
+        }
+        if (wins.none { it.match }) {
+            return ok().apply { put("humanSummary", "Nothing matched \"${clip.prompt}\" — left the clip unchanged.") }
+        }
+        val edits = ArrayList<EditSegment>()
+        for (wn in wins.filter { !it.match }) {
+            val last = edits.lastOrNull()
+            if (last != null && wn.start <= last.endMs) {
+                edits[edits.size - 1] = last.copy(endMs = maxOf(last.endMs, wn.end))
+            } else {
+                edits += EditSegment(wn.start, wn.end, com.hereliesaz.guillotine.model.EditAction.REMOVE, "not \"${clip.prompt}\"")
+            }
+        }
+        if (edits.isEmpty()) return ok().apply { put("humanSummary", "Every part matched — nothing to cut.") }
+        vm.applyCuts(clipId, edits)
+        val removedMs = edits.sumOf { it.endMs - it.startMs }
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("segmentsRemoved", edits.size)
+            put("clipCount", n)
+            put("humanSummary", "Kept the parts matching \"${clip.prompt}\": cut ${edits.size} range(s) (${msFmt(removedMs)}). Timeline now $n clip(s).")
+        }
+    }
+
+    /** Caption the playhead frame. Desktop has no on-device VLM, so this is the honest label-based
+     *  description (same as describe_current_frame); [clipId] is accepted for API parity. */
+    private fun captionFrameTool(clipId: String): JSONObject = describeCurrentFrame()
 
     // ---- learned concepts: pure data ops on the shared LearnedConcept store (REAL on desktop) ----
 

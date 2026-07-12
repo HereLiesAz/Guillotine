@@ -281,20 +281,22 @@ separation and image labeling already ride this path.
   classifier (`DesktopImageLabeler`), `find_highlights` to an ONNX YAMNet audio-event model
   (`DesktopYamnet`), and the learned-concept pair `add_reference` / `analyze_clip_with_concept` to an
   ONNX image embedder (`DesktopImageEmbedder`, frame-level cosine matching → real cuts). `analyze_clip`
-  (prompt-driven cut analysis) and `caption_frame` (VLM) remain.
+  (prompt-driven cut analysis) and `caption_frame` are wired label-based (the labeler + the clip prompt;
+  desktop has no on-device VLM). All vision/labeling tools are now on-device.
 - **Face / segmentation** — `auto_reframe` and `blur_faces` are wired to an ONNX UltraFace-style face
   detector (`DesktopFaceDetector`). `auto_reframe` follows the main face with OFFSET_X keyframes;
   `blur_faces` tracks the face and drops a pre-blurred patch on a track above it, keyframed to follow
   (`DesktopFaceBlur` + `EditorViewModel.addFaceBlurOverlay`) — so it renders in preview + export via
   the keyframe system, no per-frame render pass. `replace_background` (needs a selfie-segmentation
   matte composite) remains.
-- **Speech models** — `transcribe_precise`, `add_voiceover`, `diarize_clip`, `remove_fillers` use
-  sherpa-onnx on Android, which has no clean desktop-JVM artifact yet; wire when one lands (or run the
-  underlying ONNX graphs directly).
+- **Speech models** — `transcribe_precise` and `remove_fillers` are wired via the on-device Vosk
+  transcriber (word timings → real cuts for filler removal). `add_voiceover` (neural TTS) and
+  `diarize_clip` (speaker diarization) still need sherpa-onnx models with no clean desktop-JVM artifact.
 - **Image models / inpaint** — `apply_image_effect`, `apply_bokeh` (TFLite depth on Android),
   `remove_object_generative`.
-- **`apply_transition`** — a two-input `xfade`+`acrossfade` JavaCV `FFmpegFrameFilter` graph exists but
-  needs a real-clip smoke test before it's promoted from stub.
+- **`apply_transition`** — wired as a cross-dissolve by overlapping the two clips on one track, which
+  the renderer's built-in crossfade blends (preview + export). Per-style xfade wipes (slide/circle/…)
+  would still need a real two-input filtergraph.
 - **GLSL shader rendering** — `apply_shader` records params but doesn't render; desktop needs a
   GL/Skia pass, not the per-pixel `BufferedImage` path.
 
