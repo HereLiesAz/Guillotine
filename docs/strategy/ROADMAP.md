@@ -52,14 +52,31 @@ Add the adoption drivers *without* removing the pro depth.
 ### Phase 2 — The AI wedge, productized (the thing only Guillotine can honestly claim)
 - Make **"tell it what to cut, it cuts"** reliably the headline experience — the on-device analyzer +
   agent loop has to *just work* on real footage.
-- **Desktop AI parity** — unstub the on-device AI tools on desktop so the cross-platform story is true.
+- **Desktop AI parity — largely done.** The desktop tool surface is now **61/66 functional** (all 66
+  defined; every tool with a real on-device desktop-JVM path is wired via the ONNX-Runtime-for-JVM
+  foundation — labeling, YAMNet highlights, face detect/blur, segmentation matte/bokeh, Vosk speech +
+  filler removal, concept matching, transitions). The five stubs left need a runtime with no
+  desktop-JVM form (neural TTS, diarization, TFLite, GLSL execution, cloud inpaint) and are kept as
+  honest errors, not cloud-faked — the on-device invariant stays intact cross-platform. Remaining:
+  on-device *smoke tests* of the ONNX paths with real models, and closing the preview-vs-export gap on
+  the segmentation effects.
 - **Opt-in cloud AI credits** for generative tasks too heavy to run locally — the primary *scalable*
   revenue lever, strictly opt-in so the privacy promise holds (see `FINANCIAL.md`).
 
 ### Phase 3 — Ecosystem & moat
-- **Plugin / LUT / shader marketplace** (revenue share) once there's an install base — the MCP server +
-  the extensibility ecosystem already make this possible.
-- **The external-MCP-control story** for power users (any AI can drive the editor) as a differentiator.
+- **azphalt — the extension standard (now real, separate repo, MIT).** The "someday plugin store" is now
+  a concrete play, and a bigger one than a Guillotine-only marketplace: **azphalt** is a *vendor-neutral*
+  portable extension standard (the `.azp` package format, a TS SDK, importers that normalize
+  `.abr`/`.kpp`/`.cube`/… into `.azp`, a reference runtime, and a registry) — write an extension once, run
+  it in **any** adopting app. The **registry** (`@azphalt/registry`) and a Next.js **consignment
+  storefront** are built and tested; the two-lane design keeps a free open registry separate from the
+  paid consignment marketplace (the only place a fee lives). Strategy: Guillotine becomes a **conforming
+  host** (rendering the declarative UI schema in Compose, running extensions on a WASM substrate), so the
+  ecosystem isn't locked to Guillotine — which is exactly what makes *other* apps able to adopt it, and
+  what turns a plugin store into a platform. This is a moat CapCut and the closed editors structurally
+  can't copy: an open, portable format nobody else built.
+- **The external-MCP-control story** for power users (any AI can drive the editor) as a differentiator —
+  and the same MCP tool surface is what an azphalt extension can eventually target.
 - **Community + sponsors/grants** maturing into sustained funding.
 
 ### Throughout — distribution & marketing
@@ -100,3 +117,8 @@ that is governance + brand, layered on top of the AGPL code (details in `FINANCI
 - [ ] Apply to **NLnet/NGI Zero**; set up **GitHub Sponsors + Ko-fi**.
 - [ ] Prototype the **quick-edit + auto-captions** on-ramp; make background removal one-tap.
 - [ ] Decide the **ads** question (wind down vs keep) and design the **buy-once Pro** unlock.
+- [x] **Desktop AI parity** — 61/66 tools functional on-device (the rest need runtimes with no
+      desktop-JVM form). Next: on-device smoke tests of the ONNX paths with real models.
+- [ ] **azphalt** — registry + consignment storefront exist; next is the **Guillotine conforming host**
+      (render the UI schema in Compose, run extensions on a WASM substrate) and pointing the importers at
+      the LUT/shader assets the editor already understands.

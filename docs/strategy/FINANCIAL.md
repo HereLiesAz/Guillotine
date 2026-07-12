@@ -94,8 +94,21 @@ goodwill income, not a plan.
   would qualify.
 - **Mozilla MOSS** — on hiatus; the smaller Mozilla Technology Fund is themed.
 
-### F · Ecosystem marketplace — *later*
-LUTs/shaders/plugins with a revenue share, once there's an install base. Needs scale first.
+### F · Ecosystem marketplace (azphalt) — *now a concrete asset; revenue still gated on scale*
+No longer hypothetical. **azphalt** — a separate **MIT** repo — is a vendor-neutral portable extension
+standard (the `.azp` package format + a TS SDK + importers + a registry) with a built, tested Next.js
+**consignment storefront**. Its two-lane design *is* the money model, made explicit:
+- **Free open registry** — no fee; the adoption/neutrality layer (the Open-VSX answer). Keeps the
+  standard adoptable and self-hostable, so no app is forced through a store to use it.
+- **Paid consignment marketplace** — the *only* place a fee lives. Creators who'd rather the platform
+  handle the sale list here; the platform takes a thin cut via a split-payout merchant-of-record
+  (Stripe-Connect-shaped, **not** single-vendor). The `quote()` split (gross → processor + platform fee
+  → seller net) is already modeled, with a fee floor so tiny sales don't run at a loss.
+
+Why it matters financially: it's a **second revenue lane that isn't the editor** and a moat the closed
+editors can't copy (a portable format nobody else built), seeded cheaply because the importers turn
+brushes/LUTs users already own into catalog. But the fee only nets at **volume**, so marketplace income
+stays a *later* line — the standard is the strategic asset now; the revenue follows the install base.
 
 ## Realistic expectations
 
