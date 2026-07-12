@@ -278,9 +278,10 @@ separation and image labeling already ride this path.
 
 **Remaining desktop stubs (each: an ONNX model path in Settings + an inference helper):**
 - **Vision / labeling** — `search_clips` and `describe_current_frame` are wired to an ONNX ImageNet
-  classifier (`DesktopImageLabeler`) and `find_highlights` to an ONNX YAMNet audio-event model
-  (`DesktopYamnet`); `analyze_clip` (prompt-driven cut analysis), `analyze_clip_with_concept`, and
-  `caption_frame` (VLM) remain.
+  classifier (`DesktopImageLabeler`), `find_highlights` to an ONNX YAMNet audio-event model
+  (`DesktopYamnet`), and the learned-concept pair `add_reference` / `analyze_clip_with_concept` to an
+  ONNX image embedder (`DesktopImageEmbedder`, frame-level cosine matching → real cuts). `analyze_clip`
+  (prompt-driven cut analysis) and `caption_frame` (VLM) remain.
 - **Face / segmentation** — `auto_reframe` and `blur_faces` are wired to an ONNX UltraFace-style face
   detector (`DesktopFaceDetector`). `auto_reframe` follows the main face with OFFSET_X keyframes;
   `blur_faces` tracks the face and drops a pre-blurred patch on a track above it, keyframed to follow
@@ -291,7 +292,7 @@ separation and image labeling already ride this path.
   sherpa-onnx on Android, which has no clean desktop-JVM artifact yet; wire when one lands (or run the
   underlying ONNX graphs directly).
 - **Image models / inpaint** — `apply_image_effect`, `apply_bokeh` (TFLite depth on Android),
-  `remove_object_generative`, `add_reference` (image/face embedder).
+  `remove_object_generative`.
 - **`apply_transition`** — a two-input `xfade`+`acrossfade` JavaCV `FFmpegFrameFilter` graph exists but
   needs a real-clip smoke test before it's promoted from stub.
 - **GLSL shader rendering** — `apply_shader` records params but doesn't render; desktop needs a

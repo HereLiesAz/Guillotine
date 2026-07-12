@@ -93,6 +93,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var labelModelPath by remember { mutableStateOf(current.labelModelPath) }
     var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
     var faceDetectModelPath by remember { mutableStateOf(current.faceDetectModelPath) }
+    var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     val uriHandler = LocalUriHandler.current
 
@@ -252,7 +253,22 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     )
                     Text(
                         "Point at an UltraFace-style ONNX face detector to enable on-device " +
-                            "auto-reframe (punch in and pan to follow the main face). Blank = off.",
+                            "auto-reframe (punch in and pan to follow the main face) and face blur. Blank = off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Concept matching (on-device)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = idEmbedModelPath,
+                        onValueChange = { idEmbedModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Image-embedding model (.onnx)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Point at an ONNX image embedder (a classifier with its head removed → a feature " +
+                            "vector) to teach and find things (add_reference / analyze_clip_with_concept). Blank = off.",
                         color = Neutral500, fontSize = 10.sp,
                     )
                 }
@@ -311,6 +327,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             labelModelPath = labelModelPath.trim(),
                             audioEventModelPath = audioEventModelPath.trim(),
                             faceDetectModelPath = faceDetectModelPath.trim(),
+                            idEmbedModelPath = idEmbedModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                         ),
                     )

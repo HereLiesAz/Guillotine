@@ -14,6 +14,7 @@ import com.hereliesaz.guillotine.ai.gen.PollConfig
 import com.hereliesaz.guillotine.ai.gen.meta
 import com.hereliesaz.guillotine.desktop.media.DesktopFaceBlur
 import com.hereliesaz.guillotine.desktop.media.DesktopFaceDetector
+import com.hereliesaz.guillotine.desktop.media.DesktopImageEmbedder
 import com.hereliesaz.guillotine.desktop.media.DesktopFfmpegFilter
 import com.hereliesaz.guillotine.desktop.media.DesktopImageLabeler
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
@@ -22,6 +23,7 @@ import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
 import com.hereliesaz.guillotine.desktop.media.DesktopYamnet
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.editor.FACE_BLUR_PREFIX
+import com.hereliesaz.guillotine.model.LearnedConcept
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.mcp.boolProp
 import com.hereliesaz.guillotine.mcp.intProp
@@ -657,8 +659,9 @@ class DesktopMcpTools(
         // ---- vision (ML Kit labeling / MediaPipe VLM) → honest stubs ----
         "analyze_clip", "analyze_clip_with_reference" ->
             visionToolUnavailable(name, "an on-device vision/labeling model")
-        "analyze_clip_with_concept" ->
-            visionToolUnavailable(name, "an on-device vision/embedding model")
+        "analyze_clip_with_concept" -> analyzeClipWithConcept(
+            args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false),
+        )
         "describe_current_frame" -> describeCurrentFrame()
         "caption_frame" ->
             visionToolUnavailable(name, "an on-device multimodal VLM (Gemma-3n)")
@@ -677,8 +680,9 @@ class DesktopMcpTools(
         "replace_background" ->
             visionToolUnavailable(name, "an on-device subject-segmentation model")
         // ---- concept embedder / image models / inpaint → honest stubs ----
-        "add_reference" ->
-            visionToolUnavailable(name, "an on-device image/face embedder")
+        "add_reference" -> addReference(
+            args.getString("name"), args.optString("term"), args.optBoolean("negative", false),
+        )
         "remove_object_generative" ->
             visionToolUnavailable(name, "an on-device object mask (ML Kit) before cloud repaint")
         "apply_image_effect", "apply_bokeh" ->
@@ -1022,6 +1026,119 @@ class DesktopMcpTools(
             put(
                 "humanSummary",
                 "Tracked the face across ${track.offsetX.size} points and added a blur patch that follows it on a track above.",
+            )
+        }
+    }
+
+    /**
+     * Teach a visual thing by pointing it out (few-shot, on-device) — the desktop analogue of Android's
+     * `add_reference`. Embeds the frame at the playhead via [DesktopImageEmbedder] and stores the
+     * L2-normalized vector as a positive (or, with [negative], a hard-negative) example of the concept
+     * [name] in the shared [LearnedConcept] store. Desktop embeds the WHOLE frame (Android detects
+     * per-object first); honest about being frame-level. Requires the concept-embedding model.
+     */
+    private fun addReference(name: String, term: String, negative: Boolean): JSONObject {
+        require(name.isNotBlank()) { "Give the thing a name, e.g. \"Rex\"." }
+        val model = settingsProvider().idEmbedModelPath
+        require(model.isNotBlank()) {
+            "No concept-embedding model set. Add an ONNX embedder in Settings → AI Analyzer → Concept matching."
+        }
+        require(File(model).isFile) { "The concept-embedding model file does not exist at: $model" }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(st.document.clips, ClipType.VIDEO, now)
+            ?: throw IllegalStateException("No video clip at the playhead to capture from — scrub to the thing first.")
+        val media = st.document.mediaFor(clip) ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs) }
+            ?: throw IllegalStateException("Could not read the current frame.")
+        val vec = DesktopImageEmbedder.embed(model, frame).toList()
+        val terms = if (term.isBlank()) emptyList() else listOf(term.trim().lowercase())
+        val key = name.trim()
+        val concepts = DesktopLearnedConceptStore.load()
+        val existing = concepts.firstOrNull { it.name.equals(key, ignoreCase = true) }
+        val updated = when {
+            existing != null && negative -> existing.copy(negatives = existing.negatives + listOf(vec), terms = (existing.terms + terms).distinct())
+            existing != null -> existing.copy(examples = existing.examples + listOf(vec), terms = (existing.terms + terms).distinct())
+            negative -> LearnedConcept(key, terms, emptyList(), listOf(vec))
+            else -> LearnedConcept(key, terms, listOf(vec))
+        }
+        DesktopLearnedConceptStore.save(concepts.filterNot { it.name.equals(key, ignoreCase = true) } + updated)
+        return ok().apply {
+            put("name", updated.name)
+            put("exampleCount", updated.exampleCount)
+            put("negativeCount", updated.negativeCount)
+            put(
+                "humanSummary",
+                if (negative) "Learned a non-example for \"${updated.name}\" (${updated.negativeCount} total)."
+                else "Learned \"${updated.name}\" (${updated.exampleCount} example(s)).",
+            )
+        }
+    }
+
+    /**
+     * Find/keep a learned thing in a clip — the desktop analogue of `analyze_clip_with_concept`. Samples
+     * the clip, embeds each window ([DesktopImageEmbedder]), and matches it to the concept's positive
+     * examples (a window matches when its best positive cosine clears a threshold and beats every
+     * negative). With [keepOnly] the non-matching windows are cut; otherwise the matching windows are
+     * cut. Cuts are applied for real via [EditorViewModel.applyCuts]. Requires the embedding model.
+     */
+    private fun analyzeClipWithConcept(clipId: String, name: String, keepOnly: Boolean): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val concept = DesktopLearnedConceptStore.get(name)
+            ?: throw IllegalStateException("No learned thing called \"$name\". Point it out first with add_reference.")
+        require(concept.examples.isNotEmpty()) { "\"$name\" has no examples yet — point it out with add_reference." }
+        val model = settingsProvider().idEmbedModelPath
+        require(model.isNotBlank()) {
+            "No concept-embedding model set. Add an ONNX embedder in Settings → AI Analyzer → Concept matching."
+        }
+        require(File(model).isFile) { "The concept-embedding model file does not exist at: $model" }
+        val positives = concept.examples.map { it.toFloatArray() }
+        val negatives = concept.negatives.map { it.toFloatArray() }
+        val dur = clip.durationMs
+        require(dur > 0) { "Clip has no duration to analyze." }
+        val step = maxOf(500L, dur / 40)
+        val threshold = 0.55f
+        // Build REMOVE segments (source ms) directly, merging contiguous windows.
+        val edits = ArrayList<EditSegment>()
+        var srcMs = clip.trimStartMs
+        val endSrc = clip.trimStartMs + dur
+        while (srcMs < endSrc) {
+            val winEnd = minOf(srcMs + step, endSrc)
+            val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, srcMs) }
+            val match = if (frame == null) false else {
+                val e = DesktopImageEmbedder.embed(model, frame)
+                val maxPos = positives.maxOf { DesktopImageEmbedder.cosine(e, it) }
+                val maxNeg = if (negatives.isEmpty()) -1f else negatives.maxOf { DesktopImageEmbedder.cosine(e, it) }
+                maxPos >= threshold && maxPos > maxNeg
+            }
+            val remove = if (keepOnly) !match else match
+            if (remove) {
+                val last = edits.lastOrNull()
+                if (last != null && srcMs <= last.endMs) {
+                    edits[edits.size - 1] = last.copy(endMs = maxOf(last.endMs, winEnd))
+                } else {
+                    edits += EditSegment(srcMs, winEnd, com.hereliesaz.guillotine.model.EditAction.REMOVE, if (keepOnly) "not \"$name\"" else "\"$name\"")
+                }
+            }
+            srcMs = winEnd
+        }
+        if (edits.isEmpty()) {
+            return ok().apply {
+                put("humanSummary", if (keepOnly) "Every part matched \"$name\" — nothing removed." else "No part matched \"$name\" — nothing removed.")
+            }
+        }
+        vm.applyCuts(clipId, edits)
+        val removedMs = edits.sumOf { it.endMs - it.startMs }
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("segmentsRemoved", edits.size)
+            put("clipCount", n)
+            put(
+                "humanSummary",
+                "${if (keepOnly) "Kept only" else "Removed"} \"$name\": cut ${edits.size} range(s) (${msFmt(removedMs)}). Timeline now $n clip(s).",
             )
         }
     }
