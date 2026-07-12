@@ -277,10 +277,10 @@ on-device/private promise — only the model download touches the network, infer
 separation and image labeling already ride this path.
 
 **Remaining desktop stubs (each: an ONNX model path in Settings + an inference helper):**
-- **Vision / labeling** — `search_clips` is wired to an ONNX ImageNet classifier
-  (`DesktopImageLabeler`) and `find_highlights` to an ONNX YAMNet audio-event model
-  (`DesktopYamnet`); `analyze_clip` (prompt-driven cut analysis), `analyze_clip_with_concept`,
-  `describe_current_frame`, and `caption_frame` (VLM) remain.
+- **Vision / labeling** — `search_clips` and `describe_current_frame` are wired to an ONNX ImageNet
+  classifier (`DesktopImageLabeler`) and `find_highlights` to an ONNX YAMNet audio-event model
+  (`DesktopYamnet`); `analyze_clip` (prompt-driven cut analysis), `analyze_clip_with_concept`, and
+  `caption_frame` (VLM) remain.
 - **Face / segmentation** — `auto_reframe` is wired to an ONNX UltraFace-style face detector
   (`DesktopFaceDetector`, follows the main face with OFFSET_X keyframes); `blur_faces` (needs a
   per-frame blur pass in preview + export) and `replace_background` (needs a selfie-segmentation

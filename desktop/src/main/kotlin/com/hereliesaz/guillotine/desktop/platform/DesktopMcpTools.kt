@@ -70,7 +70,7 @@ class DesktopMcpTools(
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("remove_object_generative", "Remove object with inpainting (not yet available on desktop).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
-        put(toolDefinition("describe_current_frame", "Describe the current preview frame (not yet available on desktop).", emptySchema()))
+        put(toolDefinition("describe_current_frame", "Describe the video frame at the playhead using on-device image labels (needs the footage-search model).", emptySchema()))
         put(toolDefinition(
             "transcribe_clip",
             "Transcribe a clip's audio ON-DEVICE (offline Vosk, no key/network) and add timed caption " +
@@ -657,8 +657,7 @@ class DesktopMcpTools(
             visionToolUnavailable(name, "an on-device vision/labeling model")
         "analyze_clip_with_concept" ->
             visionToolUnavailable(name, "an on-device vision/embedding model")
-        "describe_current_frame" ->
-            visionToolUnavailable(name, "an on-device object-detection model")
+        "describe_current_frame" -> describeCurrentFrame()
         "caption_frame" ->
             visionToolUnavailable(name, "an on-device multimodal VLM (Gemma-3n)")
         "find_highlights" -> findHighlights(
@@ -949,6 +948,41 @@ class DesktopMcpTools(
         return ok().apply {
             put("keyframes", points.size)
             put("humanSummary", "Auto-reframed: punched in ${z}× and panned across ${points.size} points to follow the face.")
+        }
+    }
+
+    /**
+     * Describe the video frame at the playhead using the on-device ONNX image labeler — the desktop
+     * analogue of Android's `describe_current_frame`. Android runs an object detector; desktop reuses
+     * [DesktopImageLabeler] (the footage-search classifier) to name the frame's most likely contents.
+     * Honest about being label-based, not box-level object detection. Requires the footage-search model.
+     */
+    private fun describeCurrentFrame(): JSONObject {
+        val model = settingsProvider().labelModelPath
+        require(model.isNotBlank()) {
+            "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search."
+        }
+        require(File(model).isFile) { "The image-labeling model file does not exist at: $model" }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(st.document.clips, ClipType.VIDEO, now)
+            ?: return JSONObject().put("error", "No video clip at the playhead — scrub onto one.")
+        val media = st.document.mediaFor(clip)
+            ?: return JSONObject().put("error", "Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs) }
+            ?: return JSONObject().put("error", "Could not extract the current preview frame.")
+        val labels = DesktopImageLabeler.labels(model, frame, topK = 5)
+        val topDesc = labels.take(3).joinToString(", ") { "${it.text} (${(it.confidence * 100).toInt()}%)" }
+        return ok().apply {
+            put("clipId", clip.id)
+            put("labels", JSONArray().apply {
+                labels.forEach { put(JSONObject().put("label", it.text).put("confidence", (it.confidence * 100).toInt())) }
+            })
+            put(
+                "humanSummary",
+                if (topDesc.isBlank()) "Couldn't recognize the frame's contents." else "This frame looks like: $topDesc.",
+            )
         }
     }
 
