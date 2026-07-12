@@ -43,31 +43,35 @@ object DesktopFaceDetector {
         val input = preprocess(image, w, h)
         val inputName = session.inputNames.first()
 
-        OnnxTensor.createTensor(DesktopOnnx.environment, FloatBuffer.wrap(input), longArrayOf(1, 3, h.toLong(), w.toLong()))
+        return OnnxTensor.createTensor(DesktopOnnx.environment, FloatBuffer.wrap(input), longArrayOf(1, 3, h.toLong(), w.toLong()))
             .use { tensor ->
                 session.run(mapOf(inputName to tensor)).use { result ->
                     // Disambiguate the two outputs by their trailing dim: 2 → confidences, 4 → boxes.
-                    // OrtSession.Result is keyed by output NAME, so iterate its values, not by index.
+                    // OrtSession.Result is Iterable<Map.Entry<name, value>>, so iterate its entries.
                     var scores: FloatArray? = null
                     var boxes: FloatArray? = null
-                    for (onnxValue in result.values) {
-                        val ot = onnxValue as? OnnxTensor ?: continue
+                    for (entry in result) {
+                        val ot = entry.value as? OnnxTensor ?: continue
                         val last = (ot.info as? TensorInfo)?.shape?.lastOrNull()?.toInt() ?: continue
                         val fb = ot.floatBuffer
                         val arr = FloatArray(fb.remaining()).also { fb.get(it) }
                         if (last == 2) scores = arr else if (last == 4) boxes = arr
                     }
-                    val sc = scores ?: return emptyList()
-                    val bx = boxes ?: return emptyList()
-                    val n = minOf(sc.size / 2, bx.size / 4)
-                    val faces = ArrayList<Face>()
-                    for (i in 0 until n) {
-                        val conf = sc[i * 2 + 1] // index 0 = background, index 1 = face
-                        if (conf >= minScore) {
-                            faces += Face(bx[i * 4], bx[i * 4 + 1], bx[i * 4 + 2], bx[i * 4 + 3], conf)
+                    val sc = scores
+                    val bx = boxes
+                    if (sc == null || bx == null) {
+                        emptyList()
+                    } else {
+                        val n = minOf(sc.size / 2, bx.size / 4)
+                        val faces = ArrayList<Face>()
+                        for (i in 0 until n) {
+                            val conf = sc[i * 2 + 1] // index 0 = background, index 1 = face
+                            if (conf >= minScore) {
+                                faces += Face(bx[i * 4], bx[i * 4 + 1], bx[i * 4 + 2], bx[i * 4 + 3], conf)
+                            }
                         }
+                        faces
                     }
-                    return faces
                 }
             }
     }
