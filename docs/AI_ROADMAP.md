@@ -257,9 +257,11 @@ separately (`DesktopMcpTools`), so it trailed Android's 66 tools. The editor cor
 transitions, color, text, FFmpeg export, cloud assistant) is at parity; the remaining gap is the
 AI-tool surface.
 
-All **66** tools are now *defined* on desktop (the schema is discoverable via `tools/list`), and the
-majority are fully functional; the remainder are honest stubs that return a clear "needs an on-device
-model" error until their model is wired.
+All **66** tools are now *defined* on desktop (the schema is discoverable via `tools/list`), and all
+but **five** are functional. Every tool with a real on-device desktop-JVM path is wired; the last five
+are honest stubs (a clear "needs an on-device model" error) because they require a runtime that has no
+desktop-JVM form, and we do **not** cloud-fake them — keeping the on-device/private invariant is the
+point. They are enumerated at the end of this section.
 
 **Functional on desktop:** the timeline/edit/user-tool tools; cloud generation (`generate_image` /
 `generate_video` / `generate_music`); the beat suite (`get_beat_map`, `cut_to_beats`, `apply_on_beat`,
@@ -276,7 +278,7 @@ Settings exactly like Android (a model *path*, not a bundled binary), so desktop
 on-device/private promise — only the model download touches the network, inference is local. Stem
 separation and image labeling already ride this path.
 
-**Remaining desktop stubs (each: an ONNX model path in Settings + an inference helper):**
+**Wired this pass (each: an ONNX model path in Settings + an inference helper):**
 - **Vision / labeling** — `search_clips` and `describe_current_frame` are wired to an ONNX ImageNet
   classifier (`DesktopImageLabeler`), `find_highlights` to an ONNX YAMNet audio-event model
   (`DesktopYamnet`), and the learned-concept pair `add_reference` / `analyze_clip_with_concept` to an
@@ -300,8 +302,23 @@ separation and image labeling already ride this path.
 - **`apply_transition`** — wired as a cross-dissolve by overlapping the two clips on one track, which
   the renderer's built-in crossfade blends (preview + export). Per-style xfade wipes (slide/circle/…)
   would still need a real two-input filtergraph.
-- **GLSL shader rendering** — `apply_shader` records params but doesn't render; desktop needs a
-  GL/Skia pass, not the per-pixel `BufferedImage` path.
 
 The learned-concept *store* (`shared/model/LearnedConcept.kt`) is already shared, so only the
 embedders/detectors are platform-bound.
+
+**Genuinely blocked — the five honest stubs (no cloud fake).** These need a runtime with no
+desktop-JVM form; doing them would mean either faking ML (never) or sending media off-device (breaks
+the invariant). They error clearly until a real on-device path exists:
+- **`add_voiceover`** — neural TTS. sherpa/Piper have no clean JVM artifact. A pure-Java TTS (MaryTTS)
+  is the only on-device option, and it's a heavy dependency + voices — a deliberate future call.
+- **`diarize_clip`** — speaker diarization (sherpa pyannote segmentation + embedding); no JVM artifact.
+- **`apply_image_effect`** — generic TFLite image models (super-res / style / low-light); TFLite is
+  Android-only, and each effect needs its own bundled model.
+- **`apply_shader`** — GLSL execution. Params parse via the shared `GlslShader`, but rendering needs a
+  GL/Skia pass; a CPU per-pixel interpreter isn't viable.
+- **`remove_object_generative`** — object mask → cloud inpaint. No on-device object-masker to seed it,
+  and no inpaint provider wired.
+
+**Net:** desktop is at **61/66** functional tools — everything except the five above — the highest it
+has ever been, with the on-device invariant intact (only the generation tools touch the network, and
+only for the generated media, exactly as on Android).
