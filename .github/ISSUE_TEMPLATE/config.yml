@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How to contribute
+    url: https://github.com/HereLiesAz/Guillotine/blob/main/CONTRIBUTING.md
+    about: The contribution workflow, the one-line CLA sign-off, and the invariants a PR must respect.
+  - name: Governance & values
+    url: https://github.com/HereLiesAz/Guillotine/blob/main/GOVERNANCE.md
+    about: What the project values and how decisions get made.
