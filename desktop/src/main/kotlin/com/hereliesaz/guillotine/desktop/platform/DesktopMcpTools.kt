@@ -685,7 +685,8 @@ class DesktopMcpTools(
         )
         "remove_object_generative" ->
             visionToolUnavailable(name, "an on-device object mask (ML Kit) before cloud repaint")
-        "apply_image_effect", "apply_bokeh" ->
+        "apply_bokeh" -> applyBokehTool(args.optString("clip_id"))
+        "apply_image_effect" ->
             visionToolUnavailable(name, "an on-device TFLite image model")
         "denoise_clip" ->
             visionToolUnavailable(name, "the on-device GTCRN speech-denoiser model")
@@ -1287,6 +1288,23 @@ class DesktopMcpTools(
         return ok().apply {
             put("clipCount", vm.uiState.value.document.clips.size)
             put("humanSummary", "Replaced the background behind clip ${clip.id} — the subject is matted on export.")
+        }
+    }
+
+    /**
+     * Portrait bokeh: keep the segmented subject sharp and blur the background. Sets the clip's [bokeh]
+     * flag; the export render composites a blurred background behind the matted subject
+     * ([DesktopSegmenter.portraitBlur]). Requires the subject-segmentation model. (Desktop uses subject
+     * segmentation, not a depth model — so it's a portrait blur, not true depth-of-field.)
+     */
+    private fun applyBokehTool(clipId: String): JSONObject {
+        require(settingsProvider().segModelPath.isNotBlank()) {
+            "No subject-segmentation model set. Add an ONNX segmenter in Settings → AI Analyzer → Background removal."
+        }
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(bokeh = true) }
+        return ok().apply {
+            put("humanSummary", "Portrait bokeh on clip ${clip.id} — subject sharp, background blurred (on export).")
         }
     }
 

@@ -24,6 +24,43 @@ object DesktopSegmenter {
     fun matte(img: BufferedImage, modelPath: String): BufferedImage =
         runCatching { matteInternal(img, modelPath) }.getOrDefault(img)
 
+    /**
+     * Portrait bokeh: keep the segmented subject sharp and blur the background. Blurs [img], then
+     * composites the matted (sharp) subject back on top. Returns [img] unchanged on any failure.
+     */
+    fun portraitBlur(img: BufferedImage, modelPath: String): BufferedImage = runCatching {
+        val subject = matteInternal(img, modelPath) // ARGB, subject opaque / background transparent
+        val w = img.width
+        val h = img.height
+        val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val g = out.createGraphics()
+        g.drawImage(smoothBlur(img), 0, 0, w, h, null) // blurred background
+        g.drawImage(subject, 0, 0, null)               // sharp subject over it
+        g.dispose()
+        out
+    }.getOrDefault(img)
+
+    /** Cheap smooth blur: downscale hard, then upscale bilinear. */
+    private fun smoothBlur(img: BufferedImage): BufferedImage {
+        val w = img.width
+        val h = img.height
+        val sw = (w / 12).coerceAtLeast(1)
+        val sh = (h / 12).coerceAtLeast(1)
+        val small = BufferedImage(sw, sh, BufferedImage.TYPE_INT_RGB)
+        small.createGraphics().apply {
+            setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            drawImage(img, 0, 0, sw, sh, null)
+            dispose()
+        }
+        val big = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        big.createGraphics().apply {
+            setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            drawImage(small, 0, 0, w, h, null)
+            dispose()
+        }
+        return big
+    }
+
     private fun matteInternal(img: BufferedImage, modelPath: String): BufferedImage {
         val session = DesktopOnnx.session(modelPath)
         val inShape = runCatching { (session.inputInfo.values.firstOrNull()?.info as? TensorInfo)?.shape }.getOrNull()

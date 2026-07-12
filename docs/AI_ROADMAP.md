@@ -293,8 +293,10 @@ separation and image labeling already ride this path.
 - **Speech models** — `transcribe_precise` and `remove_fillers` are wired via the on-device Vosk
   transcriber (word timings → real cuts for filler removal). `add_voiceover` (neural TTS) and
   `diarize_clip` (speaker diarization) still need sherpa-onnx models with no clean desktop-JVM artifact.
-- **Image models / inpaint** — `apply_image_effect`, `apply_bokeh` (TFLite depth on Android),
-  `remove_object_generative`.
+- **Image models / inpaint** — `apply_bokeh` is wired as a portrait blur (the `DesktopSegmenter`
+  keeps the subject sharp and blurs the background, on export — desktop has no depth model, so it's
+  segmentation-based not true depth-of-field). `apply_image_effect` (generic TFLite superres/style/
+  lowlight) and `remove_object_generative` (object mask + cloud inpaint) remain.
 - **`apply_transition`** — wired as a cross-dissolve by overlapping the two clips on one track, which
   the renderer's built-in crossfade blends (preview + export). Per-style xfade wipes (slide/circle/…)
   would still need a real two-input filtergraph.

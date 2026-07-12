@@ -292,12 +292,14 @@ object DesktopExporter {
             DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
         }
 
-        // Subject matte: replace the background with alpha so the track beneath shows through. Applied
-        // after colour/LUT; only when the clip has removeBackground on AND a segmentation model is set.
-        val drawImg = if (f.removeBackground && DesktopRenderConfig.segModelPath.isNotBlank()) {
-            DesktopSegmenter.matte(img, DesktopRenderConfig.segModelPath)
-        } else {
-            img
+        // Subject segmentation (needs a seg model), applied after colour/LUT:
+        //  • removeBackground → matte the subject to alpha so the track beneath shows through
+        //  • bokeh → keep the subject sharp and blur the background
+        val segModel = DesktopRenderConfig.segModelPath
+        val drawImg = when {
+            f.removeBackground && segModel.isNotBlank() -> DesktopSegmenter.matte(img, segModel)
+            f.bokeh && segModel.isNotBlank() -> DesktopSegmenter.portraitBlur(img, segModel)
+            else -> img
         }
 
         // Keyframed transforms
