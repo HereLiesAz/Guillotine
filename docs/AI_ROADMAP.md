@@ -278,8 +278,9 @@ separation and image labeling already ride this path.
 
 **Remaining desktop stubs (each: an ONNX model path in Settings + an inference helper):**
 - **Vision / labeling** — `search_clips` is wired to an ONNX ImageNet classifier
-  (`DesktopImageLabeler`); `analyze_clip` (prompt-driven cut analysis), `analyze_clip_with_concept`,
-  `describe_current_frame`, `caption_frame` (VLM), and `find_highlights` (YAMNet audio-event) remain.
+  (`DesktopImageLabeler`) and `find_highlights` to an ONNX YAMNet audio-event model
+  (`DesktopYamnet`); `analyze_clip` (prompt-driven cut analysis), `analyze_clip_with_concept`,
+  `describe_current_frame`, and `caption_frame` (VLM) remain.
 - **Face / segmentation** — `blur_faces`, `auto_reframe`, `replace_background` need an ONNX
   face-detector / selfie-segmentation model.
 - **Speech models** — `transcribe_precise`, `add_voiceover`, `diarize_clip`, `remove_fillers` use

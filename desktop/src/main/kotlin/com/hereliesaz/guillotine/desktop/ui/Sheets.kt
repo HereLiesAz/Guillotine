@@ -91,6 +91,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
     var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
     var labelModelPath by remember { mutableStateOf(current.labelModelPath) }
+    var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     val uriHandler = LocalUriHandler.current
 
@@ -223,6 +224,21 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "tools use a cloud provider above.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+
+                    Text("Audio highlights (on-device)", color = Neutral400, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = audioEventModelPath,
+                        onValueChange = { audioEventModelPath = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("YAMNet audio-event model (.onnx)", color = Neutral500, fontSize = 12.sp) },
+                        textStyle = TextStyle(color = White, fontSize = 12.sp),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Point at a YAMNet ONNX export to enable on-device highlight detection " +
+                            "(\"find the best moments\" — applause, cheering, laughter, music). Blank = off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 1 -> {
                     Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
@@ -277,6 +293,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             speechModelPath = speechModelPath.trim(),
                             agentModelPath = agentModelPath.trim(),
                             labelModelPath = labelModelPath.trim(),
+                            audioEventModelPath = audioEventModelPath.trim(),
                             frameAnalysisCacheSize = frameAnalysisCacheSize,
                         ),
                     )

@@ -17,6 +17,7 @@ import com.hereliesaz.guillotine.desktop.media.DesktopImageLabeler
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaImport
 import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
+import com.hereliesaz.guillotine.desktop.media.DesktopYamnet
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.mcp.boolProp
@@ -659,8 +660,11 @@ class DesktopMcpTools(
             visionToolUnavailable(name, "an on-device object-detection model")
         "caption_frame" ->
             visionToolUnavailable(name, "an on-device multimodal VLM (Gemma-3n)")
-        "find_highlights" ->
-            visionToolUnavailable(name, "the on-device YAMNet audio-event model")
+        "find_highlights" -> findHighlights(
+            args.getString("clip_id"),
+            args.optDouble("threshold", 0.3).toFloat(),
+            args.optBoolean("split", true),
+        )
         "search_clips" -> searchClips(args.getString("query"))
         // ---- face / segmentation (ML Kit) → honest stubs ----
         "blur_faces", "auto_reframe" ->
@@ -815,6 +819,76 @@ class DesktopMcpTools(
                 "humanSummary",
                 if (found == 0) "No clips matched \"$query\"." else "Found $found clip(s) matching \"$query\".",
             )
+        }
+    }
+
+    /**
+     * Audio-event highlight detection ("find the best moments") via the on-device ONNX YAMNet model —
+     * the desktop analogue of Android's TFLite `find_highlights`. Decodes the clip's audio to 16 kHz
+     * mono, scans it in ~1 s windows through [DesktopYamnet], merges consecutive highlight windows
+     * (≤1.5 s gap) into ranges, and (when [split]) cuts the clip at each range boundary so every best
+     * moment becomes its own piece. Requires the YAMNet model set in Settings → AI Analyzer → Audio
+     * highlights; relays its error rather than faking a result.
+     */
+    private fun findHighlights(clipId: String, threshold: Float, split: Boolean): JSONObject {
+        val path = settingsProvider().audioEventModelPath
+        require(path.isNotBlank()) {
+            "No audio-event model set. Add a YAMNet .onnx in Settings → AI Analyzer → Audio highlights."
+        }
+        require(File(path).isFile) { "The audio-event model file does not exist at: $path" }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, DesktopYamnet.SAMPLE_RATE) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to analyze.")
+        // decodePcmMono decodes the WHOLE media, so drop hits outside the clip's trimmed source window
+        // (else a trimmed-out highlight maps to a zero-length range at the clip boundary).
+        val frameMs = DesktopYamnet.FRAME * 1000L / DesktopYamnet.SAMPLE_RATE
+        val srcStart = clip.trimStartMs
+        val srcEnd = clip.trimStartMs + clip.durationMs
+        val hits = DesktopYamnet.scanHighlights(path, pcm.samples, threshold.coerceIn(0.05f, 0.95f))
+            .filter { it.startMs < srcEnd && it.startMs + frameMs > srcStart }
+        if (hits.isEmpty()) {
+            return ok().apply {
+                put("highlightCount", 0)
+                put("humanSummary", "No highlight-worthy audio events found (try a lower threshold).")
+            }
+        }
+        class Range(val startMs: Long, var endMs: Long, val labels: MutableMap<String, Int>)
+        val ranges = ArrayList<Range>()
+        for (h in hits.sortedBy { it.startMs }) {
+            val last = ranges.lastOrNull()
+            if (last != null && h.startMs - last.endMs <= 1500L) {
+                last.endMs = h.startMs + frameMs
+                last.labels[h.label] = (last.labels[h.label] ?: 0) + 1
+            } else {
+                ranges += Range(h.startMs, h.startMs + frameMs, mutableMapOf(h.label to 1))
+            }
+        }
+        // Source ms → timeline ms, clamped to the clip's placement.
+        fun toTimeline(srcMs: Long) = (clip.startTimeMs + (srcMs - clip.trimStartMs))
+            .coerceIn(clip.startTimeMs, clip.endTimeMs)
+        val arr = JSONArray()
+        val boundaries = sortedSetOf<Long>()
+        ranges.forEach { r ->
+            val s = toTimeline(r.startMs); val e = toTimeline(r.endMs)
+            val label = r.labels.maxByOrNull { it.value }?.key ?: "event"
+            arr.put(JSONObject().apply { put("startMs", s); put("endMs", e); put("event", label) })
+            if (s > clip.startTimeMs && s < clip.endTimeMs) boundaries += s
+            if (e > clip.startTimeMs && e < clip.endTimeMs) boundaries += e
+        }
+        var splitInfo = ""
+        if (split && boundaries.isNotEmpty()) {
+            vm.splitClipAt(clipId, boundaries.toList())
+            splitInfo = " Split at ${boundaries.size} boundaries so each best moment is its own clip."
+        }
+        val topLabels = ranges.flatMap { it.labels.keys }.distinct().take(4).joinToString(", ")
+        return ok().apply {
+            put("highlightCount", ranges.size)
+            put("highlights", arr)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Found ${ranges.size} highlight moment(s) — $topLabels.$splitInfo")
         }
     }
 
