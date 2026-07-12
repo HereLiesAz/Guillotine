@@ -47,10 +47,11 @@ object DesktopFaceDetector {
             .use { tensor ->
                 session.run(mapOf(inputName to tensor)).use { result ->
                     // Disambiguate the two outputs by their trailing dim: 2 → confidences, 4 → boxes.
+                    // OrtSession.Result is keyed by output NAME, so iterate its values, not by index.
                     var scores: FloatArray? = null
                     var boxes: FloatArray? = null
-                    for (i in 0 until result.size()) {
-                        val ot = result[i] as? OnnxTensor ?: continue
+                    for (onnxValue in result.values) {
+                        val ot = onnxValue as? OnnxTensor ?: continue
                         val last = (ot.info as? TensorInfo)?.shape?.lastOrNull()?.toInt() ?: continue
                         val fb = ot.floatBuffer
                         val arr = FloatArray(fb.remaining()).also { fb.get(it) }

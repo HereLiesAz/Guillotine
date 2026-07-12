@@ -938,8 +938,10 @@ class DesktopMcpTools(
         val points = samples.mapIndexed { i, (relMs, _) ->
             val lo = maxOf(0, i - 1); val hi = minOf(samples.size - 1, i + 1)
             val avgCx = (lo..hi).map { samples[it].second }.average().toFloat()
-            // Subject right of center → pan the image left (negative offset) to recenter.
-            val offsetX = ((0.5f - avgCx) * 2f * maxPan).coerceIn(-maxPan, maxPan)
+            // Subject right of center → pan the image left (negative offset) to recenter. OFFSET_X is a
+            // fraction of frame width (desktop render: image centre = canvasW/2 + ox*canvasW), so pan by
+            // the face's own offset from centre, bounded to the in-frame limit.
+            val offsetX = (0.5f - avgCx).coerceIn(-maxPan, maxPan)
             Triple(relMs, offsetX, ease)
         }
         vm.updateClip(clipId) { it.copy(scale = z) }
