@@ -104,9 +104,8 @@ months.
 - **Missing the adoption drivers:** no templates/trends engine, no licensed music library + beat-sync
   surfaced as a first-class flow, no stickers, no one-tap social publish.
 - **Setup friction:** BYO keys, model downloads, unsigned desktop installers, not prominent on app stores.
-- **Maturity:** pre-1.0 (v0.9); features exist that are built-but-lightly-verified. (Desktop AI is no
-  longer the gap it was — the desktop tool surface is now **61/66 functional on-device**, closing the
-  cross-platform story; the caveat is now *verification*, not *absence*.)
+- **Maturity:** pre-1.0 (v0.9); some on-device AI is Android-first (desktop stubs); features exist that
+  are built-but-lightly-verified.
 - **Distribution & marketing ≈ zero** — the single biggest practical gap. A better editor nobody can find
   loses to a worse one everybody has.
 - The **"AI drives the editor via tools"** idea is powerful but abstract to someone who just wants a
@@ -136,12 +135,6 @@ text — never your frames), which is a defensible, honest differentiator.
    positioning.
 6. **Fix distribution first (see ROADMAP.md).** Store presence + signed installers + a sharp landing page
    are prerequisites to any of the above mattering.
-7. **The emerging platform moat (azphalt).** Guillotine now anchors a *vendor-neutral* portable extension
-   standard — **azphalt** (the `.azp` format + SDK + importers + registry + a built consignment
-   storefront, a separate MIT repo). It's early and orthogonal to mainstream adoption, but strategically
-   it's a moat the closed editors structurally can't match — a portable, self-hostable format other apps
-   can adopt (not a walled plugin silo) — plus a second, non-editor revenue lane (consignment) for later.
-   Don't let it distract from the captions + distribution on-ramp, but it's a real differentiator to name.
 
 ## Sources
 
