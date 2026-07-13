@@ -292,6 +292,16 @@ object DesktopExporter {
             DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
         }
 
+        // Subject segmentation (needs a seg model), applied after colour/LUT:
+        //  • removeBackground → matte the subject to alpha so the track beneath shows through
+        //  • bokeh → keep the subject sharp and blur the background
+        val segModel = DesktopRenderConfig.segModelPath
+        val drawImg = when {
+            f.removeBackground && segModel.isNotBlank() -> DesktopSegmenter.matte(img, segModel)
+            f.bokeh && segModel.isNotBlank() -> DesktopSegmenter.portraitBlur(img, segModel)
+            else -> img
+        }
+
         // Keyframed transforms
         val scale = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
         val rotation = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
@@ -317,7 +327,7 @@ object DesktopExporter {
         transform.scale(fitScale * scale, fitScale * scale)
 
         g.transform = transform
-        g.drawImage(img, 0, 0, null)
+        g.drawImage(drawImg, 0, 0, null)
         g.transform = prevTransform
         g.composite = prevComposite
     }

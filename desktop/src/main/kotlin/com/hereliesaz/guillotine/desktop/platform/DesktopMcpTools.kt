@@ -12,6 +12,9 @@ import com.hereliesaz.guillotine.ai.gen.GenProviderType
 import com.hereliesaz.guillotine.ai.gen.GenRequest
 import com.hereliesaz.guillotine.ai.gen.PollConfig
 import com.hereliesaz.guillotine.ai.gen.meta
+import com.hereliesaz.guillotine.desktop.media.DesktopFaceBlur
+import com.hereliesaz.guillotine.desktop.media.DesktopFaceDetector
+import com.hereliesaz.guillotine.desktop.media.DesktopImageEmbedder
 import com.hereliesaz.guillotine.desktop.media.DesktopFfmpegFilter
 import com.hereliesaz.guillotine.desktop.media.DesktopImageLabeler
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
@@ -19,6 +22,11 @@ import com.hereliesaz.guillotine.desktop.media.DesktopMediaImport
 import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
 import com.hereliesaz.guillotine.desktop.media.DesktopYamnet
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.editor.FACE_BLUR_PREFIX
+import com.hereliesaz.guillotine.model.LearnedConcept
+import com.hereliesaz.guillotine.model.MediaItem
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.mcp.boolProp
 import com.hereliesaz.guillotine.mcp.intProp
@@ -63,13 +71,13 @@ class DesktopMcpTools(
             objSchema("start_ms" to intProp(), "end_ms" to intProp(), required = listOf("start_ms", "end_ms"))))
 
         // Media-dependent tools: defined so the schema is discoverable, but return stubs on desktop.
-        put(toolDefinition("analyze_clip", "Run vision analysis on a clip (not yet available on desktop).",
+        put(toolDefinition("analyze_clip", "Prompt-driven cut analysis ON-DEVICE: label the clip's frames and keep the parts matching its prompt (set_prompt first), cutting the rest. Label-based (needs the footage-search model).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("analyze_clip_with_reference", "Analyze using reference frame (not yet available on desktop).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("remove_object_generative", "Remove object with inpainting (not yet available on desktop).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
-        put(toolDefinition("describe_current_frame", "Describe the current preview frame (not yet available on desktop).", emptySchema()))
+        put(toolDefinition("describe_current_frame", "Describe the video frame at the playhead using on-device image labels (needs the footage-search model).", emptySchema()))
         put(toolDefinition(
             "transcribe_clip",
             "Transcribe a clip's audio ON-DEVICE (offline Vosk, no key/network) and add timed caption " +
@@ -516,10 +524,10 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "blur_faces",
-            "Toggle ON-DEVICE face anonymization on a clip (ML Kit face detection, no key): every detected " +
-                "face is blurred in both preview and export, for privacy. Use for \"blur the faces\", " +
-                "\"anonymize people\", \"hide identities\", \"censor faces\". Pass enabled=false to turn it " +
-                "back off. Applies to video and image clips.",
+            "ON-DEVICE face anonymization: tracks the main face across the clip and drops a pre-blurred " +
+                "patch that follows it on a track above (keyframed, so it renders in preview and export and " +
+                "stays editable), for privacy. Use for \"blur the faces\", \"anonymize people\", \"hide " +
+                "identities\", \"censor faces\". Pass enabled=false to remove it. Needs the face-detection model.",
             objSchema(
                 "clip_id" to stringProp("The clip to blur faces on; defaults to the video clip at the playhead"),
                 "enabled" to boolProp("Turn face-blur on (default true) or off"),
@@ -583,15 +591,11 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "apply_transition",
-            "Create a GL-style TRANSITION between two clips ON-DEVICE (FFmpeg `xfade`) and add the combined " +
-                "result as a new clip. Use for \"add a crossfade/dissolve between these\", \"wipe from this " +
-                "to that\", \"put a transition here\". type is any xfade transition: fade, fadeblack, " +
-                "fadewhite, wipeleft/right/up/down, slideleft/right/up/down, circleopen, circleclose, " +
-                "dissolve, pixelize, radial, smoothleft, distance, and more (default fade). duration_sec " +
-                "is the overlap (default 1). NOTE: not yet wired on desktop — a faithful in-process " +
-                "two-input xfade needs precise offset/PTS synchronization that can't be verified here, so " +
-                "this returns an error rather than a bad cut. Single-input filtering (apply_ffmpeg_filter) " +
-                "IS wired.",
+            "Add a cross-dissolve TRANSITION between two clips ON-DEVICE. Use for \"add a crossfade/" +
+                "dissolve between these\", \"put a transition here\". Overlaps the two clips on one track " +
+                "by duration_sec (default 1) so the renderer's built-in crossfade blends them, in both " +
+                "preview and export. type is accepted for API parity but desktop does an opacity " +
+                "cross-dissolve (not per-style xfade wipes).",
             objSchema(
                 "from_clip_id" to stringProp("The outgoing (first) clip"),
                 "to_clip_id" to stringProp("The incoming (second) clip"),
@@ -652,45 +656,52 @@ class DesktopMcpTools(
         "delete_clip" -> deleteClipTool(args.getString("clip_id"))
         "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
         // ---- vision (ML Kit labeling / MediaPipe VLM) → honest stubs ----
-        "analyze_clip", "analyze_clip_with_reference" ->
+        "analyze_clip" -> analyzeClipByPrompt(args.getString("clip_id"))
+        "analyze_clip_with_reference" ->
             visionToolUnavailable(name, "an on-device vision/labeling model")
-        "analyze_clip_with_concept" ->
-            visionToolUnavailable(name, "an on-device vision/embedding model")
-        "describe_current_frame" ->
-            visionToolUnavailable(name, "an on-device object-detection model")
-        "caption_frame" ->
-            visionToolUnavailable(name, "an on-device multimodal VLM (Gemma-3n)")
+        "analyze_clip_with_concept" -> analyzeClipWithConcept(
+            args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false),
+        )
+        "describe_current_frame" -> describeCurrentFrame()
+        "caption_frame" -> captionFrameTool(args.optString("clip_id"))
         "find_highlights" -> findHighlights(
             args.getString("clip_id"),
             args.optDouble("threshold", 0.3).toFloat(),
             args.optBoolean("split", true),
         )
         "search_clips" -> searchClips(args.getString("query"))
-        // ---- face / segmentation (ML Kit) → honest stubs ----
-        "blur_faces", "auto_reframe" ->
-            visionToolUnavailable(name, "an on-device face-detection model")
-        "replace_background" ->
-            visionToolUnavailable(name, "an on-device subject-segmentation model")
+        // ---- face / segmentation ----
+        "blur_faces" -> blurFaces(
+            args.optString("clip_id"),
+            if (args.has("enabled")) args.getBoolean("enabled") else true,
+        )
+        "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
+        "replace_background" -> replaceBackgroundTool(
+            args.optString("clip_id"), args.optString("color"), args.optString("image_path"),
+        )
         // ---- concept embedder / image models / inpaint → honest stubs ----
-        "add_reference" ->
-            visionToolUnavailable(name, "an on-device image/face embedder")
+        "add_reference" -> addReference(
+            args.getString("name"), args.optString("term"), args.optBoolean("negative", false),
+        )
         "remove_object_generative" ->
             visionToolUnavailable(name, "an on-device object mask (ML Kit) before cloud repaint")
-        "apply_image_effect", "apply_bokeh" ->
+        "apply_bokeh" -> applyBokehTool(args.optString("clip_id"))
+        "apply_image_effect" ->
             visionToolUnavailable(name, "an on-device TFLite image model")
         "denoise_clip" ->
             visionToolUnavailable(name, "the on-device GTCRN speech-denoiser model")
-        "apply_transition" ->
-            visionToolUnavailable(name, "a verified two-input FFmpeg xfade path")
+        "apply_transition" -> applyTransition(
+            args.getString("from_clip_id"), args.getString("to_clip_id"), args.optDouble("duration_sec", 1.0).toFloat(),
+        )
         // ---- learned-concept data ops → REAL (shared LearnedConcept store) ----
         "list_concepts" -> listConcepts()
         "delete_concept" -> deleteConcept(args.getString("name"))
         "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
         "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
-        "transcribe_precise" -> speechToolUnavailable("transcribe_precise", "an offline Whisper (sherpa-onnx) ASR model")
+        "transcribe_precise" -> transcribeClip(args.getString("clip_id"))
         "add_voiceover" -> speechToolUnavailable("add_voiceover", "an offline neural TTS (sherpa-onnx) voice")
         "diarize_clip" -> speechToolUnavailable("diarize_clip", "the sherpa-onnx speaker-diarization models")
-        "remove_fillers" -> speechToolUnavailable("remove_fillers", "an offline Whisper (sherpa-onnx) ASR model")
+        "remove_fillers" -> removeFillers(args.getString("clip_id"))
         "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
         "create_user_tool" -> createUserTool(args.getString("name"), args.getString("description"))
         "list_user_tools" -> listUserTools()
@@ -890,6 +901,436 @@ class DesktopMcpTools(
             put("clipCount", vm.uiState.value.document.clips.size)
             put("humanSummary", "Found ${ranges.size} highlight moment(s) — $topLabels.$splitInfo")
         }
+    }
+
+    /**
+     * Vertical auto-reframe ("follow the subject") via the on-device ONNX face detector — the desktop
+     * analogue of Android's ML Kit `auto_reframe`. Punches in by [zoom] and pans OFFSET_X keyframes so
+     * the largest face stays centred as it moves. Samples ~60 frames, finds the main face's centre X
+     * per frame ([DesktopFaceDetector]), smooths (3-tap moving average), and maps each to a pan offset
+     * bounded so the punched-in crop never leaves the frame. Requires the face-detection model in
+     * Settings → AI Analyzer → Face detection; relays its error rather than faking a result.
+     */
+    private fun autoReframe(clipId: String, zoom: Float): JSONObject {
+        val model = settingsProvider().faceDetectModelPath
+        require(model.isNotBlank()) {
+            "No face-detection model set. Add an ONNX face detector in Settings → AI Analyzer → Face detection."
+        }
+        require(File(model).isFile) { "The face-detection model file does not exist at: $model" }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val z = zoom.coerceIn(1.05f, 3f)
+        val durationMs = clip.durationMs
+        require(durationMs > 0) { "Clip has no duration to reframe." }
+
+        val step = maxOf(300L, durationMs / 60) // ~every 0.3s, capped ~60 samples
+        // Max pan (normalized) that keeps the punched-in crop inside the frame.
+        val maxPan = ((z - 1f) / (2f * z)).coerceIn(0f, 0.5f)
+        val samples = ArrayList<Pair<Long, Float>>() // relMs -> centerX (0..1)
+        var srcMs = clip.trimStartMs
+        val endSrc = clip.trimStartMs + durationMs
+        while (srcMs <= endSrc) {
+            val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, srcMs) }
+            if (frame != null) {
+                DesktopFaceDetector.largestFaceCenterX(model, frame)?.let { cx ->
+                    samples += (srcMs - clip.trimStartMs) to cx
+                }
+            }
+            srcMs += step
+        }
+        check(samples.isNotEmpty()) { "No faces found to follow — auto-reframe needs a face in the shot." }
+
+        // Smooth the centers (moving average of 3) to avoid jitter, then map to a pan offset.
+        val ease = CubicBezier()
+        val points = samples.mapIndexed { i, (relMs, _) ->
+            val lo = maxOf(0, i - 1); val hi = minOf(samples.size - 1, i + 1)
+            val avgCx = (lo..hi).map { samples[it].second }.average().toFloat()
+            // Subject right of center → pan the image left (negative offset) to recenter. OFFSET_X is a
+            // fraction of frame width (desktop render: image centre = canvasW/2 + ox*canvasW), so pan by
+            // the face's own offset from centre, bounded to the in-frame limit.
+            val offsetX = (0.5f - avgCx).coerceIn(-maxPan, maxPan)
+            Triple(relMs, offsetX, ease)
+        }
+        vm.updateClip(clipId) { it.copy(scale = z) }
+        vm.insertKeyframes(clipId, KeyframeProperty.OFFSET_X, points)
+        return ok().apply {
+            put("keyframes", points.size)
+            put("humanSummary", "Auto-reframed: punched in ${z}× and panned across ${points.size} points to follow the face.")
+        }
+    }
+
+    /**
+     * Describe the video frame at the playhead using the on-device ONNX image labeler — the desktop
+     * analogue of Android's `describe_current_frame`. Android runs an object detector; desktop reuses
+     * [DesktopImageLabeler] (the footage-search classifier) to name the frame's most likely contents.
+     * Honest about being label-based, not box-level object detection. Requires the footage-search model.
+     */
+    private fun describeCurrentFrame(): JSONObject {
+        val model = settingsProvider().labelModelPath
+        require(model.isNotBlank()) {
+            "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search."
+        }
+        require(File(model).isFile) { "The image-labeling model file does not exist at: $model" }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(st.document.clips, ClipType.VIDEO, now)
+            ?: return JSONObject().put("error", "No video clip at the playhead — scrub onto one.")
+        val media = st.document.mediaFor(clip)
+            ?: return JSONObject().put("error", "Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs) }
+            ?: return JSONObject().put("error", "Could not extract the current preview frame.")
+        val labels = DesktopImageLabeler.labels(model, frame, topK = 5)
+        val topDesc = labels.take(3).joinToString(", ") { "${it.text} (${(it.confidence * 100).toInt()}%)" }
+        return ok().apply {
+            put("clipId", clip.id)
+            put("labels", JSONArray().apply {
+                labels.forEach { put(JSONObject().put("label", it.text).put("confidence", (it.confidence * 100).toInt())) }
+            })
+            put(
+                "humanSummary",
+                if (topDesc.isBlank()) "Couldn't recognize the frame's contents." else "This frame looks like: $topDesc.",
+            )
+        }
+    }
+
+    /**
+     * On-device privacy face-blur via tracking (the desktop approach): track the largest face across
+     * the clip, generate a pre-blurred patch of it, and drop that patch on a new track ABOVE the clip
+     * with OFFSET_X / OFFSET_Y / SCALE keyframes that follow the face ([DesktopFaceBlur] +
+     * [EditorViewModel.addFaceBlurOverlay]). Rides the keyframe system, so it renders in preview and
+     * export and stays editable. `enabled=false` removes the overlay. Requires the face-detection model.
+     */
+    private fun blurFaces(clipId: String, enabled: Boolean): JSONObject {
+        val clip = resolveClipOrPlayhead(clipId)
+        if (!enabled) {
+            vm.removeFaceBlurOverlay(clip.id)
+            return ok().apply { put("humanSummary", "Removed face blur from clip ${clip.id}.") }
+        }
+        val model = settingsProvider().faceDetectModelPath
+        require(model.isNotBlank()) {
+            "No face-detection model set. Add an ONNX face detector in Settings → AI Analyzer → Face detection."
+        }
+        require(File(model).isFile) { "The face-detection model file does not exist at: $model" }
+        val media = vm.uiState.value.document.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: ${clip.id}")
+        val track = DesktopFaceBlur.build(model, media.uri, clip, File(DesktopStorage.dataDir, "faceblur"))
+            ?: throw IllegalStateException("No faces found to blur — auto-blur needs a face in the shot.")
+        val probed = DesktopMediaImport.probe(track.patch)
+            ?: throw IllegalStateException("Couldn't load the generated blur patch.")
+        val patchMedia = probed.copy(name = "$FACE_BLUR_PREFIX${clip.id}", durationMs = clip.durationMs)
+        val overlayId = vm.addFaceBlurOverlay(clip.id, patchMedia, track.offsetX, track.offsetY, track.scale)
+        return ok().apply {
+            put("overlayClipId", overlayId ?: JSONObject.NULL)
+            put("keyframes", track.offsetX.size)
+            put(
+                "humanSummary",
+                "Tracked the face across ${track.offsetX.size} points and added a blur patch that follows it on a track above.",
+            )
+        }
+    }
+
+    /**
+     * Teach a visual thing by pointing it out (few-shot, on-device) — the desktop analogue of Android's
+     * `add_reference`. Embeds the frame at the playhead via [DesktopImageEmbedder] and stores the
+     * L2-normalized vector as a positive (or, with [negative], a hard-negative) example of the concept
+     * [name] in the shared [LearnedConcept] store. Desktop embeds the WHOLE frame (Android detects
+     * per-object first); honest about being frame-level. Requires the concept-embedding model.
+     */
+    private fun addReference(name: String, term: String, negative: Boolean): JSONObject {
+        require(name.isNotBlank()) { "Give the thing a name, e.g. \"Rex\"." }
+        val model = settingsProvider().idEmbedModelPath
+        require(model.isNotBlank()) {
+            "No concept-embedding model set. Add an ONNX embedder in Settings → AI Analyzer → Concept matching."
+        }
+        require(File(model).isFile) { "The concept-embedding model file does not exist at: $model" }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(st.document.clips, ClipType.VIDEO, now)
+            ?: throw IllegalStateException("No video clip at the playhead to capture from — scrub to the thing first.")
+        val media = st.document.mediaFor(clip) ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs) }
+            ?: throw IllegalStateException("Could not read the current frame.")
+        val vec = DesktopImageEmbedder.embed(model, frame).toList()
+        val terms = if (term.isBlank()) emptyList() else listOf(term.trim().lowercase())
+        val key = name.trim()
+        val concepts = DesktopLearnedConceptStore.load()
+        val existing = concepts.firstOrNull { it.name.equals(key, ignoreCase = true) }
+        val updated = when {
+            existing != null && negative -> existing.copy(negatives = existing.negatives + listOf(vec), terms = (existing.terms + terms).distinct())
+            existing != null -> existing.copy(examples = existing.examples + listOf(vec), terms = (existing.terms + terms).distinct())
+            negative -> LearnedConcept(key, terms, emptyList(), listOf(vec))
+            else -> LearnedConcept(key, terms, listOf(vec))
+        }
+        DesktopLearnedConceptStore.save(concepts.filterNot { it.name.equals(key, ignoreCase = true) } + updated)
+        return ok().apply {
+            put("name", updated.name)
+            put("exampleCount", updated.exampleCount)
+            put("negativeCount", updated.negativeCount)
+            put(
+                "humanSummary",
+                if (negative) "Learned a non-example for \"${updated.name}\" (${updated.negativeCount} total)."
+                else "Learned \"${updated.name}\" (${updated.exampleCount} example(s)).",
+            )
+        }
+    }
+
+    /**
+     * Find/keep a learned thing in a clip — the desktop analogue of `analyze_clip_with_concept`. Samples
+     * the clip, embeds each window ([DesktopImageEmbedder]), and matches it to the concept's positive
+     * examples (a window matches when its best positive cosine clears a threshold and beats every
+     * negative). With [keepOnly] the non-matching windows are cut; otherwise the matching windows are
+     * cut. Cuts are applied for real via [EditorViewModel.applyCuts]. Requires the embedding model.
+     */
+    private fun analyzeClipWithConcept(clipId: String, name: String, keepOnly: Boolean): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val concept = DesktopLearnedConceptStore.get(name)
+            ?: throw IllegalStateException("No learned thing called \"$name\". Point it out first with add_reference.")
+        require(concept.examples.isNotEmpty()) { "\"$name\" has no examples yet — point it out with add_reference." }
+        val model = settingsProvider().idEmbedModelPath
+        require(model.isNotBlank()) {
+            "No concept-embedding model set. Add an ONNX embedder in Settings → AI Analyzer → Concept matching."
+        }
+        require(File(model).isFile) { "The concept-embedding model file does not exist at: $model" }
+        val positives = concept.examples.map { it.toFloatArray() }
+        val negatives = concept.negatives.map { it.toFloatArray() }
+        val dur = clip.durationMs
+        require(dur > 0) { "Clip has no duration to analyze." }
+        val step = maxOf(500L, dur / 40)
+        val threshold = 0.55f
+        // Build REMOVE segments (source ms) directly, merging contiguous windows.
+        val edits = ArrayList<EditSegment>()
+        var srcMs = clip.trimStartMs
+        val endSrc = clip.trimStartMs + dur
+        while (srcMs < endSrc) {
+            val winEnd = minOf(srcMs + step, endSrc)
+            val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, srcMs) }
+            val match = if (frame == null) false else {
+                val e = DesktopImageEmbedder.embed(model, frame)
+                val maxPos = positives.maxOf { DesktopImageEmbedder.cosine(e, it) }
+                val maxNeg = if (negatives.isEmpty()) -1f else negatives.maxOf { DesktopImageEmbedder.cosine(e, it) }
+                maxPos >= threshold && maxPos > maxNeg
+            }
+            val remove = if (keepOnly) !match else match
+            if (remove) {
+                val last = edits.lastOrNull()
+                if (last != null && srcMs <= last.endMs) {
+                    edits[edits.size - 1] = last.copy(endMs = maxOf(last.endMs, winEnd))
+                } else {
+                    edits += EditSegment(srcMs, winEnd, com.hereliesaz.guillotine.model.EditAction.REMOVE, if (keepOnly) "not \"$name\"" else "\"$name\"")
+                }
+            }
+            srcMs = winEnd
+        }
+        if (edits.isEmpty()) {
+            return ok().apply {
+                put("humanSummary", if (keepOnly) "Every part matched \"$name\" — nothing removed." else "No part matched \"$name\" — nothing removed.")
+            }
+        }
+        vm.applyCuts(clipId, edits)
+        val removedMs = edits.sumOf { it.endMs - it.startMs }
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("segmentsRemoved", edits.size)
+            put("clipCount", n)
+            put(
+                "humanSummary",
+                "${if (keepOnly) "Kept only" else "Removed"} \"$name\": cut ${edits.size} range(s) (${msFmt(removedMs)}). Timeline now $n clip(s).",
+            )
+        }
+    }
+
+    /**
+     * Cross-dissolve transition: overlap [toClipId] onto the end of [fromClipId] on the same track so
+     * the desktop renderer's built-in crossfade blends them (it already fades two overlapping clips).
+     * Real — no FFmpeg bake. `type` is ignored (desktop does an opacity cross-dissolve).
+     */
+    private fun applyTransition(fromClipId: String, toClipId: String, durationSec: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        val from = doc.clips.firstOrNull { it.id == fromClipId }
+            ?: throw IllegalArgumentException("Clip not found: $fromClipId")
+        val to = doc.clips.firstOrNull { it.id == toClipId }
+            ?: throw IllegalArgumentException("Clip not found: $toClipId")
+        val durMs = (durationSec.coerceIn(0.1f, 5f) * 1000f).toLong().coerceAtMost(minOf(from.durationMs, to.durationMs))
+        val newStart = (from.endTimeMs - durMs).coerceAtLeast(0)
+        vm.updateClip(toClipId) { it.copy(startTimeMs = newStart, trackId = from.trackId) }
+        return ok().apply {
+            put("overlapMs", durMs)
+            put("humanSummary", "Cross-dissolve: overlapped the clips by ${msFmt(durMs)} so they blend on-device.")
+        }
+    }
+
+    /** Remove filler words ("um", "uh", …) using on-device Vosk word timings + real cuts. */
+    private fun removeFillers(clipId: String): JSONObject {
+        val model = settingsProvider().speechModelPath
+        require(model.isNotBlank()) { "No on-device speech model set. Set a Vosk model in Settings → Transcription." }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 16_000) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to analyze.")
+        val fillers = setOf("um", "umm", "uh", "uhh", "erm", "er", "ah", "hmm", "mmm", "like")
+        val srcStart = clip.trimStartMs
+        val srcEnd = clip.trimStartMs + clip.durationMs
+        val words = DesktopVoskTranscriber.transcribe(model, pcm.samples)
+            .flatMap { it.words }
+            .filter { it.word.trim().lowercase().trim('.', ',', '?', '!') in fillers }
+            .filter { it.startMs in srcStart until srcEnd }
+            .sortedBy { it.startMs }
+        if (words.isEmpty()) return ok().apply { put("humanSummary", "No filler words found.") }
+        val edits = ArrayList<EditSegment>()
+        for (w in words) {
+            val last = edits.lastOrNull()
+            if (last != null && w.startMs <= last.endMs + 150) {
+                edits[edits.size - 1] = last.copy(endMs = maxOf(last.endMs, w.endMs))
+            } else {
+                edits += EditSegment(w.startMs, w.endMs, com.hereliesaz.guillotine.model.EditAction.REMOVE, "filler: ${w.word}")
+            }
+        }
+        vm.applyCuts(clipId, edits)
+        val removedMs = edits.sumOf { it.endMs - it.startMs }
+        return ok().apply {
+            put("removed", words.size)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Removed ${words.size} filler word(s) (${msFmt(removedMs)}).")
+        }
+    }
+
+    /**
+     * Prompt-driven analysis via the on-device labeler — desktop's take on `analyze_clip`. Labels
+     * sampled windows and keeps the ones whose labels match the clip's prompt, cutting the rest (only
+     * when at least one window matches, so a total miss never nukes the clip). Label-based, not a VLM.
+     */
+    private fun analyzeClipByPrompt(clipId: String): JSONObject {
+        val model = settingsProvider().labelModelPath
+        require(model.isNotBlank()) { "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search." }
+        require(File(model).isFile) { "The image-labeling model file does not exist at: $model" }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        require(clip.prompt.isNotBlank()) { "Clip has no prompt. Use set_prompt first, e.g. \"the parts with a dog\"." }
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val promptWords = clip.prompt.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 2 }.toSet()
+        val dur = clip.durationMs
+        require(dur > 0) { "Clip has no duration to analyze." }
+        val step = maxOf(500L, dur / 40)
+        data class Win(val start: Long, val end: Long, val match: Boolean)
+        val wins = ArrayList<Win>()
+        var srcMs = clip.trimStartMs
+        val endSrc = clip.trimStartMs + dur
+        while (srcMs < endSrc) {
+            val winEnd = minOf(srcMs + step, endSrc)
+            val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, srcMs) }
+            val match = frame != null && DesktopImageLabeler.labels(model, frame, topK = 5).any { lbl ->
+                val lw = lbl.text.lowercase()
+                promptWords.any { pw -> pw in lw } || lw.split(Regex("[^a-z0-9]+")).any { it.length > 2 && it in promptWords }
+            }
+            wins += Win(srcMs, winEnd, match)
+            srcMs = winEnd
+        }
+        if (wins.none { it.match }) {
+            return ok().apply { put("humanSummary", "Nothing matched \"${clip.prompt}\" — left the clip unchanged.") }
+        }
+        val edits = ArrayList<EditSegment>()
+        for (wn in wins.filter { !it.match }) {
+            val last = edits.lastOrNull()
+            if (last != null && wn.start <= last.endMs) {
+                edits[edits.size - 1] = last.copy(endMs = maxOf(last.endMs, wn.end))
+            } else {
+                edits += EditSegment(wn.start, wn.end, com.hereliesaz.guillotine.model.EditAction.REMOVE, "not \"${clip.prompt}\"")
+            }
+        }
+        if (edits.isEmpty()) return ok().apply { put("humanSummary", "Every part matched — nothing to cut.") }
+        vm.applyCuts(clipId, edits)
+        val removedMs = edits.sumOf { it.endMs - it.startMs }
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("segmentsRemoved", edits.size)
+            put("clipCount", n)
+            put("humanSummary", "Kept the parts matching \"${clip.prompt}\": cut ${edits.size} range(s) (${msFmt(removedMs)}). Timeline now $n clip(s).")
+        }
+    }
+
+    /** Caption the playhead frame. Desktop has no on-device VLM, so this is the honest label-based
+     *  description (same as describe_current_frame); [clipId] is accepted for API parity. */
+    private fun captionFrameTool(clipId: String): JSONObject = describeCurrentFrame()
+
+    /**
+     * Replace a clip's background: matte the subject via the on-device segmentation model (on export)
+     * and drop a solid colour or an image on a NEW track behind it ([EditorViewModel.replaceBackground]).
+     * Requires the subject-segmentation model (Settings → AI Analyzer → Background removal), else the
+     * matte can't apply. The matte is applied in the export render; the preview shows the un-matted clip.
+     */
+    private fun replaceBackgroundTool(clipId: String, color: String, imagePath: String): JSONObject {
+        require(settingsProvider().segModelPath.isNotBlank()) {
+            "No subject-segmentation model set. Add an ONNX segmenter in Settings → AI Analyzer → Background removal."
+        }
+        val clip = resolveClipOrPlayhead(clipId)
+        val bg: MediaItem = when {
+            imagePath.isNotBlank() -> {
+                val f = File(imagePath)
+                require(f.isFile) { "Background image not found: $imagePath" }
+                DesktopMediaImport.probe(f)?.copy(durationMs = clip.durationMs)
+                    ?: throw IllegalStateException("Couldn't load background image: $imagePath")
+            }
+            color.isNotBlank() -> {
+                val file = makeSolidColorImage(parseColor(color), File(DesktopStorage.dataDir, "bg"))
+                DesktopMediaImport.probe(file)?.copy(name = "bg: $color", durationMs = clip.durationMs)
+                    ?: throw IllegalStateException("Couldn't create the background colour image.")
+            }
+            else -> throw IllegalArgumentException("Give a background color (e.g. #202020) or an image_path.")
+        }
+        vm.replaceBackground(clip.id, bg)
+        return ok().apply {
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Replaced the background behind clip ${clip.id} — the subject is matted on export.")
+        }
+    }
+
+    /**
+     * Portrait bokeh: keep the segmented subject sharp and blur the background. Sets the clip's [bokeh]
+     * flag; the export render composites a blurred background behind the matted subject
+     * ([DesktopSegmenter.portraitBlur]). Requires the subject-segmentation model. (Desktop uses subject
+     * segmentation, not a depth model — so it's a portrait blur, not true depth-of-field.)
+     */
+    private fun applyBokehTool(clipId: String): JSONObject {
+        require(settingsProvider().segModelPath.isNotBlank()) {
+            "No subject-segmentation model set. Add an ONNX segmenter in Settings → AI Analyzer → Background removal."
+        }
+        val clip = resolveClipOrPlayhead(clipId)
+        vm.updateClipFilters(clip.id) { it.copy(bokeh = true) }
+        return ok().apply {
+            put("humanSummary", "Portrait bokeh on clip ${clip.id} — subject sharp, background blurred (on export).")
+        }
+    }
+
+    /** Parse "#RRGGBB" / "0xRRGGBB" / a few colour names into a packed RGB int (defaults to black). */
+    private fun parseColor(spec: String): Int {
+        val s = spec.trim().lowercase()
+        mapOf(
+            "black" to 0x000000, "white" to 0xFFFFFF, "red" to 0xFF0000, "green" to 0x00AA00,
+            "blue" to 0x0000FF, "gray" to 0x808080, "grey" to 0x808080, "yellow" to 0xFFFF00,
+            "cyan" to 0x00FFFF, "magenta" to 0xFF00FF,
+        )[s]?.let { return it }
+        val hex = s.removePrefix("#").removePrefix("0x")
+        return runCatching { hex.toInt(16) and 0xFFFFFF }.getOrDefault(0x000000)
+    }
+
+    /** Write a small solid-colour PNG (uniform, so any size fills the frame) and return the file. */
+    private fun makeSolidColorImage(rgb: Int, outDir: File): File {
+        outDir.mkdirs()
+        val img = BufferedImage(320, 180, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = java.awt.Color(rgb)
+        g.fillRect(0, 0, 320, 180)
+        g.dispose()
+        val file = File(outDir, "bg_${Integer.toHexString(rgb)}.png")
+        ImageIO.write(img, "png", file)
+        return file
     }
 
     // ---- learned concepts: pure data ops on the shared LearnedConcept store (REAL on desktop) ----

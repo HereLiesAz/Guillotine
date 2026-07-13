@@ -1,6 +1,5 @@
 package com.hereliesaz.guillotine.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Diamond
@@ -44,9 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -56,7 +52,6 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
-import com.hereliesaz.guillotine.media.SubjectSegmenter
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.KeyframeProperty
@@ -95,7 +90,8 @@ fun ClipToolButtons(
 
     if (text != null) TextToolButton(vm, text)
     if (video != null) {
-        BackgroundToolButton(vm, state, video)
+        BackgroundToolButton(vm, video)
+        FaceBlurToolButton(vm, video)
         FiltersToolButton(vm, video)
     }
     if (audioTarget != null) AudioToolButton(vm, audioTarget)
@@ -131,39 +127,22 @@ private fun TextToolButton(vm: EditorViewModel, clip: TimelineClip) {
     }
 }
 
+/** One-tap on-device background removal. Tapping toggles the subject-only cutout directly — no
+ *  popup, no setting to hunt for (the wedge feature made a button, per the roadmap). Drop another
+ *  clip on a lower track to composite behind it. */
 @Composable
-private fun BackgroundToolButton(vm: EditorViewModel, state: EditorUiState, clip: TimelineClip) {
-    var open by remember { mutableStateOf(false) }
-    IconToolButton(Icons.Filled.Layers, "Background removal", active = clip.filters.removeBackground) { open = !open }
-    if (open) ToolPopup("Background", { open = false }) {
-        val media = state.document.mediaFor(clip)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = clip.filters.removeBackground,
-                onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(removeBackground = c) } },
-            )
-            Text("Remove background (subject only)", color = Neutral400, fontSize = 12.sp)
-        }
-        if (clip.filters.removeBackground && media != null) {
-            CutoutPreview(media.uri, media.kind, clip.trimStartMs)
-            Text(
-                "On-device cutout. Put a clip on a lower track to composite behind it.",
-                color = Neutral500, fontSize = 10.sp,
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = clip.filters.blurFaces,
-                onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(blurFaces = c) } },
-            )
-            Text("Blur faces (anonymize)", color = Neutral400, fontSize = 12.sp)
-        }
-        if (clip.filters.blurFaces) {
-            Text(
-                "On-device face detection blurs every face in preview and export.",
-                color = Neutral500, fontSize = 10.sp,
-            )
-        }
+private fun BackgroundToolButton(vm: EditorViewModel, clip: TimelineClip) {
+    IconToolButton(Icons.Filled.Layers, "Remove background", active = clip.filters.removeBackground) {
+        vm.updateClipFilters(clip.id) { it.copy(removeBackground = !it.removeBackground) }
+    }
+}
+
+/** One-tap on-device face blur (anonymize). Tapping toggles it; on-device face detection blurs every
+ *  face in preview and export. */
+@Composable
+private fun FaceBlurToolButton(vm: EditorViewModel, clip: TimelineClip) {
+    IconToolButton(Icons.Filled.BlurOn, "Blur faces", active = clip.filters.blurFaces) {
+        vm.updateClipFilters(clip.id) { it.copy(blurFaces = !it.blurFaces) }
     }
 }
 
@@ -417,25 +396,6 @@ private fun ToolPopup(title: String, onDismiss: () -> Unit, content: @Composable
                 content()
             }
         }
-    }
-}
-
-@Composable
-private fun CutoutPreview(uri: String, kind: com.hereliesaz.guillotine.model.MediaKind, atMs: Long) {
-    val context = LocalContext.current
-    val cut by produceState<ImageBitmap?>(null, uri, atMs) {
-        value = SubjectSegmenter.cutout(context, uri, kind, atMs)?.asImageBitmap()
-    }
-    val bitmap = cut
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap,
-            contentDescription = "Foreground cutout",
-            modifier = Modifier.fillMaxWidth().height(140.dp),
-            contentScale = ContentScale.Fit,
-        )
-    } else {
-        Text("Generating cutout…", color = Neutral500, fontSize = 11.sp)
     }
 }
 

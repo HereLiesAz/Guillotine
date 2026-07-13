@@ -141,7 +141,7 @@ jobs:
       # around the python call to actually reach `$?` — otherwise `-e` kills the step
       # on exit 2 before we can capture the code for the "Fail if any track was not
       # staged" step below.
-      - name: Publish to Google Play (internal completed + alpha/beta/production drafts)
+      - name: Publish to Google Play (internal + alpha/beta/production drafts; roll out in console)
         id: publish
         if: ${{ inputs.publish != 'false' }}
         env:

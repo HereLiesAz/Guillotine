@@ -134,6 +134,8 @@ data class ClipFilters(
     val removeBackground: Boolean = false,
     /** On-device face detection: blur every detected face for privacy/anonymization. */
     val blurFaces: Boolean = false,
+    /** On-device subject segmentation: keep the subject sharp and blur the background (portrait bokeh). */
+    val bokeh: Boolean = false,
     /** Path to a `.cube` 3D LUT applied as a color grade (blank = none). Standard Resolve/Adobe LUTs. */
     val lutPath: String = "",
     /** Path to a GLSL shader effect (`.isf`/`.fs`/`.glsl`, single-input) applied last (blank = none). */

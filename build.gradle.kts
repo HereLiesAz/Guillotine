@@ -1,3 +1,5 @@
+import java.util.Properties
+
 // Top-level build file. Plugins are declared here with `apply false` and applied
 // in module build files. Versions come from gradle/libs.versions.toml.
 plugins {
@@ -6,4 +8,73 @@ plugins {
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.compose.multiplatform) apply false
+}
+
+// ============================================================================
+// Versioning — version.properties is the single source of truth.
+// ============================================================================
+//
+// Four-part version: Major.Minor.Patch.Build.
+//   • Major / Minor — hand-edited in version.properties.
+//   • Patch / Build — AUTO-INCREMENTED on disk on EVERY Gradle configuration, i.e. every single
+//     compile/build of ANY module (:app, :desktop, :shared) with no exceptions — whether the
+//     subsequent compilation succeeds or fails (the write happens at configuration time, before any
+//     task runs). Persisted to version.properties so the bump survives across builds and lands in
+//     git when committed. Build is the monotonic Android versionCode.
+//
+// This lives in the ROOT project on purpose: the root is configured on every `./gradlew`
+// invocation regardless of which module or task is requested, so a :desktop-only or :shared-only
+// build bumps the version exactly like an :app build. The computed values are exposed via
+// rootProject.extra for the module build scripts to read (they no longer compute their own).
+run {
+    val versionPropsFile = rootProject.file("version.properties")
+    val versionProps = Properties().apply {
+        if (versionPropsFile.exists()) versionPropsFile.inputStream().use { load(it) }
+    }
+    val verMajor = versionProps.getProperty("versionMajor", "0").trim().toIntOrNull() ?: 0
+    val verMinor = versionProps.getProperty("versionMinor", "0").trim().toIntOrNull() ?: 0
+
+    fun runGit(vararg args: String): String? = runCatching {
+        providers.exec {
+            commandLine("git", *args)
+            workingDir = rootProject.rootDir
+        }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    // Monotonic floor for versionCode: never below 100 + commit count (the value earlier git-based
+    // and file-based flows would have produced), so Play never rejects an upload as non-monotonic.
+    val gitFloor = 100 + (runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0)
+
+    // First-run seed for Patch only (when version.properties has no versionPatch yet): commits since
+    // versionMinor last changed, so Patch continues from today's value instead of restarting at 1.
+    val patchSeed: Int = run {
+        val blame = runGit("blame", "-l", "-L", "/versionMinor=/,+1", "version.properties") ?: return@run 0
+        val sha = blame.substringBefore(' ').trimStart('^').takeIf { it.length >= 7 } ?: return@run 0
+        runGit("rev-list", "--count", "$sha..HEAD")?.toIntOrNull() ?: 0
+    }
+
+    // Increment BOTH counters on every configuration. Persisted + monotonic.
+    val verPatch = (versionProps.getProperty("versionPatch")?.trim()?.toIntOrNull() ?: patchSeed) + 1
+    val verBuild = maxOf(versionProps.getProperty("versionBuild")?.trim()?.toIntOrNull() ?: 0, gitFloor) + 1
+
+    // Persist the bumped values straight back to disk (keeping the human-edited Major/Minor + header).
+    versionPropsFile.writeText(
+        buildString {
+            appendLine("# Major and Minor are human-edited. Patch and Build AUTO-INCREMENT on every Gradle")
+            appendLine("# build/compile of any module (see the root build.gradle.kts) — do not hand-edit them.")
+            appendLine("versionMajor=$verMajor")
+            appendLine("versionMinor=$verMinor")
+            appendLine("versionPatch=$verPatch")
+            appendLine("versionBuild=$verBuild")
+        },
+    )
+
+    // Expose for the module build scripts (single source of truth — they read, never recompute).
+    rootProject.extra["verMajor"] = verMajor
+    rootProject.extra["verMinor"] = verMinor
+    rootProject.extra["verPatch"] = verPatch
+    rootProject.extra["verBuild"] = verBuild
+    // Android requires versionCode >= 1.
+    rootProject.extra["versionCode"] = maxOf(1, verBuild)
+    rootProject.extra["versionName"] = "$verMajor.$verMinor.$verPatch.$verBuild"
 }

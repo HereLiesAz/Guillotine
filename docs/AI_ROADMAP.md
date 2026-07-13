@@ -257,9 +257,11 @@ separately (`DesktopMcpTools`), so it trailed Android's 66 tools. The editor cor
 transitions, color, text, FFmpeg export, cloud assistant) is at parity; the remaining gap is the
 AI-tool surface.
 
-All **66** tools are now *defined* on desktop (the schema is discoverable via `tools/list`), and the
-majority are fully functional; the remainder are honest stubs that return a clear "needs an on-device
-model" error until their model is wired.
+All **66** tools are now *defined* on desktop (the schema is discoverable via `tools/list`), and all
+but **five** are functional. Every tool with a real on-device desktop-JVM path is wired; the last five
+are honest stubs (a clear "needs an on-device model" error) because they require a runtime that has no
+desktop-JVM form, and we do **not** cloud-fake them — keeping the on-device/private invariant is the
+point. They are enumerated at the end of this section.
 
 **Functional on desktop:** the timeline/edit/user-tool tools; cloud generation (`generate_image` /
 `generate_video` / `generate_music`); the beat suite (`get_beat_map`, `cut_to_beats`, `apply_on_beat`,
@@ -276,22 +278,47 @@ Settings exactly like Android (a model *path*, not a bundled binary), so desktop
 on-device/private promise — only the model download touches the network, inference is local. Stem
 separation and image labeling already ride this path.
 
-**Remaining desktop stubs (each: an ONNX model path in Settings + an inference helper):**
-- **Vision / labeling** — `search_clips` is wired to an ONNX ImageNet classifier
-  (`DesktopImageLabeler`) and `find_highlights` to an ONNX YAMNet audio-event model
-  (`DesktopYamnet`); `analyze_clip` (prompt-driven cut analysis), `analyze_clip_with_concept`,
-  `describe_current_frame`, and `caption_frame` (VLM) remain.
-- **Face / segmentation** — `blur_faces`, `auto_reframe`, `replace_background` need an ONNX
-  face-detector / selfie-segmentation model.
-- **Speech models** — `transcribe_precise`, `add_voiceover`, `diarize_clip`, `remove_fillers` use
-  sherpa-onnx on Android, which has no clean desktop-JVM artifact yet; wire when one lands (or run the
-  underlying ONNX graphs directly).
-- **Image models / inpaint** — `apply_image_effect`, `apply_bokeh` (TFLite depth on Android),
-  `remove_object_generative`, `add_reference` (image/face embedder).
-- **`apply_transition`** — a two-input `xfade`+`acrossfade` JavaCV `FFmpegFrameFilter` graph exists but
-  needs a real-clip smoke test before it's promoted from stub.
-- **GLSL shader rendering** — `apply_shader` records params but doesn't render; desktop needs a
-  GL/Skia pass, not the per-pixel `BufferedImage` path.
+**Wired this pass (each: an ONNX model path in Settings + an inference helper):**
+- **Vision / labeling** — `search_clips` and `describe_current_frame` are wired to an ONNX ImageNet
+  classifier (`DesktopImageLabeler`), `find_highlights` to an ONNX YAMNet audio-event model
+  (`DesktopYamnet`), and the learned-concept pair `add_reference` / `analyze_clip_with_concept` to an
+  ONNX image embedder (`DesktopImageEmbedder`, frame-level cosine matching → real cuts). `analyze_clip`
+  (prompt-driven cut analysis) and `caption_frame` are wired label-based (the labeler + the clip prompt;
+  desktop has no on-device VLM). All vision/labeling tools are now on-device.
+- **Face / segmentation** — `auto_reframe` and `blur_faces` are wired to an ONNX UltraFace-style face
+  detector (`DesktopFaceDetector`). `auto_reframe` follows the main face with OFFSET_X keyframes;
+  `blur_faces` tracks the face and drops a pre-blurred patch on a track above it, keyframed to follow
+  (`DesktopFaceBlur` + `EditorViewModel.addFaceBlurOverlay`) — so it renders in preview + export via
+  the keyframe system, no per-frame render pass. `replace_background` is wired to an ONNX subject
+  segmenter (`DesktopSegmenter`): the export render mattes the subject over a colour/image dropped on a
+  track behind (preview shows the un-matted clip — an export-only parity gap for now).
+- **Speech models** — `transcribe_precise` and `remove_fillers` are wired via the on-device Vosk
+  transcriber (word timings → real cuts for filler removal). `add_voiceover` (neural TTS) and
+  `diarize_clip` (speaker diarization) still need sherpa-onnx models with no clean desktop-JVM artifact.
+- **Image models / inpaint** — `apply_bokeh` is wired as a portrait blur (the `DesktopSegmenter`
+  keeps the subject sharp and blurs the background, on export — desktop has no depth model, so it's
+  segmentation-based not true depth-of-field). `apply_image_effect` (generic TFLite superres/style/
+  lowlight) and `remove_object_generative` (object mask + cloud inpaint) remain.
+- **`apply_transition`** — wired as a cross-dissolve by overlapping the two clips on one track, which
+  the renderer's built-in crossfade blends (preview + export). Per-style xfade wipes (slide/circle/…)
+  would still need a real two-input filtergraph.
 
 The learned-concept *store* (`shared/model/LearnedConcept.kt`) is already shared, so only the
 embedders/detectors are platform-bound.
+
+**Genuinely blocked — the five honest stubs (no cloud fake).** These need a runtime with no
+desktop-JVM form; doing them would mean either faking ML (never) or sending media off-device (breaks
+the invariant). They error clearly until a real on-device path exists:
+- **`add_voiceover`** — neural TTS. sherpa/Piper have no clean JVM artifact. A pure-Java TTS (MaryTTS)
+  is the only on-device option, and it's a heavy dependency + voices — a deliberate future call.
+- **`diarize_clip`** — speaker diarization (sherpa pyannote segmentation + embedding); no JVM artifact.
+- **`apply_image_effect`** — generic TFLite image models (super-res / style / low-light); TFLite is
+  Android-only, and each effect needs its own bundled model.
+- **`apply_shader`** — GLSL execution. Params parse via the shared `GlslShader`, but rendering needs a
+  GL/Skia pass; a CPU per-pixel interpreter isn't viable.
+- **`remove_object_generative`** — object mask → cloud inpaint. No on-device object-masker to seed it,
+  and no inpaint provider wired.
+
+**Net:** desktop is at **61/66** functional tools — everything except the five above — the highest it
+has ever been, with the on-device invariant intact (only the generation tools touch the network, and
+only for the generated media, exactly as on Android).

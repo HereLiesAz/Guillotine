@@ -38,6 +38,8 @@ private const val MIN_CLIP_DURATION_MS = 100L
 private const val HISTORY_LIMIT = 100
 /** A ruler drag shorter than this (ms) clears the playback region instead of defining a tiny one. */
 private const val MIN_REGION_MS = 50L
+/** Media-name prefix marking a generated face-blur patch (so its overlay clip/track can be undone). */
+const val FACE_BLUR_PREFIX = "faceblur:"
 
 data class EditorUiState(
     val document: Document = Document(),
@@ -258,6 +260,75 @@ open class EditorViewModel {
                 clips = doc.clips.map {
                     if (it.id == foregroundClipId) it.copy(filters = it.filters.copy(removeBackground = true)) else it
                 } + bgClip,
+            )
+        }
+    }
+
+    /**
+     * Face-blur by tracking: drop [patch] (a pre-blurred face patch image) on a NEW track ON TOP of
+     * [sourceClipId], spanning its range, with OFFSET_X / OFFSET_Y / SCALE keyframes that follow the
+     * face. Built on the keyframe system, so it renders in both preview and export and stays fully
+     * editable. The overlay is group-linked to the source so they move/delete together, and its media
+     * name is prefixed [FACE_BLUR_PREFIX] so [removeFaceBlurOverlay] can find and undo it. One undo
+     * step. Returns the overlay clip id, or null when the source clip is gone.
+     */
+    fun addFaceBlurOverlay(
+        sourceClipId: String,
+        patch: MediaItem,
+        offsetX: List<Pair<Long, Float>>,
+        offsetY: List<Pair<Long, Float>>,
+        scale: List<Pair<Long, Float>>,
+    ): String? {
+        var overlayId: String? = null
+        mutateDocument { doc ->
+            val src = doc.clips.firstOrNull { it.id == sourceClipId } ?: return@mutateDocument doc
+            val track = nextTrackId(doc.videoTracks, "V")
+            val ease = CubicBezier()
+            fun kfs(list: List<Pair<Long, Float>>, prop: KeyframeProperty) =
+                list.map { (t, v) -> Keyframe(newId(), t.coerceIn(0, src.durationMs), v, prop, ease) }
+            val keyframes = (kfs(offsetX, KeyframeProperty.OFFSET_X) +
+                kfs(offsetY, KeyframeProperty.OFFSET_Y) +
+                kfs(scale, KeyframeProperty.SCALE)).sortedBy { it.timeMs }
+            val group = src.groupId ?: newId()
+            val overlay = TimelineClip(
+                id = newId(),
+                mediaId = patch.id,
+                type = ClipType.VIDEO,
+                trackId = track,
+                startTimeMs = src.startTimeMs,
+                trimStartMs = 0,
+                durationMs = src.durationMs,
+                keyframes = keyframes,
+                groupId = group,
+            )
+            overlayId = overlay.id
+            doc.copy(
+                // Prepend → rendered LAST by the reversed track walk → composited ON TOP of the face.
+                videoTracks = listOf(track) + doc.videoTracks,
+                mediaItems = doc.mediaItems + patch,
+                clips = doc.clips.map {
+                    if (it.id == sourceClipId) it.copy(groupId = group, filters = it.filters.copy(blurFaces = true)) else it
+                } + overlay,
+            )
+        }
+        return overlayId
+    }
+
+    /** Remove any face-blur overlay(s) previously added for [sourceClipId], and clear its flag. */
+    fun removeFaceBlurOverlay(sourceClipId: String) {
+        mutateDocument { doc ->
+            val src = doc.clips.firstOrNull { it.id == sourceClipId } ?: return@mutateDocument doc
+            val blurMediaIds = doc.mediaItems.filter { it.name.startsWith(FACE_BLUR_PREFIX) }.map { it.id }.toSet()
+            // Overlay clips: this source's blur patches (group-linked, blur-patch media).
+            val overlayClips = doc.clips.filter {
+                it.mediaId in blurMediaIds && it.groupId != null && it.groupId == src.groupId
+            }
+            val overlayTracks = overlayClips.map { it.trackId }.toSet()
+            doc.copy(
+                videoTracks = doc.videoTracks.filterNot { it in overlayTracks },
+                clips = (doc.clips - overlayClips.toSet()).map {
+                    if (it.id == sourceClipId) it.copy(filters = it.filters.copy(blurFaces = false)) else it
+                },
             )
         }
     }

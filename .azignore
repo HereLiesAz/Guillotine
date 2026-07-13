@@ -6,6 +6,12 @@
 # Developer build/setup guide.
 docs/BUILDING.md
 
+# Contributor-only docs (the workflow + the license grant) — not useful in the
+# end-user About reader. GOVERNANCE.md and SECURITY.md are intentionally NOT
+# listed: values and how to report a vulnerability are relevant to users.
+CONTRIBUTING.md
+CLA.md
+
 # Internal backlog / roadmap.
 docs/TODO.md
 
@@ -22,3 +28,6 @@ docs/FAQ.md
 docs/strategy/MARKET.md
 docs/strategy/FINANCIAL.md
 docs/strategy/ROADMAP.md
+
+# Internal grant-application drafts — for the maintainer, not end users.
+docs/grants/nlnet-ngi-zero.md

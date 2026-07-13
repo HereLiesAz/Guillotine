@@ -160,6 +160,11 @@ fun NleScreen(
     LaunchedEffect(settings.frameAnalysisCacheSize) {
         FrameAnalysisCache.setMaxEntries(settings.frameAnalysisCacheSize)
     }
+    // Feed the subject-segmentation model path to the render config so the exporter can matte a
+    // removeBackground clip (replace_background). Re-applies whenever Settings saves a new path.
+    LaunchedEffect(settings.segModelPath) {
+        com.hereliesaz.guillotine.desktop.media.DesktopRenderConfig.segModelPath = settings.segModelPath
+    }
 
     var showSettings by remember { mutableStateOf(false) }
     var showAiComparison by remember { mutableStateOf(false) }
