@@ -109,7 +109,22 @@ private fun TextToolButton(vm: EditorViewModel, clip: TimelineClip) {
                 Chip(label = f.label(), selected = clip.font == f) { vm.setClipFont(clip.id, f) }
             }
         }
-        Text("Size & placement: use the crop tool on the preview.", color = Neutral500, fontSize = 10.sp)
+        Text("Style", color = Neutral400, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.hereliesaz.guillotine.model.TEXT_STYLE_PRESETS.forEach { p ->
+                // A preset gives a predictable look, so it also zeroes any prior pan/rotation —
+                // otherwise a moved or rotated clip lands misaligned. The chip reads as active only
+                // when the clip matches the preset exactly (including those zeroed fields).
+                val selected = clip.font == p.font && clip.offsetX == 0f && clip.offsetY == p.offsetY &&
+                    clip.scale == p.scale && clip.rotation == 0f
+                Chip(label = p.label, selected = selected) {
+                    vm.updateClip(clip.id) {
+                        it.copy(font = p.font, offsetX = 0f, offsetY = p.offsetY, scale = p.scale, rotation = 0f)
+                    }
+                }
+            }
+        }
+        Text("One-tap looks set font, size and placement — tweak further with the crop tool.", color = Neutral500, fontSize = 10.sp)
     }
 }
 

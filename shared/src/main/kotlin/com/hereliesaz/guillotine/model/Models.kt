@@ -66,6 +66,26 @@ enum class KeyframeProperty(val uiRange: ClosedFloatingPointRange<Float>, val is
 @Serializable
 enum class TextFont { SANS, SERIF, MONO, CURSIVE }
 
+/**
+ * A one-tap look for a text/caption clip: typeface + placement ([offsetY], fraction of the frame
+ * below center) + [scale]. Applied to the selected clip's [TimelineClip] fields, so the result stays
+ * fully editable afterward (crop tool, font row). Shared so app and desktop offer identical presets.
+ */
+data class TextStylePreset(
+    val label: String,
+    val font: TextFont,
+    val offsetY: Float,
+    val scale: Float,
+)
+
+/** Curated text/caption looks surfaced in the Text tool. */
+val TEXT_STYLE_PRESETS: List<TextStylePreset> = listOf(
+    TextStylePreset("Subtitle", TextFont.SANS, 0.30f, 1.0f),   // lower-third caption
+    TextStylePreset("Title", TextFont.SERIF, 0.0f, 1.7f),      // big, centered
+    TextStylePreset("Lower third", TextFont.SANS, 0.40f, 0.8f), // small label near the bottom
+    TextStylePreset("Caption", TextFont.MONO, 0.30f, 0.9f),    // monospace lower-third
+)
+
 @Serializable
 enum class EditAction { KEEP, REMOVE }
 
