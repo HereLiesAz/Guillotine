@@ -6,21 +6,35 @@ add uploads and track releases to it, then commit once. Committing an edit is
 atomic; uncommitted edits are throwaway.
 
 Rollout policy (fixed):
-  - internal      → completed  (published to internal testers immediately)
+  - internal      → draft      (bundle uploaded; roll out with one click in the console)
   - alpha         → draft      (closed testing, staged; promote by hand)
   - beta          → draft      (open testing, staged; promote by hand)
   - production    → draft      (staged; promote by hand)
 
-Structure: one bootstrap edit that uploads the AAB AND releases to internal
-(committed as the atomic critical path), then one small edit per remaining
-track that just references the already-uploaded versionCode. If a later track
-fails (e.g. Play returns FAILED_PRECONDITION because the track was never
-initialised in the Play Console), internal is still live and the failure is
-isolated to that track. The script exits 2 in that case so the workflow can:
+Why internal is `draft`, not `completed`: a `completed` release is an immediate
+LIVE rollout, and Play runs a precondition on live rollouts — every existing
+user on the track must have an upgrade path to the new bundle. When the new
+bundle's device targeting (e.g. minSdk, ABIs, screen densities) doesn't cover
+every existing user, Play rejects the rollout with
+HTTP 403 PERMISSION_DENIED: "You cannot rollout this release because it does not
+allow any existing users to upgrade to the newly added APKs." A `draft` release
+uploads and commits the bundle WITHOUT rolling it out, so that check never runs —
+the versionCode lands in the Play Console ready for a human to review and roll
+out (or to fix targeting / retain prior versionCodes first). This is the correct
+posture for a serious app anyway: CI delivers the build to Play; a person decides
+when it goes live.
+
+Structure: one bootstrap edit that uploads the AAB AND creates the internal
+release (committed as the atomic critical path), then one small edit per
+remaining track that just references the already-uploaded versionCode. If a
+later track fails (e.g. Play returns FAILED_PRECONDITION because the track was
+never initialised in the Play Console), internal is still uploaded and the
+failure is isolated to that track. The script exits 2 in that case so the
+workflow can:
   - persist the versionCode bump (it was consumed by Play; must not be reused);
   - still mark the job failed so the missing track is visible.
 
-Exit codes: 0 = full success, 2 = internal published but ≥1 other track failed,
+Exit codes: 0 = full success, 2 = internal uploaded but ≥1 other track failed,
 1 = upload or internal release failed (nothing published; versionCode NOT
 consumed by Play).
 
@@ -158,7 +172,12 @@ def _is_edit_conflict(exc: Exception) -> bool:
 
 
 def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
-    """Bootstrap edit: upload bundle + release to internal (completed). Commit.
+    """Bootstrap edit: upload bundle + create internal release (draft). Commit.
+
+    Draft, not completed: a live rollout is rejected by Play when the bundle's
+    device targeting doesn't cover every existing user on the track (403
+    PERMISSION_DENIED — see the module docstring). A draft uploads the bundle
+    without rolling out, so the commit always succeeds; roll out from the console.
 
     Retries on edit conflicts (another edit committed between open and commit).
     """
@@ -168,9 +187,9 @@ def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
         try:
             version_code = upload_bundle(session, package, edit_id, aab)
             print(f"Uploaded bundle versionCode={version_code}")
-            update_track(session, package, edit_id, "internal", "completed", version_code)
+            update_track(session, package, edit_id, "internal", "draft", version_code)
             commit_edit(session, package, edit_id)
-            print(f"  internal    → completed (versionCode {version_code} LIVE)")
+            print(f"  internal    → draft (versionCode {version_code} uploaded; roll out in the Play Console)")
             return version_code
         except Exception as e:
             delete_edit(session, package, edit_id)
@@ -213,7 +232,8 @@ def main() -> int:
     creds = service_account.Credentials.from_service_account_file(args.sa_json, scopes=SCOPES)
     session = AuthorizedSession(creds)
 
-    # Critical path: internal must go live, or the whole thing failed.
+    # Critical path: the bundle must upload + the internal draft must commit,
+    # or the whole thing failed (nothing reached Play).
     try:
         version_code = publish_internal(session, args.package, args.aab)
     except Exception as e:
@@ -246,7 +266,7 @@ def main() -> int:
         names = ", ".join(t for t, _ in failures)
         print(
             f"::warning::Track staging failed: {names}. "
-            "Internal WAS published; versionCode is burnt and must not be reused. "
+            "Internal WAS uploaded (draft); versionCode is burnt and must not be reused. "
             "The failed tracks typically need to be initialised once in the Play "
             "Console (create a manual release on each) before the API can post to "
             "them; then re-run the workflow.",
