@@ -118,7 +118,15 @@ object DesktopExporter {
                     val scale = TimelineMath.valueAt(t, KeyframeProperty.SCALE, relMs, t.scale)
 
                     g.composite = java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, opacity.coerceIn(0f, 1f))
-                    val font = g.font.deriveFont(14f * scale)
+                    // Honor the clip's typeface (Font row / text presets). AWT has no cursive logical
+                    // font, so cursive falls back to serif — the closest logical family.
+                    val family = when (t.font) {
+                        com.hereliesaz.guillotine.model.TextFont.SANS -> java.awt.Font.SANS_SERIF
+                        com.hereliesaz.guillotine.model.TextFont.SERIF -> java.awt.Font.SERIF
+                        com.hereliesaz.guillotine.model.TextFont.MONO -> java.awt.Font.MONOSPACED
+                        com.hereliesaz.guillotine.model.TextFont.CURSIVE -> java.awt.Font.SERIF
+                    }
+                    val font = java.awt.Font(family, java.awt.Font.PLAIN, 1).deriveFont(14f * scale)
                     g.font = font
                     val cx = config.width / 2 + (ox * config.width).roundToInt()
                     val cy = config.height / 2 + (oy * config.height).roundToInt()
