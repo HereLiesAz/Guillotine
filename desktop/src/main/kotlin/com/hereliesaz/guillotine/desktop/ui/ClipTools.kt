@@ -61,11 +61,14 @@ import com.hereliesaz.guillotine.desktop.ui.theme.Neutral900
 import com.hereliesaz.guillotine.desktop.ui.theme.Red500
 import com.hereliesaz.guillotine.desktop.ui.theme.White
 
+/** How auto-captions are laid down: plain subtitle clips, or the animated word-pop style. */
+enum class CaptionStyle { PLAIN, ANIMATED }
+
 @Composable
 fun ClipToolButtons(
     vm: EditorViewModel,
     state: EditorUiState,
-    onTranscribe: () -> Unit,
+    onTranscribe: (CaptionStyle) -> Unit,
 ) {
     val sel = state.selectedClips
     if (sel.isEmpty()) return
@@ -219,9 +222,35 @@ private fun KeyframesToolButton(vm: EditorViewModel, clip: TimelineClip) {
     }
 }
 
+/** One-tap auto-captions. On-device transcription (Vosk) → caption clips, in the chosen style. */
 @Composable
-private fun TranscribeToolButton(state: EditorUiState, onTranscribe: () -> Unit) {
-    IconToolButton(Icons.Filled.Subtitles, "Transcribe → captions", enabled = !state.isProcessing) { onTranscribe() }
+private fun TranscribeToolButton(state: EditorUiState, onTranscribe: (CaptionStyle) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    IconToolButton(Icons.Filled.Subtitles, "Auto-captions", enabled = !state.isProcessing) { open = !open }
+    if (open) ToolPopup("Auto-captions", { open = false }) {
+        Text("On-device speech-to-text — your audio never leaves the device.", color = Neutral500, fontSize = 10.sp)
+        CaptionStyleRow("Captions", "Clean subtitle clips, timed to the speech") {
+            onTranscribe(CaptionStyle.PLAIN); open = false
+        }
+        CaptionStyleRow("Animated", "Word-pop / karaoke style — each syllable grows as it's spoken") {
+            onTranscribe(CaptionStyle.ANIMATED); open = false
+        }
+    }
+}
+
+@Composable
+private fun CaptionStyleRow(label: String, detail: String, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .background(Neutral800)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(label, color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(detail, color = Neutral400, fontSize = 10.sp)
+    }
 }
 
 @Composable

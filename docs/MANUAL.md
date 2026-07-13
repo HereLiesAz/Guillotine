@@ -282,7 +282,7 @@ Both run entirely on the device.
 For a **text** clip, the **Text & font** popup (T icon) edits the caption text and picks a
 font — **Sans, Serif, Mono, or Cursive**. Size and placement are set with the **Crop /
 transform** tool on the preview. To turn spoken audio into caption clips automatically, use
-**Transcribe → captions** — see [Captions and transcription](#captions-and-transcription).
+**Auto-captions** — see [Captions and transcription](#captions-and-transcription).
 
 ### Keyframes and the curve editor
 
@@ -397,13 +397,17 @@ every phone.
 
 ### Captions and transcription
 
-**Transcribe → captions** turns a clip's speech into timed caption clips that appear and
-disappear with the words. It runs **on-device with Vosk** when a speech model is configured,
-otherwise via **cloud Whisper** (bring-your-own OpenAI key). Captions burn into the export.
+**Auto-captions** (the subtitles icon in the clip tool strip) turns a clip's speech into timed
+caption clips that appear and disappear with the words. Tap it and pick a style — both run
+**on-device** (your audio never leaves the device) when a speech model is configured, otherwise
+via **cloud Whisper** (bring-your-own OpenAI key on Android). Captions burn into the export.
 
-Ask the assistant for **animated / kinetic captions** ("kinetic text," "per-syllable
-animation") to split each word into syllables on separate tracks with scale keyframes that
-grow each syllable as it's spoken.
+- **Captions** — clean subtitle clips, timed to the speech.
+- **Animated** — word-pop / karaoke style: each word is split into syllables on separate tracks
+  with scale keyframes that grow each syllable as it's spoken. (Needs per-word timing; falls back
+  to plain captions when the model doesn't provide it.)
+
+You can also drive either style from the assistant ("add captions," "add kinetic captions").
 
 ### Background removal and face blur
 

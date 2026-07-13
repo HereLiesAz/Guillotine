@@ -90,6 +90,8 @@ import androidx.compose.ui.window.PopupProperties
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.FrameAnalysisCache
 import com.hereliesaz.guillotine.ai.meta
+import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
+import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
 import com.hereliesaz.guillotine.desktop.platform.DesktopKeyStore
 import com.hereliesaz.guillotine.desktop.platform.DesktopMcpAgent
 import com.hereliesaz.guillotine.desktop.platform.DesktopProjectAutosave
@@ -263,13 +265,32 @@ fun NleScreen(
         }
     }
 
-    val onTranscribe: () -> Unit = onTranscribe@{
+    val onTranscribe: (CaptionStyle) -> Unit = onTranscribe@{ style ->
         val clip = vm.uiState.value.selectedClips.singleOrNull() ?: return@onTranscribe
+        val media = vm.uiState.value.document.mediaFor(clip) ?: return@onTranscribe
+        val model = settings.speechModelPath
+        if (model.isBlank()) {
+            vm.setProcessing(false, "No on-device speech model set. Set a Vosk model in Settings → Transcription.")
+            return@onTranscribe
+        }
         vm.setProcessing(true, null)
         scope.launch {
             try {
-                // Transcription not available on desktop yet -- stub.
-                vm.setProcessing(false, "Transcription is not yet available on desktop.")
+                // Decode + Vosk are blocking/CPU-heavy — keep them off the UI dispatcher.
+                val cues = withContext(Dispatchers.IO) {
+                    val pcm = DesktopMediaDecoder.decodePcmMono(media.uri, 16_000)
+                        ?: throw IllegalStateException("No audio track in \"${media.name}\" to transcribe.")
+                    DesktopVoskTranscriber.transcribe(model, pcm.samples)
+                }
+                // Animated captions need per-word timing; fall back to plain subtitles when the
+                // on-device model didn't emit it (so the tap never silently no-ops).
+                val words = if (style == CaptionStyle.ANIMATED) cues.flatMap { it.words } else emptyList()
+                if (style == CaptionStyle.ANIMATED && words.isNotEmpty()) {
+                    vm.addAnimatedCaptionsFromTranscript(clip.id, words)
+                } else {
+                    vm.addTextClipsFromTranscript(clip.id, cues)
+                }
+                vm.setProcessing(false, null)
             } catch (e: Exception) {
                 vm.setProcessing(false, e.message ?: "Transcription failed")
             }
@@ -686,7 +707,7 @@ private fun EditorToolStrip(
     vm: EditorViewModel,
     state: EditorUiState,
     onAnalyze: () -> Unit,
-    onTranscribe: () -> Unit,
+    onTranscribe: (CaptionStyle) -> Unit,
     providerLabel: String,
     onOpenSettings: () -> Unit,
     assistant: AssistantViewModel.UiState,

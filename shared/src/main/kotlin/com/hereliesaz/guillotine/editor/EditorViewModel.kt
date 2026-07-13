@@ -38,6 +38,9 @@ private const val MIN_CLIP_DURATION_MS = 100L
 private const val HISTORY_LIMIT = 100
 /** A ruler drag shorter than this (ms) clears the playback region instead of defining a tiny one. */
 private const val MIN_REGION_MS = 50L
+
+/** Default vertical placement for auto-caption clips: lower third (fraction of frame below center). */
+private const val CAPTION_OFFSET_Y = 0.30f
 /** Media-name prefix marking a generated face-blur patch (so its overlay clip/track can be undone). */
 const val FACE_BLUR_PREFIX = "faceblur:"
 
@@ -1177,6 +1180,11 @@ open class EditorViewModel {
                     durationMs = e - s,
                     text = cue.text.trim(),
                     groupId = gid,
+                    // Sit captions in the lower third by default (offsetY is a fraction of the frame
+                    // below center; +down in both preview and export) instead of dead-center over the
+                    // subject — the standard subtitle position. Users can still move them via crop.
+                    // 0.30 keeps them clear of the 9:16 bottom safe zone (bottom 20%).
+                    offsetY = CAPTION_OFFSET_Y,
                 )
             }
             if (textClips.isEmpty()) return@mutateDocument doc
