@@ -13,6 +13,18 @@ java {
     targetCompatibility = JavaVersion.VERSION_21
 }
 
+// Desktop installer version, derived from the single source of truth (version.properties, bumped in
+// the root build). jpackage (MSI/DMG/DEB) accepts only MAJOR.MINOR.PATCH with MAJOR >= 1, so the
+// four-part app version is projected onto three fields and the major is floored at 1.
+val desktopPackageVersion: String = run {
+    val extra = rootProject.extra
+    fun v(key: String, default: Int) = if (extra.has(key)) extra[key] as Int else default
+    val major = v("verMajor", 1).coerceAtLeast(1)
+    val minor = v("verMinor", 0)
+    val patch = v("verPatch", 0)
+    "$major.$minor.$patch"
+}
+
 // Bytedeco publishes one artifact per (module, os, arch). javacv-platform pulls every
 // combination (~600 MB); we only need the host's — the installer only runs on that host.
 val javacppClassifier: String = run {
@@ -62,7 +74,7 @@ compose.desktop {
             // "task is not compatible with the current OS" — that's how jpackage matrix builds work.
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Guillotine"
-            packageVersion = "1.0.0"
+            packageVersion = desktopPackageVersion
             vendor = "HereLiesAz"
             description = "An AI-powered non-linear video editor."
             copyright = "© 2026 HereLiesAz"

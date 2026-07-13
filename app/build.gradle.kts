@@ -1,4 +1,3 @@
-import java.util.Properties
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -13,59 +12,11 @@ plugins {
 }
 
 // ---- Four-part version: Major.Minor.Patch.Build ----
-//   • Major / Minor — hand-edited in version.properties.
-//   • Patch / Build — AUTO-INCREMENTED on disk on EVERY Gradle configuration, i.e. every single
-//     compile/build, with no exceptions. Persisted to version.properties so the bump survives across
-//     builds and lands in git when committed. Build is the monotonic versionCode.
-//
-// The increment runs at configuration time below, so any `./gradlew` build/compile of `:app` bumps
-// both counters and writes them back to disk. Build never regresses below the git-derived floor
-// (100 + commit count), so uploads to Play stay strictly increasing even across machines/checkouts.
-val versionPropsFile = rootProject.file("version.properties")
-val versionProps = Properties().apply {
-    if (versionPropsFile.exists()) versionPropsFile.inputStream().use { load(it) }
-}
-val verMajor = versionProps.getProperty("versionMajor", "0").trim().toIntOrNull() ?: 0
-val verMinor = versionProps.getProperty("versionMinor", "0").trim().toIntOrNull() ?: 0
-
-fun runGit(vararg args: String): String? = runCatching {
-    providers.exec {
-        commandLine("git", *args)
-        workingDir = rootProject.rootDir
-    }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
-}.getOrNull()
-
-// Monotonic floor for versionCode: never below 100 + commit count (the value earlier git-based and
-// file-based flows would have produced), so Play never rejects an upload as non-monotonic.
-val gitFloor = 100 + (runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0)
-
-// First-run seed for Patch only (when version.properties has no versionPatch yet): commits since
-// versionMinor last changed, so Patch continues from today's value instead of restarting at 1.
-val patchSeed: Int = run {
-    val blame = runGit("blame", "-l", "-L", "/versionMinor=/,+1", "version.properties") ?: return@run 0
-    val sha = blame.substringBefore(' ').trimStart('^').takeIf { it.length >= 7 } ?: return@run 0
-    runGit("rev-list", "--count", "$sha..HEAD")?.toIntOrNull() ?: 0
-}
-
-// Increment BOTH counters on every configuration. Persisted + monotonic.
-val verPatch = (versionProps.getProperty("versionPatch")?.trim()?.toIntOrNull() ?: patchSeed) + 1
-val verBuild = maxOf(versionProps.getProperty("versionBuild")?.trim()?.toIntOrNull() ?: 0, gitFloor) + 1
-
-// Persist the bumped values straight back to disk (keeping the human-edited Major/Minor + header).
-versionPropsFile.writeText(
-    buildString {
-        appendLine("# Major and Minor are human-edited. Patch and Build AUTO-INCREMENT on every Gradle")
-        appendLine("# build/compile (see app/build.gradle.kts) — do not hand-edit them.")
-        appendLine("versionMajor=$verMajor")
-        appendLine("versionMinor=$verMinor")
-        appendLine("versionPatch=$verPatch")
-        appendLine("versionBuild=$verBuild")
-    },
-)
-
-// Android requires versionCode >= 1.
-val computedVersionCode = maxOf(1, verBuild)
-val computedVersionName = "$verMajor.$verMinor.$verPatch.$verBuild"
+// Computed centrally in the root build.gradle.kts (single source of truth: version.properties),
+// which auto-increments Patch/Build on EVERY Gradle build of any module and persists them to disk.
+// Here we only READ the already-bumped values — never recompute or rewrite them.
+val computedVersionCode = rootProject.extra["versionCode"] as Int
+val computedVersionName = rootProject.extra["versionName"] as String
 
 android {
     namespace = "com.hereliesaz.guillotine"
