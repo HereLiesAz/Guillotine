@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
+import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.TypefaceSpan
 import androidx.media3.effect.StaticOverlaySettings
@@ -35,6 +36,9 @@ class CaptionOverlay(
     private val empty = SpannableString("")
     private val styled = SpannableString(clip.text).apply {
         if (isNotEmpty()) {
+            // Dark scrim behind the glyphs so captions stay legible over bright footage — matches the
+            // preview's caption background (PreviewPlayer), keeping export WYSIWYG. ~55% black.
+            setSpan(BackgroundColorSpan(Color.argb(140, 0, 0, 0)), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             setSpan(ForegroundColorSpan(Color.WHITE), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             setSpan(AbsoluteSizeSpan(64), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             setSpan(TypefaceSpan(typefaceName(clip.font)), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
@@ -71,7 +75,9 @@ class CaptionOverlay(
         // Rebuild with alpha when opacity is keyframed
         if (opKfs.isNotEmpty()) {
             val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+            val bgAlpha = (opacity * 140).toInt().coerceIn(0, 255) // scrim fades with the text
             val s = SpannableString(clip.text)
+            s.setSpan(BackgroundColorSpan(Color.argb(bgAlpha, 0, 0, 0)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             s.setSpan(ForegroundColorSpan(Color.argb(alpha, 255, 255, 255)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             s.setSpan(AbsoluteSizeSpan(64), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             s.setSpan(TypefaceSpan(typefaceName(clip.font)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)

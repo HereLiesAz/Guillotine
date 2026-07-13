@@ -120,11 +120,20 @@ object DesktopExporter {
                     g.composite = java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, opacity.coerceIn(0f, 1f))
                     val font = g.font.deriveFont(14f * scale)
                     g.font = font
-                    g.color = Color(255, 255, 255, (opacity * 255).roundToInt().coerceIn(0, 255))
                     val cx = config.width / 2 + (ox * config.width).roundToInt()
                     val cy = config.height / 2 + (oy * config.height).roundToInt()
                     val fm = g.fontMetrics
-                    g.drawString(t.text, cx - fm.stringWidth(t.text) / 2, cy + fm.ascent / 2)
+                    val tw = fm.stringWidth(t.text)
+                    val tx = cx - tw / 2
+                    val baseline = cy + fm.ascent / 2
+                    // Dark scrim behind the glyphs so captions stay legible over bright footage —
+                    // matches the app export (CaptionOverlay) and both previews. Clip opacity is
+                    // applied by the composite above. ~55% black.
+                    val pad = 6
+                    g.color = Color(0, 0, 0, 140)
+                    g.fillRect(tx - pad, baseline - fm.ascent - pad, tw + pad * 2, fm.ascent + fm.descent + pad * 2)
+                    g.color = Color(255, 255, 255, (opacity * 255).roundToInt().coerceIn(0, 255))
+                    g.drawString(t.text, tx, baseline)
                     g.composite = java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, 1f)
                 }
 
