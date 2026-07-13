@@ -131,19 +131,26 @@ object DesktopExporter {
                     val cx = config.width / 2 + (ox * config.width).roundToInt()
                     val cy = config.height / 2 + (oy * config.height).roundToInt()
                     val fm = g.fontMetrics
-                    val tw = fm.stringWidth(t.text)
-                    val tx = cx - tw / 2
-                    val baseline = cy + fm.ascent / 2
-                    // Dark scrim behind the glyphs so captions stay legible over bright footage —
-                    // matches the app export (CaptionOverlay) and both previews. Clip opacity is
-                    // applied by the composite above. ~55% black.
+                    val lineH = fm.ascent + fm.descent
                     val pad = (6 * scale).roundToInt().coerceAtLeast(0) // scale padding with the text
-                    g.color = Color(0, 0, 0, 140)
-                    g.fillRect(tx - pad, baseline - fm.ascent - pad, tw + pad * 2, fm.ascent + fm.descent + pad * 2)
-                    // Solid white — the composite (set above) already applies clip opacity once;
-                    // encoding alpha here too would fade the text quadratically vs. the scrim.
-                    g.color = Color.WHITE
-                    g.drawString(t.text, tx, baseline)
+                    // Wrap long captions to ~90% of the frame width instead of running off-screen,
+                    // then draw the lines as a vertically-centered block around the anchor.
+                    val lines = wrapToWidth(t.text, fm, (config.width * 0.9f).toInt())
+                    val blockTop = cy - (lineH * lines.size) / 2
+                    lines.forEachIndexed { i, line ->
+                        val lw = fm.stringWidth(line)
+                        val lx = cx - lw / 2
+                        val baseline = blockTop + i * lineH + fm.ascent
+                        // Dark scrim behind each line so captions stay legible over bright footage —
+                        // matches the app export and both previews. Clip opacity applied by the
+                        // composite above. ~55% black.
+                        g.color = Color(0, 0, 0, 140)
+                        g.fillRect(lx - pad, baseline - fm.ascent - pad, lw + pad * 2, lineH + pad * 2)
+                        // Solid white — the composite already applies clip opacity once; encoding
+                        // alpha here too would fade the text quadratically vs. the scrim.
+                        g.color = Color.WHITE
+                        g.drawString(line, lx, baseline)
+                    }
                     g.composite = java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, 1f)
                 }
 
@@ -358,4 +365,24 @@ object DesktopExporter {
             else -> null
         }
     }.getOrNull()
+
+    /** Greedy word-wrap: pack words into lines no wider than [maxW] px for [fm]. A single word wider
+     *  than maxW gets its own line (may overflow — rare). Never returns an empty list. */
+    private fun wrapToWidth(text: String, fm: java.awt.FontMetrics, maxW: Int): List<String> {
+        val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.isEmpty()) return listOf("")
+        val lines = mutableListOf<String>()
+        var cur = StringBuilder()
+        for (w in words) {
+            val candidate = if (cur.isEmpty()) w else "$cur $w"
+            if (cur.isEmpty() || fm.stringWidth(candidate) <= maxW) {
+                cur = StringBuilder(candidate)
+            } else {
+                lines.add(cur.toString())
+                cur = StringBuilder(w)
+            }
+        }
+        if (cur.isNotEmpty()) lines.add(cur.toString())
+        return lines
+    }
 }
