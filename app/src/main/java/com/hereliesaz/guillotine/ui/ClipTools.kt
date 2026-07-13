@@ -129,8 +129,15 @@ private fun TextToolButton(vm: EditorViewModel, clip: TimelineClip) {
         Text("Style", color = Neutral400, fontSize = 12.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             com.hereliesaz.guillotine.model.TEXT_STYLE_PRESETS.forEach { p ->
-                Chip(label = p.label, selected = false) {
-                    vm.updateClip(clip.id) { it.copy(font = p.font, offsetY = p.offsetY, scale = p.scale) }
+                // A preset gives a predictable look, so it also zeroes any prior pan/rotation —
+                // otherwise a moved or rotated clip lands misaligned. The chip reads as active only
+                // when the clip matches the preset exactly (including those zeroed fields).
+                val selected = clip.font == p.font && clip.offsetX == 0f && clip.offsetY == p.offsetY &&
+                    clip.scale == p.scale && clip.rotation == 0f
+                Chip(label = p.label, selected = selected) {
+                    vm.updateClip(clip.id) {
+                        it.copy(font = p.font, offsetX = 0f, offsetY = p.offsetY, scale = p.scale, rotation = 0f)
+                    }
                 }
             }
         }
