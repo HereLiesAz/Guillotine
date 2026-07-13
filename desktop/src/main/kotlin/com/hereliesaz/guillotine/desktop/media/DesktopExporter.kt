@@ -144,7 +144,7 @@ object DesktopExporter {
                         // Dark scrim behind each line so captions stay legible over bright footage —
                         // matches the app export and both previews. Clip opacity applied by the
                         // composite above. ~55% black.
-                        g.color = Color(0, 0, 0, 140)
+                        g.color = scrimColor
                         g.fillRect(lx - pad, baseline - fm.ascent - pad, lw + pad * 2, lineH + pad * 2)
                         // Solid white — the composite already applies clip opacity once; encoding
                         // alpha here too would fade the text quadratically vs. the scrim.
@@ -366,20 +366,32 @@ object DesktopExporter {
         }
     }.getOrNull()
 
+    // Reused across the per-frame export hot loop to avoid re-allocating on every line/frame.
+    private val scrimColor = Color(0, 0, 0, 140)
+    private val whitespaceRegex = Regex("\\s+")
+
     /** Greedy word-wrap: pack words into lines no wider than [maxW] px for [fm]. A single word wider
-     *  than maxW gets its own line (may overflow — rare). Never returns an empty list. */
+     *  than maxW gets its own line (may overflow — rare). Never returns an empty list. Runs per
+     *  frame during export, so it fast-paths text that already fits and reuses one StringBuilder. */
     private fun wrapToWidth(text: String, fm: java.awt.FontMetrics, maxW: Int): List<String> {
-        val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val trimmed = text.trim()
+        if (fm.stringWidth(trimmed) <= maxW) return listOf(trimmed) // fast path: fits on one line
+        val words = trimmed.split(whitespaceRegex).filter { it.isNotEmpty() }
         if (words.isEmpty()) return listOf("")
         val lines = mutableListOf<String>()
-        var cur = StringBuilder()
+        val cur = StringBuilder()
         for (w in words) {
-            val candidate = if (cur.isEmpty()) w else "$cur $w"
-            if (cur.isEmpty() || fm.stringWidth(candidate) <= maxW) {
-                cur = StringBuilder(candidate)
+            if (cur.isEmpty()) {
+                cur.append(w)
             } else {
-                lines.add(cur.toString())
-                cur = StringBuilder(w)
+                val lenBefore = cur.length
+                cur.append(' ').append(w)
+                if (fm.stringWidth(cur.toString()) > maxW) {
+                    cur.setLength(lenBefore)      // undo: this word starts a new line
+                    lines.add(cur.toString())
+                    cur.setLength(0)
+                    cur.append(w)
+                }
             }
         }
         if (cur.isNotEmpty()) lines.add(cur.toString())
