@@ -121,6 +121,12 @@ fun DesktopPreviewPlayer(
                 t.text,
                 color = White.copy(alpha = (opacity * trackOpacity).coerceIn(0f, 1f)),
                 fontSize = 14.sp,
+                fontFamily = when (t.font) {
+                    com.hereliesaz.guillotine.model.TextFont.SANS -> androidx.compose.ui.text.font.FontFamily.SansSerif
+                    com.hereliesaz.guillotine.model.TextFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
+                    com.hereliesaz.guillotine.model.TextFont.MONO -> androidx.compose.ui.text.font.FontFamily.Monospace
+                    com.hereliesaz.guillotine.model.TextFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
+                },
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .align(Alignment.Center)
