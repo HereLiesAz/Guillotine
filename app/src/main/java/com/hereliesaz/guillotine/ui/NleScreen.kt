@@ -360,14 +360,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         }
     }
 
-    val onTranscribe: () -> Unit = onTranscribe@{
+    val onTranscribe: (CaptionStyle) -> Unit = onTranscribe@{ style ->
         val clip = vm.uiState.value.selectedClips.singleOrNull() ?: return@onTranscribe
         val media = vm.uiState.value.document.mediaFor(clip) ?: return@onTranscribe
         vm.setProcessing(true, null)
         scope.launch {
             try {
                 val cues = Transcription.transcribe(context, settings, Uri.parse(media.uri))
-                vm.addTextClipsFromTranscript(clip.id, cues)
+                // Animated captions need per-word timing; fall back to plain subtitles when the
+                // on-device model didn't emit it (so the tap never silently no-ops).
+                val words = if (style == CaptionStyle.ANIMATED) cues.flatMap { it.words } else emptyList()
+                if (style == CaptionStyle.ANIMATED && words.isNotEmpty()) {
+                    vm.addAnimatedCaptionsFromTranscript(clip.id, words)
+                } else {
+                    vm.addTextClipsFromTranscript(clip.id, cues)
+                }
                 vm.setProcessing(false, null)
             } catch (e: Exception) {
                 vm.setProcessing(false, e.message ?: "Transcription failed")
@@ -869,7 +876,7 @@ private fun EditorToolStrip(
     vm: EditorViewModel,
     state: EditorUiState,
     onAnalyze: () -> Unit,
-    onTranscribe: () -> Unit,
+    onTranscribe: (CaptionStyle) -> Unit,
     providerLabel: String,
     onOpenSettings: () -> Unit,
     assistant: AssistantViewModel.UiState,
