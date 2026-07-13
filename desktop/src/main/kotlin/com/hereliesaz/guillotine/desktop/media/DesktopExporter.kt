@@ -129,10 +129,12 @@ object DesktopExporter {
                     // Dark scrim behind the glyphs so captions stay legible over bright footage —
                     // matches the app export (CaptionOverlay) and both previews. Clip opacity is
                     // applied by the composite above. ~55% black.
-                    val pad = 6
+                    val pad = (6 * scale).roundToInt().coerceAtLeast(0) // scale padding with the text
                     g.color = Color(0, 0, 0, 140)
                     g.fillRect(tx - pad, baseline - fm.ascent - pad, tw + pad * 2, fm.ascent + fm.descent + pad * 2)
-                    g.color = Color(255, 255, 255, (opacity * 255).roundToInt().coerceIn(0, 255))
+                    // Solid white — the composite (set above) already applies clip opacity once;
+                    // encoding alpha here too would fade the text quadratically vs. the scrim.
+                    g.color = Color.WHITE
                     g.drawString(t.text, tx, baseline)
                     g.composite = java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, 1f)
                 }
