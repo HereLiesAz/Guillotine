@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -296,14 +297,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     )
 
                     Text("Footage search (on-device)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = labelModelPath,
-                        onValueChange = { labelModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Image-classifier model (.onnx)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = labelModelPath, hint = "Image-classifier model (.onnx)", isDirectory = false) { labelModelPath = it }
                     Text(
                         "Point at an ONNX ImageNet classifier (e.g. MobileNet/ResNet) to enable on-device " +
                             "footage search (\"find clips with a dog\"). Put a labels file — one class per " +
@@ -314,14 +308,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     )
 
                     Text("Audio highlights (on-device)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = audioEventModelPath,
-                        onValueChange = { audioEventModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("YAMNet audio-event model (.onnx)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = audioEventModelPath, hint = "YAMNet audio-event model (.onnx)", isDirectory = false) { audioEventModelPath = it }
                     Text(
                         "Point at a YAMNet ONNX export to enable on-device highlight detection " +
                             "(\"find the best moments\" — applause, cheering, laughter, music). Blank = off.",
@@ -329,14 +316,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     )
 
                     Text("Face detection (on-device)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = faceDetectModelPath,
-                        onValueChange = { faceDetectModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Face-detector model (.onnx, UltraFace-style)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = faceDetectModelPath, hint = "Face-detector model (.onnx, UltraFace-style)", isDirectory = false) { faceDetectModelPath = it }
                     Text(
                         "Point at an UltraFace-style ONNX face detector to enable on-device " +
                             "auto-reframe (punch in and pan to follow the main face) and face blur. Blank = off.",
@@ -344,14 +324,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     )
 
                     Text("Concept matching (on-device)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = idEmbedModelPath,
-                        onValueChange = { idEmbedModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Image-embedding model (.onnx)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = idEmbedModelPath, hint = "Image-embedding model (.onnx)", isDirectory = false) { idEmbedModelPath = it }
                     Text(
                         "Point at an ONNX image embedder (a classifier with its head removed → a feature " +
                             "vector) to teach and find things (add_reference / analyze_clip_with_concept). Blank = off.",
@@ -359,14 +332,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     )
 
                     Text("Background removal (on-device)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = segModelPath,
-                        onValueChange = { segModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Subject-segmentation model (.onnx)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = segModelPath, hint = "Subject-segmentation model (.onnx)", isDirectory = false) { segModelPath = it }
                     Text(
                         "Point at an ONNX subject segmenter (selfie-seg / U2Net / MODNet) to matte the " +
                             "subject for replace_background (applied on export). Blank = off.",
@@ -387,14 +353,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                 }
                 2 -> {
                     Text("Transcription", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = speechModelPath,
-                        onValueChange = { speechModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Vosk model folder path", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = speechModelPath, hint = "Vosk model folder", isDirectory = true) { speechModelPath = it }
                     Text("Set a Vosk model folder for offline transcription; blank uses OpenAI Whisper.", color = Neutral500, fontSize = 10.sp)
                     Text(
                         "Download a Vosk model  ↗",
@@ -472,6 +431,51 @@ private fun KeyField(label: String, value: String, onChange: (String) -> Unit) {
         singleLine = true,
     )
     Text("Stored encrypted on this device.", color = Neutral500, fontSize = 10.sp)
+}
+
+/**
+ * A model-path setting rendered as a **Browse** button (not a paste-a-path text box): it opens the
+ * native file (or folder, when [isDirectory]) explorer and stores the chosen absolute path. Shows the
+ * current path read-only, with a Clear affordance.
+ */
+@Composable
+private fun ModelPathField(value: String, hint: String, isDirectory: Boolean, onSet: (String) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .border(1.dp, Neutral700, RoundedCornerShape(6.dp))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = value.ifBlank { hint },
+            color = if (value.isBlank()) Neutral500 else White,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+        )
+        // Vertical padding is INSIDE the clickable so the whole padded area is the click target.
+        Text(
+            if (isDirectory) "Choose folder" else "Browse",
+            color = Red500, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clickable {
+                    val picked = if (isDirectory) pickFolder("Select model folder") else pickFile("Select model file")
+                    if (picked != null) onSet(picked.absolutePath)
+                }
+                .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
+        )
+        if (value.isNotBlank()) {
+            Text(
+                "Clear", color = Neutral400, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable { onSet("") }
+                    .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
+            )
+        }
+    }
 }
 
 @Composable
