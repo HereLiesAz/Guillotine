@@ -121,6 +121,11 @@ object AzpPackage {
         } catch (e: Exception) {
             return listOf(e.message ?: "azp: read failed")
         }
+        return verify(entries)
+    }
+
+    /** [verify] over already-unzipped entries — lets callers ([load], [verifyTrust]) unzip only once. */
+    private fun verify(entries: Map<String, ByteArray>): List<String> {
         val raw = entries["manifest.json"] ?: return listOf("azp: manifest.json is missing")
         val manifest = try {
             parseManifest(raw)
@@ -161,13 +166,19 @@ object AzpPackage {
 
     /** Load + integrity-verify; throws [AzpException] listing all problems if it doesn't verify. */
     fun load(bytes: ByteArray): Loaded {
-        val errors = verify(bytes)
+        val entries = try {
+            unzip(bytes)
+        } catch (e: Exception) {
+            throw AzpException("Invalid .azp: ${e.message ?: "read failed"}")
+        }
+        val errors = verify(entries)
         if (errors.isNotEmpty()) throw AzpException("Invalid .azp: ${errors.joinToString("; ")}")
-        return read(bytes)
+        val raw = entries["manifest.json"] ?: throw AzpException("azp: manifest.json is missing")
+        return Loaded(parseManifest(raw), entries.filterKeys { it != "manifest.json" })
     }
 
-    private fun parseSignature(bytes: ByteArray): AzpSignature? {
-        val raw = unzip(bytes)["signature.json"] ?: return null
+    private fun parseSignature(entries: Map<String, ByteArray>): AzpSignature? {
+        val raw = entries["signature.json"] ?: return null
         return json.decodeFromString(AzpSignature.serializer(), raw.decodeToString())
     }
 
@@ -181,6 +192,11 @@ object AzpPackage {
         } catch (e: Exception) {
             return SignatureStatus(signed = false, valid = false, error = e.message)
         }
+        return signatureStatus(entries)
+    }
+
+    /** [signatureStatus] over already-unzipped entries — reused by [verifyTrust]. */
+    private fun signatureStatus(entries: Map<String, ByteArray>): SignatureStatus {
         val manifestRaw = entries["manifest.json"]
             ?: return SignatureStatus(signed = false, valid = false, error = "azp: manifest.json is missing")
         val sigRaw = entries["signature.json"] ?: return SignatureStatus(signed = false, valid = false)
@@ -221,11 +237,16 @@ object AzpPackage {
      * chain by a key in the store. Mirrors `@azphalt/azp` `verifyTrust`.
      */
     fun verifyTrust(bytes: ByteArray, trustedKeys: Set<String>): TrustResult {
-        val integrity = verify(bytes)
+        val entries = try {
+            unzip(bytes)
+        } catch (e: Exception) {
+            return TrustResult(ok = false, signed = false, trusted = false, reason = "invalid package: ${e.message ?: "read failed"}")
+        }
+        val integrity = verify(entries)
         if (integrity.isNotEmpty()) {
             return TrustResult(ok = false, signed = false, trusted = false, reason = "invalid package: ${integrity.joinToString("; ")}")
         }
-        val status = signatureStatus(bytes)
+        val status = signatureStatus(entries)
         if (!status.signed) {
             return TrustResult(ok = true, signed = false, trusted = false, reason = "unsigned: no signer to trust")
         }
@@ -236,7 +257,7 @@ object AzpPackage {
             return TrustResult(ok = false, signed = true, trusted = false, reason = status.error ?: "signature verification failed", signerPublicKey = status.signerPublicKey)
         }
         val sig = try {
-            parseSignature(bytes)
+            parseSignature(entries)
         } catch (e: Exception) {
             return TrustResult(ok = true, signed = true, trusted = false, reason = "signature unreadable: ${e.message}", signerPublicKey = status.signerPublicKey)
         } ?: return TrustResult(ok = true, signed = false, trusted = false, reason = "unsigned: no signer to trust")
