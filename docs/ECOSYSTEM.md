@@ -110,10 +110,13 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
 
 **Where Guillotine is on the [adoption path](https://github.com/HereLiesAz/azphalt/blob/main/docs/ADOPTION.md):**
 
-- ✅ **Load & verify (job #1).** [`AzpPackage`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpPackage.kt)
+- ✅ **Load, verify & trust (job #1).** [`AzpPackage`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpPackage.kt)
   opens a `.azp`, rejects unsafe paths, parses the manifest, and verifies every payload file against its
   SHA-256 digest — on-device, pure-JVM, mirroring `@azphalt/azp` so a package built by the reference
-  tools loads unchanged. Signature (Ed25519) enforcement follows once azphalt's trust model lands.
+  tools loads unchanged. **Signing is now enforced too:** `signatureStatus` verifies the detached
+  Ed25519 `signature.json` over the manifest, and `verifyTrust` decides identity against a host trust
+  store — directly, or through a registry counter-signature chain (web of trust). Unsigned-but-valid
+  packages have integrity, not provenance (surfaced as a warning, per the spec), never silently trusted.
 - ⏳ **Capabilities, WASM substrate, UI schema (jobs #2–#6).** Running extension code on a WASM sandbox
   (QuickJS-in-WASM for JS), granting least-privilege capabilities, and rendering the declarative UI
   schema natively in Compose are the remaining work to become a full **conforming host**.
