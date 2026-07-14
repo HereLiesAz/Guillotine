@@ -3,9 +3,9 @@
 import { defineFilter } from "@azphalt/azdk";
 
 export const duotone = defineFilter((ctx) => {
-  const sh = ctx.params.color("shadow");     // {r,g,b,a} in 0..255
-  const hi = ctx.params.color("highlight");
-  const amount = Math.max(0, Math.min(1, ctx.params.number("amount")));
+  const sh = ctx.params.color("shadow") || { r: 26, g: 16, b: 53, a: 255 };     // {r,g,b,a} in 0..255
+  const hi = ctx.params.color("highlight") || { r: 255, g: 211, b: 110, a: 255 };
+  const amount = Math.max(0, Math.min(1, ctx.params.number("amount") ?? 1));
 
   const bmp = ctx.bitmap.read(ctx.target);
   const d = bmp.data;

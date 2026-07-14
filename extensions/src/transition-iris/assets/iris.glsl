@@ -8,9 +8,10 @@ uniform float smoothness; // default 0.1
 
 vec4 transition(vec2 uv) {
   float dist = distance(uv, center);
+  float s = max(1e-4, smoothness);
   // grow past the far corner (0.5*sqrt(2)) so the reveal completes fully
-  float radius = progress * (0.7072 + smoothness);
+  float radius = progress * (0.7072 + s);
   // m = 1 inside the circle (show incoming), 0 outside (show outgoing)
-  float m = smoothstep(radius, radius - smoothness, dist);
+  float m = smoothstep(radius, radius - s, dist);
   return mix(getFromColor(uv), getToColor(uv), m);
 }

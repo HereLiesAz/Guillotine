@@ -96,9 +96,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 `;
 
-/** Collect every file under `dir` keyed by its forward-slash path relative to `dir`. */
+/** Collect every file under `dir` keyed by its forward-slash path relative to `dir`. Skips hidden
+ *  files (e.g. .DS_Store) so an OS artifact can't end up as an unlisted package payload. */
 function collect(dir, base = dir, out = {}) {
   for (const name of readdirSync(dir)) {
+    if (name.startsWith(".")) continue;
     const p = join(dir, name);
     if (statSync(p).isDirectory()) collect(p, base, out);
     else out[relative(base, p).split("\\").join("/")] = readFileSync(p);

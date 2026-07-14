@@ -19,7 +19,7 @@ void main() {
   vec4 c = IMG_THIS_PIXEL(inputImage);
   vec2 uv = isf_FragNormCoord;
 
-  float g = (rand(uv * (TIME + 1.0)) - 0.5) * amount;
+  float g = (rand(uv * (mod(TIME, 100.0) + 1.0)) - 0.5) * amount;
   c.rgb += g;
 
   // 1.4142 normalises the centre-to-corner distance to ~1.

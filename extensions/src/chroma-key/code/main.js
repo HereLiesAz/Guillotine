@@ -5,9 +5,9 @@ import { defineFilter } from "@azphalt/azdk";
 const MAX_DIST = Math.sqrt(3) * 255;
 
 export const chromaKey = defineFilter((ctx) => {
-  const key = ctx.params.color("keyColor");
-  const threshold = ctx.params.number("threshold") * MAX_DIST; // fully keyed within this distance
-  const softness = Math.max(1e-4, ctx.params.number("softness")) * MAX_DIST; // ramp width
+  const key = ctx.params.color("keyColor") || { r: 0, g: 255, b: 0, a: 255 };
+  const threshold = (ctx.params.number("threshold") ?? 0.4) * MAX_DIST; // fully keyed within this distance
+  const softness = Math.max(1e-4, ctx.params.number("softness") ?? 0.1) * MAX_DIST; // ramp width
 
   const bmp = ctx.bitmap.read(ctx.target);
   const d = bmp.data;
