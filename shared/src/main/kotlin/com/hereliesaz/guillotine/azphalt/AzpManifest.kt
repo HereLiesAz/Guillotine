@@ -49,15 +49,33 @@ data class AzpManifest(
     val isCode: Boolean get() = kind == "code" || kind == "mixed"
 }
 
-/** A contributed asset (brush / lut / pattern / stamp / shader) inside a `.azp`. */
+/**
+ * A contributed asset inside a `.azp` — a traditional asset (`brush`/`lut`/`shader`/`transition`/…)
+ * or an **AI model** (`onnx` | `tflite` | `litert` | `sherpa-bundle`). Per spec/extension-manifest.md.
+ *
+ * A large asset (e.g. a multi-hundred-MB model) may be shipped **out of band**: [path] is `""` and
+ * [remoteUrl] + [checksum] (+ [byteSize]) point at a file the host downloads with its own resumable
+ * downloader (the "VSCode header pattern"). Exactly one of [path] (bundled) / [remoteUrl] (remote)
+ * carries the bytes.
+ */
 @Serializable
 data class AzpAsset(
-    /** `brush` | `lut` | `pattern` | `stamp` | `shader`. */
+    /** Asset format — e.g. `lut`, `shader`, `transition`, or a model type `onnx`/`tflite`/`sherpa-bundle`. */
     val type: String,
-    /** Path into the package's `/assets`. */
+    /** Path into the package's `/assets` when bundled; `""` when the bytes are remote (see [remoteUrl]). */
     val path: String,
+    /** Semantic role for routing (e.g. `subject-segmentation`, `speech-to-text`, `depth`). */
+    val role: String? = null,
+    /** URL to fetch when the asset is too large to bundle ([path] == `""`). */
+    val remoteUrl: String? = null,
+    /** SHA-256 of the remote file (`sha256-<hex>` or bare hex) — verified after download. */
+    val checksum: String? = null,
+    /** Size in bytes of the remote file, so a host can pre-allocate / show progress. */
+    val byteSize: Long? = null,
     /** Optional host-rendered control schema (see spec/ui-schema.md). */
     val ui: String? = null,
     /** Normalized, host-neutral settings (e.g. a shader's declared inputs). Free-form. */
     val params: JsonElement? = null,
+    /** Marketplace filter tags. */
+    val tags: List<String> = emptyList(),
 )
