@@ -41,7 +41,15 @@ object AzpPackage {
         ZipInputStream(ByteArrayInputStream(bytes)).use { zin ->
             var entry = zin.nextEntry
             while (entry != null) {
-                if (!entry.isDirectory) out[entry.name] = zin.readBytes()
+                if (!entry.isDirectory) {
+                    // Normalize Windows-style separators so a backslash can't smuggle a `..` past the
+                    // forward-slash path check (spec mandates forward-slash names anyway).
+                    val name = entry.name.replace('\\', '/')
+                    // Reject duplicate entries: a second entry silently overwriting the first is a
+                    // ZIP-confusion vector (verify one copy, a different parser runs the other).
+                    if (out.containsKey(name)) throw AzpException("azp: duplicate entry $name")
+                    out[name] = zin.readBytes()
+                }
                 zin.closeEntry()
                 entry = zin.nextEntry
             }
@@ -77,7 +85,9 @@ object AzpPackage {
         val (manifest, payload) = loaded
 
         for (path in payload.keys) {
-            if (path.startsWith("/") || path.split("/").contains("..")) {
+            // Reject absolute paths, `..` traversal, and colons (Windows drive letters like `C:evil`
+            // and NTFS alternate-data-stream names like `file:stream` bypass a plain `..` check).
+            if (path.startsWith("/") || path.split("/").contains("..") || path.contains(":")) {
                 errors.add("unsafe path: $path")
             }
         }

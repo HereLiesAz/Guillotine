@@ -85,6 +85,18 @@ class AzpPackageTest {
         assertTrue(AzpPackage.verify(azp).any { it.contains("unsafe path") })
     }
 
+    @Test fun rejectsColonPath() {
+        // Windows drive-letter / NTFS ADS names must not slip past the `..` check.
+        val data = "x".encodeToByteArray()
+        val azp = zip(
+            mapOf(
+                "manifest.json" to manifest(mapOf("C:evil.js" to AzpPackage.digest(data))).encodeToByteArray(),
+                "C:evil.js" to data,
+            ),
+        )
+        assertTrue(AzpPackage.verify(azp).any { it.contains("unsafe path") })
+    }
+
     @Test fun rejectsMissingManifest() {
         val azp = zip(mapOf("code/main.js" to "x".encodeToByteArray()))
         assertFalse(AzpPackage.isValid(azp))
