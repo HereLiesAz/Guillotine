@@ -99,6 +99,31 @@ self-describing.
 
 ---
 
+## 3b. azphalt — the portable extension standard 📦 (adopting; loader ✅, host runtime ahead)
+
+Beyond MCP (which drives the *editor* as text), Guillotine is adopting **[azphalt](https://github.com/HereLiesAz/azphalt)** —
+a *vendor-neutral*, MIT-licensed **portable extension standard**: write a brush, filter, LUT, or shader
+once as an `.azp` package and it runs in **any** conforming host, not just Guillotine. The point is the
+opposite of a walled plugin store — extensions travel, and any app (or you) can run its own registry.
+It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normalize
+`.abr`/`.cube`/… into `.azp`, a reference runtime, an open registry, and a consignment storefront).
+
+**Where Guillotine is on the [adoption path](https://github.com/HereLiesAz/azphalt/blob/main/docs/ADOPTION.md):**
+
+- ✅ **Load & verify (job #1).** [`AzpPackage`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpPackage.kt)
+  opens a `.azp`, rejects unsafe paths, parses the manifest, and verifies every payload file against its
+  SHA-256 digest — on-device, pure-JVM, mirroring `@azphalt/azp` so a package built by the reference
+  tools loads unchanged. Signature (Ed25519) enforcement follows once azphalt's trust model lands.
+- ⏳ **Capabilities, WASM substrate, UI schema (jobs #2–#6).** Running extension code on a WASM sandbox
+  (QuickJS-in-WASM for JS), granting least-privilege capabilities, and rendering the declarative UI
+  schema natively in Compose are the remaining work to become a full **conforming host**.
+
+The fit is deliberate: azphalt's **never-list** (a host must never expose its engine, camera, sensors,
+filesystem, or network to extensions) is the same on-device, least-authority boundary Guillotine already
+enforces — so adopting it strengthens the privacy invariant rather than bending it.
+
+---
+
 ## 4. Frei0r & FFmpeg filters — native video filters ✅ (advanced, bring-your-own ffmpeg)
 
 - **FFmpeg `-vf` filtergraphs:** the ubiquitous filter-chain syntax.
