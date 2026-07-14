@@ -98,6 +98,20 @@ def delete_edit(session: AuthorizedSession, package: str, edit_id: str) -> None:
 
 
 def update_track(session: AuthorizedSession, package: str, edit_id: str, track: str, status: str, version_code: int) -> None:
+    """Set the track to exactly this release, dropping any release already on it.
+
+    The Play API's track update REPLACES the track's `releases` list, so any existing draft (e.g. a
+    previous build's AAB still staged for submission) is removed and the new versionCode becomes the
+    only release on the track — the latest AAB is always the one up for submitting. We first read the
+    track and log what we're replacing, so removing a stale draft is visible in the workflow output.
+    """
+    existing = session.get(f"{API}/{package}/edits/{edit_id}/tracks/{track}", timeout=META_TIMEOUT_S)
+    if existing.ok:
+        for rel in existing.json().get("releases", []) or []:
+            codes = ",".join(str(c) for c in (rel.get("versionCodes") or []))
+            if str(version_code) not in codes.split(","):
+                print(f"  {track}: removing existing {rel.get('status', '?')} release (versionCodes [{codes}])")
+
     body = {"releases": [{"status": status, "versionCodes": [str(version_code)]}]}
     r = session.put(
         f"{API}/{package}/edits/{edit_id}/tracks/{track}",
