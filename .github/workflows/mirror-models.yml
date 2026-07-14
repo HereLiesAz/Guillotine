@@ -20,6 +20,11 @@ on:
         type: boolean
         default: true
 
+# Least privilege: checks out the repo and pushes to external Hugging Face repos (via HF_TOKEN);
+# the GitHub token needs only read.
+permissions:
+  contents: read
+
 jobs:
   mirror:
     runs-on: ubuntu-latest
