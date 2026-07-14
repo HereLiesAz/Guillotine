@@ -34,7 +34,14 @@ name: Release AAB to Play
 # full-depth checkout (see `fetch-depth: 0` below) to see the whole commit history.
 
 on:
+  # Publish ONLY from main (plus manual dispatch). Publishing on every branch push staged whichever
+  # branch built last as the Play draft and burned Google's daily edit-commit quota ("Daily save quota
+  # exceeded"), so the newest AAB often never landed. Restricting to main means the staged draft is
+  # always the latest merged build, and there are few enough commits that the quota holds.
   push:
+    branches: [main]
+    paths-ignore:
+      - version.properties
   workflow_dispatch:
     inputs:
       publish:
