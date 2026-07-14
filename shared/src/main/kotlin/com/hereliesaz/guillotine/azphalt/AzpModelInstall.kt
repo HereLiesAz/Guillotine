@@ -66,6 +66,7 @@ object AzpModelInstall {
     private const val READ_TIMEOUT_MS = 60_000
     private const val DOWNLOAD_RETRIES = 4
     private const val BUFFER = 1 shl 16
+    private const val PROGRESS_INTERVAL = 1 shl 20 // ~1 MB between progress callbacks
 
     /**
      * Plan (integrity + trust) then install every model asset. Throws [AzpPackage.AzpException] if the
@@ -144,8 +145,15 @@ object AzpModelInstall {
             attempt++
             try {
                 return attemptDownload(url, dest, model, onProgress)
+            } catch (e: InterruptedException) {
+                // Cancellation (e.g. the host coroutine was cancelled): restore the flag and propagate.
+                Thread.currentThread().interrupt()
+                throw e
             } catch (e: Exception) {
-                val httpCode = (e as? AzpPackage.AzpException)?.message?.substringAfterLast("HTTP ")?.take(3)?.toIntOrNull()
+                // A definite 4xx won't fix itself by retrying the same URL. Only parse when the message
+                // actually carries an "HTTP <code>" so an unrelated AzpException isn't misclassified.
+                val message = (e as? AzpPackage.AzpException)?.message
+                val httpCode = message?.takeIf { "HTTP " in it }?.substringAfterLast("HTTP ")?.take(3)?.toIntOrNull()
                 val fatal = httpCode != null && httpCode in 400..499
                 if (fatal) throw e
                 if (attempt >= DOWNLOAD_RETRIES) {
@@ -182,11 +190,12 @@ object AzpModelInstall {
             val base = if (resuming) resumeFrom else 0L
             val total = model.byteSize
                 ?: conn.contentLengthLong.takeIf { it > 0 }?.let { it + base }
-            // When resuming, re-hash the bytes already on disk so the digest covers the whole file.
-            if (resuming) dest.inputStream().use { copyHashing(it, md, null, 0, total, model, onProgress) }
+            // When resuming, re-hash the bytes already on disk so the digest covers the whole file
+            // (reported as VERIFYING so the UI doesn't show the bar racing during a local read).
+            if (resuming) dest.inputStream().use { copyHashing(it, md, null, 0, total, model, Phase.VERIFYING, onProgress) }
             conn.inputStream.use { input ->
                 FileOutputStream(dest, resuming).use { out ->
-                    copyHashing(input, md, out, base, total, model, onProgress)
+                    copyHashing(input, md, out, base, total, model, Phase.DOWNLOADING, onProgress)
                 }
             }
             return "sha256-" + md.digest().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
@@ -195,7 +204,11 @@ object AzpModelInstall {
         }
     }
 
-    /** Copy [input] to [out] (null ⇒ hash only), feeding [md]; returns the running total after [startDone]. */
+    /**
+     * Copy [input] to [out] (null ⇒ hash only), feeding [md]; returns the running total after [startDone].
+     * Progress is throttled to [PROGRESS_INTERVAL] so a hundred-MB model doesn't fire thousands of
+     * callbacks at the host UI, but the final byte count is always reported.
+     */
     private fun copyHashing(
         input: InputStream,
         md: MessageDigest,
@@ -203,18 +216,24 @@ object AzpModelInstall {
         startDone: Long,
         total: Long?,
         model: AzpModelInstaller.PlannedModel,
+        phase: Phase,
         onProgress: (Progress) -> Unit,
     ): Long {
         val buf = ByteArray(BUFFER)
         var done = startDone
+        var lastReported = startDone
         while (true) {
             val n = input.read(buf)
             if (n < 0) break
             md.update(buf, 0, n)
             out?.write(buf, 0, n)
             done += n
-            onProgress(Progress(model, Phase.DOWNLOADING, done, total))
+            if (done - lastReported >= PROGRESS_INTERVAL) {
+                onProgress(Progress(model, phase, done, total))
+                lastReported = done
+            }
         }
+        if (done != lastReported) onProgress(Progress(model, phase, done, total))
         return done
     }
 

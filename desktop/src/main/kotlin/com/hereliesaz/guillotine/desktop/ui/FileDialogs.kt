@@ -34,6 +34,20 @@ fun rememberOpenProjectLauncher(onPicked: (File) -> Unit): () -> Unit {
 }
 
 @Composable
+fun rememberModelInstallLauncher(onPicked: (File) -> Unit): () -> Unit {
+    return remember {
+        {
+            val fd = FileDialog(null as Frame?, "Install AI model (.azp)", FileDialog.LOAD)
+            fd.file = "*.azp"
+            fd.isVisible = true
+            val dir = fd.directory
+            val name = fd.file
+            if (dir != null && name != null) onPicked(File(dir, name))
+        }
+    }
+}
+
+@Composable
 fun rememberMediaImportLauncher(onPicked: (List<File>) -> Unit): () -> Unit {
     return remember {
         {
