@@ -237,6 +237,14 @@ def main() -> int:
     try:
         version_code = publish_internal(session, args.package, args.aab)
     except Exception as e:
+        # Idempotency: a push that has an open PR fires this workflow twice (push + pull_request
+        # events), so two runs build the same commit and compute the same versionCode. The first to
+        # commit the internal draft consumes that code; the second then gets
+        # "Version code N has already been used." That means the build is already on Play — treat it
+        # as success, not a failure. (Only this exact collision; every other error still fails.)
+        if "already been used" in str(e):
+            print(f"::warning::versionCode already published (a concurrent run did it first); treating as success. {e}", file=sys.stderr)
+            return EXIT_OK
         print(f"Play publish failed (internal): {e}", file=sys.stderr)
         return EXIT_FAIL
 

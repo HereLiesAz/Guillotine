@@ -117,6 +117,15 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   Ed25519 `signature.json` over the manifest, and `verifyTrust` decides identity against a host trust
   store — directly, or through a registry counter-signature chain (web of trust). Unsigned-but-valid
   packages have integrity, not provenance (surfaced as a warning, per the spec), never silently trusted.
+- ✅ **Deliver AI models over azphalt.** azphalt isn't only for brushes and LUTs — a `.azp` can ship an
+  **on-device AI model** (`onnx` / `tflite` / `litert` / `sherpa-bundle`), bundled or referenced by
+  `remoteUrl` + `checksum` for large weights. [`AzpModelInstaller`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpModelInstaller.kt)
+  routes each model to the right settings slot by its `role`, and
+  [`AzpModelInstall`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpModelInstall.kt)
+  downloads (resumable), **verifies the SHA-256 before wiring it in**, and writes it under the app's
+  models directory. **Settings → Advanced → Install AI model (.azp)** drives it on both platforms; an
+  unsigned package is installed only after an explicit trust warning. So a speech, segmentation, or
+  labeling model can be delivered and adopted without a new app build.
 - ⏳ **Capabilities, WASM substrate, UI schema (jobs #2–#6).** Running extension code on a WASM sandbox
   (QuickJS-in-WASM for JS), granting least-privilege capabilities, and rendering the declarative UI
   schema natively in Compose are the remaining work to become a full **conforming host**.

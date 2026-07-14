@@ -65,8 +65,13 @@ import com.hereliesaz.guillotine.desktop.ui.theme.White
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.GlobalSettings
 import com.hereliesaz.guillotine.model.Quality
+import com.hereliesaz.guillotine.azphalt.AzpModelInstall
+import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
+import com.hereliesaz.guillotine.desktop.platform.DesktopStorage
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 private fun SheetCard(content: @Composable () -> Unit) {
@@ -97,6 +102,86 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var segModelPath by remember { mutableStateOf(current.segModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     val uriHandler = LocalUriHandler.current
+    val scope = rememberCoroutineScope()
+
+    // Assemble settings from the current editable state — shared by Save and the .azp installer
+    // (which folds newly-routed model paths into the visible fields first).
+    fun buildSettings(): AiSettings = AiSettings(
+        provider = provider,
+        keys = keys,
+        models = models,
+        leonardoKey = leonardoKey.trim(),
+        leonardoModel = leonardoModel,
+        speechModelPath = speechModelPath.trim(),
+        agentModelPath = agentModelPath.trim(),
+        labelModelPath = labelModelPath.trim(),
+        audioEventModelPath = audioEventModelPath.trim(),
+        faceDetectModelPath = faceDetectModelPath.trim(),
+        idEmbedModelPath = idEmbedModelPath.trim(),
+        segModelPath = segModelPath.trim(),
+        frameAnalysisCacheSize = frameAnalysisCacheSize,
+    )
+
+    // --- Install an AI model from an azphalt .azp package ---------------------------------------
+    var azpBusy by remember { mutableStateOf(false) }
+    var azpStatus by remember { mutableStateOf<String?>(null) }
+    var azpUntrusted by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
+
+    fun applyInstalled(result: AzpModelInstall.Result) {
+        result.installed.forEach { inst ->
+            when (inst.slot) {
+                AzpModelInstaller.ModelSlot.SPEECH_TO_TEXT -> speechModelPath = inst.path
+                AzpModelInstaller.ModelSlot.IMAGE_LABELING -> labelModelPath = inst.path
+                AzpModelInstaller.ModelSlot.AUDIO_EVENT -> audioEventModelPath = inst.path
+                AzpModelInstaller.ModelSlot.FACE_DETECTION -> faceDetectModelPath = inst.path
+                AzpModelInstaller.ModelSlot.IMAGE_EMBEDDING -> idEmbedModelPath = inst.path
+                AzpModelInstaller.ModelSlot.SUBJECT_SEGMENTATION -> segModelPath = inst.path
+                else -> Unit // FACE_EMBEDDING has no desktop field yet
+            }
+        }
+        onSave(buildSettings())
+    }
+
+    fun installAzp(bytes: ByteArray, allowUntrusted: Boolean) {
+        scope.launch {
+            azpBusy = true
+            azpStatus = "Reading package…"
+            try {
+                val dir = java.io.File(DesktopStorage.dataDir, "azp-models")
+                val result = withContext(Dispatchers.IO) {
+                    AzpModelInstall.install(bytes, emptySet(), dir, allowUntrusted) { p ->
+                        val pct = p.bytesTotal?.takeIf { it > 0 }?.let { p.bytesDone * 100 / it }
+                        azpStatus = when (p.phase) {
+                            AzpModelInstall.Phase.DOWNLOADING ->
+                                "Downloading ${p.model.filename}${pct?.let { " — $it%" } ?: ""}…"
+                            AzpModelInstall.Phase.VERIFYING -> "Verifying ${p.model.filename}…"
+                            AzpModelInstall.Phase.WRITING -> "Writing ${p.model.filename}…"
+                        }
+                    }
+                }
+                applyInstalled(result)
+                val routed = result.installed.count { it.slot != null }
+                azpStatus = "Installed ${result.installed.size} model(s) from ${result.packageId}" +
+                    (if (result.trust.trusted) " (trusted)" else " (unsigned)") +
+                    if (routed < result.installed.size) " — ${result.installed.size - routed} need manual wiring." else "."
+            } catch (e: com.hereliesaz.guillotine.azphalt.AzpModelInstall.UntrustedException) {
+                azpUntrusted = bytes to e.trust.reason
+                azpStatus = null
+            } catch (e: Exception) {
+                azpStatus = "Install failed: ${e.message}"
+            } finally {
+                azpBusy = false
+            }
+        }
+    }
+
+    val installModelLauncher = rememberModelInstallLauncher { file ->
+        scope.launch {
+            val bytes = runCatching { withContext(Dispatchers.IO) { file.readBytes() } }.getOrNull()
+            if (bytes == null) { azpStatus = "Could not read ${file.name}."; return@launch }
+            installAzp(bytes, allowUntrusted = false)
+        }
+    }
 
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("AI Analyzer", "Image Gen", "Transcription", "Advanced")
@@ -324,34 +409,55 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "the bearer token configured in the desktop key store.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+
+                    Text("Install AI model (.azp)", color = Neutral400, fontSize = 12.sp)
+                    Text(
+                        if (azpBusy) "Installing…" else "Install",
+                        color = if (azpBusy) Neutral500 else Red500,
+                        fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable(enabled = !azpBusy) { installModelLauncher() },
+                    )
+                    if (azpBusy) LinearProgressIndicator(color = Red500, modifier = Modifier.fillMaxWidth())
+                    azpStatus?.let { Text(it, color = Neutral400, fontSize = 10.sp) }
+                    Text(
+                        "Install an on-device AI model shipped as an azphalt package (ONNX / sherpa). " +
+                            "The package is integrity-checked; a remote model is verified against its " +
+                            "checksum before it's wired in. Saved automatically on success.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
             }
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Button(
-                onClick = {
-                    onSave(
-                        AiSettings(
-                            provider = provider,
-                            keys = keys,
-                            models = models,
-                            leonardoKey = leonardoKey.trim(),
-                            leonardoModel = leonardoModel,
-                            speechModelPath = speechModelPath.trim(),
-                            agentModelPath = agentModelPath.trim(),
-                            labelModelPath = labelModelPath.trim(),
-                            audioEventModelPath = audioEventModelPath.trim(),
-                            faceDetectModelPath = faceDetectModelPath.trim(),
-                            idEmbedModelPath = idEmbedModelPath.trim(),
-                            segModelPath = segModelPath.trim(),
-                            frameAnalysisCacheSize = frameAnalysisCacheSize,
-                        ),
-                    )
-                },
+                onClick = { onSave(buildSettings()) },
                 colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Color.Black),
             ) { Text("Save", fontSize = 14.sp, fontWeight = FontWeight.Medium) }
         }
+    }
+
+    azpUntrusted?.let { (bytes, reason) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { azpUntrusted = null },
+            title = { Text("Install an unverified model?") },
+            text = {
+                Text(
+                    "This package isn't from a signer you trust ($reason). Its integrity checks passed, " +
+                        "but a malicious model could produce misleading results. Only install packages " +
+                        "from a source you trust.",
+                )
+            },
+            confirmButton = {
+                Text(
+                    "Install anyway", color = Red500, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable { azpUntrusted = null; installAzp(bytes, allowUntrusted = true) },
+                )
+            },
+            dismissButton = {
+                Text("Cancel", modifier = Modifier.clickable { azpUntrusted = null })
+            },
+        )
     }
 }
 
