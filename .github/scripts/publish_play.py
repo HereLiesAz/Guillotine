@@ -108,9 +108,9 @@ def update_track(session: AuthorizedSession, package: str, edit_id: str, track: 
     existing = session.get(f"{API}/{package}/edits/{edit_id}/tracks/{track}", timeout=META_TIMEOUT_S)
     if existing.ok:
         for rel in existing.json().get("releases", []) or []:
-            codes = ",".join(str(c) for c in (rel.get("versionCodes") or []))
-            if str(version_code) not in codes.split(","):
-                print(f"  {track}: removing existing {rel.get('status', '?')} release (versionCodes [{codes}])")
+            version_codes = [str(c) for c in (rel.get("versionCodes") or [])]
+            if str(version_code) not in version_codes:
+                print(f"  {track}: removing existing {rel.get('status', '?')} release (versionCodes [{','.join(version_codes)}])")
 
     body = {"releases": [{"status": status, "versionCodes": [str(version_code)]}]}
     r = session.put(
