@@ -23,6 +23,11 @@ on:
         type: string
         default: "HereLiesAz/guillotine-t2v"
 
+# Least privilege: this workflow only checks out the repo and pushes to an external Hugging Face
+# Space (via HF_TOKEN), so the GitHub token needs nothing beyond read.
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest

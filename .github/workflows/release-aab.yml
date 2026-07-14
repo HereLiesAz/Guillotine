@@ -49,6 +49,11 @@ concurrency:
   group: google-play-publish
   cancel-in-progress: false
 
+# Least privilege: builds the AAB, uploads it as an artifact, and publishes to Google Play via the
+# Play API (PLAY_SERVICE_ACCOUNT_JSON). It does not write back to the repo, so read is enough.
+permissions:
+  contents: read
+
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
