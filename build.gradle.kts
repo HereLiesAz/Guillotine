@@ -41,9 +41,9 @@ run {
         }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
     }.getOrNull()
 
-    // Monotonic floor for versionCode: never below 100 + commit count (the value earlier git-based
+    // Monotonic floor for versionCode: never below 205920500 + commit count (the value earlier git-based
     // and file-based flows would have produced), so Play never rejects an upload as non-monotonic.
-    val gitFloor = 100 + (runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0)
+    val gitFloor = 205920500 + (runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0)
 
     // First-run seed for Patch only (when version.properties has no versionPatch yet): commits since
     // versionMinor last changed, so Patch continues from today's value instead of restarting at 1.
