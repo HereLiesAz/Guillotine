@@ -65,6 +65,9 @@ import com.hereliesaz.guillotine.desktop.ui.theme.White
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.GlobalSettings
 import com.hereliesaz.guillotine.model.Quality
+import com.hereliesaz.guillotine.azphalt.AzpModelInstall
+import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
+import com.hereliesaz.guillotine.desktop.platform.DesktopStorage
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -124,16 +127,15 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var azpStatus by remember { mutableStateOf<String?>(null) }
     var azpUntrusted by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
 
-    fun applyInstalled(result: com.hereliesaz.guillotine.azphalt.AzpModelInstall.Result) {
-        val slot = com.hereliesaz.guillotine.azphalt.AzpModelInstaller.ModelSlot
+    fun applyInstalled(result: AzpModelInstall.Result) {
         result.installed.forEach { inst ->
             when (inst.slot) {
-                slot.SPEECH_TO_TEXT -> speechModelPath = inst.path
-                slot.IMAGE_LABELING -> labelModelPath = inst.path
-                slot.AUDIO_EVENT -> audioEventModelPath = inst.path
-                slot.FACE_DETECTION -> faceDetectModelPath = inst.path
-                slot.IMAGE_EMBEDDING -> idEmbedModelPath = inst.path
-                slot.SUBJECT_SEGMENTATION -> segModelPath = inst.path
+                AzpModelInstaller.ModelSlot.SPEECH_TO_TEXT -> speechModelPath = inst.path
+                AzpModelInstaller.ModelSlot.IMAGE_LABELING -> labelModelPath = inst.path
+                AzpModelInstaller.ModelSlot.AUDIO_EVENT -> audioEventModelPath = inst.path
+                AzpModelInstaller.ModelSlot.FACE_DETECTION -> faceDetectModelPath = inst.path
+                AzpModelInstaller.ModelSlot.IMAGE_EMBEDDING -> idEmbedModelPath = inst.path
+                AzpModelInstaller.ModelSlot.SUBJECT_SEGMENTATION -> segModelPath = inst.path
                 else -> Unit // FACE_EMBEDDING has no desktop field yet
             }
         }
@@ -145,15 +147,15 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             azpBusy = true
             azpStatus = "Reading package…"
             try {
-                val dir = java.io.File(com.hereliesaz.guillotine.desktop.platform.DesktopStorage.dataDir, "azp-models")
+                val dir = java.io.File(DesktopStorage.dataDir, "azp-models")
                 val result = withContext(Dispatchers.IO) {
-                    com.hereliesaz.guillotine.azphalt.AzpModelInstall.install(bytes, emptySet(), dir, allowUntrusted) { p ->
+                    AzpModelInstall.install(bytes, emptySet(), dir, allowUntrusted) { p ->
                         val pct = p.bytesTotal?.takeIf { it > 0 }?.let { p.bytesDone * 100 / it }
                         azpStatus = when (p.phase) {
-                            com.hereliesaz.guillotine.azphalt.AzpModelInstall.Phase.DOWNLOADING ->
+                            AzpModelInstall.Phase.DOWNLOADING ->
                                 "Downloading ${p.model.filename}${pct?.let { " — $it%" } ?: ""}…"
-                            com.hereliesaz.guillotine.azphalt.AzpModelInstall.Phase.VERIFYING -> "Verifying ${p.model.filename}…"
-                            com.hereliesaz.guillotine.azphalt.AzpModelInstall.Phase.WRITING -> "Writing ${p.model.filename}…"
+                            AzpModelInstall.Phase.VERIFYING -> "Verifying ${p.model.filename}…"
+                            AzpModelInstall.Phase.WRITING -> "Writing ${p.model.filename}…"
                         }
                     }
                 }
