@@ -445,7 +445,7 @@ private fun ModelPathField(value: String, hint: String, isDirectory: Boolean, on
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
             .border(1.dp, Neutral700, RoundedCornerShape(6.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -454,8 +454,9 @@ private fun ModelPathField(value: String, hint: String, isDirectory: Boolean, on
             fontSize = 12.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
         )
+        // Vertical padding is INSIDE the clickable so the whole padded area is the click target.
         Text(
             if (isDirectory) "Choose folder" else "Browse",
             color = Red500, fontSize = 12.sp, fontWeight = FontWeight.Medium,
@@ -464,12 +465,14 @@ private fun ModelPathField(value: String, hint: String, isDirectory: Boolean, on
                     val picked = if (isDirectory) pickFolder("Select model folder") else pickFile("Select model file")
                     if (picked != null) onSet(picked.absolutePath)
                 }
-                .padding(start = 12.dp),
+                .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
         )
         if (value.isNotBlank()) {
             Text(
                 "Clear", color = Neutral400, fontSize = 12.sp,
-                modifier = Modifier.clickable { onSet("") }.padding(start = 12.dp),
+                modifier = Modifier
+                    .clickable { onSet("") }
+                    .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
             )
         }
     }

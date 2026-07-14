@@ -1517,7 +1517,7 @@ private fun ModelPathField(
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
             .border(1.dp, Neutral700, RoundedCornerShape(6.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -1526,20 +1526,23 @@ private fun ModelPathField(
             fontSize = 12.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
         )
+        // Vertical padding is INSIDE the clickable so the whole padded area is the touch target.
         Text(
             if (importing) "Copying…" else if (isDirectory) "Choose folder" else "Browse",
             color = if (importing) Neutral500 else Red500,
             fontSize = 12.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier
                 .clickableText { if (!importing) onBrowse(isDirectory) { onSet(it) } }
-                .padding(start = 12.dp),
+                .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
         )
         if (value.isNotBlank()) {
             Text(
                 "Clear", color = Neutral400, fontSize = 12.sp,
-                modifier = Modifier.clickableText { onSet("") }.padding(start = 12.dp),
+                modifier = Modifier
+                    .clickableText { onSet("") }
+                    .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
             )
         }
     }
