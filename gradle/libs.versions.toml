@@ -11,7 +11,7 @@
 # composeUi explicitly instead of using a BOM. material-icons-extended is frozen at 1.7.8
 # (deprecated upstream) and rides along fine on the newer Compose runtime.
 agp = "9.2.1"
-kotlin = "2.4.0"
+kotlin = "2.4.10"
 coreKtx = "1.19.0"
 lifecycle = "2.11.0"
 activityCompose = "1.13.0"
