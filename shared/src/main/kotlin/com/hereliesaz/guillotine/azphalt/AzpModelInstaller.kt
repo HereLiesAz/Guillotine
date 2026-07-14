@@ -113,10 +113,18 @@ object AzpModelInstaller {
      * bare hex (case-insensitive). Returns false when the checksum is absent — a remote model without an
      * integrity value MUST NOT be trusted.
      */
-    fun checksumMatches(bytes: ByteArray, checksum: String?): Boolean {
+    fun checksumMatches(bytes: ByteArray, checksum: String?): Boolean =
+        checksumMatchesDigest(AzpPackage.digest(bytes), checksum)
+
+    /**
+     * Like [checksumMatches] but for an already-computed `sha256-<hex>` [digest] — for streaming callers
+     * that hash a large download on the fly rather than buffering it. Returns false when [checksum] is
+     * absent (a remote model without an integrity value MUST NOT be trusted).
+     */
+    fun checksumMatchesDigest(digest: String, checksum: String?): Boolean {
         if (checksum.isNullOrBlank()) return false
         val want = checksum.trim().removePrefix("sha256-").lowercase()
-        val got = AzpPackage.digest(bytes).removePrefix("sha256-")
+        val got = digest.trim().removePrefix("sha256-").lowercase()
         return want == got
     }
 
