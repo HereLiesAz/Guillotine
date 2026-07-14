@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -69,6 +70,7 @@ import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
 import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_FACE_MODELS
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
+import com.hereliesaz.guillotine.ai.ModelImport
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_RECOGNITION_MODELS
@@ -151,6 +153,35 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var mcpToken by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpAuth.token(context)) }
 
     val scope = rememberCoroutineScope()
+
+    // --- Native file/folder pickers for model paths ---------------------------------------------
+    // The picker returns a SAF content: URI, but the on-device runtimes (Vosk/sherpa/ONNX) load from a
+    // real path — so the selection is copied into app storage and the resulting path is stored.
+    var modelPickPending by remember { mutableStateOf<((String) -> Unit)?>(null) }
+    var modelImporting by remember { mutableStateOf(false) }
+    fun runImport(uri: android.net.Uri?, isDirectory: Boolean) {
+        val cb = modelPickPending
+        modelPickPending = null
+        if (uri == null || cb == null) return
+        scope.launch {
+            modelImporting = true
+            val path = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                if (isDirectory) ModelImport.importTree(context, uri) else ModelImport.importFile(context, uri)
+            }
+            modelImporting = false
+            if (path != null) cb(path)
+        }
+    }
+    val modelFileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> runImport(uri, isDirectory = false) }
+    val modelTreeLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> runImport(uri, isDirectory = true) }
+    fun browseModel(isDirectory: Boolean, onResult: (String) -> Unit) {
+        modelPickPending = onResult
+        if (isDirectory) modelTreeLauncher.launch(null) else modelFileLauncher.launch(arrayOf("*/*"))
+    }
 
     // Assemble the settings from the current editable state — shared by the Save button and the
     // .azp installer (which folds newly-routed model paths into the visible fields first).
@@ -447,14 +478,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     // Assistant brain: the command bar uses the selected provider's key when set,
                     // else this on-device LLM. Lets the AI drive the editor fully offline.
                     Text("AI assistant — on-device model (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = agentModelPath,
-                        onValueChange = { agentModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("On-device LLM model path (.task)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = agentModelPath, hint = "On-device LLM model (.task)", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { agentModelPath = it }
                     Text(
                         "Use a downloaded .task model to run the assistant offline with no key; otherwise " +
                             "it uses the selected provider's key above. Pick a recommended model below — " +
@@ -473,14 +497,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     // A stronger MediaPipe-ImageEmbedder-compatible .tflite (e.g. MobileCLIP-S0,
                     // EfficientNet-Lite0) markedly improves "teach a specific thing" matching.
                     Text("Recognition model — for \"teach a specific thing\" (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = idEmbedModelPath,
-                        onValueChange = { idEmbedModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Image-embedding model path (.tflite)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = idEmbedModelPath, hint = "Image-embedding model (.tflite)", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { idEmbedModelPath = it }
                     Text(
                         "Blank = bundled MobileNet-V3-small. Drop in a stronger MediaPipe-compatible embedder " +
                             "(MobileCLIP-S0, EfficientNet-Lite0) for sharper instance matching.",
@@ -494,14 +511,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         onUse = { idEmbedModelPath = it },
                     )
                     Text("Face model — for identifying a specific person (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = faceEmbedModelPath,
-                        onValueChange = { faceEmbedModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Face-embedding model path (.tflite)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = faceEmbedModelPath, hint = "Face-embedding model (.tflite)", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { faceEmbedModelPath = it }
                     Text(
                         "When set, teaching a person uses face recognition (ML Kit face detect + this model). " +
                             "Blank = fall back to the general recognition model.",
@@ -524,14 +534,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         Triple("depth", "Depth model path (.tflite)", ModelCategory.DEPTH),
                         Triple("lowlight", "Low-light enhance model path (.tflite)", ModelCategory.LOWLIGHT),
                     ).forEach { (kind, hint, cat) ->
-                        OutlinedTextField(
-                            value = effectModelPaths[kind].orEmpty(),
-                            onValueChange = { effectModelPaths = effectModelPaths + (kind to it) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text(hint, color = Neutral500, fontSize = 12.sp) },
-                            textStyle = TextStyle(color = White, fontSize = 12.sp),
-                            singleLine = true,
-                        )
+                        ModelPathField(value = effectModelPaths[kind].orEmpty(), hint = hint, isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { effectModelPaths = effectModelPaths + (kind to it) }
                         val recs = recommendedModelsFor(cat)
                         if (recs.isNotEmpty()) {
                             ModelPicker(
@@ -551,14 +554,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
                     // On-device audio-event model (YAMNet) for highlight detection.
                     Text("Audio highlights — on-device YAMNet (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = audioEventModelPath,
-                        onValueChange = { audioEventModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("YAMNet audio-event model path (.tflite)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = audioEventModelPath, hint = "YAMNet audio-event model (.tflite)", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { audioEventModelPath = it }
                     Text(
                         "Lets the assistant \"find the highlights / best moments\" by detecting applause, " +
                             "cheering, laughter, music and crowd noise in a clip's audio.",
@@ -574,14 +570,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
                     // Offline speech: sherpa-onnx ASR (speech→text) and TTS (text→speech).
                     Text("Speech (ASR) — offline transcription (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = asrModelPath,
-                        onValueChange = { asrModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("sherpa-onnx ASR model directory", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = asrModelPath, hint = "sherpa-onnx ASR model folder", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { asrModelPath = it }
                     Text(
                         "Enables \"transcribe this accurately\" via offline Whisper (sherpa-onnx).",
                         color = Neutral500, fontSize = 10.sp,
@@ -594,14 +583,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         onUse = { asrModelPath = it },
                     )
                     Text("Speech (TTS) — offline voiceover (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = ttsModelPath,
-                        onValueChange = { ttsModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("sherpa-onnx TTS voice directory", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = ttsModelPath, hint = "sherpa-onnx TTS voice folder", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { ttsModelPath = it }
                     Text(
                         "Enables \"add a voiceover saying …\" via offline neural TTS (sherpa-onnx).",
                         color = Neutral500, fontSize = 10.sp,
@@ -616,14 +598,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
                     // Multimodal VLM (Gemma-3n) for rich frame captioning.
                     Text("Frame captioning (VLM) — multimodal model (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = vlmModelPath,
-                        onValueChange = { vlmModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Multimodal VLM model path (.task)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = vlmModelPath, hint = "Multimodal VLM model (.task)", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { vlmModelPath = it }
                     Text(
                         "Lets the assistant \"describe / understand this frame\" in rich language (Gemma-3n " +
                             "vision). Gated — sign in free at Hugging Face, download, and paste the path.",
@@ -639,14 +614,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
                     // Speaker diarization needs TWO sherpa models: a segmentation model + an embedding model.
                     Text("Speaker diarization — who spoke when (optional, needs both models)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = diarizeSegModelPath,
-                        onValueChange = { diarizeSegModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Segmentation model directory (pyannote)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = diarizeSegModelPath, hint = "Diarization segmentation folder (pyannote)", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { diarizeSegModelPath = it }
                     ModelPicker(
                         context = context,
                         title = "Segmentation models — download, use, or remove",
@@ -654,14 +622,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         selectedPath = diarizeSegModelPath,
                         onUse = { diarizeSegModelPath = it },
                     )
-                    OutlinedTextField(
-                        value = diarizeEmbedModelPath,
-                        onValueChange = { diarizeEmbedModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Speaker-embedding model (.onnx)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = diarizeEmbedModelPath, hint = "Speaker-embedding model (.onnx)", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { diarizeEmbedModelPath = it }
                     Text(
                         "Enables \"who speaks when?\" — set BOTH a segmentation and an embedding model.",
                         color = Neutral500, fontSize = 10.sp,
@@ -676,14 +637,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
                     // Stem separation (Spleeter via ONNX Runtime).
                     Text("Stem separation — vocals / instrumental (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = stemModelPath,
-                        onValueChange = { stemModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Spleeter model directory (ONNX)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = stemModelPath, hint = "Spleeter model folder (ONNX)", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { stemModelPath = it }
                     Text(
                         "Enables \"separate the stems / isolate the vocals\" (Spleeter). Heavy — best on a " +
                             "capable device and moderate clip lengths.",
@@ -699,14 +653,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
                     // Noise reduction / voice isolation (sherpa-onnx GTCRN denoiser).
                     Text("Noise reduction — clean up voice audio (optional)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = denoiseModelPath,
-                        onValueChange = { denoiseModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Speech-denoiser model (.onnx)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = denoiseModelPath, hint = "Speech-denoiser model (.onnx)", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { denoiseModelPath = it }
                     Text(
                         "Enables \"remove background noise / clean up the audio\" — strips hiss, hum, and " +
                             "background noise from voice (GTCRN). Fast, on-device.",
@@ -722,14 +669,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
                     // FFmpeg / Frei0r filtergraph baking (advanced; desktop-first).
                     Text("FFmpeg / Frei0r filters — bake a -vf graph (advanced)", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = ffmpegPath,
-                        onValueChange = { ffmpegPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Path to an ffmpeg executable", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = ffmpegPath, hint = "ffmpeg executable", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { ffmpegPath = it }
                     Text(
                         "Enables \"apply the ffmpeg filter …\" — bakes a standard FFmpeg -vf filtergraph " +
                             "(and Frei0r plugins via frei0r=name:params) onto a clip. Needs an ffmpeg " +
@@ -769,14 +709,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                 }
                 2 -> { // Transcription
                     Text("Transcription", color = Neutral400, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = speechModelPath,
-                        onValueChange = { speechModelPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("On-device speech model path (Vosk)", color = Neutral500, fontSize = 12.sp) },
-                        textStyle = TextStyle(color = White, fontSize = 12.sp),
-                        singleLine = true,
-                    )
+                    ModelPathField(value = speechModelPath, hint = "Vosk speech model folder", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { speechModelPath = it }
                     Text("Set a Vosk model folder for offline transcription; blank uses OpenAI Whisper.", color = Neutral500, fontSize = 10.sp)
                     Text(
                         "Download a Vosk model  ↗",
@@ -1564,3 +1497,53 @@ private fun Quality.label() = when (this) {
 }
 
 private fun Modifier.clickableText(onClick: () -> Unit): Modifier = this.clickable(onClick = onClick)
+
+/**
+ * A model-path setting rendered as a **Browse** button (not a paste-a-path text box): it opens the
+ * native file (or folder, when [isDirectory]) explorer via [onBrowse], which copies the selection into
+ * app storage and hands back the stored path. Shows the current path read-only, with a Clear affordance.
+ */
+@Composable
+private fun ModelPathField(
+    value: String,
+    hint: String,
+    isDirectory: Boolean,
+    importing: Boolean,
+    onBrowse: (isDirectory: Boolean, onResult: (String) -> Unit) -> Unit,
+    onSet: (String) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .border(1.dp, Neutral700, RoundedCornerShape(6.dp))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = value.ifBlank { hint },
+            color = if (value.isBlank()) Neutral500 else White,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+        )
+        // Vertical padding is INSIDE the clickable so the whole padded area is the touch target.
+        Text(
+            if (importing) "Copying…" else if (isDirectory) "Choose folder" else "Browse",
+            color = if (importing) Neutral500 else Red500,
+            fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clickableText { if (!importing) onBrowse(isDirectory) { onSet(it) } }
+                .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
+        )
+        if (value.isNotBlank()) {
+            Text(
+                "Clear", color = Neutral400, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickableText { onSet("") }
+                    .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
+            )
+        }
+    }
+}
