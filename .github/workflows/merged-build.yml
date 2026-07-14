@@ -16,6 +16,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege by default: most jobs only build/test. The release job that tags + uploads a
+# GitHub Release raises its own permission to `contents: write` (see its job-level `permissions`).
+permissions:
+  contents: read
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest

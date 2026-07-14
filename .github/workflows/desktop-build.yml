@@ -17,6 +17,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: build + upload-artifact only; no repo writes.
+permissions:
+  contents: read
+
 jobs:
   desktop-build:
     strategy:
