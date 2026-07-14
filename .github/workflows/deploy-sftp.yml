@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source (main)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Deploy via lftp (SFTP)
         env:
