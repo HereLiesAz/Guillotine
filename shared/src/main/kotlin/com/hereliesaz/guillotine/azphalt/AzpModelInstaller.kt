@@ -81,7 +81,9 @@ object AzpModelInstaller {
     fun plan(azpBytes: ByteArray, trustedKeys: Set<String>): InstallPlan {
         val trust = AzpPackage.verifyTrust(azpBytes, trustedKeys)
         if (!trust.ok) throw AzpPackage.AzpException("cannot install: ${trust.reason}")
-        val loaded = AzpPackage.load(azpBytes) // integrity already confirmed by verifyTrust
+        // read (not load): verifyTrust already confirmed integrity, so skip a second SHA-256 pass over
+        // the payload — that pass is expensive over multi-hundred-MB model weights, especially on mobile.
+        val loaded = AzpPackage.read(azpBytes)
         val models = loaded.manifest.assets
             .filter { it.type.trim().lowercase() in MODEL_TYPES }
             .map { asset ->
