@@ -144,9 +144,6 @@ Forks and derivatives must: keep the source open under AGPL-3.0 (including for n
 attribution — a visible "Based on Guillotine" credit in the app's About / legal notices (AGPLv3 §7(b));
 and **use a different name and icon** — the "Guillotine" name and logo are reserved (§7(e)).
 
-Releases previously dedicated under **CC0 1.0** remain public domain; the AGPL-3.0 licensing applies to
-subsequent versions.
-
 Alongside the license, the project keeps a **non-binding, good-faith companion** — the
 [Open-Source Open-Mind covenant](docs/OPEN-SOURCE-OPEN-MIND.md). It's not a condition of anything; it just
 asks that the real author's statement, if one is ever sent, be heard once. *Be OSOM to each other.*
