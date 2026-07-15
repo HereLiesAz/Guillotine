@@ -99,43 +99,7 @@ data class AiSettings(
     val models: Map<AiProviderType, String> = emptyMap(),
     val leonardoKey: String = "",
     val leonardoModel: String = LeonardoDefaultModel,
-    val speechModelPath: String = "",
-    val agentModelPath: String = "",
     val frameAnalysisCacheSize: Int = FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
-    /** Optional stronger on-device image-embedding model (recognition / "same thing?" matching);
-     *  blank = the bundled MobileNet-V3-small. */
-    val idEmbedModelPath: String = "",
-    /** Optional on-device face-embedding model used when recognising a specific person. */
-    val faceEmbedModelPath: String = "",
-    /** Optional on-device face-DETECTION model (finds face boxes; distinct from the face-embedding
-     *  model above). On Android this is ML Kit's built-in detector; on desktop it's an ONNX
-     *  UltraFace-style model the user points at, used by `auto_reframe` (blank = feature off there). */
-    val faceDetectModelPath: String = "",
-    /** Optional on-device subject-SEGMENTATION model. On Android this is ML Kit selfie segmentation;
-     *  on desktop it's an ONNX segmenter the user points at, used to matte `replace_background`. */
-    val segModelPath: String = "",
-    /** Paths to on-device TFLite image-effect models, keyed by effect ("superres"/"style"/"depth"). */
-    val effectModelPaths: Map<String, String> = emptyMap(),
-    /** Optional on-device image-labeling classifier for footage search. On Android this is ML Kit's
-     *  built-in labeler (no path needed); on desktop it's an ONNX ImageNet classifier the user points
-     *  at here (blank = `search_clips` returns a "needs a model" stub). */
-    val labelModelPath: String = "",
-    /** Optional on-device YAMNet audio-event `.tflite` for highlight detection; blank = feature off. */
-    val audioEventModelPath: String = "",
-    /** Optional sherpa-onnx offline ASR model *directory* (extracted bundle); blank = feature off. */
-    val asrModelPath: String = "",
-    /** Optional sherpa-onnx offline TTS voice *directory* (extracted bundle); blank = feature off. */
-    val ttsModelPath: String = "",
-    /** Optional multimodal VLM `.task` (e.g. Gemma-3n) for rich frame captioning; blank = feature off. */
-    val vlmModelPath: String = "",
-    /** Optional sherpa-onnx pyannote segmentation model *directory* for speaker diarization. */
-    val diarizeSegModelPath: String = "",
-    /** Optional sherpa-onnx speaker-embedding `.onnx` file for speaker diarization. */
-    val diarizeEmbedModelPath: String = "",
-    /** Optional Spleeter model *directory* (ONNX) for stem separation (vocals / accompaniment). */
-    val stemModelPath: String = "",
-    /** Optional sherpa-onnx GTCRN `.onnx` speech-denoiser file for on-device noise reduction. */
-    val denoiseModelPath: String = "",
     /** Optional path to an `ffmpeg` executable for baking FFmpeg/Frei0r filtergraphs onto a clip (blank =
      *  feature off). Desktop-first; on Android, point at a bundled/downloaded ffmpeg binary. */
     val ffmpegPath: String = "",

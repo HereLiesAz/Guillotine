@@ -169,7 +169,7 @@ fun FaqDialog(settings: AiSettings, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val entries = remember(settings) { 
         val base = parseSections(readDoc(context, "FAQ.md"))
-        val cmds = DocSection("What can I ask the AI to do?", getDynamicAiCommands(settings))
+        val cmds = DocSection("What can I ask the AI to do?", getDynamicAiCommands(context, settings))
         listOf(cmds) + base
     }
     var open by remember { mutableStateOf(-1) }
@@ -267,7 +267,7 @@ private fun readDoc(context: Context, fileName: String): String =
     runCatching { context.assets.open("help/$fileName").bufferedReader().use { it.readText() } }
         .getOrDefault("")
 
-private fun getDynamicAiCommands(settings: AiSettings): String {
+private fun getDynamicAiCommands(context: android.content.Context, settings: AiSettings): String {
     val b = StringBuilder()
     b.appendLine("The AI assistant can edit your timeline directly. Talk to it naturally! Here are examples of what you can ask it to do right now, based on your configured AI models:\n")
     
@@ -278,13 +278,13 @@ private fun getDynamicAiCommands(settings: AiSettings): String {
     b.appendLine("- \"Auto-duck the music under the voiceover.\"")
     b.appendLine("- \"Find clips containing a dog.\" (On-device object search)")
     
-    if (settings.audioEventModelPath.isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "audioEventModelPath").isNotBlank()) {
         b.appendLine("\n### Audio Highlights")
         b.appendLine("- \"Find the best moments in this video.\"")
         b.appendLine("- \"Where does the crowd cheer?\"")
     }
     
-    if (settings.asrModelPath.isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath").isNotBlank()) {
         b.appendLine("\n### Speech & Transcription")
         b.appendLine("- \"Transcribe this clip accurately.\"")
         b.appendLine("- \"Remove filler words like 'um' and 'uh'.\"")
@@ -293,30 +293,30 @@ private fun getDynamicAiCommands(settings: AiSettings): String {
         b.appendLine("- \"Add animated captions to this clip.\"")
     }
     
-    if (settings.ttsModelPath.isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "ttsModelPath").isNotBlank()) {
         b.appendLine("\n### Voiceover")
         b.appendLine("- \"Add a voiceover saying 'Welcome to my vlog'.\"")
     }
     
-    if (settings.stemModelPath.isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "stemModelPath").isNotBlank()) {
         b.appendLine("\n### Stem Separation")
         b.appendLine("- \"Isolate the vocals in this clip.\"")
         b.appendLine("- \"Give me the instrumental track.\"")
     }
     
-    if (settings.diarizeSegModelPath.isNotBlank() && settings.diarizeEmbedModelPath.isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "diarizeSegModelPath").isNotBlank() && com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "diarizeEmbedModelPath").isNotBlank()) {
         b.appendLine("\n### Speaker Diarization")
         b.appendLine("- \"Who speaks when in this audio?\"")
         b.appendLine("- \"Split this clip by speaker.\"")
     }
     
-    if (settings.effectModelPaths["depth"]?.isNotBlank() == true) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "effect_depth").isNotBlank()) {
         b.appendLine("\n### Image Effects")
         b.appendLine("- \"Blur the background of this clip.\"")
         b.appendLine("- \"Apply portrait mode.\"")
     }
     
-    if (settings.vlmModelPath.isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "vlmModelPath").isNotBlank()) {
         b.appendLine("\n### Vision Understanding")
         b.appendLine("- \"Describe exactly what is happening in this scene.\"")
     }

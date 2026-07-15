@@ -252,48 +252,32 @@ private fun getDynamicAiCommands(settings: AiSettings): String {
     b.appendLine("- \"Auto-duck the music under the voiceover.\"")
     b.appendLine("- \"Find clips containing a dog.\" (On-device object search)")
     
-    if (settings.audioEventModelPath.isNotBlank()) {
-        b.appendLine("\n### Audio Highlights")
-        b.appendLine("- \"Find the best moments in this video.\"")
-        b.appendLine("- \"Where does the crowd cheer?\"")
-    }
+    b.appendLine("\n### Audio Highlights")
+    b.appendLine("- \"Find the best moments in this video.\"")
+    b.appendLine("- \"Where does the crowd cheer?\"")
     
-    if (settings.asrModelPath.isNotBlank()) {
-        b.appendLine("\n### Speech & Transcription")
-        b.appendLine("- \"Transcribe this clip accurately.\"")
-        b.appendLine("- \"Remove filler words like 'um' and 'uh'.\"")
-    } else {
-        b.appendLine("\n### Speech & Transcription")
-        b.appendLine("- \"Add animated captions to this clip.\"")
-    }
+    b.appendLine("\n### Speech & Transcription")
+    b.appendLine("- \"Transcribe this clip accurately.\"")
+    b.appendLine("- \"Remove filler words like 'um' and 'uh'.\"")
+    b.appendLine("- \"Add animated captions to this clip.\"")
     
-    if (settings.ttsModelPath.isNotBlank()) {
-        b.appendLine("\n### Voiceover")
-        b.appendLine("- \"Add a voiceover saying 'Welcome to my vlog'.\"")
-    }
+    b.appendLine("\n### Voiceover")
+    b.appendLine("- \"Add a voiceover saying 'Welcome to my vlog'.\"")
     
-    if (settings.stemModelPath.isNotBlank()) {
-        b.appendLine("\n### Stem Separation")
-        b.appendLine("- \"Isolate the vocals in this clip.\"")
-        b.appendLine("- \"Give me the instrumental track.\"")
-    }
+    b.appendLine("\n### Stem Separation")
+    b.appendLine("- \"Isolate the vocals in this clip.\"")
+    b.appendLine("- \"Give me the instrumental track.\"")
     
-    if (settings.diarizeSegModelPath.isNotBlank() && settings.diarizeEmbedModelPath.isNotBlank()) {
-        b.appendLine("\n### Speaker Diarization")
-        b.appendLine("- \"Who speaks when in this audio?\"")
-        b.appendLine("- \"Split this clip by speaker.\"")
-    }
+    b.appendLine("\n### Speaker Diarization")
+    b.appendLine("- \"Who speaks when in this audio?\"")
+    b.appendLine("- \"Split this clip by speaker.\"")
     
-    if (settings.effectModelPaths["depth"]?.isNotBlank() == true) {
-        b.appendLine("\n### Image Effects")
-        b.appendLine("- \"Blur the background of this clip.\"")
-        b.appendLine("- \"Apply portrait mode.\"")
-    }
+    b.appendLine("\n### Image Effects")
+    b.appendLine("- \"Blur the background of this clip.\"")
+    b.appendLine("- \"Apply portrait mode.\"")
     
-    if (settings.vlmModelPath.isNotBlank()) {
-        b.appendLine("\n### Vision Understanding")
-        b.appendLine("- \"Describe exactly what is happening in this scene.\"")
-    }
+    b.appendLine("\n### Vision Understanding")
+    b.appendLine("- \"Describe exactly what is happening in this scene.\"")
     
     val genFeatures = mutableListOf<String>()
     if (settings.isKindOffered(GenKind.IMAGE)) genFeatures.add("- \"Generate an image of a cyberpunk city.\"")

@@ -21,15 +21,15 @@ object AzpModelInstaller {
     /** Asset `type`s that are AI models (spec/extension-manifest.md § AI Models). */
     val MODEL_TYPES = setOf("onnx", "tflite", "litert", "sherpa-bundle")
 
-    /** An [AiSettings] model-path field a delivered model can be routed to. */
-    enum class ModelSlot(val apply: (AiSettings, String) -> AiSettings) {
-        IMAGE_LABELING({ s, p -> s.copy(labelModelPath = p) }),
-        FACE_DETECTION({ s, p -> s.copy(faceDetectModelPath = p) }),
-        FACE_EMBEDDING({ s, p -> s.copy(faceEmbedModelPath = p) }),
-        SUBJECT_SEGMENTATION({ s, p -> s.copy(segModelPath = p) }),
-        IMAGE_EMBEDDING({ s, p -> s.copy(idEmbedModelPath = p) }),
-        SPEECH_TO_TEXT({ s, p -> s.copy(speechModelPath = p) }),
-        AUDIO_EVENT({ s, p -> s.copy(audioEventModelPath = p) }),
+    /** An AI model role that a delivered model can declare. */
+    enum class ModelSlot {
+        IMAGE_LABELING,
+        FACE_DETECTION,
+        FACE_EMBEDDING,
+        SUBJECT_SEGMENTATION,
+        IMAGE_EMBEDDING,
+        SPEECH_TO_TEXT,
+        AUDIO_EVENT,
     }
 
     /** Map an asset's semantic `role` to the [ModelSlot] it drives (null ⇒ unknown; host may prompt). */

@@ -57,9 +57,8 @@ object AzpModelInstall {
         val packageId: String,
         val installed: List<Installed>,
     ) {
-        /** Fold every routed model's path into [settings]; returns the updated settings to persist. */
-        fun applyTo(settings: AiSettings): AiSettings =
-            installed.fold(settings) { s, i -> i.slot?.apply(s, i.path) ?: s }
+        /** (Deprecated) Legacy routing hook; models now load straight from the registry. */
+        fun applyTo(settings: AiSettings): AiSettings = settings
     }
 
     private const val CONNECT_TIMEOUT_MS = 20_000

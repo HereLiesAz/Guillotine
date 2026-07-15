@@ -58,13 +58,7 @@ class DesktopKeyStore {
                 leonardoKey = json.optString("leonardo_key", ""),
                 leonardoModel = json.optString("leonardo_model", "")
                     .takeIf { it.isNotBlank() } ?: LeonardoDefaultModel,
-                speechModelPath = json.optString("speech_model_path", ""),
-                agentModelPath = json.optString("agent_model_path", ""),
-                labelModelPath = json.optString("label_model_path", ""),
-                audioEventModelPath = json.optString("audio_event_model_path", ""),
-                faceDetectModelPath = json.optString("face_detect_model_path", ""),
-                idEmbedModelPath = json.optString("id_embed_model_path", ""),
-                segModelPath = json.optString("seg_model_path", ""),
+
                 frameAnalysisCacheSize = json.optInt(
                     "frame_analysis_cache_size",
                     FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
@@ -82,13 +76,7 @@ class DesktopKeyStore {
             }
             put("leonardo_key", settings.leonardoKey)
             put("leonardo_model", settings.leonardoModel)
-            put("speech_model_path", settings.speechModelPath)
-            put("agent_model_path", settings.agentModelPath)
-            put("label_model_path", settings.labelModelPath)
-            put("audio_event_model_path", settings.audioEventModelPath)
-            put("face_detect_model_path", settings.faceDetectModelPath)
-            put("id_embed_model_path", settings.idEmbedModelPath)
-            put("seg_model_path", settings.segModelPath)
+
             put("frame_analysis_cache_size", settings.frameAnalysisCacheSize)
         }
         dataFile.writeBytes(encrypt(json.toString()))

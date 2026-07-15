@@ -162,11 +162,7 @@ fun NleScreen(
     LaunchedEffect(settings.frameAnalysisCacheSize) {
         FrameAnalysisCache.setMaxEntries(settings.frameAnalysisCacheSize)
     }
-    // Feed the subject-segmentation model path to the render config so the exporter can matte a
-    // removeBackground clip (replace_background). Re-applies whenever Settings saves a new path.
-    LaunchedEffect(settings.segModelPath) {
-        com.hereliesaz.guillotine.desktop.media.DesktopRenderConfig.segModelPath = settings.segModelPath
-    }
+
 
     var showSettings by remember { mutableStateOf(false) }
     var showAiComparison by remember { mutableStateOf(false) }
@@ -268,9 +264,9 @@ fun NleScreen(
     val onTranscribe: (CaptionStyle) -> Unit = onTranscribe@{ style ->
         val clip = vm.uiState.value.selectedClips.singleOrNull() ?: return@onTranscribe
         val media = vm.uiState.value.document.mediaFor(clip) ?: return@onTranscribe
-        val model = settings.speechModelPath
-        if (model.isBlank()) {
-            vm.setProcessing(false, "No on-device speech model set. Set a Vosk model in Settings → Transcription.")
+        val model = System.getProperty("user.home") + "/.azphalt/packages/com.azphalt.model.vosk/assets/vosk-model"
+        if (!java.io.File(model).exists()) {
+            vm.setProcessing(false, "Vosk transcription model missing. Please install it from the AI Storefront.")
             return@onTranscribe
         }
         vm.setProcessing(true, null)

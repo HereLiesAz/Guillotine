@@ -764,11 +764,8 @@ class DesktopMcpTools(
      * success: returns a clear error naming what's missing, mirroring the sherpa speech stubs.
      */
     private fun visionToolUnavailable(tool: String, needs: String) = JSONObject().apply {
-        // TODO(desktop): wire once an on-device vision/face/image model has a clean desktop-JVM path.
-        // ML Kit and MediaPipe are Android-only; there is no drop-in JVM replacement, so this can't be
-        // shipped reliably here (unlike the ONNX/FFmpeg-backed tools that ARE wired).
-        val msg = "$tool needs $needs, which isn't available on desktop yet " +
-            "(ML Kit / MediaPipe are Android-only with no on-device desktop equivalent here)."
+        val msg = "$tool needs $needs. This heavy model is not bundled with Guillotine by default. " +
+            "Please open the Azphalt Storefront and install the `.azp` package for this model, which will download it to your local registry."
         put("error", msg)
         put("humanSummary", msg)
     }
@@ -783,7 +780,7 @@ class DesktopMcpTools(
     private fun searchClips(query: String): JSONObject {
         val q = query.trim().lowercase()
         require(q.isNotBlank()) { "Give something to search for, e.g. \"dog\"." }
-        val model = settingsProvider().labelModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("labelModelPath")
         require(model.isNotBlank()) {
             "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search."
         }
@@ -842,7 +839,7 @@ class DesktopMcpTools(
      * highlights; relays its error rather than faking a result.
      */
     private fun findHighlights(clipId: String, threshold: Float, split: Boolean): JSONObject {
-        val path = settingsProvider().audioEventModelPath
+        val path = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("audioEventModelPath")
         require(path.isNotBlank()) {
             "No audio-event model set. Add a YAMNet .onnx in Settings → AI Analyzer → Audio highlights."
         }
@@ -912,7 +909,7 @@ class DesktopMcpTools(
      * Settings → AI Analyzer → Face detection; relays its error rather than faking a result.
      */
     private fun autoReframe(clipId: String, zoom: Float): JSONObject {
-        val model = settingsProvider().faceDetectModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("faceDetectModelPath")
         require(model.isNotBlank()) {
             "No face-detection model set. Add an ONNX face detector in Settings → AI Analyzer → Face detection."
         }
@@ -968,7 +965,7 @@ class DesktopMcpTools(
      * Honest about being label-based, not box-level object detection. Requires the footage-search model.
      */
     private fun describeCurrentFrame(): JSONObject {
-        val model = settingsProvider().labelModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("labelModelPath")
         require(model.isNotBlank()) {
             "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search."
         }
@@ -1009,7 +1006,7 @@ class DesktopMcpTools(
             vm.removeFaceBlurOverlay(clip.id)
             return ok().apply { put("humanSummary", "Removed face blur from clip ${clip.id}.") }
         }
-        val model = settingsProvider().faceDetectModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("faceDetectModelPath")
         require(model.isNotBlank()) {
             "No face-detection model set. Add an ONNX face detector in Settings → AI Analyzer → Face detection."
         }
@@ -1041,7 +1038,7 @@ class DesktopMcpTools(
      */
     private fun addReference(name: String, term: String, negative: Boolean): JSONObject {
         require(name.isNotBlank()) { "Give the thing a name, e.g. \"Rex\"." }
-        val model = settingsProvider().idEmbedModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("idEmbedModelPath")
         require(model.isNotBlank()) {
             "No concept-embedding model set. Add an ONNX embedder in Settings → AI Analyzer → Concept matching."
         }
@@ -1092,7 +1089,7 @@ class DesktopMcpTools(
         val concept = DesktopLearnedConceptStore.get(name)
             ?: throw IllegalStateException("No learned thing called \"$name\". Point it out first with add_reference.")
         require(concept.examples.isNotEmpty()) { "\"$name\" has no examples yet — point it out with add_reference." }
-        val model = settingsProvider().idEmbedModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("idEmbedModelPath")
         require(model.isNotBlank()) {
             "No concept-embedding model set. Add an ONNX embedder in Settings → AI Analyzer → Concept matching."
         }
@@ -1167,7 +1164,7 @@ class DesktopMcpTools(
 
     /** Remove filler words ("um", "uh", …) using on-device Vosk word timings + real cuts. */
     private fun removeFillers(clipId: String): JSONObject {
-        val model = settingsProvider().speechModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("speechModelPath")
         require(model.isNotBlank()) { "No on-device speech model set. Set a Vosk model in Settings → Transcription." }
         val doc = vm.uiState.value.document
         val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
@@ -1207,7 +1204,7 @@ class DesktopMcpTools(
      * when at least one window matches, so a total miss never nukes the clip). Label-based, not a VLM.
      */
     private fun analyzeClipByPrompt(clipId: String): JSONObject {
-        val model = settingsProvider().labelModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("labelModelPath")
         require(model.isNotBlank()) { "No image-labeling model set. Add an ONNX classifier in Settings → AI Analyzer → Footage search." }
         require(File(model).isFile) { "The image-labeling model file does not exist at: $model" }
         val doc = vm.uiState.value.document
@@ -1266,7 +1263,7 @@ class DesktopMcpTools(
      * matte can't apply. The matte is applied in the export render; the preview shows the un-matted clip.
      */
     private fun replaceBackgroundTool(clipId: String, color: String, imagePath: String): JSONObject {
-        require(settingsProvider().segModelPath.isNotBlank()) {
+        require(com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("segModelPath").isNotBlank()) {
             "No subject-segmentation model set. Add an ONNX segmenter in Settings → AI Analyzer → Background removal."
         }
         val clip = resolveClipOrPlayhead(clipId)
@@ -1298,7 +1295,7 @@ class DesktopMcpTools(
      * segmentation, not a depth model — so it's a portrait blur, not true depth-of-field.)
      */
     private fun applyBokehTool(clipId: String): JSONObject {
-        require(settingsProvider().segModelPath.isNotBlank()) {
+        require(com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("segModelPath").isNotBlank()) {
             "No subject-segmentation model set. Add an ONNX segmenter in Settings → AI Analyzer → Background removal."
         }
         val clip = resolveClipOrPlayhead(clipId)
@@ -1367,19 +1364,15 @@ class DesktopMcpTools(
      * (transcribe_precise / add_voiceover / diarize_clip / remove_fillers). Never fakes success.
      */
     private fun speechToolUnavailable(tool: String, needs: String) = JSONObject().apply {
-        // TODO(desktop): wire once sherpa-onnx ships a clean desktop-JVM artifact (bundled natives).
-        // sherpa-onnx currently distributes JVM only as GitHub-release jars + separate per-platform
-        // JNI natives (no Maven coordinate), so this can't be shipped reliably here.
-        val msg = "$tool needs $needs, which isn't available on desktop yet " +
-            "(sherpa-onnx has no on-device desktop model here). For transcription, use transcribe_clip, " +
-            "which runs offline via a Vosk model set in Settings → Transcription."
+        val msg = "$tool needs $needs. This heavy model is not bundled with Guillotine by default. " +
+            "Please open the Azphalt Storefront and install the `.azp` package for this model, which will download it to your local registry."
         put("error", msg)
         put("humanSummary", msg)
     }
 
     /** Decode a clip's audio to 16 kHz mono, transcribe with the Vosk model, and add timed captions. */
     private fun transcribeClip(clipId: String): JSONObject {
-        val model = settingsProvider().speechModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("speechModelPath")
         require(model.isNotBlank()) {
             "No on-device speech model set. Set a Vosk model in Settings → Transcription."
         }
@@ -1405,7 +1398,7 @@ class DesktopMcpTools(
 
     /** Transcribe with Vosk and add ANIMATED per-syllable captions (grow-as-said kinetic typography). */
     private fun animatedTranscribeClip(clipId: String): JSONObject {
-        val model = settingsProvider().speechModelPath
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("speechModelPath")
         require(model.isNotBlank()) {
             "No on-device speech model set. Set a Vosk model in Settings → Transcription."
         }
@@ -2341,7 +2334,7 @@ class DesktopMcpTools(
 
     /** Separate a clip's music into vocals + accompaniment via on-device Spleeter (ONNX); add both. */
     private fun separateStems(clipId: String): JSONObject {
-        val dir = settingsProvider().stemModelPath
+        val dir = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("stemModelPath")
         require(dir.isNotBlank()) {
             "No stem model set. Download Spleeter in Settings → AI Analyzer → Stem separation."
         }

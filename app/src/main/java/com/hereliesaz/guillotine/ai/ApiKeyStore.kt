@@ -47,20 +47,6 @@ class ApiKeyStore(context: Context) {
         leonardoKey = prefs.getString(KEY_LEONARDO_KEY, "").orEmpty(),
         leonardoModel = prefs.getString(KEY_LEONARDO_MODEL, "")
             ?.takeIf { it.isNotBlank() } ?: LeonardoDefaultModel,
-        speechModelPath = prefs.getString(KEY_SPEECH, "").orEmpty(),
-        agentModelPath = prefs.getString(KEY_AGENT_MODEL, "").orEmpty(),
-        idEmbedModelPath = prefs.getString(KEY_ID_EMBED, "").orEmpty(),
-        faceEmbedModelPath = prefs.getString(KEY_FACE_EMBED, "").orEmpty(),
-        effectModelPaths = EFFECT_KEYS
-            .associateWith { prefs.getString("effect_model_$it", "").orEmpty() }.filterValues { it.isNotEmpty() },
-        audioEventModelPath = prefs.getString(KEY_AUDIO_EVENT, "").orEmpty(),
-        asrModelPath = prefs.getString(KEY_ASR_MODEL, "").orEmpty(),
-        ttsModelPath = prefs.getString(KEY_TTS_MODEL, "").orEmpty(),
-        vlmModelPath = prefs.getString(KEY_VLM_MODEL, "").orEmpty(),
-        diarizeSegModelPath = prefs.getString(KEY_DIARIZE_SEG, "").orEmpty(),
-        diarizeEmbedModelPath = prefs.getString(KEY_DIARIZE_EMBED, "").orEmpty(),
-        stemModelPath = prefs.getString(KEY_STEM_MODEL, "").orEmpty(),
-        denoiseModelPath = prefs.getString(KEY_DENOISE_MODEL, "").orEmpty(),
         ffmpegPath = prefs.getString(KEY_FFMPEG_PATH, "").orEmpty(),
         frameAnalysisCacheSize = prefs
             .getInt(KEY_FRAME_CACHE_SIZE, FrameAnalysisCache.DEFAULT_MAX_ENTRIES)
@@ -88,19 +74,6 @@ class ApiKeyStore(context: Context) {
                 }
                 putString(KEY_LEONARDO_KEY, settings.leonardoKey)
                 putString(KEY_LEONARDO_MODEL, settings.leonardoModel)
-                putString(KEY_SPEECH, settings.speechModelPath)
-                putString(KEY_AGENT_MODEL, settings.agentModelPath)
-                putString(KEY_ID_EMBED, settings.idEmbedModelPath)
-                putString(KEY_FACE_EMBED, settings.faceEmbedModelPath)
-                EFFECT_KEYS.forEach { putString("effect_model_$it", settings.effectModelPaths[it].orEmpty()) }
-                putString(KEY_AUDIO_EVENT, settings.audioEventModelPath)
-                putString(KEY_ASR_MODEL, settings.asrModelPath)
-                putString(KEY_TTS_MODEL, settings.ttsModelPath)
-                putString(KEY_VLM_MODEL, settings.vlmModelPath)
-                putString(KEY_DIARIZE_SEG, settings.diarizeSegModelPath)
-                putString(KEY_DIARIZE_EMBED, settings.diarizeEmbedModelPath)
-                putString(KEY_STEM_MODEL, settings.stemModelPath)
-                putString(KEY_DENOISE_MODEL, settings.denoiseModelPath)
                 putString(KEY_FFMPEG_PATH, settings.ffmpegPath)
                 putInt(KEY_FRAME_CACHE_SIZE, settings.frameAnalysisCacheSize)
                 GenProviderType.entries.forEach {
@@ -125,19 +98,6 @@ class ApiKeyStore(context: Context) {
         const val KEY_PROVIDER = "ai_provider"
         const val KEY_LEONARDO_KEY = "leonardo_key"
         const val KEY_LEONARDO_MODEL = "leonardo_model"
-        const val KEY_SPEECH = "speech_model_path"
-        const val KEY_AGENT_MODEL = "agent_model_path"
-        const val KEY_ID_EMBED = "id_embed_model_path"
-        const val KEY_FACE_EMBED = "face_embed_model_path"
-        val EFFECT_KEYS = listOf("superres", "style", "depth", "lowlight")
-        const val KEY_AUDIO_EVENT = "audio_event_model_path"
-        const val KEY_ASR_MODEL = "asr_model_path"
-        const val KEY_TTS_MODEL = "tts_model_path"
-        const val KEY_VLM_MODEL = "vlm_model_path"
-        const val KEY_DIARIZE_SEG = "diarize_seg_model_path"
-        const val KEY_DIARIZE_EMBED = "diarize_embed_model_path"
-        const val KEY_STEM_MODEL = "stem_model_path"
-        const val KEY_DENOISE_MODEL = "denoise_model_path"
         const val KEY_FFMPEG_PATH = "ffmpeg_path"
         const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"

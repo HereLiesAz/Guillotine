@@ -94,13 +94,6 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var models by remember { mutableStateOf(current.models) }
     var leonardoKey by remember { mutableStateOf(current.leonardoKey) }
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
-    var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
-    var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
-    var labelModelPath by remember { mutableStateOf(current.labelModelPath) }
-    var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
-    var faceDetectModelPath by remember { mutableStateOf(current.faceDetectModelPath) }
-    var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
-    var segModelPath by remember { mutableStateOf(current.segModelPath) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
@@ -113,13 +106,6 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         models = models,
         leonardoKey = leonardoKey.trim(),
         leonardoModel = leonardoModel,
-        speechModelPath = speechModelPath.trim(),
-        agentModelPath = agentModelPath.trim(),
-        labelModelPath = labelModelPath.trim(),
-        audioEventModelPath = audioEventModelPath.trim(),
-        faceDetectModelPath = faceDetectModelPath.trim(),
-        idEmbedModelPath = idEmbedModelPath.trim(),
-        segModelPath = segModelPath.trim(),
         frameAnalysisCacheSize = frameAnalysisCacheSize,
     )
 
@@ -130,15 +116,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
     fun applyInstalled(result: AzpModelInstall.Result) {
         result.installed.forEach { inst ->
-            when (inst.slot) {
-                AzpModelInstaller.ModelSlot.SPEECH_TO_TEXT -> speechModelPath = inst.path
-                AzpModelInstaller.ModelSlot.IMAGE_LABELING -> labelModelPath = inst.path
-                AzpModelInstaller.ModelSlot.AUDIO_EVENT -> audioEventModelPath = inst.path
-                AzpModelInstaller.ModelSlot.FACE_DETECTION -> faceDetectModelPath = inst.path
-                AzpModelInstaller.ModelSlot.IMAGE_EMBEDDING -> idEmbedModelPath = inst.path
-                AzpModelInstaller.ModelSlot.SUBJECT_SEGMENTATION -> segModelPath = inst.path
-                else -> Unit // FACE_EMBEDDING has no desktop field yet
-            }
+        // (Legacy manual routing removed; models operate directly from ~/.azphalt/packages)
         }
         onSave(buildSettings())
     }
@@ -296,48 +274,6 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         color = Neutral500, fontSize = 10.sp,
                     )
 
-                    Text("Footage search (on-device)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = labelModelPath, hint = "Image-classifier model (.onnx)", isDirectory = false) { labelModelPath = it }
-                    Text(
-                        "Point at an ONNX ImageNet classifier (e.g. MobileNet/ResNet) to enable on-device " +
-                            "footage search (\"find clips with a dog\"). Put a labels file — one class per " +
-                            "line — next to it, named \"<model>.txt\", \"labels.txt\", or " +
-                            "\"imagenet_classes.txt\". Blank = footage search off. Other on-device vision " +
-                            "tools use a cloud provider above.",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
-
-                    Text("Audio highlights (on-device)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = audioEventModelPath, hint = "YAMNet audio-event model (.onnx)", isDirectory = false) { audioEventModelPath = it }
-                    Text(
-                        "Point at a YAMNet ONNX export to enable on-device highlight detection " +
-                            "(\"find the best moments\" — applause, cheering, laughter, music). Blank = off.",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
-
-                    Text("Face detection (on-device)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = faceDetectModelPath, hint = "Face-detector model (.onnx, UltraFace-style)", isDirectory = false) { faceDetectModelPath = it }
-                    Text(
-                        "Point at an UltraFace-style ONNX face detector to enable on-device " +
-                            "auto-reframe (punch in and pan to follow the main face) and face blur. Blank = off.",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
-
-                    Text("Concept matching (on-device)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = idEmbedModelPath, hint = "Image-embedding model (.onnx)", isDirectory = false) { idEmbedModelPath = it }
-                    Text(
-                        "Point at an ONNX image embedder (a classifier with its head removed → a feature " +
-                            "vector) to teach and find things (add_reference / analyze_clip_with_concept). Blank = off.",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
-
-                    Text("Background removal (on-device)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = segModelPath, hint = "Subject-segmentation model (.onnx)", isDirectory = false) { segModelPath = it }
-                    Text(
-                        "Point at an ONNX subject segmenter (selfie-seg / U2Net / MODNet) to matte the " +
-                            "subject for replace_background (applied on export). Blank = off.",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
                 }
                 1 -> {
                     Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
@@ -352,14 +288,6 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     )
                 }
                 2 -> {
-                    Text("Transcription", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = speechModelPath, hint = "Vosk model folder", isDirectory = true) { speechModelPath = it }
-                    Text("Set a Vosk model folder for offline transcription; blank uses OpenAI Whisper.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                        "Download a Vosk model  ↗",
-                        color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickable { uriHandler.openUri("https://alphacephei.com/vosk/models") },
-                    )
                 }
                 3 -> {
                     Text("MCP server", color = Neutral400, fontSize = 12.sp)
