@@ -2963,7 +2963,7 @@ class McpTools(
     // ---- azphalt plugin tools ----
 
     private fun listAzpPlugins(): JSONObject {
-        val baseDir = java.io.File("C:\\Users\\azrie\\StudioProjects\\Guillotine\\extensions")
+        val baseDir = java.io.File(context.filesDir, "extensions")
         if (!baseDir.exists()) return ok().apply { put("plugins", JSONArray()) }
         
         val pluginsList = JSONArray()

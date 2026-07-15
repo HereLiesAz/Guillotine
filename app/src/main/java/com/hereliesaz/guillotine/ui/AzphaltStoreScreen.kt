@@ -72,7 +72,7 @@ fun AzphaltStoreScreen(
     val selectedCategory by storeState.selectedCategory.collectAsState()
     
     LaunchedEffect(Unit) {
-        val baseDir = "C:\\Users\\azrie\\StudioProjects\\Guillotine\\extensions"
+        val baseDir = java.io.File(context.filesDir, "extensions").absolutePath
         storeState.loadPlugins(baseDir)
     }
 

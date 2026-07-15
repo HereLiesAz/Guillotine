@@ -1,8 +1,0 @@
-{
-  "controls": [
-    { "type": "slider", "key": "scanlines", "label": "Scanline intensity", "min": 0, "max": 1, "step": 0.01, "default": 0.35 },
-    { "type": "number", "key": "gap", "label": "Scanline gap (px)", "min": 2, "max": 8, "step": 1, "default": 3 },
-    { "type": "number", "key": "aberration", "label": "RGB fringe (px)", "min": 0, "max": 8, "step": 1, "default": 2 },
-    { "type": "slider", "key": "vignette", "label": "Vignette", "min": 0, "max": 1, "step": 0.01, "default": 0.4 }
-  ]
-}

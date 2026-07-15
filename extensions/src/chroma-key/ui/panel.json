@@ -1,7 +1,0 @@
-{
-  "controls": [
-    { "type": "color", "key": "keyColor", "label": "Key colour", "default": "#00ff00" },
-    { "type": "slider", "key": "threshold", "label": "Threshold", "min": 0, "max": 1, "step": 0.01, "default": 0.4 },
-    { "type": "slider", "key": "softness", "label": "Softness", "min": 0.01, "max": 0.5, "step": 0.01, "default": 0.1 }
-  ]
-}
