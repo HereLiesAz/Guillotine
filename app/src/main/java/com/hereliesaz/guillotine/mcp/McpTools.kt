@@ -715,6 +715,7 @@ class McpTools(
                 "clip_id" to stringProp(), "property" to stringProp(),
                 required = listOf("clip_id", "property")
             )
+        ))
         put(toolDefinition(
             "list_azp_plugins",
             "List all available azphalt `.azp` effect and kinetic typography plugins installed in the " +
@@ -3009,9 +3010,10 @@ class McpTools(
     }
     
     private fun applyAzpPlugin(clipId: String, pluginId: String): JSONObject {
-        val clip = getClipOrThrow(clipId)
+        val clip = vm.editor.uiState.value.document.clips.find { it.id == clipId } 
+            ?: throw IllegalArgumentException("Clip $clipId not found.")
         
-        vm.updateClip(clipId) { c ->
+        vm.editor.updateClip(clipId) { c ->
             c.copy(azpPluginId = pluginId)
         }
         

@@ -471,7 +471,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 )
                 TransportControls(vm, state)
             }
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = settings.asrModelPath)
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = settings.asrModelPath)
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
         } else {
             PreviewPlayer(
@@ -482,7 +482,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
             )
             TransportControls(vm, state)
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = settings.asrModelPath)
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = settings.asrModelPath)
             TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
         } // editor Column
@@ -901,6 +901,7 @@ private fun EditorToolStrip(
     onAgentRun: (String) -> Unit,
     onImport: () -> Unit,
     onHelp: () -> Unit,
+    onOpenStore: () -> Unit,
     /** Offline ASR model dir for voice-command dictation; blank hides the mic button. */
     asrModelPath: String = "",
 ) {
@@ -1017,7 +1018,7 @@ private fun EditorToolStrip(
         ) {
             // Azphalt Store button
             androidx.compose.material3.IconButton(
-                onClick = { showAzphaltStore = true },
+                onClick = { onOpenStore() },
                 modifier = Modifier.padding(end = 4.dp)
             ) {
                 Icon(Icons.Default.Storefront, contentDescription = "Azphalt Store", tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
