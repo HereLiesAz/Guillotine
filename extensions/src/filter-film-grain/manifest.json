@@ -1,0 +1,21 @@
+{
+  "azphalt": "0.1",
+  "id": "com.hereliesaz.guillotine.filter.film-grain",
+  "name": "Film Grain",
+  "version": "1.0.0",
+  "kind": "asset",
+  "license": "MIT",
+  "author": "HereLiesAz",
+  "description": "Animated film grain with a subtle vignette — an ISF fragment shader.",
+  "homepage": "https://github.com/HereLiesAz/Guillotine",
+  "compat": ">=0.1",
+  "assets": [
+    {
+      "type": "shader",
+      "path": "assets/film-grain.fs",
+      "params": { "format": "isf" },
+      "tags": ["filter", "grain", "film", "stylize"],
+      "contentRights": { "attribution": "Film Grain shader © HereLiesAz, MIT", "attributionRequired": false, "commercialUse": true }
+    }
+  ]
+}

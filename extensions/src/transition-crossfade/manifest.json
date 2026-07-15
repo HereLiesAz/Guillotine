@@ -1,0 +1,21 @@
+{
+  "azphalt": "0.1",
+  "id": "com.hereliesaz.guillotine.transition.crossfade",
+  "name": "Crossfade",
+  "version": "1.0.0",
+  "kind": "asset",
+  "license": "MIT",
+  "author": "HereLiesAz",
+  "description": "A smooth linear dissolve from one clip to the next.",
+  "homepage": "https://github.com/HereLiesAz/Guillotine",
+  "compat": ">=0.1",
+  "assets": [
+    {
+      "type": "transition",
+      "path": "assets/crossfade.glsl",
+      "params": { "format": "gl-transition", "duration": 1.0 },
+      "tags": ["transition", "dissolve", "fade"],
+      "contentRights": { "attribution": "Crossfade transition © HereLiesAz, MIT", "attributionRequired": false, "commercialUse": true }
+    }
+  ]
+}
