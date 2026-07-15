@@ -63,6 +63,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -461,7 +476,60 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         // Analysis/export status & errors now stream into the activity-log bottom sheet below,
         // so there's no separate status strip here.
         if (widthClass == WindowWidthSizeClass.Expanded) {
-            Column(Modifier.weight(0.6f).fillMaxWidth()) {
+            Row(
+                Modifier
+                    .weight(0.6f)
+                    .fillMaxWidth()
+            ) {
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .animateContentSize()
+                ) {
+                    PreviewPlayer(
+                        state,
+                        Modifier.weight(1f).fillMaxWidth(),
+                        cropMode = state.tool == EditorTool.CROP,
+                        showSafeZones = state.tool == EditorTool.CROP,
+                        onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                    )
+                    TransportControls(vm, state)
+                }
+
+                AnimatedVisibility(
+                    visible = state.tool != EditorTool.SELECT || state.selectedClips.isNotEmpty(),
+                    enter = slideInHorizontally(initialOffsetX = { it }) + expandHorizontally(),
+                    exit = slideOutHorizontally(targetOffsetX = { it }) + shrinkHorizontally()
+                ) {
+                    AdvancedToolView(
+                        vm = vm,
+                        state = state,
+                        onTranscribe = onTranscribe,
+                        modifier = Modifier
+                            .width(320.dp)
+                            .fillMaxHeight()
+                    )
+                }
+            }
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = settings.asrModelPath)
+            
+            // The timeline "swells" (takes more space) when a clip is selected.
+            val timelineWeight = if (state.selectedClips.isNotEmpty()) 0.5f else 0.4f
+            TimelinePanel(
+                vm, state, onImportToTrack, onCreateOnTrack, 
+                Modifier
+                    .weight(timelineWeight)
+                    .fillMaxWidth()
+                    .animateContentSize()
+            )
+        } else {
+            Column(
+                Modifier
+                    .weight(0.42f)
+                    .fillMaxWidth()
+                    .animateContentSize()
+            ) {
                 PreviewPlayer(
                     state,
                     Modifier.weight(1f).fillMaxWidth(),
@@ -471,19 +539,32 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 )
                 TransportControls(vm, state)
             }
+            
             EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = settings.asrModelPath)
-            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
-        } else {
-            PreviewPlayer(
-                state,
-                Modifier.weight(0.42f).fillMaxWidth(),
-                cropMode = state.tool == EditorTool.CROP,
-                showSafeZones = state.tool == EditorTool.CROP,
-                onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+            
+            AnimatedVisibility(
+                visible = state.tool != EditorTool.SELECT || state.selectedClips.isNotEmpty(),
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                AdvancedToolView(
+                    vm = vm,
+                    state = state,
+                    onTranscribe = onTranscribe,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                )
+            }
+            
+            val timelineWeight = if (state.selectedClips.isNotEmpty()) 0.68f else 0.58f
+            TimelinePanel(
+                vm, state, onImportToTrack, onCreateOnTrack, 
+                Modifier
+                    .weight(timelineWeight)
+                    .fillMaxWidth()
+                    .animateContentSize()
             )
-            TransportControls(vm, state)
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = settings.asrModelPath)
-            TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.58f).fillMaxWidth())
         }
         } // editor Column
 
@@ -1084,7 +1165,7 @@ private fun EditorToolStrip(
                 (selected.size > 1 && selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null })
             if (oneUnit) {
                 ToolGroupSeparator()
-                ClipToolButtons(vm, state, onTranscribe)
+                // Removed inline clip tools because they are now in AdvancedToolView
             }
         }
         // The agent's running status/output now streams into the activity-log bottom sheet; the

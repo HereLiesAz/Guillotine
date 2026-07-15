@@ -1,5 +1,12 @@
 package com.hereliesaz.guillotine.ui
 
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.dp
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
@@ -59,4 +66,32 @@ fun IconToolButton(
             .padding(8.dp)
             .size(18.dp),
     )
+}
+
+
+@Composable
+fun DraggableTimelineDivider(
+    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    onDrag: (Float) -> Unit
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(16.dp)
+            .background(androidx.compose.ui.graphics.Color(0xFF171717))
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDrag(dragAmount)
+                }
+            }
+    ) {
+        Box(
+            modifier = androidx.compose.ui.Modifier
+                .fillMaxWidth(0.15f)
+                .height(4.dp)
+                .background(androidx.compose.ui.graphics.Color(0xFF525252), RoundedCornerShape(2.dp))
+                .align(androidx.compose.ui.Alignment.Center)
+        )
+    }
 }

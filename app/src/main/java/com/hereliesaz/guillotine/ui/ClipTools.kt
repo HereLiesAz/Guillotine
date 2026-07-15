@@ -74,44 +74,13 @@ import kotlinx.coroutines.launch
 /** How auto-captions are laid down: plain subtitle clips, or the animated word-pop style. */
 enum class CaptionStyle { PLAIN, ANIMATED }
 
-@Composable
-fun ClipToolButtons(
-    vm: EditorViewModel,
-    state: EditorUiState,
-    onTranscribe: (CaptionStyle) -> Unit,
-) {
-    val sel = state.selectedClips
-    if (sel.isEmpty()) return
-    // Pick a representative clip per type, so a grouped video+audio pair shows both the
-    // picture tools and the audio tool without needing to ungroup.
-    val video = sel.firstOrNull { it.type == ClipType.VIDEO }
-    val text = sel.firstOrNull { it.type == ClipType.TEXT }
-    // Audio editing targets an independent audio clip; if the only audio is a video's linked
-    // shadow, route to the video clip (which actually carries that sound).
-    val audioTarget = sel.firstOrNull { it.type == ClipType.AUDIO && it.linkedClipId == null } ?: video
-    val processable = video ?: sel.firstOrNull { it.type == ClipType.AUDIO }
-
-    if (text != null) TextToolButton(vm, text)
-    if (video != null) {
-        BackgroundToolButton(vm, video)
-        FaceBlurToolButton(vm, video)
-        FiltersToolButton(vm, video)
-    }
-    if (audioTarget != null) AudioToolButton(vm, audioTarget)
-    (video ?: processable ?: text)?.let { KeyframesToolButton(vm, it) }
-    if (processable != null) {
-        TranscribeToolButton(state, onTranscribe)
-        if (processable.edits.isNotEmpty()) SplitToolButton(vm, processable)
-    }
-}
+// Removed ClipToolButtons, we use InlineClipTools now
 
 // ---- individual tool buttons + their popups ----
 
 @Composable
-private fun TextToolButton(vm: EditorViewModel, clip: TimelineClip) {
-    var open by remember { mutableStateOf(false) }
-    IconToolButton(Icons.Filled.TextFields, "Text & font", active = open) { open = !open }
-    if (open) ToolPopup("Text", { open = false }) {
+fun TextToolInline(vm: EditorViewModel, clip: TimelineClip) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         OutlinedTextField(
             value = clip.text,
             onValueChange = { vm.setClipText(clip.id, it) },
@@ -149,7 +118,7 @@ private fun TextToolButton(vm: EditorViewModel, clip: TimelineClip) {
  *  popup, no setting to hunt for (the wedge feature made a button, per the roadmap). Drop another
  *  clip on a lower track to composite behind it. */
 @Composable
-private fun BackgroundToolButton(vm: EditorViewModel, clip: TimelineClip) {
+fun BackgroundToolButton(vm: EditorViewModel, clip: TimelineClip) {
     IconToolButton(Icons.Filled.Layers, "Remove background", active = clip.filters.removeBackground) {
         vm.updateClipFilters(clip.id) { it.copy(removeBackground = !it.removeBackground) }
     }
@@ -158,17 +127,15 @@ private fun BackgroundToolButton(vm: EditorViewModel, clip: TimelineClip) {
 /** One-tap on-device face blur (anonymize). Tapping toggles it; on-device face detection blurs every
  *  face in preview and export. */
 @Composable
-private fun FaceBlurToolButton(vm: EditorViewModel, clip: TimelineClip) {
+fun FaceBlurToolButton(vm: EditorViewModel, clip: TimelineClip) {
     IconToolButton(Icons.Filled.BlurOn, "Blur faces", active = clip.filters.blurFaces) {
         vm.updateClipFilters(clip.id) { it.copy(blurFaces = !it.blurFaces) }
     }
 }
 
 @Composable
-private fun FiltersToolButton(vm: EditorViewModel, clip: TimelineClip) {
-    var open by remember { mutableStateOf(false) }
-    IconToolButton(Icons.Filled.Tune, "Filters", active = open) { open = !open }
-    if (open) ToolPopup("Filters", { open = false }) {
+fun FiltersToolInline(vm: EditorViewModel, clip: TimelineClip) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         val f = clip.filters
         FilterSlider(vm, clip.id, "Brightness", f.brightness, 0f..2f, keyframe = KeyframeProperty.BRIGHTNESS) { v, ff -> ff.copy(brightness = v) }
         FilterSlider(vm, clip.id, "Contrast", f.contrast, 0f..2f, keyframe = KeyframeProperty.CONTRAST) { v, ff -> ff.copy(contrast = v) }
@@ -309,10 +276,8 @@ private fun LutRow(vm: EditorViewModel, clip: TimelineClip) {
 }
 
 @Composable
-private fun AudioToolButton(vm: EditorViewModel, clip: TimelineClip) {
-    var open by remember { mutableStateOf(false) }
-    IconToolButton(Icons.Filled.VolumeUp, "Audio", active = open) { open = !open }
-    if (open) ToolPopup("Audio", { open = false }) {
+fun AudioToolInline(vm: EditorViewModel, clip: TimelineClip) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         val f = clip.filters
         FilterSlider(vm, clip.id, "Volume", f.volume, 0f..2f, keyframe = KeyframeProperty.VOLUME) { v, ff -> ff.copy(volume = v) }
         FilterSlider(vm, clip.id, "Pan", f.pan, -1f..1f, keyframe = KeyframeProperty.PAN) { v, ff -> ff.copy(pan = v) }
@@ -324,10 +289,8 @@ private fun AudioToolButton(vm: EditorViewModel, clip: TimelineClip) {
 }
 
 @Composable
-private fun KeyframesToolButton(vm: EditorViewModel, clip: TimelineClip) {
-    var open by remember { mutableStateOf(false) }
-    IconToolButton(Icons.Filled.Timeline, "Keyframes", active = open) { open = !open }
-    if (open) ToolPopup("Keyframes", { open = false }) {
+fun KeyframesToolInline(vm: EditorViewModel, clip: TimelineClip) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         var property by remember { mutableStateOf(KeyframeProperty.OPACITY) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             KeyframeProperty.values().forEach { p ->
@@ -375,16 +338,14 @@ private fun KeyframesToolButton(vm: EditorViewModel, clip: TimelineClip) {
 
 /** One-tap auto-captions. On-device transcription → caption clips, in the chosen style. */
 @Composable
-private fun TranscribeToolButton(state: EditorUiState, onTranscribe: (CaptionStyle) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    IconToolButton(Icons.Filled.Subtitles, "Auto-captions", enabled = !state.isProcessing) { open = !open }
-    if (open) ToolPopup("Auto-captions", { open = false }) {
+fun TranscribeToolInline(state: EditorUiState, onTranscribe: (CaptionStyle) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("On-device speech-to-text — your audio never leaves the device.", color = Neutral500, fontSize = 10.sp)
         CaptionStyleRow("Captions", "Clean subtitle clips, timed to the speech") {
-            onTranscribe(CaptionStyle.PLAIN); open = false
+            onTranscribe(CaptionStyle.PLAIN)
         }
         CaptionStyleRow("Animated", "Word-pop / karaoke style — each syllable grows as it's spoken") {
-            onTranscribe(CaptionStyle.ANIMATED); open = false
+            onTranscribe(CaptionStyle.ANIMATED)
         }
     }
 }
@@ -405,7 +366,7 @@ private fun CaptionStyleRow(label: String, detail: String, onClick: () -> Unit) 
 }
 
 @Composable
-private fun SplitToolButton(vm: EditorViewModel, clip: TimelineClip) {
+fun SplitToolButton(vm: EditorViewModel, clip: TimelineClip) {
     IconToolButton(Icons.Filled.CallSplit, "Split into ${clip.edits.size} clips") { vm.segmentClip(clip.id) }
 }
 
