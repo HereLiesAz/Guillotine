@@ -1,0 +1,16 @@
+{
+  "name": "guillotine-extensions",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "azphalt extensions and assets that expand Guillotine — built with @azphalt/azdk + @azphalt/azp.",
+  "license": "MIT",
+  "scripts": {
+    "build": "node build.mjs",
+    "verify": "node build.mjs --verify"
+  },
+  "dependencies": {
+    "@azphalt/azdk": "^0.1.1",
+    "fflate": "^0.8.2"
+  }
+}

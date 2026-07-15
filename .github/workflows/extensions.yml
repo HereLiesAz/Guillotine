@@ -1,0 +1,36 @@
+name: Extensions
+
+# Build and integrity-verify the azphalt extensions/assets under extensions/, and fail if the
+# committed dist/*.azp are stale (out of sync with src/). Keeps the .azp packages honest.
+on:
+  push:
+    paths:
+      - extensions/**
+      - .github/workflows/extensions.yml
+  pull_request:
+    paths:
+      - extensions/**
+      - .github/workflows/extensions.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extensions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run verify
+      - name: Fail if committed dist/ is stale
+        run: |
+          if ! git diff --exit-code -- dist; then
+            echo "::error::extensions/dist is out of date — run 'npm run build' in extensions/ and commit." >&2
+            exit 1
+          fi
