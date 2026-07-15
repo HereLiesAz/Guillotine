@@ -6,12 +6,12 @@ import java.io.File
 object ModelResolver {
     fun resolve(context: Context, property: String): String {
         return when (property) {
-            "labelModelPath" -> "" // Handled by MLKit
+            "labelModelPath" -> getRegistryPath(context, "com.azphalt.model.mobilenetv3", "assets/mobilenetv3.tflite")
             "audioEventModelPath" -> getRegistryPath(context, "com.azphalt.model.audio-events", "assets/yamnet.tflite")
-            "faceDetectModelPath" -> "" // Handled by MLKit
+            "faceDetectModelPath" -> getRegistryPath(context, "com.azphalt.model.face-detect", "assets/face-detect.tflite")
             "idEmbedModelPath" -> getRegistryPath(context, "com.azphalt.model.id-embed", "assets/mobilenetv3.tflite")
             "faceEmbedModelPath" -> getRegistryPath(context, "com.azphalt.model.face-embed", "assets/face-embed.tflite")
-            "segModelPath" -> "" // Handled by MLKit
+            "segModelPath" -> getRegistryPath(context, "com.azphalt.model.segmentation", "assets/selfie_segmentation.tflite")
             "speechModelPath" -> getRegistryPath(context, "com.azphalt.model.vosk", "assets/vosk-model")
             "stemModelPath" -> getRegistryPath(context, "com.azphalt.model.spleeter", "assets/spleeter.onnx")
             "diarizeSegModelPath" -> getRegistryPath(context, "com.azphalt.model.pyannote", "assets/segmentation.onnx")
