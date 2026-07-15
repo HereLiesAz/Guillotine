@@ -1,0 +1,33 @@
+{
+  "tracks": [
+    {
+      "type": "binding",
+      "property": "offsetX",
+      "binding": "scene.motionVectors.x",
+      "modifier": "inverse_smooth"
+    },
+    {
+      "type": "binding",
+      "property": "offsetY",
+      "binding": "scene.motionVectors.y",
+      "modifier": "inverse_smooth"
+    },
+    {
+      "type": "binding",
+      "property": "rotation",
+      "binding": "scene.motionVectors.rotation",
+      "modifier": "inverse_smooth"
+    },
+    {
+      "type": "keyframe",
+      "property": "scale",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 1.15,
+          "easing": "linear"
+        }
+      ]
+    }
+  ]
+}

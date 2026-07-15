@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "warp": {
+      "bind": "scene.motionVectors",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": {
+        "intensity": 50,
+        "direction": "$VALUE"
+      }
+    }
+  }
+}

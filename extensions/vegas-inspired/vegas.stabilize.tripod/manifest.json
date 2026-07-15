@@ -1,0 +1,26 @@
+{
+  "id": "vegas.stabilize.tripod",
+  "version": "1.0.0",
+  "name": "Video Stabilization - Tripod Mode",
+  "description": "Aggressively clamps offset and rotation to a strict inverse to lock the shot completely still.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "stabilize",
+        "tripod",
+        "lock",
+        "ai"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}

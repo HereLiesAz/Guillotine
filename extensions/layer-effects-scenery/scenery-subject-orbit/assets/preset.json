@@ -1,0 +1,45 @@
+{
+  "tracks": {
+    "camera": {
+      "bind": "object.center",
+      "mapOut": {
+        "aim": "$VALUE",
+        "position": [
+          0,
+          0,
+          500
+        ],
+        "aperture": 1.4
+      }
+    },
+    "opacity": {
+      "bind": "depth.occlusion",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": [
+        1,
+        0
+      ]
+    },
+    "rotation": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "time": 1,
+        "value": [
+          0,
+          360,
+          0
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "tracks": {
+    "position": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          100,
+          0
+        ]
+      },
+      {
+        "time": 0.3,
+        "value": [
+          0,
+          -50,
+          0
+        ],
+        "easing": "ease-out"
+      },
+      {
+        "time": 0.7,
+        "value": [
+          0,
+          0,
+          0
+        ],
+        "easing": "ease-in"
+      }
+    ],
+    "scale": [
+      {
+        "time": 0,
+        "value": [
+          0.8,
+          1.5
+        ]
+      },
+      {
+        "time": 0.3,
+        "value": [
+          1,
+          1
+        ],
+        "easing": "ease-out"
+      },
+      {
+        "time": 0.7,
+        "value": [
+          1.5,
+          0.5
+        ],
+        "easing": "ease-in"
+      },
+      {
+        "time": 0.9,
+        "value": [
+          1,
+          1
+        ],
+        "easing": "spring"
+      }
+    ],
+    "opacity": [
+      {
+        "time": 0,
+        "value": 0
+      },
+      {
+        "time": 0.1,
+        "value": 1
+      }
+    ]
+  }
+}

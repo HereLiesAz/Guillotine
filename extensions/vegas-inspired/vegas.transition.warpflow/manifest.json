@@ -1,0 +1,26 @@
+{
+  "id": "vegas.transition.warpflow",
+  "version": "1.0.0",
+  "name": "Warp Flow Transition",
+  "description": "Dynamically distorts the image and pulls the viewer into the next scene.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "transition",
+        "warp",
+        "flow",
+        "dynamic"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}

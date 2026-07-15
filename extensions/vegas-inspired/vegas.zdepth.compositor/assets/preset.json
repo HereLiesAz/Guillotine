@@ -1,0 +1,32 @@
+{
+  "tracks": [
+    {
+      "type": "binding",
+      "property": "depth.collision",
+      "binding": "scene.depthMap",
+      "modifier": "occludeBackground"
+    },
+    {
+      "type": "keyframe",
+      "property": "filters.removeBackground",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 1,
+          "easing": "linear"
+        }
+      ]
+    },
+    {
+      "type": "keyframe",
+      "property": "filters.bokeh",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 1,
+          "easing": "linear"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "opacity": {
+      "bind": "speech.wordDuration",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": [
+        1,
+        1
+      ]
+    }
+  }
+}

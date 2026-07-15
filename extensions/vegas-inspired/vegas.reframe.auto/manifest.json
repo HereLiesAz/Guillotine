@@ -1,0 +1,26 @@
+{
+  "id": "vegas.reframe.auto",
+  "version": "1.0.0",
+  "name": "Smart Auto-Reframe",
+  "description": "Keeps the primary action centered in a vertical frame using inverse motion vectors.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "reframe",
+        "social",
+        "vertical",
+        "ai"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}

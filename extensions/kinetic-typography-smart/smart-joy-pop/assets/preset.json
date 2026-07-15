@@ -1,0 +1,21 @@
+{
+  "tracks": {
+    "scale": {
+      "bind": "speech.sentiment",
+      "mapIn": [
+        0.5,
+        1
+      ],
+      "mapOut": [
+        [
+          1,
+          1
+        ],
+        [
+          1.4,
+          1.4
+        ]
+      ]
+    }
+  }
+}

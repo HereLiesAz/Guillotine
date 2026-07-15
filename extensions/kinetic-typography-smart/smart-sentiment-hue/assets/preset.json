@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "color": {
+      "bind": "speech.sentiment",
+      "mapIn": [
+        -1,
+        1
+      ],
+      "mapOut": [
+        "#FF0000",
+        "#00FF00"
+      ]
+    }
+  }
+}

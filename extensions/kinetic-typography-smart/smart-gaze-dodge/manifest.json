@@ -1,0 +1,28 @@
+{
+  "azphalt": "0.1",
+  "id": "com.hereliesaz.kinetic.smart-gaze-dodge",
+  "name": "Eye-Contact Dodge",
+  "version": "2.0.0",
+  "kind": "asset",
+  "license": "MIT",
+  "compat": ">=0.1",
+  "targetApps": [
+    "com.hereliesaz.guillotine"
+  ],
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "word"
+      },
+      "tags": [
+        "kinetic-typography",
+        "smart-binding",
+        "ai-driven"
+      ]
+    }
+  ],
+  "files": {}
+}

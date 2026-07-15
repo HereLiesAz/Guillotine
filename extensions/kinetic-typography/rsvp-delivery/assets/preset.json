@@ -1,0 +1,32 @@
+{
+  "tracks": {
+    "opacity": [
+      {
+        "time": 0,
+        "value": 0
+      },
+      {
+        "time": 0.05,
+        "value": 1
+      },
+      {
+        "time": 0.95,
+        "value": 1
+      },
+      {
+        "time": 1,
+        "value": 0
+      }
+    ],
+    "position": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  }
+}

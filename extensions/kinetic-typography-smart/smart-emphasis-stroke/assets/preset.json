@@ -1,0 +1,21 @@
+{
+  "tracks": {
+    "strokeWidth": {
+      "bind": "speech.emphasis",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": [
+        0,
+        10
+      ]
+    },
+    "strokeColor": [
+      {
+        "time": 0,
+        "value": "#000000"
+      }
+    ]
+  }
+}

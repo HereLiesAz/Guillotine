@@ -1,0 +1,26 @@
+{
+  "id": "vegas.isolate.glow",
+  "version": "1.0.0",
+  "name": "Subject Isolate & Glow",
+  "description": "Isolates the subject and pushes brightness and contrast to create a pop effect.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "isolate",
+        "glow",
+        "mask",
+        "ai"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}

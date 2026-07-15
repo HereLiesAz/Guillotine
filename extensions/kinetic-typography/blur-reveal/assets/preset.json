@@ -1,0 +1,25 @@
+{
+  "tracks": {
+    "opacity": [
+      {
+        "time": 0,
+        "value": 0
+      },
+      {
+        "time": 1,
+        "value": 1
+      }
+    ],
+    "blur": [
+      {
+        "time": 0,
+        "value": 20
+      },
+      {
+        "time": 1,
+        "value": 0,
+        "easing": "ease-out"
+      }
+    ]
+  }
+}

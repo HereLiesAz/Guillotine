@@ -1,0 +1,89 @@
+{
+  "tracks": {
+    "position": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "time": 0.1,
+        "value": [
+          5,
+          -5,
+          0
+        ]
+      },
+      {
+        "time": 0.2,
+        "value": [
+          -5,
+          5,
+          0
+        ]
+      },
+      {
+        "time": 0.3,
+        "value": [
+          5,
+          5,
+          0
+        ]
+      },
+      {
+        "time": 0.4,
+        "value": [
+          -5,
+          -5,
+          0
+        ]
+      },
+      {
+        "time": 0.5,
+        "value": [
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "color": [
+      {
+        "time": 0,
+        "value": "#FF0000"
+      }
+    ],
+    "strokeWidth": [
+      {
+        "time": 0,
+        "value": 8
+      }
+    ],
+    "strokeColor": [
+      {
+        "time": 0,
+        "value": "#FFFFFF"
+      }
+    ],
+    "scale": [
+      {
+        "time": 0,
+        "value": [
+          1.1,
+          1.1
+        ]
+      },
+      {
+        "time": 0.5,
+        "value": [
+          1,
+          1
+        ],
+        "easing": "ease-out"
+      }
+    ]
+  }
+}

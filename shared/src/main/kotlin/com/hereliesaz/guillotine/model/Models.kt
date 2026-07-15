@@ -199,6 +199,8 @@ data class TimelineClip(
     val offsetX: Float = 0f,
     val offsetY: Float = 0f,
     val rotation: Float = 0f,
+    /** The `.azp` plugin ID applied to this clip, if any (kinetic typography, layer effects, etc.) */
+    val azpPluginId: String? = null,
 ) {
     val endTimeMs: Long get() = startTimeMs + durationMs
 }

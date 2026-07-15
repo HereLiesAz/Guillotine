@@ -1,0 +1,37 @@
+{
+  "tracks": [
+    {
+      "type": "keyframe",
+      "property": "filters.removeBackground",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 1,
+          "easing": "linear"
+        }
+      ]
+    },
+    {
+      "type": "keyframe",
+      "property": "filters.brightness",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 1.3,
+          "easing": "linear"
+        }
+      ]
+    },
+    {
+      "type": "keyframe",
+      "property": "filters.contrast",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 1.4,
+          "easing": "linear"
+        }
+      ]
+    }
+  ]
+}

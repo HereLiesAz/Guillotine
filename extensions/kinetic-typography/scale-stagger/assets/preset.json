@@ -1,0 +1,21 @@
+{
+  "tracks": {
+    "scale": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          0
+        ]
+      },
+      {
+        "time": 1,
+        "value": [
+          1,
+          1
+        ],
+        "easing": "ease-out"
+      }
+    ]
+  }
+}

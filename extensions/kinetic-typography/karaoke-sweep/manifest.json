@@ -1,0 +1,31 @@
+{
+  "azphalt": "0.1",
+  "id": "com.hereliesaz.kinetic.karaoke-sweep",
+  "name": "Karaoke Sweep",
+  "version": "1.2.0",
+  "kind": "asset",
+  "license": "MIT",
+  "compat": ">=0.1",
+  "targetApps": [
+    "com.hereliesaz.guillotine"
+  ],
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "params": {
+        "format": "az-motion",
+        "stagger": 0.1,
+        "staggerMode": "character"
+      },
+      "tags": [
+        "kinetic-typography",
+        "caption",
+        "character",
+        "modern",
+        "karaoke"
+      ]
+    }
+  ],
+  "files": {}
+}

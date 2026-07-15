@@ -1,0 +1,19 @@
+{
+  "tracks": {
+    "color": {
+      "bind": "inpaint.backgroundTexture"
+    },
+    "opacity": [
+      {
+        "time": 0,
+        "value": 0.85
+      }
+    ],
+    "blur": [
+      {
+        "time": 0,
+        "value": 3
+      }
+    ]
+  }
+}

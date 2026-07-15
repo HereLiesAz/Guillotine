@@ -1,0 +1,49 @@
+{
+  "tracks": [
+    {
+      "type": "binding",
+      "property": "filters.bokeh",
+      "binding": "scene.backgroundTexture",
+      "modifier": "enable"
+    },
+    {
+      "type": "binding",
+      "property": "scene.shadowCasters",
+      "binding": "scene.lightVector",
+      "modifier": "soft_shadow"
+    },
+    {
+      "type": "keyframe",
+      "property": "scale",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 0.35,
+          "easing": "linear"
+        }
+      ]
+    },
+    {
+      "type": "keyframe",
+      "property": "offsetX",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 0.6,
+          "easing": "linear"
+        }
+      ]
+    },
+    {
+      "type": "keyframe",
+      "property": "offsetY",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 0.6,
+          "easing": "linear"
+        }
+      ]
+    }
+  ]
+}

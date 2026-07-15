@@ -1,0 +1,26 @@
+{
+  "id": "vegas.tracking.planar",
+  "version": "1.0.0",
+  "name": "Motion Tracking - Planar Pin",
+  "description": "Locks a graphic's position to the movement of the camera/scene.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "tracking",
+        "planar",
+        "pin",
+        "ai"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}

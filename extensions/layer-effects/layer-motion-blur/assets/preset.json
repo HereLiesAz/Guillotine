@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "motionBlur": {
+      "bind": "scene.motionIntensity",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": [
+        0,
+        25
+      ]
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "tracks": {
+    "spotlights": [
+      {
+        "time": 0,
+        "value": [
+          {
+            "position": [
+              0,
+              500,
+              100
+            ],
+            "target": [
+              0,
+              0,
+              0
+            ],
+            "color": "#ffffff",
+            "angle": 90,
+            "distance": 1000
+          }
+        ]
+      }
+    ]
+  }
+}

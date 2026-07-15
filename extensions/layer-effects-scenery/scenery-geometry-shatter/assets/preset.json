@@ -1,0 +1,45 @@
+{
+  "tracks": {
+    "position": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          0,
+          -500
+        ],
+        "easing": "ease-in"
+      },
+      {
+        "time": 1,
+        "value": [
+          0,
+          0,
+          1000
+        ]
+      }
+    ],
+    "opacity": {
+      "bind": "depth.collision",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": [
+        1,
+        0
+      ]
+    },
+    "blur": {
+      "bind": "depth.collision",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": [
+        0,
+        50
+      ]
+    }
+  }
+}

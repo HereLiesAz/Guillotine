@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "rotation": {
+      "bind": "speech.sentiment",
+      "mapIn": [
+        -1,
+        -0.5
+      ],
+      "mapOut": [
+        -5,
+        5
+      ]
+    }
+  }
+}

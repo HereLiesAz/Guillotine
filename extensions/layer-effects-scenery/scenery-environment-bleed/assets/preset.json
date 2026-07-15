@@ -1,0 +1,16 @@
+{
+  "tracks": {
+    "color": {
+      "bind": "scene.dominantColor"
+    },
+    "shadow": {
+      "bind": "scene.dominantColor",
+      "mapOut": [
+        0,
+        0,
+        20,
+        "$VALUE"
+      ]
+    }
+  }
+}

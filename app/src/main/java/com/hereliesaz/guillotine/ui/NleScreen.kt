@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Mic
@@ -220,11 +221,15 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showNewProjectConfirm by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
+    // Settings & state for non-editor overlays (Help, Faq, Upgrades, Store).
     var showHelp by remember { mutableStateOf(false) }
     var showTutorial by remember { mutableStateOf(false) }
     var showFaq by remember { mutableStateOf(false) }
     var showAdFree by remember { mutableStateOf(false) }
+    var showAzphaltStore by remember { mutableStateOf(false) }
     
+    // UMP consent form state.
+    var canRequestAds by remember { mutableStateOf(false) }  
     val billingManager = remember { com.hereliesaz.guillotine.billing.BillingManager(context, scope).apply { initialize() } }
     
     var exporting by remember { mutableStateOf(false) }
@@ -650,6 +655,18 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
     if (showFaq) FaqDialog(settings = settings, onDismiss = { showFaq = false })
     if (showAdFree) AdFreeDialog(billingManager = billingManager, onDismiss = { showAdFree = false })
+    if (showAzphaltStore) {
+        AzphaltStoreScreen(
+            onApplyPlugin = { pluginId ->
+                val clipId = vm.uiState.value.selectedClipIds.firstOrNull()
+                if (clipId != null) {
+                    vm.updateClip(clipId) { it.copy(azpPluginId = pluginId) }
+                }
+                showAzphaltStore = false
+            },
+            onDismiss = { showAzphaltStore = false }
+        )
+    }
     if (showOnboarding) {
         OnboardingDialog(
             onComplete = { selectedModelPath ->
@@ -998,6 +1015,14 @@ private fun EditorToolStrip(
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Azphalt Store button
+            androidx.compose.material3.IconButton(
+                onClick = { showAzphaltStore = true },
+                modifier = Modifier.padding(end = 4.dp)
+            ) {
+                Icon(Icons.Default.Storefront, contentDescription = "Azphalt Store", tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
+            }
+
             // ---- Modes (toggle a tool on/off; active one is highlighted) ----
             IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
                 vm.setTool(EditorTool.SELECT)

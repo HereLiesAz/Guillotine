@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "blur": {
+      "bind": "depth.focusMask",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": [
+        10,
+        0
+      ]
+    }
+  }
+}

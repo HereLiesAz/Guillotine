@@ -1,0 +1,26 @@
+{
+  "id": "vegas.film.damage",
+  "version": "1.0.0",
+  "name": "Vintage Film Damage",
+  "description": "Animates sepia, contrast, blur, and opacity to simulate film flicker and projector damage.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "vintage",
+        "film",
+        "damage",
+        "flicker"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}

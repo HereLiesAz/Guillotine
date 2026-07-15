@@ -1,0 +1,26 @@
+{
+  "id": "vegas.timeramp.optical",
+  "version": "1.0.0",
+  "name": "Optical Flow Time Ramp",
+  "description": "Smooth speed-ramping using Bezier easing to slow time precisely.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "timeramp",
+        "slowmo",
+        "speed",
+        "opticalflow"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}

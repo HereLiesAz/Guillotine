@@ -1,0 +1,47 @@
+{
+  "tracks": {
+    "color": [
+      {
+        "time": 0,
+        "value": "#FFFFFF88"
+      },
+      {
+        "time": 0.1,
+        "value": "#00FF00"
+      },
+      {
+        "time": 0.8,
+        "value": "#00FF00"
+      },
+      {
+        "time": 1,
+        "value": "#FFFFFF88"
+      }
+    ],
+    "scale": [
+      {
+        "time": 0,
+        "value": [
+          1,
+          1
+        ]
+      },
+      {
+        "time": 0.1,
+        "value": [
+          1.1,
+          1.1
+        ],
+        "easing": "ease-out"
+      },
+      {
+        "time": 0.3,
+        "value": [
+          1,
+          1
+        ],
+        "easing": "ease-in"
+      }
+    ]
+  }
+}

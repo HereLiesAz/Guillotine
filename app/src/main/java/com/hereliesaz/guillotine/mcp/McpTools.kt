@@ -715,6 +715,21 @@ class McpTools(
                 "clip_id" to stringProp(), "property" to stringProp(),
                 required = listOf("clip_id", "property")
             )
+        put(toolDefinition(
+            "list_azp_plugins",
+            "List all available azphalt `.azp` effect and kinetic typography plugins installed in the " +
+                "extensions directories. Returns the plugin IDs, names, and tags. Use this to discover " +
+                "available advanced effects to apply.",
+            emptySchema()
+        ))
+        put(toolDefinition(
+            "apply_azp_plugin",
+            "Apply a specific `.azp` plugin (by its ID) to a clip on the timeline.",
+            objSchema(
+                "clip_id" to stringProp("The ID of the clip to apply the plugin to"),
+                "plugin_id" to stringProp("The ID of the plugin (from list_azp_plugins)"),
+                required = listOf("clip_id", "plugin_id")
+            )
         ))
     }
 
@@ -787,6 +802,8 @@ class McpTools(
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
+        "list_azp_plugins" -> listAzpPlugins()
+        "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -2940,6 +2957,67 @@ class McpTools(
         }
         
         return ok().apply { put("humanSummary", "Cleared all $property keyframes on clip $clipId.") }
+    }
+
+    // ---- azphalt plugin tools ----
+
+    private fun listAzpPlugins(): JSONObject {
+        val extensionsDir = java.io.File(context.filesDir, "extensions")
+        if (!extensionsDir.exists()) {
+            val projectExtensions = java.io.File("C:\\Users\\azrie\\StudioProjects\\Guillotine\\extensions")
+            if (!projectExtensions.exists()) return ok().apply { put("plugins", JSONArray()) }
+        }
+        
+        val pluginsList = JSONArray()
+        val dirs = listOf("kinetic-typography", "kinetic-typography-smart", "layer-effects", "layer-effects-scenery")
+        val baseDir = java.io.File("C:\\Users\\azrie\\StudioProjects\\Guillotine\\extensions")
+        
+        for (dirName in dirs) {
+            val dir = java.io.File(baseDir, dirName)
+            if (dir.exists() && dir.isDirectory) {
+                dir.listFiles()?.forEach { pluginDir ->
+                    val manifestFile = java.io.File(pluginDir, "manifest.json")
+                    if (manifestFile.exists()) {
+                        try {
+                            val manifest = JSONObject(manifestFile.readText())
+                            val id = manifest.optString("id", "")
+                            val name = manifest.optString("name", "")
+                            val assets = manifest.optJSONArray("assets")
+                            val tags = if (assets != null && assets.length() > 0) {
+                                assets.getJSONObject(0).optJSONArray("tags") ?: JSONArray()
+                            } else JSONArray()
+                            
+                            val pluginObj = JSONObject().apply {
+                                put("id", id)
+                                put("name", name)
+                                put("tags", tags)
+                                put("category", dirName)
+                            }
+                            pluginsList.put(pluginObj)
+                        } catch (e: Exception) {
+                            // Skip malformed
+                        }
+                    }
+                }
+            }
+        }
+        
+        return ok().apply { 
+            put("plugins", pluginsList)
+            put("humanSummary", "Found ${pluginsList.length()} azphalt plugins.")
+        }
+    }
+    
+    private fun applyAzpPlugin(clipId: String, pluginId: String): JSONObject {
+        val clip = getClipOrThrow(clipId)
+        
+        vm.updateClip(clipId) { c ->
+            c.copy(azpPluginId = pluginId)
+        }
+        
+        return ok().apply { 
+            put("humanSummary", "Applied plugin $pluginId to clip $clipId. The host UI will now interpret this clip using the preset.")
+        }
     }
 
 }

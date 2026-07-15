@@ -1,0 +1,26 @@
+{
+  "id": "vegas.pip.pro",
+  "version": "1.0.0",
+  "name": "Pro Picture-in-Picture",
+  "description": "A premium PiP layout that perfectly scales and drops a shadow, with background bokeh.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "pip",
+        "picture-in-picture",
+        "overlay",
+        "pro"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}

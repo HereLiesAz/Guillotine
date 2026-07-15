@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "blur": {
+      "bind": "speech.wps",
+      "mapIn": [
+        2,
+        6
+      ],
+      "mapOut": [
+        0,
+        15
+      ]
+    }
+  }
+}

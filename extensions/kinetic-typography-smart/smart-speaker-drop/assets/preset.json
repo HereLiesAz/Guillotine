@@ -1,0 +1,23 @@
+{
+  "tracks": {
+    "position": {
+      "bind": "speaker.id",
+      "mapIn": [
+        0,
+        3
+      ],
+      "mapOut": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          30,
+          0
+        ]
+      ]
+    }
+  }
+}

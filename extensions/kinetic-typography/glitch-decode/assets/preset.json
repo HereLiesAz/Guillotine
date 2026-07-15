@@ -1,0 +1,62 @@
+{
+  "tracks": {
+    "skew": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          0
+        ]
+      },
+      {
+        "time": 0.1,
+        "value": [
+          20,
+          0
+        ]
+      },
+      {
+        "time": 0.2,
+        "value": [
+          -20,
+          0
+        ]
+      },
+      {
+        "time": 0.3,
+        "value": [
+          0,
+          0
+        ]
+      }
+    ],
+    "color": [
+      {
+        "time": 0,
+        "value": "#FFFFFF"
+      },
+      {
+        "time": 0.1,
+        "value": "#FF00FF"
+      },
+      {
+        "time": 0.2,
+        "value": "#00FFFF"
+      },
+      {
+        "time": 0.3,
+        "value": "#FFFFFF"
+      }
+    ],
+    "opacity": [
+      {
+        "time": 0,
+        "value": 0
+      },
+      {
+        "time": 0.1,
+        "value": 1
+      }
+    ]
+  }
+}

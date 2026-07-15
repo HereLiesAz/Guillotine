@@ -1,0 +1,13 @@
+{
+  "tracks": {
+    "shadow": {
+      "bind": "speaker.color",
+      "mapOut": [
+        0,
+        0,
+        15,
+        "$VALUE"
+      ]
+    }
+  }
+}

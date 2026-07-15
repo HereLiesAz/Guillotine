@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "color": {
+      "bind": "audio.rms",
+      "mapIn": [
+        0,
+        1
+      ],
+      "mapOut": [
+        "#FFFFFF",
+        "#FF0000"
+      ]
+    }
+  }
+}

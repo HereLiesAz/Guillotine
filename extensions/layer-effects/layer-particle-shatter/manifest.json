@@ -1,0 +1,27 @@
+{
+  "azphalt": "0.1",
+  "id": "com.hereliesaz.layer.layer-particle-shatter",
+  "name": "Particle Shatter",
+  "version": "1.0.0",
+  "kind": "asset",
+  "license": "MIT",
+  "compat": ">=0.1",
+  "targetApps": [
+    "com.hereliesaz.guillotine"
+  ],
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "params": {
+        "format": "az-motion"
+      },
+      "tags": [
+        "layer-effect",
+        "shatter",
+        "particles"
+      ]
+    }
+  ],
+  "files": {}
+}

@@ -1,0 +1,19 @@
+{
+  "tracks": {
+    "rotation": {
+      "bind": "speaker.id",
+      "mapOut": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          180,
+          0,
+          0
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "rotation": {
+      "bind": "audio.pitch",
+      "mapIn": [
+        50,
+        400
+      ],
+      "mapOut": [
+        -10,
+        10
+      ]
+    }
+  }
+}

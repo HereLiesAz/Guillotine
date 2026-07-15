@@ -1,0 +1,32 @@
+{
+  "tracks": {
+    "skew": {
+      "bind": "scene.motionIntensity",
+      "mapIn": [
+        0.5,
+        1
+      ],
+      "mapOut": [
+        [
+          0,
+          0
+        ],
+        [
+          30,
+          0
+        ]
+      ]
+    },
+    "color": {
+      "bind": "scene.motionIntensity",
+      "mapIn": [
+        0.8,
+        1
+      ],
+      "mapOut": [
+        "#FFFFFF",
+        "#00FFFF"
+      ]
+    }
+  }
+}

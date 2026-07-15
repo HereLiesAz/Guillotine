@@ -1,0 +1,21 @@
+{
+  "tracks": {
+    "bend": [
+      {
+        "time": 0,
+        "value": {
+          "angle": 0,
+          "radius": 1000
+        },
+        "easing": "ease-in"
+      },
+      {
+        "time": 1,
+        "value": {
+          "angle": 180,
+          "radius": 50
+        }
+      }
+    ]
+  }
+}

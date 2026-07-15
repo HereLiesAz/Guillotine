@@ -1,0 +1,46 @@
+{
+  "tracks": [
+    {
+      "type": "keyframe",
+      "property": "warp",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 0,
+          "easing": "linear"
+        },
+        {
+          "time": 0.8,
+          "value": 0,
+          "easing": "easeIn"
+        },
+        {
+          "time": 1,
+          "value": 1,
+          "easing": "linear"
+        }
+      ]
+    },
+    {
+      "type": "keyframe",
+      "property": "scale",
+      "keyframes": [
+        {
+          "time": 0,
+          "value": 1,
+          "easing": "linear"
+        },
+        {
+          "time": 0.8,
+          "value": 1,
+          "easing": "easeIn"
+        },
+        {
+          "time": 1,
+          "value": 1.5,
+          "easing": "linear"
+        }
+      ]
+    }
+  ]
+}

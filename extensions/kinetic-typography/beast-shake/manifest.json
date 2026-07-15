@@ -1,0 +1,32 @@
+{
+  "azphalt": "0.1",
+  "id": "com.hereliesaz.kinetic.beast-shake",
+  "name": "Beast Shake",
+  "version": "1.2.0",
+  "kind": "asset",
+  "license": "MIT",
+  "compat": ">=0.1",
+  "targetApps": [
+    "com.hereliesaz.guillotine"
+  ],
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "params": {
+        "format": "az-motion",
+        "stagger": 0.15,
+        "staggerMode": "word"
+      },
+      "tags": [
+        "kinetic-typography",
+        "caption",
+        "word",
+        "modern",
+        "beast",
+        "high-energy"
+      ]
+    }
+  ],
+  "files": {}
+}

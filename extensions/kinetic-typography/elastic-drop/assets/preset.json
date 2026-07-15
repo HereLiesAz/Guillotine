@@ -1,0 +1,52 @@
+{
+  "tracks": {
+    "position": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          -200,
+          0
+        ]
+      },
+      {
+        "time": 0.4,
+        "value": [
+          0,
+          0,
+          0
+        ],
+        "easing": "spring"
+      }
+    ],
+    "opacity": [
+      {
+        "time": 0,
+        "value": 0
+      },
+      {
+        "time": 0.1,
+        "value": 1
+      }
+    ],
+    "rotation": [
+      {
+        "time": 0,
+        "value": [
+          0,
+          0,
+          -15
+        ]
+      },
+      {
+        "time": 0.4,
+        "value": [
+          0,
+          0,
+          0
+        ],
+        "easing": "spring"
+      }
+    ]
+  }
+}

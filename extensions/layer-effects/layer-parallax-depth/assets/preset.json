@@ -1,0 +1,15 @@
+{
+  "tracks": {
+    "camera": {
+      "bind": "device.gyroscope"
+    },
+    "extrusion": {
+      "bind": "depth.map",
+      "mapOut": [
+        {
+          "depth": 20
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "tracks": {
+    "reflection": {
+      "bind": "scene.floorMask",
+      "mapOut": {
+        "opacity": 0.8,
+        "distance": 0,
+        "contour": "$VALUE"
+      }
+    }
+  }
+}

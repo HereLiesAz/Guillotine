@@ -1,0 +1,26 @@
+{
+  "id": "vegas.stabilize.actioncam",
+  "version": "1.0.0",
+  "name": "Video Stabilization - Action Cam",
+  "description": "Cancels out shaky camera movement by inverting scene motion vectors.",
+  "files": {
+    "assets/preset.json": "sha256-placeholder"
+  },
+  "assets": [
+    {
+      "type": "motion",
+      "path": "assets/preset.json",
+      "tags": [
+        "stabilize",
+        "actioncam",
+        "smooth",
+        "ai"
+      ],
+      "params": {
+        "format": "az-motion",
+        "staggerMode": "layer",
+        "stagger": 0
+      }
+    }
+  ]
+}
