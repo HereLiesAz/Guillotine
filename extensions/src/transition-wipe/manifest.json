@@ -1,0 +1,21 @@
+{
+  "azphalt": "0.1",
+  "id": "com.hereliesaz.guillotine.transition.wipe",
+  "name": "Directional Wipe",
+  "version": "1.0.0",
+  "kind": "asset",
+  "license": "MIT",
+  "author": "HereLiesAz",
+  "description": "The incoming clip sweeps in along a direction, behind a soft edge.",
+  "homepage": "https://github.com/HereLiesAz/Guillotine",
+  "compat": ">=0.1",
+  "assets": [
+    {
+      "type": "transition",
+      "path": "assets/wipe.glsl",
+      "params": { "format": "gl-transition", "duration": 1.0, "direction": [1.0, 0.0], "smoothness": 0.05 },
+      "tags": ["transition", "wipe", "slide"],
+      "contentRights": { "attribution": "Directional Wipe transition © HereLiesAz, MIT", "attributionRequired": false, "commercialUse": true }
+    }
+  ]
+}

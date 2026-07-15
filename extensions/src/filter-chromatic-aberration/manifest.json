@@ -1,0 +1,21 @@
+{
+  "azphalt": "0.1",
+  "id": "com.hereliesaz.guillotine.filter.chromatic-aberration",
+  "name": "Chromatic Aberration",
+  "version": "1.0.0",
+  "kind": "asset",
+  "license": "MIT",
+  "author": "HereLiesAz",
+  "description": "Lens-style RGB channel split that grows toward the edges — an ISF fragment shader.",
+  "homepage": "https://github.com/HereLiesAz/Guillotine",
+  "compat": ">=0.1",
+  "assets": [
+    {
+      "type": "shader",
+      "path": "assets/chromatic-aberration.fs",
+      "params": { "format": "isf" },
+      "tags": ["filter", "lens", "glitch", "stylize"],
+      "contentRights": { "attribution": "Chromatic Aberration shader © HereLiesAz, MIT", "attributionRequired": false, "commercialUse": true }
+    }
+  ]
+}
