@@ -475,97 +475,88 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
         // Analysis/export status & errors now stream into the activity-log bottom sheet below,
         // so there's no separate status strip here.
-        if (widthClass == WindowWidthSizeClass.Expanded) {
-            Row(
-                Modifier
-                    .weight(0.6f)
-                    .fillMaxWidth()
-            ) {
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .animateContentSize()
-                ) {
-                    PreviewPlayer(
-                        state,
-                        Modifier.weight(1f).fillMaxWidth(),
-                        cropMode = state.tool == EditorTool.CROP,
-                        showSafeZones = state.tool == EditorTool.CROP,
-                        onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-                    )
-                    TransportControls(vm, state)
-                }
+        var timelineWeight by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.4f) }
 
-                AnimatedVisibility(
-                    visible = state.tool != EditorTool.SELECT || state.selectedClips.isNotEmpty(),
-                    enter = slideInHorizontally(initialOffsetX = { it }) + expandHorizontally(),
-                    exit = slideOutHorizontally(targetOffsetX = { it }) + shrinkHorizontally()
-                ) {
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            androidx.compose.ui.Modifier
+                .weight(1f - timelineWeight)
+                .fillMaxWidth()
+        ) {
+            val isWide = maxWidth > maxHeight * 1.1f
+            if (isWide) {
+                androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Column(
+                        androidx.compose.ui.Modifier
+                            .weight(0.65f)
+                            .fillMaxHeight()
+                            .animateContentSize()
+                    ) {
+                        PreviewPlayer(
+                            state,
+                            androidx.compose.ui.Modifier.weight(1f).fillMaxWidth(),
+                            cropMode = state.tool == EditorTool.CROP,
+                            showSafeZones = state.tool == EditorTool.CROP,
+                            onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                        )
+                        TransportControls(vm, state)
+                    }
                     AdvancedToolView(
                         vm = vm,
                         state = state,
                         onTranscribe = onTranscribe,
-                        modifier = Modifier
-                            .width(320.dp)
+                        modifier = androidx.compose.ui.Modifier
+                            .weight(0.35f)
                             .fillMaxHeight()
                     )
                 }
+            } else {
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().animateContentSize()) {
+                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(0.5f).fillMaxWidth()) {
+                        PreviewPlayer(
+                            state,
+                            androidx.compose.ui.Modifier.weight(1f).fillMaxWidth(),
+                            cropMode = state.tool == EditorTool.CROP,
+                            showSafeZones = state.tool == EditorTool.CROP,
+                            onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                        )
+                        TransportControls(vm, state)
+                    }
+                    AdvancedToolView(
+                        vm = vm,
+                        state = state,
+                        onTranscribe = onTranscribe,
+                        modifier = androidx.compose.ui.Modifier
+                            .weight(0.5f)
+                            .fillMaxWidth()
+                    )
+                }
             }
+        }
+        
+        androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(16.dp))
+        DraggableTimelineDivider(
+            onDrag = { dragAmount ->
+                timelineWeight = (timelineWeight - dragAmount * 0.0015f).coerceIn(0.2f, 0.8f)
+            }
+        )
+        androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(16.dp))
+        
+        androidx.compose.foundation.layout.Column(
+            androidx.compose.ui.Modifier
+                .weight(timelineWeight)
+                .fillMaxWidth()
+        ) {
             EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = settings.asrModelPath)
             
-            // The timeline "swells" (takes more space) when a clip is selected.
-            val timelineWeight = if (state.selectedClips.isNotEmpty()) 0.5f else 0.4f
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack, 
-                Modifier
-                    .weight(timelineWeight)
-                    .fillMaxWidth()
-                    .animateContentSize()
-            )
-        } else {
-            Column(
-                Modifier
-                    .weight(0.42f)
-                    .fillMaxWidth()
-                    .animateContentSize()
-            ) {
-                PreviewPlayer(
-                    state,
-                    Modifier.weight(1f).fillMaxWidth(),
-                    cropMode = state.tool == EditorTool.CROP,
-                    showSafeZones = state.tool == EditorTool.CROP,
-                    onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
-                )
-                TransportControls(vm, state)
-            }
-            
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = settings.asrModelPath)
-            
-            AnimatedVisibility(
-                visible = state.tool != EditorTool.SELECT || state.selectedClips.isNotEmpty(),
-                enter = expandVertically(),
-                exit = shrinkVertically()
-            ) {
-                AdvancedToolView(
-                    vm = vm,
-                    state = state,
-                    onTranscribe = onTranscribe,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                )
-            }
-            
-            val timelineWeight = if (state.selectedClips.isNotEmpty()) 0.68f else 0.58f
-            TimelinePanel(
-                vm, state, onImportToTrack, onCreateOnTrack, 
-                Modifier
-                    .weight(timelineWeight)
+                androidx.compose.ui.Modifier
+                    .weight(1f)
                     .fillMaxWidth()
                     .animateContentSize()
             )
         }
+
         } // editor Column
 
         // Integrated activity log (AI chat, running process, progress, errors) — AzNavRail's
