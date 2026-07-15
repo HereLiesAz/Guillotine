@@ -2963,57 +2963,53 @@ class McpTools(
     // ---- azphalt plugin tools ----
 
     private fun listAzpPlugins(): JSONObject {
-        val extensionsDir = java.io.File(context.filesDir, "extensions")
-        if (!extensionsDir.exists()) {
-            val projectExtensions = java.io.File("C:\\Users\\azrie\\StudioProjects\\Guillotine\\extensions")
-            if (!projectExtensions.exists()) return ok().apply { put("plugins", JSONArray()) }
-        }
+        val baseDir = java.io.File("C:\\Users\\azrie\\StudioProjects\\Guillotine\\extensions")
+        if (!baseDir.exists()) return ok().apply { put("plugins", JSONArray()) }
         
         val pluginsList = JSONArray()
-        val dirs = listOf("kinetic-typography", "kinetic-typography-smart", "layer-effects", "layer-effects-scenery")
-        val baseDir = java.io.File("C:\\Users\\azrie\\StudioProjects\\Guillotine\\extensions")
         
-        for (dirName in dirs) {
-            val dir = java.io.File(baseDir, dirName)
-            if (dir.exists() && dir.isDirectory) {
-                dir.listFiles()?.forEach { pluginDir ->
-                    val manifestFile = java.io.File(pluginDir, "manifest.json")
-                    if (manifestFile.exists()) {
-                        try {
-                            val manifest = JSONObject(manifestFile.readText())
-                            val id = manifest.optString("id", "")
-                            val name = manifest.optString("name", "")
-                            val assets = manifest.optJSONArray("assets")
-                            val tags = if (assets != null && assets.length() > 0) {
-                                assets.getJSONObject(0).optJSONArray("tags") ?: JSONArray()
-                            } else JSONArray()
-                            
-                            val pluginObj = JSONObject().apply {
-                                put("id", id)
-                                put("name", name)
-                                put("tags", tags)
-                                put("category", dirName)
-                            }
-                            pluginsList.put(pluginObj)
-                        } catch (e: Exception) {
-                            // Skip malformed
-                        }
-                    }
+        baseDir.listFiles { _, name -> name.endsWith(".azp") }?.forEach { azpFile ->
+            try {
+                val bytes = azpFile.readBytes()
+                val loaded = com.hereliesaz.guillotine.azphalt.AzpPackage.load(bytes)
+                val manifest = loaded.manifest
+                
+                val id = manifest.id
+                val name = manifest.name
+                
+                val tagsList = manifest.assets.firstOrNull()?.tags ?: emptyList()
+                val tags = JSONArray()
+                tagsList.forEach { tags.put(it) }
+                
+                var cat = "layer-effects"
+                if (id.contains("vegas")) cat = "vegas-inspired"
+                else if (id.contains("scenery")) cat = "layer-effects-scenery"
+                else if (id.contains("smart")) cat = "kinetic-typography-smart"
+                else if (id.contains("typography") || id.contains("type") || tagsList.contains("text")) cat = "kinetic-typography"
+                
+                val pluginObj = JSONObject().apply {
+                    put("id", id)
+                    put("name", name)
+                    put("tags", tags)
+                    put("category", cat)
                 }
+                pluginsList.put(pluginObj)
+            } catch (e: Exception) {
+                // Skip invalid
             }
         }
         
-        return ok().apply { 
+        return ok().apply {
             put("plugins", pluginsList)
-            put("humanSummary", "Found ${pluginsList.length()} azphalt plugins.")
+            put("humanSummary", "Listed ${pluginsList.length()} available Azphalt plugins.")
         }
     }
     
     private fun applyAzpPlugin(clipId: String, pluginId: String): JSONObject {
-        val clip = vm.editor.uiState.value.document.clips.find { it.id == clipId } 
+        val clip = vm.uiState.value.document.clips.find { it.id == clipId } 
             ?: throw IllegalArgumentException("Clip $clipId not found.")
         
-        vm.editor.updateClip(clipId) { c ->
+        vm.updateClip(clipId) { c ->
             c.copy(azpPluginId = pluginId)
         }
         

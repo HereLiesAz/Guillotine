@@ -32,48 +32,40 @@ class AzphaltStoreState {
         val baseDir = File(baseDirPath)
         if (!baseDir.exists()) return
 
-        val dirs = listOf("kinetic-typography", "kinetic-typography-smart", "layer-effects", "layer-effects-scenery", "vegas-inspired")
         val loadedPlugins = mutableListOf<AzphaltPlugin>()
 
-        for (dirName in dirs) {
-            val dir = File(baseDir, dirName)
-            if (dir.exists() && dir.isDirectory) {
-                dir.listFiles()?.forEach { pluginDir ->
-                    val manifestFile = File(pluginDir, "manifest.json")
-                    if (manifestFile.exists()) {
-                        try {
-                            val manifest = JSONObject(manifestFile.readText())
-                            val id = manifest.optString("id", "")
-                            val name = manifest.optString("name", "")
-                            val desc = manifest.optString("description", "A powerful azphalt plugin.")
-                            
-                            val assets = manifest.optJSONArray("assets")
-                            val tagsList = mutableListOf<String>()
-                            if (assets != null && assets.length() > 0) {
-                                val tagsArr = assets.getJSONObject(0).optJSONArray("tags")
-                                if (tagsArr != null) {
-                                    for (i in 0 until tagsArr.length()) {
-                                        tagsList.add(tagsArr.getString(i))
-                                    }
-                                }
-                            }
-                            
-                            loadedPlugins.add(
-                                AzphaltPlugin(
-                                    id = id,
-                                    name = name,
-                                    description = desc,
-                                    category = dirName,
-                                    tags = tagsList
-                                )
-                            )
-                        } catch (e: Exception) {
-                            // Skip invalid json
-                        }
-                    }
-                }
+        baseDir.listFiles { _, name -> name.endsWith(".azp") }?.forEach { azpFile ->
+            try {
+                val bytes = azpFile.readBytes()
+                val loaded = AzpPackage.load(bytes)
+                val manifest = loaded.manifest
+                
+                val id = manifest.id
+                val name = manifest.name
+                val desc = manifest.description
+                
+                val tagsList = manifest.assets.firstOrNull()?.tags ?: emptyList()
+                
+                var cat = "layer-effects"
+                if (id.contains("vegas")) cat = "vegas-inspired"
+                else if (id.contains("scenery")) cat = "layer-effects-scenery"
+                else if (id.contains("smart")) cat = "kinetic-typography-smart"
+                else if (id.contains("typography") || id.contains("type") || tagsList.contains("text")) cat = "kinetic-typography"
+                
+                loadedPlugins.add(
+                    AzphaltPlugin(
+                        id = id,
+                        name = name,
+                        description = desc ?: "A powerful azphalt plugin.",
+                        category = cat,
+                        tags = tagsList
+                    )
+                )
+            } catch (e: Exception) {
+                // Skip invalid or unverifiable packages
             }
         }
+        
         _plugins.value = loadedPlugins
     }
 }
