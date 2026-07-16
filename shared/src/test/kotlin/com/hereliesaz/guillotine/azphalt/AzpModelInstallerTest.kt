@@ -1,6 +1,5 @@
 package com.hereliesaz.guillotine.azphalt
 
-import com.hereliesaz.guillotine.ai.AiSettings
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -49,9 +48,8 @@ class AzpModelInstallerTest {
         assertTrue(m.bundled)
         assertEquals(AzpModelInstaller.ModelSlot.SUBJECT_SEGMENTATION, m.slot)
         assertArrayEquals(model, AzpModelInstaller.bundledBytes(plan, m))
-        // Applying the slot wires the right AiSettings field.
-        val settings = m.slot!!.apply(AiSettings(), "/models/seg.onnx")
-        assertEquals("/models/seg.onnx", settings.segModelPath)
+        // The role routes to the SUBJECT_SEGMENTATION slot (asserted above); models now load straight
+        // from the on-disk registry (ModelResolver), not from an AiSettings path field.
     }
 
     @Test fun plansRemoteModelAndVerifiesChecksum() {

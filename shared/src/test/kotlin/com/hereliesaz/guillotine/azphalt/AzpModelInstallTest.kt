@@ -1,6 +1,5 @@
 package com.hereliesaz.guillotine.azphalt
 
-import com.hereliesaz.guillotine.ai.AiSettings
 import com.sun.net.httpserver.HttpServer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -72,9 +71,6 @@ class AzpModelInstallTest {
         val onDisk = java.io.File(one.path)
         assertTrue(onDisk.isFile)
         assertArrayEquals(weights, onDisk.readBytes())
-        // The routed slot is folded into settings for persistence.
-        val settings = result.applyTo(AiSettings())
-        assertEquals(one.path, settings.segModelPath)
         // No `.part` files linger.
         assertTrue(dir.listFiles()!!.none { it.name.endsWith(".part") })
     }
