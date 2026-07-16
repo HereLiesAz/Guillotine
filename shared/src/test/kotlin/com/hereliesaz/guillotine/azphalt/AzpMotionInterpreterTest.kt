@@ -3,9 +3,9 @@ package com.hereliesaz.guillotine.azphalt
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.TimelineClip
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 class AzpMotionInterpreterTest {
 
@@ -33,13 +33,13 @@ class AzpMotionInterpreterTest {
 
         val opacity = kfs.filter { it.property == KeyframeProperty.OPACITY }.sortedBy { it.timeMs }
         assertEquals(2, opacity.size)
-        assertEquals(0L, opacity[0].timeMs); assertEquals(0f, opacity[0].value)
-        assertEquals(1000L, opacity[1].timeMs); assertEquals(1f, opacity[1].value)
+        assertEquals(0L, opacity[0].timeMs); assertEquals(0f, opacity[0].value, 1e-4f)
+        assertEquals(1000L, opacity[1].timeMs); assertEquals(1f, opacity[1].value, 1e-4f)
 
         val scale = kfs.filter { it.property == KeyframeProperty.SCALE }.sortedBy { it.timeMs }
         assertEquals(2, scale.size)
-        assertEquals(1.0f, scale[0].value)   // rest 2 * 0.5
-        assertEquals(2.0f, scale[1].value)   // rest 2 * 1.0
+        assertEquals(1.0f, scale[0].value, 1e-4f)   // rest 2 * 0.5
+        assertEquals(2.0f, scale[1].value, 1e-4f)   // rest 2 * 1.0
     }
 
     @Test fun offsetAndRotationAreAdditiveDeltas() {
@@ -52,11 +52,11 @@ class AzpMotionInterpreterTest {
 
         val kfs = AzpMotionInterpreter.bakeFromBytes(json, caption(offsetY = 0.3f, rotation = 10f))
         val oy = kfs.filter { it.property == KeyframeProperty.OFFSET_Y }.sortedBy { it.timeMs }
-        assertEquals(0.6f, oy[0].value)   // rest 0.3 + delta 0.3
-        assertEquals(0.3f, oy[1].value)   // rest 0.3 + delta 0.0
+        assertEquals(0.6f, oy[0].value, 1e-4f)   // rest 0.3 + delta 0.3
+        assertEquals(0.3f, oy[1].value, 1e-4f)   // rest 0.3 + delta 0.0
         val rot = kfs.filter { it.property == KeyframeProperty.ROTATION }.sortedBy { it.timeMs }
-        assertEquals(-80f, rot[0].value)  // rest 10 + delta -90
-        assertEquals(10f, rot[1].value)
+        assertEquals(-80f, rot[0].value, 1e-4f)  // rest 10 + delta -90
+        assertEquals(10f, rot[1].value, 1e-4f)
     }
 
     @Test fun emptyOrBindingOnlyPresetBakesNothing() {

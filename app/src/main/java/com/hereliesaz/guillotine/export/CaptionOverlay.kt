@@ -59,7 +59,7 @@ class CaptionOverlay(
         StaticOverlaySettings.Builder()
             .setScale(clip.scale, clip.scale)
             .setRotationDegrees(clip.rotation)
-            .setBackgroundFrameAnchor(clip.offsetX.coerceIn(-1f, 1f), (-clip.offsetY).coerceIn(-1f, 1f))
+            .setBackgroundFrameAnchor(anchorX(clip.offsetX), anchorY(clip.offsetY))
             .build()
     } else null
 
@@ -100,9 +100,16 @@ class CaptionOverlay(
         return StaticOverlaySettings.Builder()
             .setScale(scale, scale)
             .setRotationDegrees(rot)
-            .setBackgroundFrameAnchor(ox.coerceIn(-1f, 1f), (-oy).coerceIn(-1f, 1f))
+            .setBackgroundFrameAnchor(anchorX(ox), anchorY(oy))
             .build()
     }
+
+    // The model's offsetX/offsetY are a fraction of the FULL frame from center (matches the preview,
+    // which offsets by ox*frameWidth, and the video geometry, which translates by ox*2 in NDC). Media3's
+    // background-frame anchor is [-1,1] over the frame, so a fraction f maps to f*2 (offsetX 0.5 = right
+    // edge = anchor +1). The old code passed the raw offset, landing captions at HALF their position.
+    private fun anchorX(offsetX: Float): Float = (offsetX * 2f).coerceIn(-1f, 1f)
+    private fun anchorY(offsetY: Float): Float = (-offsetY * 2f).coerceIn(-1f, 1f)
 
     private fun typefaceName(f: TextFont): String = when (f) {
         TextFont.SANS -> "sans-serif"
