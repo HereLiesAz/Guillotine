@@ -35,9 +35,11 @@ object MotionInterpreter {
     fun bake(preset: MotionPreset, clip: TimelineClip, intensity: Float = 1f): List<Keyframe> {
         val dur = clip.durationMs.coerceAtLeast(1L)
         val k = intensity.coerceIn(0f, 2f)
-        // Clamp the windows so entrance + exit can't exceed the clip.
+        // Clamp the windows so entrance + exit can't exceed — or overlap within — the clip: the exit
+        // never starts before the entrance ends, so `in` and `out` keyframes can't collide on a channel.
         val enterMs = (dur * preset.window.enter.coerceIn(0f, 1f)).toLong().coerceIn(0L, dur)
-        val exitMs = (dur * preset.window.exit.coerceIn(0f, 1f)).toLong().coerceIn(0L, dur)
+        val exitMs = (dur * preset.window.exit.coerceIn(0f, 1f)).toLong()
+            .coerceIn(0L, (dur - enterMs).coerceAtLeast(0L))
 
         val out = ArrayList<Keyframe>()
         for (track in preset.tracks) {
@@ -50,7 +52,17 @@ object MotionInterpreter {
                 MotionMode.SUSTAIN -> emitSustain(out, track, property, rest, k, dur)
             }
         }
-        return out
+        // Collapse any keyframes that landed on the same (property, time) — a degenerate preset or
+        // rounding in a fast sustain cycle — keeping the last, so no channel has two values at one instant.
+        return dedupe(out)
+    }
+
+    /** Keep one keyframe per (property, timeMs); later writes win. Preserves emission order otherwise. */
+    private fun dedupe(kfs: List<Keyframe>): List<Keyframe> {
+        if (kfs.size < 2) return kfs
+        val byKey = LinkedHashMap<Pair<KeyframeProperty, Long>, Keyframe>(kfs.size)
+        for (kf in kfs) byKey[kf.property to kf.timeMs] = kf
+        return byKey.values.toList()
     }
 
     /** Map one track's `t: 0..1` keys onto the time span `[startMs, endMs]`. */
