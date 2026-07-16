@@ -1,5 +1,10 @@
 package com.hereliesaz.guillotine.azphalt
 
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
+
 /**
  * Plans the on-device installation of kinetic typography / motion presets delivered as azphalt `.azp`
  * packages. The package is integrity-verified and trust-checked ([AzpPackage]), and motion assets
@@ -47,21 +52,15 @@ object AzpMotionInstaller {
             .filter { it.type.trim().lowercase() in MOTION_TYPES }
             .map { asset ->
                 val bundled = asset.path.isNotBlank()
-                
-                // Extract params
-                val paramsString = asset.params?.toString() ?: "{}"
-                val format = if (paramsString.contains("\"format\":\"")) {
-                    paramsString.substringAfter("\"format\":\"").substringBefore("\"")
-                } else "az-motion"
-                
-                val staggerMode = if (paramsString.contains("\"staggerMode\":\"")) {
-                    paramsString.substringAfter("\"staggerMode\":\"").substringBefore("\"")
-                } else "character"
-                
-                val stagger = if (paramsString.contains("\"stagger\":")) {
-                    paramsString.substringAfter("\"stagger\":").substringBefore(",").substringBefore("}").toFloatOrNull() ?: 0f
-                } else 0f
-                
+
+                // Decode params as JSON rather than slicing params.toString() — the old string-matching
+                // broke on ordinary whitespace (e.g. `"stagger": 0.5`, which yielded 0), silently
+                // disabling the stagger effect and defaulting format/staggerMode incorrectly.
+                val params = (asset.params as? JsonObject)
+                val format = (params?.get("format") as? JsonPrimitive)?.contentOrNull ?: "az-motion"
+                val staggerMode = (params?.get("staggerMode") as? JsonPrimitive)?.contentOrNull ?: "character"
+                val stagger = (params?.get("stagger") as? JsonPrimitive)?.floatOrNull ?: 0f
+
                 PlannedMotion(
                     packageId = loaded.manifest.id,
                     type = asset.type,

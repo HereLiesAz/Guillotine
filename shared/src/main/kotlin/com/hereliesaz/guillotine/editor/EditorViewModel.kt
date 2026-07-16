@@ -1149,6 +1149,49 @@ open class EditorViewModel {
     fun setClipFont(clipId: String, font: com.hereliesaz.guillotine.model.TextFont) =
         updateClip(clipId) { it.copy(font = font) }
 
+    // ---- kinetic typography (azphalt motion presets) -----------------------
+
+    /**
+     * Apply a kinetic-typography motion preset to a caption. [motionJsonBytes] is the `az-motion` asset
+     * payload from the plugin's `.azp`; [pluginId] is the package id (recorded on the clip for the UI).
+     * The preset is baked into `generated` keyframes on the clip — after first stripping any previously
+     * baked ones, so switching presets is clean and the user's own keyframes on the same channels survive.
+     * No-op when the clip is gone or the preset produces no keyframes. One undo step.
+     */
+    fun applyCaptionMotion(clipId: String, motionJsonBytes: ByteArray, pluginId: String) {
+        var applied = false
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val baked = try {
+                com.hereliesaz.guillotine.azphalt.AzpMotionInterpreter.bakeFromBytes(motionJsonBytes, clip)
+            } catch (_: Exception) {
+                return@mutateDocument doc
+            }
+            if (baked.isEmpty()) return@mutateDocument doc
+            val userKfs = clip.keyframes.filterNot { it.generated } // keep hand-authored keyframes
+            applied = true
+            doc.copy(clips = doc.clips.map {
+                if (it.id == clipId) it.copy(keyframes = (userKfs + baked).sortedBy { k -> k.timeMs }, azpPluginId = pluginId)
+                else it
+            })
+        }
+        if (applied) actionRecorder.record(RecordedAction("apply_caption_motion", mapOf("clip_id" to clipId, "plugin_id" to pluginId), "Apply kinetic preset $pluginId to $clipId"))
+    }
+
+    /** Remove the baked motion-preset keyframes from a caption (leaving user keyframes) and clear its
+     *  applied-preset marker. One undo step; no-op if the clip has no generated keyframes. */
+    fun clearCaptionMotion(clipId: String) {
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            if (clip.keyframes.none { it.generated } && clip.azpPluginId == null) return@mutateDocument doc
+            doc.copy(clips = doc.clips.map {
+                if (it.id == clipId) it.copy(keyframes = it.keyframes.filterNot { k -> k.generated }, azpPluginId = null)
+                else it
+            })
+        }
+        actionRecorder.record(RecordedAction("clear_caption_motion", mapOf("clip_id" to clipId), "Clear kinetic preset from $clipId"))
+    }
+
     // ---- whole-track settings ----------------------------------------------
 
     fun updateTrackSettings(trackId: String, transform: (com.hereliesaz.guillotine.model.TrackSettings) -> com.hereliesaz.guillotine.model.TrackSettings) {
