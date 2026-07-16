@@ -124,6 +124,13 @@ data class Keyframe(
     val value: Float,
     val property: KeyframeProperty,
     val easing: CubicBezier = CubicBezier(),
+    /**
+     * True when this keyframe was baked by a caption-animation preset (see [CaptionAnimation]) rather
+     * than authored by the user. Lets the editor strip/replace exactly the preset's curve when the user
+     * switches or clears the animation, leaving hand-made keyframes on the same channels untouched.
+     * Default false — every user-created keyframe is authored, and old projects deserialize as authored.
+     */
+    val generated: Boolean = false,
 )
 
 /** An AI (or heuristic) suggested keep/remove range, in source-media milliseconds. */
@@ -199,6 +206,15 @@ data class TimelineClip(
     val offsetX: Float = 0f,
     val offsetY: Float = 0f,
     val rotation: Float = 0f,
+    /**
+     * The id of the installed azphalt `motion` preset (kinetic-typography plugin) currently applied to
+     * this caption ([ClipType.TEXT] only), or null for none. Recorded so the UI can show the active
+     * preset and re-bake with the same intensity; the actual motion lives in the clip's `generated`
+     * [keyframes], so preview and export need no new render code. See [com.hereliesaz.guillotine.motion].
+     */
+    val captionMotionId: String? = null,
+    /** Strength multiplier (0..2, 1 = default) for [captionMotionId]'s travel/scale/rotation. */
+    val captionMotionIntensity: Float = 1f,
 ) {
     val endTimeMs: Long get() = startTimeMs + durationMs
 }
