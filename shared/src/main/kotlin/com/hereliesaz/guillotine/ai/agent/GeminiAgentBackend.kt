@@ -120,10 +120,13 @@ class GeminiAgentBackend(
     }
 
     private fun post(body: JSONObject): JSONObject {
-        val endpoint = "$base/v1beta/models/$model:generateContent?key=$apiKey"
+        // Pass the key in the x-goog-api-key header, not the URL query string — a key in the URL leaks
+        // into request logs, proxy access logs, and any crash trace that captures the endpoint.
+        val endpoint = "$base/v1beta/models/$model:generateContent"
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("x-goog-api-key", apiKey)
             connectTimeout = 30_000
             readTimeout = 120_000
             doOutput = true
