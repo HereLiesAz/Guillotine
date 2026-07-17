@@ -493,9 +493,20 @@ fun NleScreen(
                 exportDone = null
                 scope.launch {
                     try {
-                        val config = com.hereliesaz.guillotine.desktop.media.DesktopExporter.ExportConfig(name = name)
+                        val exportDoc = vm.uiState.value.document
+                        // Export at the project's aspect ratio (what the preview already shows) instead of
+                        // a fixed 1920x1080 — otherwise a 9:16 vertical or 1:1 square project exported as
+                        // letterboxed landscape.
+                        val (exportW, exportH) = when (exportDoc.settings.aspectRatio) {
+                            com.hereliesaz.guillotine.model.AspectRatio.RATIO_9_16 -> 1080 to 1920
+                            com.hereliesaz.guillotine.model.AspectRatio.RATIO_1_1 -> 1080 to 1080
+                            else -> 1920 to 1080 // RATIO_16_9 and ORIGINAL → 1080p landscape
+                        }
+                        val config = com.hereliesaz.guillotine.desktop.media.DesktopExporter.ExportConfig(
+                            name = name, width = exportW, height = exportH,
+                        )
                         val file = com.hereliesaz.guillotine.desktop.media.DesktopExporter.export(
-                            document = vm.uiState.value.document,
+                            document = exportDoc,
                             config = config,
                             onProgress = { p, ms ->
                                 exportProgress = p
