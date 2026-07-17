@@ -207,6 +207,11 @@ object DesktopExporter {
             val pan = clip.filters.pan
             val leftGain = volume * if (pan > 0f) 1f - pan else 1f
             val rightGain = volume * if (pan < 0f) 1f + pan else 1f
+            // When VOLUME/PAN are keyframed, gains are interpolated per sample below instead of using the
+            // static gains above — otherwise volume/pan automation exported flat on desktop.
+            val volKfs = clip.keyframes.filter { it.property == KeyframeProperty.VOLUME }.sortedBy { it.timeMs }
+            val panKfs = clip.keyframes.filter { it.property == KeyframeProperty.PAN }.sortedBy { it.timeMs }
+            val animatedGain = volKfs.isNotEmpty() || panKfs.isNotEmpty()
 
             // Normalize gain
             val normGain = if (clip.filters.normalize) {
@@ -235,10 +240,19 @@ object DesktopExporter {
                     val buf = samples[0] as? ShortBuffer ?: continue
                     buf.rewind()
                     while (buf.remaining() >= 2 && sampleIdx < endSample) {
+                        var lg = leftGain
+                        var rg = rightGain
+                        if (animatedGain) {
+                            val relMs = (sampleIdx - startSample) * 1000L / config.sampleRate
+                            val v = TimelineMath.interpolateSorted(volKfs, relMs, clip.filters.volume) * trackSettings.volume
+                            val p = TimelineMath.interpolateSorted(panKfs, relMs, clip.filters.pan)
+                            lg = v * if (p > 0f) 1f - p else 1f
+                            rg = v * if (p < 0f) 1f + p else 1f
+                        }
                         val l = buf.get().toFloat() / 32768f
                         val r = buf.get().toFloat() / 32768f
-                        mixL[sampleIdx] += l * leftGain * normGain
-                        mixR[sampleIdx] += r * rightGain * normGain
+                        mixL[sampleIdx] += l * lg * normGain
+                        mixR[sampleIdx] += r * rg * normGain
                         sampleIdx++
                     }
                 }
