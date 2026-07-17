@@ -181,7 +181,9 @@ jobs:
       # RELEASE STEPS (Only run on PUSH, not Pull Requests)
       # ------------------------------------------------------------------
       - name: Prepare Release Variables
-        if: success() && github.event_name == 'push'
+        # Only the default branch publishes the canonical latest-debug release. Feature/PR branches
+        # still build + test above (the real gate) but must not overwrite the shared release or tag.
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: release_vars
         run: |
           export BUILD_NUMBER=$(git rev-list --count HEAD)
@@ -228,7 +230,7 @@ jobs:
           echo "APK_FILE=$TARGET_NAME" >> $GITHUB_ENV
 
       - name: Publish Release
-        if: success() && github.event_name == 'push'
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -239,19 +241,18 @@ jobs:
           git tag -fa $TAG_NAME -m "Latest Debug Build"
           git push origin $TAG_NAME --force
 
-          # Check if release exists
-          if gh release view $TAG_NAME > /dev/null 2>&1; then
-             echo "Updating existing release..."
-             gh release edit $TAG_NAME --prerelease \
+          # Idempotent create-or-update: `gh release view` can report a false "not found" (e.g. right
+          # after the tag is force-moved), which previously sent us down the "create" path against an
+          # existing release and failed the job. Instead: try to create; if it already exists, edit it;
+          # then always upload the APK with --clobber so a re-run on the same commit replaces it.
+          if ! gh release create "$TAG_NAME" "$APK_FILE" --prerelease \
+                 --title "Latest Debug Build ($TAG_NAME)" \
+                 --notes "Auto-build from commit $GITHUB_SHA" \
+                 --target "$GITHUB_SHA" 2>/dev/null; then
+             echo "Release exists — updating..."
+             gh release edit "$TAG_NAME" --prerelease \
                --title "Latest Debug Build ($TAG_NAME)" \
                --notes "Auto-build from commit $GITHUB_SHA" \
-               --target $GITHUB_SHA
-             # Clobber so re-running on the same commit replaces the APK instead of failing.
-             gh release upload $TAG_NAME "$APK_FILE" --clobber
-          else
-             echo "Creating new release..."
-             gh release create $TAG_NAME "$APK_FILE" --prerelease \
-               --title "Latest Debug Build ($TAG_NAME)" \
-               --notes "Auto-build from commit $GITHUB_SHA" \
-               --target $GITHUB_SHA
+               --target "$GITHUB_SHA"
+             gh release upload "$TAG_NAME" "$APK_FILE" --clobber
           fi

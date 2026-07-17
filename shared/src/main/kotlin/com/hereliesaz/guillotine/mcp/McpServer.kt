@@ -53,7 +53,13 @@ class McpServer(port: Int = 6274) : NanoHTTPD(port) {
 
     private fun handleMcp(session: IHTTPSession): Response {
         val t = tools ?: return ok(jsonRpcError(null, -32603, "Server not ready").toString())
-        return ok(McpDispatcher.handle(t, readBody(session)))
+        val resp = McpDispatcher.handle(t, readBody(session))
+        // A JSON-RPC notification produces no response body — acknowledge with 202 and send nothing.
+        return if (resp.isEmpty()) {
+            newFixedLengthResponse(Response.Status.ACCEPTED, "application/json", "")
+        } else {
+            ok(resp)
+        }
     }
 
     private fun readBody(session: IHTTPSession): String {

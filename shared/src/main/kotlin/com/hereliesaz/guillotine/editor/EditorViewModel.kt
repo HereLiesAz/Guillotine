@@ -112,6 +112,12 @@ open class EditorViewModel {
     private val past = ArrayDeque<Document>()
     private val future = ArrayDeque<Document>()
 
+    // Serializes the read-then-write of the undo/redo stacks. MCP tool calls mutate the document on
+    // background threads (Dispatchers.IO / relay + NanoHTTPD workers) concurrently with UI edits; without
+    // this, two mutations reading the same base document would each push history and one edit would be
+    // lost. `MutableStateFlow.update` is already atomic; this makes the whole read-modify-write atomic.
+    private val historyLock = Any()
+
     private val document: Document get() = _uiState.value.document
 
     val actionRecorder = ActionRecorder()
@@ -133,10 +139,10 @@ open class EditorViewModel {
 
     // ---- undo/redo plumbing ------------------------------------------------
 
-    private fun mutateDocument(transform: (Document) -> Document) {
+    private fun mutateDocument(transform: (Document) -> Document) = synchronized(historyLock) {
         val current = document
         val next = transform(current)
-        if (next === current) return
+        if (next === current) return@synchronized
         past.addLast(current)
         if (past.size > HISTORY_LIMIT) past.removeFirst()
         future.clear()
@@ -151,8 +157,8 @@ open class EditorViewModel {
         }
     }
 
-    fun undo() {
-        if (past.isEmpty()) return
+    fun undo() = synchronized(historyLock) {
+        if (past.isEmpty()) return@synchronized
         val prev = past.removeLast()
         future.addLast(document)
         _uiState.update {
@@ -167,8 +173,8 @@ open class EditorViewModel {
         }
     }
 
-    fun redo() {
-        if (future.isEmpty()) return
+    fun redo() = synchronized(historyLock) {
+        if (future.isEmpty()) return@synchronized
         val next = future.removeLast()
         past.addLast(document)
         _uiState.update {
@@ -832,9 +838,17 @@ open class EditorViewModel {
             edits = emptyList(),
             groupId = groupId,
             linkedClipId = null,
-            keyframes = clip.keyframes
-                .filter { it.timeMs >= relStart && it.timeMs < relStart + dur }
-                .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+            keyframes = run {
+                // Half-open [relStart, relStart+dur) assigns a keyframe on an interior cut boundary to the
+                // NEXT piece (where it sits at relStart). But the piece that reaches the clip's END has no
+                // "next" piece, so include its closing boundary there — otherwise a keyframe at the clip's
+                // final ms is dropped (matches splitClip, which keeps it).
+                val end = relStart + dur
+                val includeEnd = end >= clip.durationMs
+                clip.keyframes
+                    .filter { it.timeMs >= relStart && (if (includeEnd) it.timeMs <= end else it.timeMs < end) }
+                    .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) }
+            },
         )
 
     /**
@@ -1006,10 +1020,26 @@ open class EditorViewModel {
             val compatible = ((clip.type == ClipType.VIDEO || clip.type == ClipType.TEXT) && isVideoTrack) ||
                 (clip.type == ClipType.AUDIO && isAudioTrack)
             if (!compatible) return@mutateDocument doc
+            val newStart = newStartMs.coerceAtLeast(0)
+            val delta = newStart - clip.startTimeMs
+            // The primary clip changes track + position; its group members and its linked audio shadow
+            // (which lives on an audio track and can't follow onto a video track) keep their tracks but
+            // shift by the same delta, so grouped clips and video↔audio sync don't break on a move.
+            val gid = clip.groupId
+            val followIds = doc.clips.asSequence().filter {
+                it.id != clipId && (
+                    (gid != null && it.groupId == gid) ||
+                        it.linkedClipId == clipId ||
+                        it.id == clip.linkedClipId
+                    )
+            }.map { it.id }.toHashSet()
             doc.copy(
                 clips = doc.clips.map {
-                    if (it.id == clipId) it.copy(trackId = targetTrackId, startTimeMs = newStartMs.coerceAtLeast(0))
-                    else it
+                    when {
+                        it.id == clipId -> it.copy(trackId = targetTrackId, startTimeMs = newStart)
+                        it.id in followIds -> it.copy(startTimeMs = (it.startTimeMs + delta).coerceAtLeast(0))
+                        else -> it
+                    }
                 },
             )
         }
@@ -1118,6 +1148,49 @@ open class EditorViewModel {
     /** Set the typeface of a [ClipType.TEXT] clip. */
     fun setClipFont(clipId: String, font: com.hereliesaz.guillotine.model.TextFont) =
         updateClip(clipId) { it.copy(font = font) }
+
+    // ---- kinetic typography (azphalt motion presets) -----------------------
+
+    /**
+     * Apply a kinetic-typography motion preset to a caption. [motionJsonBytes] is the `az-motion` asset
+     * payload from the plugin's `.azp`; [pluginId] is the package id (recorded on the clip for the UI).
+     * The preset is baked into `generated` keyframes on the clip — after first stripping any previously
+     * baked ones, so switching presets is clean and the user's own keyframes on the same channels survive.
+     * No-op when the clip is gone or the preset produces no keyframes. One undo step.
+     */
+    fun applyCaptionMotion(clipId: String, motionJsonBytes: ByteArray, pluginId: String) {
+        var applied = false
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val baked = try {
+                com.hereliesaz.guillotine.azphalt.AzpMotionInterpreter.bakeFromBytes(motionJsonBytes, clip)
+            } catch (_: Exception) {
+                return@mutateDocument doc
+            }
+            if (baked.isEmpty()) return@mutateDocument doc
+            val userKfs = clip.keyframes.filterNot { it.generated } // keep hand-authored keyframes
+            applied = true
+            doc.copy(clips = doc.clips.map {
+                if (it.id == clipId) it.copy(keyframes = (userKfs + baked).sortedBy { k -> k.timeMs }, azpPluginId = pluginId)
+                else it
+            })
+        }
+        if (applied) actionRecorder.record(RecordedAction("apply_caption_motion", mapOf("clip_id" to clipId, "plugin_id" to pluginId), "Apply kinetic preset $pluginId to $clipId"))
+    }
+
+    /** Remove the baked motion-preset keyframes from a caption (leaving user keyframes) and clear its
+     *  applied-preset marker. One undo step; no-op if the clip has no generated keyframes. */
+    fun clearCaptionMotion(clipId: String) {
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            if (clip.keyframes.none { it.generated } && clip.azpPluginId == null) return@mutateDocument doc
+            doc.copy(clips = doc.clips.map {
+                if (it.id == clipId) it.copy(keyframes = it.keyframes.filterNot { k -> k.generated }, azpPluginId = null)
+                else it
+            })
+        }
+        actionRecorder.record(RecordedAction("clear_caption_motion", mapOf("clip_id" to clipId), "Clear kinetic preset from $clipId"))
+    }
 
     // ---- whole-track settings ----------------------------------------------
 
@@ -1295,7 +1368,10 @@ open class EditorViewModel {
             doc.copy(clips = doc.clips.map { clip ->
                 if (clip.id != clipId) return@map clip
                 val rel = (_uiState.value.currentTimeMs - clip.startTimeMs).coerceIn(0, clip.durationMs)
-                val default = if (property == KeyframeProperty.VOLUME) clip.filters.volume else 1f
+                // Capture the property's CURRENT value at the playhead — its interpolated value if already
+                // keyframed, else the clip's static value (scale/rotation/offset/volume/…). Hardcoding 1f
+                // snapped a keyframed-at look (e.g. brightness 1.5, scale 2.0) back to default at that time.
+                val default = com.hereliesaz.guillotine.model.TimelineMath.valueAt(clip, property, rel, property.staticValue(clip))
                 // Auto-ease (default) gives a smooth in/out; off = linear.
                 val easing = if (_uiState.value.autoEase) {
                     com.hereliesaz.guillotine.model.CubicBezier()
@@ -1388,8 +1464,12 @@ open class EditorViewModel {
             doc.copy(clips = doc.clips.map { clip ->
                 if (clip.id != clipId) return@map clip
                 var kfs = clip.keyframes
-                points.forEach { (relRaw, value, easing) ->
+                points.forEach { (relRaw, valueRaw, easing) ->
                     val rel = relRaw.coerceIn(0, clip.durationMs)
+                    // Clamp to the property's valid range so a caller (e.g. apply_on_beat) can't inject an
+                    // out-of-range value — a SPEED keyframe of 0 or negative would make TimelineMath's
+                    // source-time integration stall or run backwards (a frozen/garbled frame lookup).
+                    val value = valueRaw.coerceIn(property.uiRange)
                     val existing = kfs.firstOrNull { it.property == property && it.timeMs == rel }
                     kfs = if (existing != null) {
                         kfs.map { if (it.id == existing.id) it.copy(value = value, easing = easing) else it }
@@ -1530,6 +1610,11 @@ open class EditorViewModel {
                 clips = doc.clips + src.copy(
                     id = newId(),
                     startTimeMs = _uiState.value.currentTimeMs,
+                    // A pasted clip is a standalone copy: clear the source's group and linked-shadow
+                    // bindings so it doesn't move/delete with the original or get mistaken for its
+                    // audio shadow (which would drop it from preview/export).
+                    groupId = null,
+                    linkedClipId = null,
                     keyframes = src.keyframes.map { it.copy(id = newId()) },
                 ),
             )

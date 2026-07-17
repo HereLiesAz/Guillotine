@@ -124,6 +124,13 @@ data class Keyframe(
     val value: Float,
     val property: KeyframeProperty,
     val easing: CubicBezier = CubicBezier(),
+    /**
+     * True when this keyframe was baked by a kinetic-typography motion preset (see [AzpMotionInterpreter])
+     * rather than authored by the user. Lets the editor strip/replace exactly the preset's curve when the
+     * user switches or clears a caption's animation, leaving hand-made keyframes on the same channels
+     * intact. Default false — user keyframes and old projects deserialize as authored.
+     */
+    val generated: Boolean = false,
 )
 
 /** An AI (or heuristic) suggested keep/remove range, in source-media milliseconds. */

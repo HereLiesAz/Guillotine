@@ -9,13 +9,20 @@ import org.json.JSONObject
  */
 object McpDispatcher {
 
-    /** Parse a JSON-RPC request body and return the JSON-RPC response body. Never throws. */
+    /**
+     * Parse a JSON-RPC request body and return the JSON-RPC response body, or an **empty string** for a
+     * notification (a request with no `id`, e.g. the MCP client's `notifications/initialized`), which
+     * per JSON-RPC 2.0 MUST NOT be answered. Never throws.
+     */
     fun handle(tools: McpToolsSurface, body: String): String {
         val json = runCatching { JSONObject(body) }.getOrNull()
             ?: return jsonRpcError(null, -32700, "Parse error").toString()
+        val method = json.optString("method")
+        // A notification carries no id — do not send any response (not even "method not found").
+        if (!json.has("id") && method.startsWith("notifications/")) return ""
         val req = JsonRpcRequest(
             id = json.opt("id"),
-            method = json.optString("method"),
+            method = method,
             params = json.optJSONObject("params"),
         )
         return dispatch(tools, req).toString()

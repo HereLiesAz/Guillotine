@@ -2,6 +2,7 @@ package com.hereliesaz.guillotine.ai.agent
 
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -38,6 +39,7 @@ class GeminiAgentBackend(
 
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
+                ensureActive() // honor cancellation between turns — stop issuing paid API calls once cancelled
                 val body = JSONObject().apply {
                     put("system_instruction", JSONObject().put(
                         "parts", JSONArray().put(JSONObject().put("text", AGENT_SYSTEM_PROMPT)),
@@ -118,10 +120,13 @@ class GeminiAgentBackend(
     }
 
     private fun post(body: JSONObject): JSONObject {
-        val endpoint = "$base/v1beta/models/$model:generateContent?key=$apiKey"
+        // Pass the key in the x-goog-api-key header, not the URL query string — a key in the URL leaks
+        // into request logs, proxy access logs, and any crash trace that captures the endpoint.
+        val endpoint = "$base/v1beta/models/$model:generateContent"
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("x-goog-api-key", apiKey)
             connectTimeout = 30_000
             readTimeout = 120_000
             doOutput = true

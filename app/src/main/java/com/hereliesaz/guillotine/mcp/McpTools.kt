@@ -725,11 +725,22 @@ class McpTools(
         ))
         put(toolDefinition(
             "apply_azp_plugin",
-            "Apply a specific `.azp` plugin (by its ID) to a clip on the timeline.",
+            "Apply a specific `.azp` plugin (by its ID) to a clip on the timeline. A kinetic-typography " +
+                "motion plugin applied to a caption (TEXT clip) is baked into keyframes, so it animates " +
+                "in preview and export and stays editable.",
             objSchema(
                 "clip_id" to stringProp("The ID of the clip to apply the plugin to"),
                 "plugin_id" to stringProp("The ID of the plugin (from list_azp_plugins)"),
                 required = listOf("clip_id", "plugin_id")
+            )
+        ))
+        put(toolDefinition(
+            "clear_azp_plugin",
+            "Remove an applied kinetic-typography preset (its baked keyframes) and any applied-plugin " +
+                "marker from a clip. Hand-authored keyframes are kept.",
+            objSchema(
+                "clip_id" to stringProp("The ID of the clip to clear the plugin/preset from"),
+                required = listOf("clip_id")
             )
         ))
     }
@@ -805,6 +816,7 @@ class McpTools(
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
         "list_azp_plugins" -> listAzpPlugins()
         "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
+        "clear_azp_plugin" -> clearAzpPlugin(args.getString("clip_id"))
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -3006,16 +3018,42 @@ class McpTools(
     }
     
     private fun applyAzpPlugin(clipId: String, pluginId: String): JSONObject {
-        val clip = vm.uiState.value.document.clips.find { it.id == clipId } 
+        val clip = vm.uiState.value.document.clips.find { it.id == clipId }
             ?: throw IllegalArgumentException("Clip $clipId not found.")
-        
-        vm.updateClip(clipId) { c ->
-            c.copy(azpPluginId = pluginId)
+
+        // Find the installed .azp whose manifest id matches, and try to pull a `motion` (kinetic
+        // typography) asset out of it. A motion plugin is baked into real keyframes on the caption so it
+        // renders in preview + export; anything else just records the applied-plugin id as before.
+        val baseDir = java.io.File(context.filesDir, "extensions")
+        val motionBytes: ByteArray? = baseDir.listFiles { _, name -> name.endsWith(".azp") }
+            ?.firstNotNullOfOrNull { f ->
+                runCatching {
+                    val bytes = f.readBytes()
+                    val plan = com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(bytes, emptySet())
+                    if (plan.loaded.manifest.id != pluginId) return@runCatching null
+                    val motion = plan.motions.firstOrNull() ?: return@runCatching null
+                    com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.bundledBytes(plan, motion)
+                }.getOrNull()
+            }
+
+        if (motionBytes != null && clip.type == com.hereliesaz.guillotine.model.ClipType.TEXT) {
+            vm.applyCaptionMotion(clipId, motionBytes, pluginId)
+            return ok().apply {
+                put("humanSummary", "Applied kinetic-typography preset $pluginId to caption $clipId (baked keyframes).")
+            }
         }
-        
-        return ok().apply { 
-            put("humanSummary", "Applied plugin $pluginId to clip $clipId. The host UI will now interpret this clip using the preset.")
+
+        vm.updateClip(clipId) { c -> c.copy(azpPluginId = pluginId) }
+        return ok().apply {
+            put("humanSummary", "Applied plugin $pluginId to clip $clipId.")
         }
+    }
+
+    private fun clearAzpPlugin(clipId: String): JSONObject {
+        vm.uiState.value.document.clips.find { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip $clipId not found.")
+        vm.clearCaptionMotion(clipId)
+        return ok().apply { put("humanSummary", "Cleared the applied plugin/preset from clip $clipId.") }
     }
 
 }

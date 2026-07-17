@@ -106,6 +106,8 @@ class McpRelayClient(
                 if (iv.isEmpty() || ct.isEmpty()) return@launch
                 val requestBody = McpCrypto.open(token, iv, ct)
                 val responseBody = McpDispatcher.handle(tools, requestBody)
+                // A notification yields an empty body — there is nothing to echo back to the relay.
+                if (responseBody.isEmpty()) return@launch
                 val sealed = McpCrypto.seal(token, responseBody)
                 webSocket.send(
                     JSONObject().apply {

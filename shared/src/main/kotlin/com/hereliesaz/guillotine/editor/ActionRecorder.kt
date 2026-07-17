@@ -10,31 +10,34 @@ data class RecordedAction(
 )
 
 class ActionRecorder {
+    // Guards all mutable state: MCP tool calls invoke record() on background threads while the UI reads
+    // actions()/toJson(), so every access is synchronized to avoid a torn list / ConcurrentModification.
+    private val lock = Any()
     private var _recording = false
     private var _targetClipId: String? = null
     private val _actions = mutableListOf<RecordedAction>()
 
-    val isRecording: Boolean get() = _recording
-    val targetClipId: String? get() = _targetClipId
-    val actions: List<RecordedAction> get() = _actions.toList()
+    val isRecording: Boolean get() = synchronized(lock) { _recording }
+    val targetClipId: String? get() = synchronized(lock) { _targetClipId }
+    val actions: List<RecordedAction> get() = synchronized(lock) { _actions.toList() }
 
-    fun start(clipId: String) {
+    fun start(clipId: String) = synchronized(lock) {
         _recording = true
         _targetClipId = clipId
         _actions.clear()
     }
 
-    fun stop(): List<RecordedAction> {
+    fun stop(): List<RecordedAction> = synchronized(lock) {
         _recording = false
-        return _actions.toList()
+        _actions.toList()
     }
 
-    fun record(action: RecordedAction) {
-        if (!_recording) return
-        _actions.add(action)
+    fun record(action: RecordedAction) = synchronized(lock) {
+        if (_recording) _actions.add(action)
+        Unit
     }
 
-    fun discard() {
+    fun discard() = synchronized(lock) {
         _recording = false
         _actions.clear()
         _targetClipId = null

@@ -2,6 +2,7 @@ package com.hereliesaz.guillotine.ai.agent
 
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,6 +35,7 @@ class OpenAiAgentBackend(
 
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
+                ensureActive() // honor cancellation between turns — stop issuing paid API calls once cancelled
                 val body = JSONObject().apply {
                     put("model", model)
                     put("messages", messages)

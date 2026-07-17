@@ -106,8 +106,11 @@ object Spleeter {
 
         outDir.mkdirs()
         val stamp = File(outDir, "stem").absolutePath
-        val vWav = "${stamp}_vocals_${System.identityHashCode(vocalsL)}.wav"
-        val aWav = "${stamp}_accompaniment_${System.identityHashCode(accL)}.wav"
+        // A per-run token so repeated separations into the same dir never collide (identityHashCode is
+        // not unique — a GC address reuse could overwrite a prior result). Both stems share the token.
+        val token = java.util.UUID.randomUUID().toString().substring(0, 8)
+        val vWav = "${stamp}_vocals_${token}.wav"
+        val aWav = "${stamp}_accompaniment_${token}.wav"
         writeStereoWav(File(vWav), vocalsL, vocalsR)
         writeStereoWav(File(aWav), accL, accR)
         return Stems(vWav, aWav, n * 1000L / SR)
