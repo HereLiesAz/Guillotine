@@ -1213,16 +1213,21 @@ class DesktopMcpTools(
         val clip = vm.uiState.value.document.clips.find { it.id == clipId }
             ?: throw IllegalArgumentException("Clip $clipId not found.")
         val baseDir = File(DesktopStorage.dataDir, "extensions")
+        // Track whether an installed .azp actually matches pluginId, so applying an unknown plugin fails
+        // loudly instead of silently stamping the clip with an id that resolves to nothing.
+        var pluginExists = false
         val motionBytes: ByteArray? = baseDir.listFiles { _, name -> name.endsWith(".azp") }
             ?.firstNotNullOfOrNull { f ->
                 runCatching {
                     val bytes = f.readBytes()
                     val plan = com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(bytes, emptySet())
                     if (plan.loaded.manifest.id != pluginId) return@runCatching null
+                    pluginExists = true
                     val motion = plan.motions.firstOrNull() ?: return@runCatching null
                     com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.bundledBytes(plan, motion)
                 }.getOrNull()
             }
+        if (!pluginExists) throw IllegalArgumentException("Plugin $pluginId not found in the extensions directory.")
         if (motionBytes != null && clip.type == com.hereliesaz.guillotine.model.ClipType.TEXT) {
             vm.applyCaptionMotion(clipId, motionBytes, pluginId)
             return ok().apply {

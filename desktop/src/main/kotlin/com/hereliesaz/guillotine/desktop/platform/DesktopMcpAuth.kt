@@ -32,10 +32,13 @@ object DesktopMcpAuth {
     }
 
     /** Write the bearer token owner-readable only — it grants full control of the local MCP tool
-     *  surface, so any other local user/process reading it off disk could drive the editor. Restrict
-     *  the file to the owner (POSIX 0600); on non-POSIX filesystems (Windows) fall back to the File API. */
+     *  surface, so any other local user/process reading it off disk could drive the editor. Lock the
+     *  file down (POSIX 0600, or the File API on non-POSIX filesystems like Windows) **before** writing
+     *  the secret, so the token bytes never exist in a world-readable file. */
     private fun writeRestricted(f: File, token: String) {
-        f.writeText(token)
+        f.parentFile?.mkdirs()
+        // Create/truncate the (empty) file, restrict it, then write the secret into the locked file.
+        runCatching { f.writeText("") }
         val restricted = runCatching {
             val perms = java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")
             java.nio.file.Files.setPosixFilePermissions(f.toPath(), perms)
@@ -44,6 +47,7 @@ object DesktopMcpAuth {
             f.setReadable(false, false); f.setWritable(false, false)
             f.setReadable(true, true); f.setWritable(true, true)
         }
+        f.writeText(token)
     }
 
     private fun generate(): String {
