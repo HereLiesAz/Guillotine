@@ -644,6 +644,32 @@ class DesktopMcpTools(
                 "prompt" to stringProp("Optional question about the frame (default: describe it)"),
             ),
         ))
+        put(toolDefinition(
+            "list_azp_plugins",
+            "List installed azphalt `.azp` effect and kinetic-typography plugins. Returns plugin IDs, " +
+                "names, and tags. Use this to discover advanced effects to apply.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "apply_azp_plugin",
+            "Apply a `.azp` plugin (by its ID) to a clip. A kinetic-typography motion plugin applied to a " +
+                "caption (TEXT clip) is baked into keyframes, so it animates in preview and export and " +
+                "stays editable.",
+            objSchema(
+                "clip_id" to stringProp("The ID of the clip to apply the plugin to"),
+                "plugin_id" to stringProp("The ID of the plugin (from list_azp_plugins)"),
+                required = listOf("clip_id", "plugin_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_azp_plugin",
+            "Remove an applied kinetic-typography preset (its baked keyframes) and any applied-plugin " +
+                "marker from a clip. Hand-authored keyframes are kept.",
+            objSchema(
+                "clip_id" to stringProp("The ID of the clip to clear the plugin/preset from"),
+                required = listOf("clip_id"),
+            ),
+        ))
     }
 
     override fun call(name: String, args: JSONObject): JSONObject = when (name) {
@@ -693,6 +719,9 @@ class DesktopMcpTools(
         "apply_transition" -> applyTransition(
             args.getString("from_clip_id"), args.getString("to_clip_id"), args.optDouble("duration_sec", 1.0).toFloat(),
         )
+        "list_azp_plugins" -> listAzpPlugins()
+        "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
+        "clear_azp_plugin" -> clearAzpPlugin(args.getString("clip_id"))
         // ---- learned-concept data ops → REAL (shared LearnedConcept store) ----
         "list_concepts" -> listConcepts()
         "delete_concept" -> deleteConcept(args.getString("name"))
@@ -1147,6 +1176,75 @@ class DesktopMcpTools(
      * the desktop renderer's built-in crossfade blends them (it already fades two overlapping clips).
      * Real — no FFmpeg bake. `type` is ignored (desktop does an opacity cross-dissolve).
      */
+    // ---- azphalt plugin tools (parity with app McpTools) ----
+
+    private fun listAzpPlugins(): JSONObject {
+        val baseDir = File(DesktopStorage.dataDir, "extensions")
+        val pluginsList = JSONArray()
+        if (baseDir.exists()) {
+            baseDir.listFiles { _, name -> name.endsWith(".azp") }?.forEach { azpFile ->
+                try {
+                    val manifest = com.hereliesaz.guillotine.azphalt.AzpPackage.load(azpFile.readBytes()).manifest
+                    val id = manifest.id
+                    val tagsList = manifest.assets.firstOrNull()?.tags ?: emptyList()
+                    val tags = JSONArray().also { arr -> tagsList.forEach { arr.put(it) } }
+                    val cat = when {
+                        id.contains("vegas") -> "vegas-inspired"
+                        id.contains("scenery") -> "layer-effects-scenery"
+                        id.contains("smart") -> "kinetic-typography-smart"
+                        id.contains("typography") || id.contains("type") || tagsList.contains("text") -> "kinetic-typography"
+                        else -> "layer-effects"
+                    }
+                    pluginsList.put(JSONObject().apply {
+                        put("id", id); put("name", manifest.name); put("tags", tags); put("category", cat)
+                    })
+                } catch (_: Exception) {
+                    // Skip invalid packages.
+                }
+            }
+        }
+        return ok().apply {
+            put("plugins", pluginsList)
+            put("humanSummary", "Listed ${pluginsList.length()} available Azphalt plugins.")
+        }
+    }
+
+    private fun applyAzpPlugin(clipId: String, pluginId: String): JSONObject {
+        val clip = vm.uiState.value.document.clips.find { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip $clipId not found.")
+        val baseDir = File(DesktopStorage.dataDir, "extensions")
+        // Track whether an installed .azp actually matches pluginId, so applying an unknown plugin fails
+        // loudly instead of silently stamping the clip with an id that resolves to nothing.
+        var pluginExists = false
+        val motionBytes: ByteArray? = baseDir.listFiles { _, name -> name.endsWith(".azp") }
+            ?.firstNotNullOfOrNull { f ->
+                runCatching {
+                    val bytes = f.readBytes()
+                    val plan = com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(bytes, emptySet())
+                    if (plan.loaded.manifest.id != pluginId) return@runCatching null
+                    pluginExists = true
+                    val motion = plan.motions.firstOrNull() ?: return@runCatching null
+                    com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.bundledBytes(plan, motion)
+                }.getOrNull()
+            }
+        if (!pluginExists) throw IllegalArgumentException("Plugin $pluginId not found in the extensions directory.")
+        if (motionBytes != null && clip.type == com.hereliesaz.guillotine.model.ClipType.TEXT) {
+            vm.applyCaptionMotion(clipId, motionBytes, pluginId)
+            return ok().apply {
+                put("humanSummary", "Applied kinetic-typography preset $pluginId to caption $clipId (baked keyframes).")
+            }
+        }
+        vm.updateClip(clipId) { c -> c.copy(azpPluginId = pluginId) }
+        return ok().apply { put("humanSummary", "Applied plugin $pluginId to clip $clipId.") }
+    }
+
+    private fun clearAzpPlugin(clipId: String): JSONObject {
+        vm.uiState.value.document.clips.find { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip $clipId not found.")
+        vm.clearCaptionMotion(clipId)
+        return ok().apply { put("humanSummary", "Cleared the applied plugin/preset from clip $clipId.") }
+    }
+
     private fun applyTransition(fromClipId: String, toClipId: String, durationSec: Float): JSONObject {
         val doc = vm.uiState.value.document
         val from = doc.clips.firstOrNull { it.id == fromClipId }

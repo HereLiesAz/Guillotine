@@ -2,6 +2,8 @@ package com.hereliesaz.guillotine.desktop.media
 
 import com.hereliesaz.guillotine.media.CubeLut
 import java.awt.image.BufferedImage
+import java.awt.image.ConvolveOp
+import java.awt.image.Kernel
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -27,6 +29,8 @@ object DesktopColorMatrix {
         saturation: Float,
         hueRotate: Float,
         sepia: Float,
+        grayscale: Float = 0f,
+        invert: Float = 0f,
     ): FloatArray {
         // Work in row-major 5x4 (android.graphics.ColorMatrix layout):
         // row r: [r0 r1 r2 r3 offset] where output = r0*R + r1*G + r2*B + r3*A + offset
@@ -83,6 +87,37 @@ object DesktopColorMatrix {
         val s = (sepia / 100f).coerceIn(0f, 1f)
         if (s > 0f) {
             postConcat(cm, sepiaRowMajor(s))
+        }
+
+        // Grayscale (0..100%): interpolate identity → luminance projection.
+        val gray = (grayscale / 100f).coerceIn(0f, 1f)
+        if (gray > 0f) {
+            fun lg(id: Float, lum: Float) = (1f - gray) * id + gray * lum
+            postConcat(
+                cm,
+                floatArrayOf(
+                    lg(1f, LR), lg(0f, LG), lg(0f, LB), 0f, 0f,
+                    lg(0f, LR), lg(1f, LG), lg(0f, LB), 0f, 0f,
+                    lg(0f, LR), lg(0f, LG), lg(1f, LB), 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            )
+        }
+
+        // Invert (0..100%): out = (1-2i)·in + 255·i, so i=1 gives 255−in.
+        val inv = (invert / 100f).coerceIn(0f, 1f)
+        if (inv > 0f) {
+            val d = 1f - 2f * inv
+            val o = 255f * inv
+            postConcat(
+                cm,
+                floatArrayOf(
+                    d, 0f, 0f, 0f, o,
+                    0f, d, 0f, 0f, o,
+                    0f, 0f, d, 0f, o,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            )
         }
 
         // Convert row-major 5x4 to column-major 4x4 + offsets (19 elements total)
@@ -192,6 +227,27 @@ object DesktopColorMatrix {
         image.setRGB(0, 0, w, h, pixels, 0, w)
     }
 
+    /**
+     * Gaussian-ish blur of [image] in place by [radiusPx] pixels (the clip's `filters.blur`), applied as
+     * a separable box kernel via two [ConvolveOp]s (horizontal then vertical) — well-tested Java2D math,
+     * so it's correct without a hand-rolled convolution. Desktop previously ignored blur entirely, so a
+     * blurred clip rendered sharp on both preview and export. No-op for a zero/negative radius. The
+     * radius is capped so a runaway value can't stall a per-frame render.
+     */
+    fun blur(image: BufferedImage, radiusPx: Float) {
+        val r = radiusPx.roundToInt().coerceIn(0, 40)
+        if (r <= 0 || image.width < 2 || image.height < 2) return
+        val size = 2 * r + 1
+        val line = FloatArray(size) { 1f / size } // normalized 1D box kernel
+        val opH = ConvolveOp(Kernel(size, 1, line), ConvolveOp.EDGE_NO_OP, null)
+        val opV = ConvolveOp(Kernel(1, size, line), ConvolveOp.EDGE_NO_OP, null)
+        // ConvolveOp requires distinct src/dst. Let it create a type-compatible scratch (passing null
+        // dest), then blur vertically back into the original — avoids constructing a BufferedImage from a
+        // possibly-TYPE_CUSTOM decoded-frame type.
+        val tmp = opH.filter(image, null)
+        opV.filter(tmp, image)
+    }
+
     /** Check if the matrix is effectively identity (no visible change). */
     fun isIdentity(
         brightness: Float,
@@ -199,7 +255,10 @@ object DesktopColorMatrix {
         saturation: Float,
         hueRotate: Float,
         sepia: Float,
-    ): Boolean = brightness == 1f && contrast == 1f && saturation == 1f && hueRotate == 0f && sepia == 0f
+        grayscale: Float = 0f,
+        invert: Float = 0f,
+    ): Boolean = brightness == 1f && contrast == 1f && saturation == 1f && hueRotate == 0f &&
+        sepia == 0f && grayscale == 0f && invert == 0f
 
     // --- Row-major 5x4 matrix helpers (same layout as android.graphics.ColorMatrix) ---
 

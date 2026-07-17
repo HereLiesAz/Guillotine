@@ -3025,16 +3025,21 @@ class McpTools(
         // typography) asset out of it. A motion plugin is baked into real keyframes on the caption so it
         // renders in preview + export; anything else just records the applied-plugin id as before.
         val baseDir = java.io.File(context.filesDir, "extensions")
+        // Track whether an installed .azp actually matches pluginId, so applying an unknown plugin fails
+        // loudly instead of silently stamping the clip with an id that resolves to nothing.
+        var pluginExists = false
         val motionBytes: ByteArray? = baseDir.listFiles { _, name -> name.endsWith(".azp") }
             ?.firstNotNullOfOrNull { f ->
                 runCatching {
                     val bytes = f.readBytes()
                     val plan = com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(bytes, emptySet())
                     if (plan.loaded.manifest.id != pluginId) return@runCatching null
+                    pluginExists = true
                     val motion = plan.motions.firstOrNull() ?: return@runCatching null
                     com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.bundledBytes(plan, motion)
                 }.getOrNull()
             }
+        if (!pluginExists) throw IllegalArgumentException("Plugin $pluginId not found in the extensions directory.")
 
         if (motionBytes != null && clip.type == com.hereliesaz.guillotine.model.ClipType.TEXT) {
             vm.applyCaptionMotion(clipId, motionBytes, pluginId)

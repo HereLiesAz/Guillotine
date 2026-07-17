@@ -287,10 +287,11 @@ private fun applyColorEffects(img: BufferedImage, clip: TimelineClip, sourceMs: 
     val saturation = TimelineMath.valueAt(clip, KeyframeProperty.SATURATION, relMs, f.saturation)
     val hue = TimelineMath.valueAt(clip, KeyframeProperty.HUE, relMs, f.hueRotate)
     val sepia = TimelineMath.valueAt(clip, KeyframeProperty.SEPIA, relMs, f.sepia)
-    if (!DesktopColorMatrix.isIdentity(brightness, contrast, saturation, hue, sepia)) {
-        val matrix = DesktopColorMatrix.buildMatrix(brightness, contrast, saturation, hue, sepia)
+    if (!DesktopColorMatrix.isIdentity(brightness, contrast, saturation, hue, sepia, f.grayscale, f.invert)) {
+        val matrix = DesktopColorMatrix.buildMatrix(brightness, contrast, saturation, hue, sepia, f.grayscale, f.invert)
         DesktopColorMatrix.applyToImage(img, matrix)
     }
+    if (f.blur > 0f) DesktopColorMatrix.blur(img, f.blur)
     // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). Parsed once and
     // cached by path so the LUT isn't re-parsed per frame.
     if (f.lutPath.isNotBlank()) {

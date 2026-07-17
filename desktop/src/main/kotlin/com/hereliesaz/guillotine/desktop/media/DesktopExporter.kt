@@ -126,7 +126,11 @@ object DesktopExporter {
                         com.hereliesaz.guillotine.model.TextFont.MONO -> java.awt.Font.MONOSPACED
                         com.hereliesaz.guillotine.model.TextFont.CURSIVE -> java.awt.Font.SERIF
                     }
-                    val font = java.awt.Font(family, java.awt.Font.PLAIN, 1).deriveFont(14f * scale)
+                    // Size the caption relative to the export canvas — a fixed 14px was near-illegible on
+                    // a 1080p+ frame. Match the app export's ~64px-at-1080p so captions read at the same
+                    // relative size on both platforms (then apply the clip's own scale).
+                    val baseFontPx = config.height * (64f / 1080f)
+                    val font = java.awt.Font(family, java.awt.Font.PLAIN, 1).deriveFont(baseFontPx * scale)
                     g.font = font
                     val cx = config.width / 2 + (ox * config.width).roundToInt()
                     val cy = config.height / 2 + (oy * config.height).roundToInt()
@@ -203,6 +207,11 @@ object DesktopExporter {
             val pan = clip.filters.pan
             val leftGain = volume * if (pan > 0f) 1f - pan else 1f
             val rightGain = volume * if (pan < 0f) 1f + pan else 1f
+            // When VOLUME/PAN are keyframed, gains are interpolated per sample below instead of using the
+            // static gains above — otherwise volume/pan automation exported flat on desktop.
+            val volKfs = clip.keyframes.filter { it.property == KeyframeProperty.VOLUME }.sortedBy { it.timeMs }
+            val panKfs = clip.keyframes.filter { it.property == KeyframeProperty.PAN }.sortedBy { it.timeMs }
+            val animatedGain = volKfs.isNotEmpty() || panKfs.isNotEmpty()
 
             // Normalize gain
             val normGain = if (clip.filters.normalize) {
@@ -231,10 +240,19 @@ object DesktopExporter {
                     val buf = samples[0] as? ShortBuffer ?: continue
                     buf.rewind()
                     while (buf.remaining() >= 2 && sampleIdx < endSample) {
+                        var lg = leftGain
+                        var rg = rightGain
+                        if (animatedGain) {
+                            val relMs = (sampleIdx - startSample) * 1000L / config.sampleRate
+                            val v = TimelineMath.interpolateSorted(volKfs, relMs, clip.filters.volume) * trackSettings.volume
+                            val p = TimelineMath.interpolateSorted(panKfs, relMs, clip.filters.pan)
+                            lg = v * if (p > 0f) 1f - p else 1f
+                            rg = v * if (p < 0f) 1f + p else 1f
+                        }
                         val l = buf.get().toFloat() / 32768f
                         val r = buf.get().toFloat() / 32768f
-                        mixL[sampleIdx] += l * leftGain * normGain
-                        mixR[sampleIdx] += r * rightGain * normGain
+                        mixL[sampleIdx] += l * lg * normGain
+                        mixR[sampleIdx] += r * rg * normGain
                         sampleIdx++
                     }
                 }
@@ -308,10 +326,11 @@ object DesktopExporter {
         val saturation = TimelineMath.valueAt(clip, KeyframeProperty.SATURATION, relMs, f.saturation)
         val hue = TimelineMath.valueAt(clip, KeyframeProperty.HUE, relMs, f.hueRotate)
         val sepia = TimelineMath.valueAt(clip, KeyframeProperty.SEPIA, relMs, f.sepia)
-        if (!DesktopColorMatrix.isIdentity(brightness, contrast, saturation, hue, sepia)) {
-            val matrix = DesktopColorMatrix.buildMatrix(brightness, contrast, saturation, hue, sepia)
+        if (!DesktopColorMatrix.isIdentity(brightness, contrast, saturation, hue, sepia, f.grayscale, f.invert)) {
+            val matrix = DesktopColorMatrix.buildMatrix(brightness, contrast, saturation, hue, sepia, f.grayscale, f.invert)
             DesktopColorMatrix.applyToImage(img, matrix)
         }
+        if (f.blur > 0f) DesktopColorMatrix.blur(img, f.blur)
         // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). The LUT is
         // parsed once and cached by path, so it isn't re-parsed for every exported frame.
         if (f.lutPath.isNotBlank()) {
