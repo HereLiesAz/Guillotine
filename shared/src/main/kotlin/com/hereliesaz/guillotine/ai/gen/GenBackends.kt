@@ -189,12 +189,12 @@ object GenBackends {
 
     private fun geminiImagen(req: GenRequest, sink: GenSink) = sync {
         val model = req.model.ifBlank { "imagen-4.0-generate-001" }
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predict?key=${req.apiKey}"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predict"
         val body = JSONObject().apply {
             put("instances", JSONArray().put(JSONObject().put("prompt", req.prompt)))
             put("parameters", JSONObject().put("sampleCount", 1))
         }
-        val resp = GenHttp.requestJson("POST", url, emptyMap(), body)
+        val resp = GenHttp.requestJson("POST", url, mapOf("x-goog-api-key" to req.apiKey), body)
         val b64 = JSONObject(resp).getJSONArray("predictions").getJSONObject(0).getString("bytesBase64Encoded")
         sink.saveBytes(decodeB64(b64), "png")
     }
@@ -303,15 +303,15 @@ object GenBackends {
     private fun geminiVeo(req: GenRequest) = object : GenJob {
         val model = req.model.ifBlank { "veo-3.1-generate-preview" }
         override suspend fun submit(): String {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predictLongRunning?key=${req.apiKey}"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predictLongRunning"
             val body = JSONObject().apply {
                 put("instances", JSONArray().put(JSONObject().put("prompt", req.prompt)))
             }
-            return JSONObject(GenHttp.requestJson("POST", url, emptyMap(), body)).getString("name")
+            return JSONObject(GenHttp.requestJson("POST", url, mapOf("x-goog-api-key" to req.apiKey), body)).getString("name")
         }
         override suspend fun poll(handle: String): JobStatus {
-            val url = "https://generativelanguage.googleapis.com/v1beta/$handle?key=${req.apiKey}"
-            val o = JSONObject(GenHttp.requestJson("GET", url, emptyMap()))
+            val url = "https://generativelanguage.googleapis.com/v1beta/$handle"
+            val o = JSONObject(GenHttp.requestJson("GET", url, mapOf("x-goog-api-key" to req.apiKey)))
             if (!o.optBoolean("done", false)) return JobStatus.Running()
             o.optJSONObject("error")?.let { return JobStatus.Failed(it.optString("message", "Veo failed.")) }
             // Response nests generatedSamples[].video.uri; the file uri needs the key appended.
@@ -470,9 +470,9 @@ object GenBackends {
 
     private fun geminiLyria(req: GenRequest, sink: GenSink) = sync {
         val model = req.model.ifBlank { "lyria-002" }
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predict?key=${req.apiKey}"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predict"
         val body = JSONObject().put("instances", JSONArray().put(JSONObject().put("prompt", req.prompt)))
-        val resp = GenHttp.requestJson("POST", url, emptyMap(), body)
+        val resp = GenHttp.requestJson("POST", url, mapOf("x-goog-api-key" to req.apiKey), body)
         val b64 = JSONObject(resp).getJSONArray("predictions").getJSONObject(0).getString("bytesBase64Encoded")
         sink.saveBytes(decodeB64(b64), "wav")
     }
