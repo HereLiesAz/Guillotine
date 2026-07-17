@@ -33,7 +33,12 @@ object GenHttp {
                 doOutput = true
             }
         }
-        if (body != null) conn.outputStream.use { it.write(body.toString().toByteArray()) }
+        try {
+            if (body != null) conn.outputStream.use { it.write(body.toString().toByteArray()) }
+        } catch (e: Throwable) {
+            conn.disconnect() // write failed before readOrThrow could disconnect — don't leak the socket
+            throw e
+        }
         readOrThrow(conn, url)
     }
 
@@ -55,7 +60,12 @@ object GenHttp {
                 doOutput = true
             }
         }
-        if (body != null) conn.outputStream.use { it.write(body) }
+        try {
+            if (body != null) conn.outputStream.use { it.write(body) }
+        } catch (e: Throwable) {
+            conn.disconnect() // write failed before readOrThrow could disconnect — don't leak the socket
+            throw e
+        }
         readOrThrow(conn, url)
     }
 
