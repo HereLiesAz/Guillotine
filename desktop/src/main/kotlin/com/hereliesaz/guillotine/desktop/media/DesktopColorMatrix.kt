@@ -27,6 +27,8 @@ object DesktopColorMatrix {
         saturation: Float,
         hueRotate: Float,
         sepia: Float,
+        grayscale: Float = 0f,
+        invert: Float = 0f,
     ): FloatArray {
         // Work in row-major 5x4 (android.graphics.ColorMatrix layout):
         // row r: [r0 r1 r2 r3 offset] where output = r0*R + r1*G + r2*B + r3*A + offset
@@ -83,6 +85,37 @@ object DesktopColorMatrix {
         val s = (sepia / 100f).coerceIn(0f, 1f)
         if (s > 0f) {
             postConcat(cm, sepiaRowMajor(s))
+        }
+
+        // Grayscale (0..100%): interpolate identity → luminance projection.
+        val gray = (grayscale / 100f).coerceIn(0f, 1f)
+        if (gray > 0f) {
+            fun lg(id: Float, lum: Float) = (1f - gray) * id + gray * lum
+            postConcat(
+                cm,
+                floatArrayOf(
+                    lg(1f, LR), lg(0f, LG), lg(0f, LB), 0f, 0f,
+                    lg(0f, LR), lg(1f, LG), lg(0f, LB), 0f, 0f,
+                    lg(0f, LR), lg(0f, LG), lg(1f, LB), 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            )
+        }
+
+        // Invert (0..100%): out = (1-2i)·in + 255·i, so i=1 gives 255−in.
+        val inv = (invert / 100f).coerceIn(0f, 1f)
+        if (inv > 0f) {
+            val d = 1f - 2f * inv
+            val o = 255f * inv
+            postConcat(
+                cm,
+                floatArrayOf(
+                    d, 0f, 0f, 0f, o,
+                    0f, d, 0f, 0f, o,
+                    0f, 0f, d, 0f, o,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            )
         }
 
         // Convert row-major 5x4 to column-major 4x4 + offsets (19 elements total)
@@ -199,7 +232,10 @@ object DesktopColorMatrix {
         saturation: Float,
         hueRotate: Float,
         sepia: Float,
-    ): Boolean = brightness == 1f && contrast == 1f && saturation == 1f && hueRotate == 0f && sepia == 0f
+        grayscale: Float = 0f,
+        invert: Float = 0f,
+    ): Boolean = brightness == 1f && contrast == 1f && saturation == 1f && hueRotate == 0f &&
+        sepia == 0f && grayscale == 0f && invert == 0f
 
     // --- Row-major 5x4 matrix helpers (same layout as android.graphics.ColorMatrix) ---
 
