@@ -330,6 +330,7 @@ object DesktopExporter {
             val matrix = DesktopColorMatrix.buildMatrix(brightness, contrast, saturation, hue, sepia, f.grayscale, f.invert)
             DesktopColorMatrix.applyToImage(img, matrix)
         }
+        if (f.blur > 0f) DesktopColorMatrix.blur(img, f.blur)
         // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). The LUT is
         // parsed once and cached by path, so it isn't re-parsed for every exported frame.
         if (f.lutPath.isNotBlank()) {

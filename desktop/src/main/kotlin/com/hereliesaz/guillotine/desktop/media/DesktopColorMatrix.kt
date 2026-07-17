@@ -2,6 +2,8 @@ package com.hereliesaz.guillotine.desktop.media
 
 import com.hereliesaz.guillotine.media.CubeLut
 import java.awt.image.BufferedImage
+import java.awt.image.ConvolveOp
+import java.awt.image.Kernel
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -223,6 +225,27 @@ object DesktopColorMatrix {
         }
 
         image.setRGB(0, 0, w, h, pixels, 0, w)
+    }
+
+    /**
+     * Gaussian-ish blur of [image] in place by [radiusPx] pixels (the clip's `filters.blur`), applied as
+     * a separable box kernel via two [ConvolveOp]s (horizontal then vertical) — well-tested Java2D math,
+     * so it's correct without a hand-rolled convolution. Desktop previously ignored blur entirely, so a
+     * blurred clip rendered sharp on both preview and export. No-op for a zero/negative radius. The
+     * radius is capped so a runaway value can't stall a per-frame render.
+     */
+    fun blur(image: BufferedImage, radiusPx: Float) {
+        val r = radiusPx.roundToInt().coerceIn(0, 40)
+        if (r <= 0 || image.width < 2 || image.height < 2) return
+        val size = 2 * r + 1
+        val line = FloatArray(size) { 1f / size } // normalized 1D box kernel
+        val opH = ConvolveOp(Kernel(size, 1, line), ConvolveOp.EDGE_NO_OP, null)
+        val opV = ConvolveOp(Kernel(1, size, line), ConvolveOp.EDGE_NO_OP, null)
+        // ConvolveOp requires distinct src/dst. Let it create a type-compatible scratch (passing null
+        // dest), then blur vertically back into the original — avoids constructing a BufferedImage from a
+        // possibly-TYPE_CUSTOM decoded-frame type.
+        val tmp = opH.filter(image, null)
+        opV.filter(tmp, image)
     }
 
     /** Check if the matrix is effectively identity (no visible change). */
