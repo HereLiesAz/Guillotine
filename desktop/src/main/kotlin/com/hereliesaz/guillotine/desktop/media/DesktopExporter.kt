@@ -126,7 +126,11 @@ object DesktopExporter {
                         com.hereliesaz.guillotine.model.TextFont.MONO -> java.awt.Font.MONOSPACED
                         com.hereliesaz.guillotine.model.TextFont.CURSIVE -> java.awt.Font.SERIF
                     }
-                    val font = java.awt.Font(family, java.awt.Font.PLAIN, 1).deriveFont(14f * scale)
+                    // Size the caption relative to the export canvas — a fixed 14px was near-illegible on
+                    // a 1080p+ frame. Match the app export's ~64px-at-1080p so captions read at the same
+                    // relative size on both platforms (then apply the clip's own scale).
+                    val baseFontPx = config.height * (64f / 1080f)
+                    val font = java.awt.Font(family, java.awt.Font.PLAIN, 1).deriveFont(baseFontPx * scale)
                     g.font = font
                     val cx = config.width / 2 + (ox * config.width).roundToInt()
                     val cy = config.height / 2 + (oy * config.height).roundToInt()
