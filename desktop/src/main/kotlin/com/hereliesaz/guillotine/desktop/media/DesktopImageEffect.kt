@@ -51,15 +51,13 @@ object DesktopImageEffect {
         g.dispose()
         val out = FloatArray(3 * w * h)
         val plane = w * h
-        var i = 0
-        for (y in 0 until h) {
-            for (x in 0 until w) {
-                val rgb = scaled.getRGB(x, y)
-                out[i] = ((rgb ushr 16) and 0xFF) / 255f
-                out[plane + i] = ((rgb ushr 8) and 0xFF) / 255f
-                out[2 * plane + i] = (rgb and 0xFF) / 255f
-                i++
-            }
+        val pixels = IntArray(plane)
+        scaled.getRGB(0, 0, w, h, pixels, 0, w)
+        for (i in 0 until plane) {
+            val rgb = pixels[i]
+            out[i] = ((rgb ushr 16) and 0xFF) / 255f
+            out[plane + i] = ((rgb ushr 8) and 0xFF) / 255f
+            out[2 * plane + i] = (rgb and 0xFF) / 255f
         }
         return out
     }

@@ -43,17 +43,19 @@ object DesktopDiarizer {
         val winSamples = 2 * SR
         val windows = ArrayList<Win>()
         val session = DesktopOnnx.session(embedModelPath)
-        val wantsFbank = run {
-            val shape = runCatching { (session.inputInfo.values.firstOrNull()?.info as? TensorInfo)?.shape }.getOrNull()
-            shape != null && shape.size == 3 && (shape[2] == MELS.toLong() || shape.last() == MELS.toLong())
-        }
+        // Detect a fbank input and, if so, which axis is the mel axis: `[1, 80, T]` (mel-first) or
+        // `[1, T, 80]` (mel-last). Anything else is fed the raw waveform.
+        val inShape = runCatching { (session.inputInfo.values.firstOrNull()?.info as? TensorInfo)?.shape }.getOrNull()
+        val melFirst = inShape != null && inShape.size == 3 && inShape[1] == MELS.toLong()
+        val melLast = inShape != null && inShape.size == 3 && inShape[2] == MELS.toLong()
+        val wantsFbank = melFirst || melLast
         for ((s, e) in speech) {
             var w = s
             while (w < e) {
                 val end = min(e, w + winSamples)
                 if (end - w >= SR / 2) { // need >= 0.5 s to embed
                     val seg = samples.copyOfRange(w, end)
-                    val emb = embed(session, seg, wantsFbank)
+                    val emb = embed(session, seg, wantsFbank, melFirst)
                     if (emb != null) windows.add(Win(w * 1000L / SR, end * 1000L / SR, l2norm(emb)))
                 }
                 w += winSamples
@@ -121,15 +123,22 @@ object DesktopDiarizer {
 
     // ---- embedding -----------------------------------------------------------
 
-    private fun embed(session: ai.onnxruntime.OrtSession, seg: FloatArray, wantsFbank: Boolean): FloatArray? = runCatching {
+    private fun embed(session: ai.onnxruntime.OrtSession, seg: FloatArray, wantsFbank: Boolean, melFirst: Boolean): FloatArray? = runCatching {
         val env = DesktopOnnx.environment
         val name = session.inputNames.first()
         val tensor = if (wantsFbank) {
             val feats = fbank(seg)                 // [T][80]
             val t = feats.size
             val flat = FloatArray(t * MELS)
-            for (i in 0 until t) System.arraycopy(feats[i], 0, flat, i * MELS, MELS)
-            OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), longArrayOf(1, t.toLong(), MELS.toLong()))
+            if (melFirst) {
+                // [1, 80, T]: mel-major — flat[m * T + i].
+                for (i in 0 until t) for (m in 0 until MELS) flat[m * t + i] = feats[i][m]
+                OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), longArrayOf(1, MELS.toLong(), t.toLong()))
+            } else {
+                // [1, T, 80]: frame-major.
+                for (i in 0 until t) System.arraycopy(feats[i], 0, flat, i * MELS, MELS)
+                OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), longArrayOf(1, t.toLong(), MELS.toLong()))
+            }
         } else {
             OnnxTensor.createTensor(env, FloatBuffer.wrap(seg), longArrayOf(1, seg.size.toLong()))
         }
@@ -232,12 +241,20 @@ object DesktopDiarizer {
         for (i in 0 until n) clusters.add(mutableListOf(i))
         val threshold = 0.55f
 
+        // Precompute the pairwise distance matrix once (O(N^2) vector ops) instead of recomputing
+        // cosine distances on every merge iteration.
+        val dist = Array(n) { FloatArray(n) }
+        for (i in 0 until n) for (j in i + 1 until n) {
+            val d = cosineDist(embs[i], embs[j])
+            dist[i][j] = d; dist[j][i] = d
+        }
+
         while (clusters.size > 1) {
             var bestI = -1; var bestJ = -1; var bestD = Float.MAX_VALUE
             for (i in clusters.indices) {
                 for (j in i + 1 until clusters.size) {
                     var sum = 0f; var cnt = 0
-                    for (a in clusters[i]) for (b in clusters[j]) { sum += cosineDist(embs[a], embs[b]); cnt++ }
+                    for (a in clusters[i]) for (b in clusters[j]) { sum += dist[a][b]; cnt++ }
                     val d = if (cnt > 0) sum / cnt else Float.MAX_VALUE
                     if (d < bestD) { bestD = d; bestI = i; bestJ = j }
                 }

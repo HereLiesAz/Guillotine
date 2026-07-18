@@ -61,13 +61,13 @@ object DesktopInpaint {
         scaled.createGraphics().apply { drawImage(img, 0, 0, w, h, null); dispose() }
         val out = FloatArray(3 * w * h)
         val plane = w * h
-        var i = 0
-        for (y in 0 until h) for (x in 0 until w) {
-            val rgb = scaled.getRGB(x, y)
+        val pixels = IntArray(plane)
+        scaled.getRGB(0, 0, w, h, pixels, 0, w)
+        for (i in 0 until plane) {
+            val rgb = pixels[i]
             out[i] = ((rgb ushr 16) and 0xFF) / 255f
             out[plane + i] = ((rgb ushr 8) and 0xFF) / 255f
             out[2 * plane + i] = (rgb and 0xFF) / 255f
-            i++
         }
         return out
     }
@@ -77,11 +77,12 @@ object DesktopInpaint {
         val scaled = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
         scaled.createGraphics().apply { drawImage(matte, 0, 0, w, h, null); dispose() }
         val out = FloatArray(w * h)
-        var i = 0
-        for (y in 0 until h) for (x in 0 until w) {
-            val a = (scaled.getRGB(x, y) ushr 24) and 0xFF
-            out[i++] = if (a > 128) 1f else 0f
-            }
+        val pixels = IntArray(w * h)
+        scaled.getRGB(0, 0, w, h, pixels, 0, w)
+        for (i in 0 until w * h) {
+            val a = (pixels[i] ushr 24) and 0xFF
+            out[i] = if (a > 128) 1f else 0f
+        }
         return out
     }
 

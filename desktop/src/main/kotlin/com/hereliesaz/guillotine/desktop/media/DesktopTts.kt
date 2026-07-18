@@ -122,10 +122,15 @@ object DesktopTts {
         var considered = 0
         if (lexicon.isNotEmpty()) {
             for (word in text.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }) {
-                val phones = lexicon[word.trim('.', ',', '!', '?', ';', ':')]
+                val cleaned = word.trim('.', ',', '!', '?', ';', ':')
+                val phones = lexicon[cleaned]
                 if (phones != null) {
                     considered += phones.size
                     phones.forEach { p -> tokens[p]?.let { out.add(it) } }
+                } else {
+                    // A word missing from the lexicon falls back to character-level so it isn't silently
+                    // dropped (the rest of the sentence would otherwise keep `out` non-empty and skip it).
+                    for (ch in cleaned) { considered++; tokens[ch.toString()]?.let { out.add(it) } }
                 }
             }
         }
