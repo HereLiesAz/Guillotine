@@ -106,12 +106,12 @@ object DesktopExporter {
                     outgoing?.let { clip ->
                         val opacity = TimelineMath.valueAt(clip, KeyframeProperty.OPACITY, timeMs - clip.startTimeMs, 1f) *
                             trackSettings.opacity * (1f - (xfade ?: 0f))
-                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity, grabberCache)
+                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity, grabberCache, converter)
                     }
                     incoming?.let { clip ->
                         val opacity = TimelineMath.valueAt(clip, KeyframeProperty.OPACITY, timeMs - clip.startTimeMs, 1f) *
                             trackSettings.opacity * (xfade ?: 0f)
-                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity, grabberCache)
+                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity, grabberCache, converter)
                     }
                 }
 
@@ -167,10 +167,29 @@ object DesktopExporter {
 
                 g.dispose()
 
+                // Global crop (x/y/w/h in % of the frame): take the crop sub-rectangle of the composited
+                // frame and scale it back to fill the output, so the crop rectangle becomes the visible
+                // frame (matches the model's crop semantics + the app's Media3 Crop). No-op at full frame.
+                val crop = document.settings.crop
+                val source: BufferedImage = if (crop.x != 0f || crop.y != 0f || crop.w != 100f || crop.h != 100f) {
+                    val cx = (crop.x / 100f * config.width).roundToInt().coerceIn(0, config.width - 1)
+                    val cy = (crop.y / 100f * config.height).roundToInt().coerceIn(0, config.height - 1)
+                    val cw = (crop.w / 100f * config.width).roundToInt().coerceIn(1, config.width - cx)
+                    val ch = (crop.h / 100f * config.height).roundToInt().coerceIn(1, config.height - cy)
+                    val scaled = BufferedImage(config.width, config.height, BufferedImage.TYPE_INT_ARGB)
+                    val sg = scaled.createGraphics()
+                    sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+                    sg.drawImage(canvas.getSubimage(cx, cy, cw, ch), 0, 0, config.width, config.height, null)
+                    sg.dispose()
+                    scaled
+                } else {
+                    canvas
+                }
+
                 // Convert ARGB to BGR for encoding
                 val bgrImage = BufferedImage(config.width, config.height, BufferedImage.TYPE_3BYTE_BGR)
                 val bg = bgrImage.createGraphics()
-                bg.drawImage(canvas, 0, 0, null)
+                bg.drawImage(source, 0, 0, null)
                 bg.dispose()
 
                 recorder.record(converter.convert(bgrImage))
@@ -307,6 +326,7 @@ object DesktopExporter {
         canvasH: Int,
         opacity: Float,
         grabbers: MutableMap<String, FFmpegFrameGrabber>,
+        converter: Java2DFrameConverter,
     ) {
         if (opacity <= 0f) return
         val media = document.mediaFor(clip) ?: return
@@ -316,18 +336,33 @@ object DesktopExporter {
 
         val img = when (media.kind) {
             MediaKind.IMAGE -> runCatching { ImageIO.read(file) }.getOrNull()
-            MediaKind.VIDEO, MediaKind.AUDIO -> runCatching {
+            MediaKind.VIDEO, MediaKind.AUDIO -> {
                 // Reuse (or open once) a grabber for this file; seek instead of reopening per frame.
-                val grabber = grabbers.getOrPut(file.absolutePath) { FFmpegFrameGrabber(file).apply { start() } }
-                grabber.timestamp = sourceMs * 1000L
-                val converter = Java2DFrameConverter()
-                var frame = grabber.grabImage() ?: return
-                var attempts = 0
-                while (frame.image == null && attempts++ < 5) {
-                    frame = grabber.grabImage() ?: return
-                }
-                converter.convert(frame)
-            }.getOrNull()
+                val path = file.absolutePath
+                val grabber = runCatching {
+                    grabbers.getOrPut(path) { FFmpegFrameGrabber(file).apply { start() } }
+                }.getOrNull() ?: return
+                runCatching {
+                    // Only seek when not already positioned just before the target — a per-frame seek is
+                    // expensive, and a forward export usually advances sequentially; grab the next frame
+                    // instead when the target is within ~0.5s ahead of the current position.
+                    val target = sourceMs * 1000L
+                    val current = grabber.timestamp
+                    if (current < 0 || target < current || target - current > 500_000L) {
+                        grabber.timestamp = target
+                    }
+                    var frame = grabber.grabImage() ?: return@runCatching null
+                    var attempts = 0
+                    while (frame.image == null && attempts++ < 5) {
+                        frame = grabber.grabImage() ?: return@runCatching null
+                    }
+                    converter.convert(frame)
+                }.onFailure {
+                    // Evict a broken grabber so later frames don't keep hitting the same failure.
+                    grabbers.remove(path)
+                    runCatching { grabber.stop(); grabber.release() }
+                }.getOrNull()
+            }
         } ?: return
 
         // Apply color effects
