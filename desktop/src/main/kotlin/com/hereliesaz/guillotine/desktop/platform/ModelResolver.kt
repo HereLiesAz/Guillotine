@@ -43,6 +43,7 @@ object ModelResolver {
         "effect_superres" -> "realesrgan.onnx"
         "effect_lowlight" -> "mirnet.onnx"
         "effect_style" -> "style.onnx"
+        "inpaintModelPath" -> "lama.onnx"
         else -> null
     }
 }

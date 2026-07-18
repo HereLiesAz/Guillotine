@@ -314,17 +314,25 @@ best-effort transform of the single-image filter subset the parser accepts; a sh
 compiled to SkSL leaves the frame untouched (the tool reports `shaderRendered:false` for it), so the
 worst case is a no-op, never a corrupted picture.
 
-**Genuinely blocked — the four honest stubs (no cloud fake).** These need a runtime with no
-desktop-JVM form; doing them would mean either faking ML (never) or sending media off-device (breaks
-the invariant). They error clearly until a real on-device path exists:
-- **`add_voiceover`** — neural TTS. sherpa/Piper have no clean JVM artifact. A pure-Java TTS (MaryTTS)
-  is the only on-device option, and it's a heavy dependency + voices — a deliberate future call.
-- **`diarize_clip`** — speaker diarization (sherpa pyannote segmentation + embedding); no JVM artifact.
-- **`apply_image_effect`** — generic TFLite image models (super-res / style / low-light); TFLite is
-  Android-only, and each effect needs its own bundled model.
-- **`remove_object_generative`** — object mask → cloud inpaint. No on-device object-masker to seed it,
-  and no inpaint provider wired.
+**Resolved — the last four now run on-device via ONNX Runtime** (no sherpa/TFLite binding, no cloud —
+each hand-rolled over the ONNX/JavaCV infra desktop already ships, gated on an installed `.azp` model):
+- **`add_voiceover`** — a VITS/Piper `.onnx` voice run directly through ONNX Runtime
+  (`desktop/media/DesktopTts.kt`): text → token ids (lexicon or character-level; no espeak needed) →
+  audio → WAV → audio clip. A phoneme-only voice with no lexicon errors clearly rather than emitting
+  garbage. Slot `ttsModelPath`.
+- **`diarize_clip`** — energy VAD + an ONNX speaker-embedding model + agglomerative clustering
+  (`desktop/media/DesktopDiarizer.kt`); the embedding input auto-adapts between raw waveform and log-mel
+  fbank. Slot `diarizeEmbedModelPath`.
+- **`apply_image_effect`** — a generic NCHW image `.onnx` (super-res / style / depth / lowlight) over the
+  playhead frame (`desktop/media/DesktopImageEffect.kt`), output range auto-detected. Slots `effect_*`.
+- **`remove_object_generative`** — segmentation mask of the salient subject + a LaMa-style inpaint
+  `.onnx` (`desktop/media/DesktopInpaint.kt`), fully on-device (desktop does not use Android's cloud
+  Leonardo path, so it removes the segmented subject rather than an arbitrary named object). Slots
+  `segModelPath` + `inpaintModelPath`.
 
-**Net:** desktop is at **62/66** functional tools — everything except the four above — the highest it
-has ever been, with the on-device invariant intact (only the generation tools touch the network, and
-only for the generated media, exactly as on Android).
+These are genuine on-device pipelines; their quality tracks the installed model, and each fails loudly
+(never fakes) when its `.azp` isn't installed or a model's I/O contract doesn't match.
+
+**Net:** desktop is at **66/66** functional tools — full tool-surface parity with Android — with the
+on-device invariant intact (only the generation tools touch the network, and only for the generated
+media, exactly as on Android).
