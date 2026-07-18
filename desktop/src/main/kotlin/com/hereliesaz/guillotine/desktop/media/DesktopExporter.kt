@@ -404,11 +404,16 @@ object DesktopExporter {
         //  • removeBackground → matte the subject to alpha so the track beneath shows through
         //  • bokeh → keep the subject sharp and blur the background
         val segModel = DesktopRenderConfig.segModelPath
-        val drawImg = when {
+        val segImg = when {
             f.removeBackground && segModel.isNotBlank() -> DesktopSegmenter.matte(img, segModel)
             f.bokeh && segModel.isNotBlank() -> DesktopSegmenter.portraitBlur(img, segModel)
             else -> img
         }
+        // Custom GLSL/ISF shader, applied last (matches Android's order). Rendered through Skia's CPU
+        // raster runtime effect; a no-op if the shader can't be translated/compiled to SkSL.
+        val drawImg = if (f.shaderPath.isNotBlank()) {
+            DesktopShaderPass.apply(segImg, f.shaderPath, f.shaderParams, relMs.coerceAtLeast(0))
+        } else segImg
 
         // Keyframed transforms
         val scale = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)

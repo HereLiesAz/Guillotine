@@ -336,17 +336,21 @@ private fun applyColorEffects(
     // caller opted in (paused), since ONNX matting is far too slow for live playback:
     //  • removeBackground → matte the subject to alpha so lower tracks / the letterbox show through
     //  • bokeh → keep the subject sharp and blur the background
-    if (applySeg) {
+    val segged = if (applySeg) {
         val segModel = DesktopRenderConfig.segModelPath
         if (segModel.isNotBlank()) {
-            return when {
+            when {
                 f.removeBackground -> runCatching { DesktopSegmenter.matte(img, segModel) }.getOrDefault(img)
                 f.bokeh -> runCatching { DesktopSegmenter.portraitBlur(img, segModel) }.getOrDefault(img)
                 else -> img
             }
-        }
-    }
-    return img
+        } else img
+    } else img
+    // Custom GLSL/ISF shader, applied last (matches Android + the export path). Rendered via Skia's CPU
+    // raster runtime effect; a no-op if the shader can't be compiled to SkSL.
+    return if (f.shaderPath.isNotBlank()) {
+        DesktopShaderPass.apply(segged, f.shaderPath, f.shaderParams, relMs.coerceAtLeast(0))
+    } else segged
 }
 
 /** A reused FFmpeg decoder for the preview. Seeks (instead of reopening) toward the requested source
