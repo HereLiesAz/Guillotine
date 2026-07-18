@@ -306,7 +306,15 @@ separation and image labeling already ride this path.
 The learned-concept *store* (`shared/model/LearnedConcept.kt`) is already shared, so only the
 embedders/detectors are platform-bound.
 
-**Genuinely blocked — the five honest stubs (no cloud fake).** These need a runtime with no
+**Resolved — `apply_shader` now renders on desktop.** GLSL/ISF shaders are translated to Skia's SkSL
+(`shared/media/GlslToSksl.kt`) and executed through Skia's **CPU raster runtime effect**
+(`desktop/media/DesktopShaderPass.kt`) — no GL context, window, or display needed, so it works in
+headless export as well as the live preview, applied last exactly as on Android. The translation is a
+best-effort transform of the single-image filter subset the parser accepts; a shader that can't be
+compiled to SkSL leaves the frame untouched (the tool reports `shaderRendered:false` for it), so the
+worst case is a no-op, never a corrupted picture.
+
+**Genuinely blocked — the four honest stubs (no cloud fake).** These need a runtime with no
 desktop-JVM form; doing them would mean either faking ML (never) or sending media off-device (breaks
 the invariant). They error clearly until a real on-device path exists:
 - **`add_voiceover`** — neural TTS. sherpa/Piper have no clean JVM artifact. A pure-Java TTS (MaryTTS)
@@ -314,11 +322,9 @@ the invariant). They error clearly until a real on-device path exists:
 - **`diarize_clip`** — speaker diarization (sherpa pyannote segmentation + embedding); no JVM artifact.
 - **`apply_image_effect`** — generic TFLite image models (super-res / style / low-light); TFLite is
   Android-only, and each effect needs its own bundled model.
-- **`apply_shader`** — GLSL execution. Params parse via the shared `GlslShader`, but rendering needs a
-  GL/Skia pass; a CPU per-pixel interpreter isn't viable.
 - **`remove_object_generative`** — object mask → cloud inpaint. No on-device object-masker to seed it,
   and no inpaint provider wired.
 
-**Net:** desktop is at **61/66** functional tools — everything except the five above — the highest it
+**Net:** desktop is at **62/66** functional tools — everything except the four above — the highest it
 has ever been, with the on-device invariant intact (only the generation tools touch the network, and
 only for the generated media, exactly as on Android).

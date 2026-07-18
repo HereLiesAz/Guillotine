@@ -55,7 +55,9 @@ object DesktopExporter {
         val converter = Java2DFrameConverter()
 
         val clips = document.clips.filterNot { it.trackId in document.disabledTrackIds }
-        val hasAudio = clips.any { it.type == ClipType.AUDIO }
+        val hasAudio = clips.any {
+            it.type == ClipType.AUDIO || (it.type == ClipType.VIDEO && document.mediaFor(it)?.hasAudio == true)
+        }
 
         val recorder = FFmpegFrameRecorder(outputFile, config.width, config.height)
         recorder.videoCodec = avcodec.AV_CODEC_ID_H264
@@ -69,6 +71,11 @@ object DesktopExporter {
             recorder.audioChannels = 2
         }
         recorder.start()
+
+        // One decoder per source file, reused across every frame that samples it. Opening/starting a
+        // fresh FFmpegFrameGrabber per frame (its header read + codec init) made export crawl; export is
+        // forward-sequential, so seeking a live grabber each frame is far cheaper. Released in `finally`.
+        val grabberCache = HashMap<String, FFmpegFrameGrabber>()
 
         try {
             // Video frames
@@ -99,12 +106,12 @@ object DesktopExporter {
                     outgoing?.let { clip ->
                         val opacity = TimelineMath.valueAt(clip, KeyframeProperty.OPACITY, timeMs - clip.startTimeMs, 1f) *
                             trackSettings.opacity * (1f - (xfade ?: 0f))
-                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity)
+                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity, grabberCache, converter)
                     }
                     incoming?.let { clip ->
                         val opacity = TimelineMath.valueAt(clip, KeyframeProperty.OPACITY, timeMs - clip.startTimeMs, 1f) *
                             trackSettings.opacity * (xfade ?: 0f)
-                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity)
+                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity, grabberCache, converter)
                     }
                 }
 
@@ -160,10 +167,29 @@ object DesktopExporter {
 
                 g.dispose()
 
+                // Global crop (x/y/w/h in % of the frame): take the crop sub-rectangle of the composited
+                // frame and scale it back to fill the output, so the crop rectangle becomes the visible
+                // frame (matches the model's crop semantics + the app's Media3 Crop). No-op at full frame.
+                val crop = document.settings.crop
+                val source: BufferedImage = if (crop.x != 0f || crop.y != 0f || crop.w != 100f || crop.h != 100f) {
+                    val cx = (crop.x / 100f * config.width).roundToInt().coerceIn(0, config.width - 1)
+                    val cy = (crop.y / 100f * config.height).roundToInt().coerceIn(0, config.height - 1)
+                    val cw = (crop.w / 100f * config.width).roundToInt().coerceIn(1, config.width - cx)
+                    val ch = (crop.h / 100f * config.height).roundToInt().coerceIn(1, config.height - cy)
+                    val scaled = BufferedImage(config.width, config.height, BufferedImage.TYPE_INT_ARGB)
+                    val sg = scaled.createGraphics()
+                    sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+                    sg.drawImage(canvas.getSubimage(cx, cy, cw, ch), 0, 0, config.width, config.height, null)
+                    sg.dispose()
+                    scaled
+                } else {
+                    canvas
+                }
+
                 // Convert ARGB to BGR for encoding
                 val bgrImage = BufferedImage(config.width, config.height, BufferedImage.TYPE_3BYTE_BGR)
                 val bg = bgrImage.createGraphics()
-                bg.drawImage(canvas, 0, 0, null)
+                bg.drawImage(source, 0, 0, null)
                 bg.dispose()
 
                 recorder.record(converter.convert(bgrImage))
@@ -175,6 +201,7 @@ object DesktopExporter {
                 exportAudio(recorder, document, clips, config, totalDurationMs)
             }
         } finally {
+            grabberCache.values.forEach { runCatching { it.stop(); it.release() } }
             recorder.stop()
             recorder.release()
         }
@@ -190,7 +217,14 @@ object DesktopExporter {
         config: ExportConfig,
         totalDurationMs: Long,
     ) {
-        val audioClips = clips.filter { it.type == ClipType.AUDIO }
+        // Mix standalone + shadow audio clips as before, PLUS a video clip's own embedded audio when it
+        // has no linked shadow clip standing in for it — otherwise a video's sound was dropped from the
+        // export. (A shadowed video's audio still comes through its shadow, unchanged.)
+        val shadowedVideoIds = clips.mapNotNull { if (it.type == ClipType.AUDIO) it.linkedClipId else null }.toHashSet()
+        val audioClips = clips.filter { c ->
+            c.type == ClipType.AUDIO ||
+                (c.type == ClipType.VIDEO && document.mediaFor(c)?.hasAudio == true && c.id !in shadowedVideoIds)
+        }
         if (audioClips.isEmpty()) return
 
         val totalSamples = (totalDurationMs * config.sampleRate / 1000L).toInt()
@@ -212,6 +246,11 @@ object DesktopExporter {
             val volKfs = clip.keyframes.filter { it.property == KeyframeProperty.VOLUME }.sortedBy { it.timeMs }
             val panKfs = clip.keyframes.filter { it.property == KeyframeProperty.PAN }.sortedBy { it.timeMs }
             val animatedGain = volKfs.isNotEmpty() || panKfs.isNotEmpty()
+            // Mirror the video path's REMOVE handling: samples whose source time falls in a removed
+            // range are written as silence, so a marked-but-not-yet-applied cut is silent in the export
+            // exactly where the picture goes black. The audio here reads source 1:1 (speed is ignored in
+            // the mix), so source ms maps linearly from the sample offset.
+            val hasRemoves = clip.edits.any { it.action == com.hereliesaz.guillotine.model.EditAction.REMOVE }
 
             // Normalize gain
             val normGain = if (clip.filters.normalize) {
@@ -240,10 +279,16 @@ object DesktopExporter {
                     val buf = samples[0] as? ShortBuffer ?: continue
                     buf.rewind()
                     while (buf.remaining() >= 2 && sampleIdx < endSample) {
+                        val relMs = (sampleIdx - startSample) * 1000L / config.sampleRate
+                        // Drop samples inside a removed source range (read them, but mix silence).
+                        if (hasRemoves && TimelineMath.isRemoved(clip, clip.trimStartMs + relMs)) {
+                            buf.get(); buf.get()
+                            sampleIdx++
+                            continue
+                        }
                         var lg = leftGain
                         var rg = rightGain
                         if (animatedGain) {
-                            val relMs = (sampleIdx - startSample) * 1000L / config.sampleRate
                             val v = TimelineMath.interpolateSorted(volKfs, relMs, clip.filters.volume) * trackSettings.volume
                             val p = TimelineMath.interpolateSorted(panKfs, relMs, clip.filters.pan)
                             lg = v * if (p > 0f) 1f - p else 1f
@@ -291,32 +336,50 @@ object DesktopExporter {
         canvasW: Int,
         canvasH: Int,
         opacity: Float,
+        grabbers: MutableMap<String, FFmpegFrameGrabber>,
+        converter: Java2DFrameConverter,
     ) {
         if (opacity <= 0f) return
         val media = document.mediaFor(clip) ?: return
         val file = uriToFile(media.uri) ?: return
         val sourceMs = TimelineMath.sourceTimeMs(clip, timeMs).coerceAtLeast(0)
+        // Honor un-applied REMOVE marks: if this frame samples a removed source range, draw nothing so
+        // the lower track / black shows through. The audio mixer gates on the same isRemoved check, so
+        // video and audio stay in sync. (Committed cuts ripple via applyCuts and carry no marks; this
+        // only affects clips exported while still carrying scissor marks — which desktop previously
+        // played straight through.)
+        if (TimelineMath.isRemoved(clip, sourceMs)) return
         val relMs = timeMs - clip.startTimeMs
 
         val img = when (media.kind) {
             MediaKind.IMAGE -> runCatching { ImageIO.read(file) }.getOrNull()
-            MediaKind.VIDEO, MediaKind.AUDIO -> runCatching {
-                val grabber = FFmpegFrameGrabber(file)
-                grabber.start()
-                try {
-                    grabber.timestamp = sourceMs * 1000L
-                    val converter = Java2DFrameConverter()
-                    var frame = grabber.grabImage() ?: return
+            MediaKind.VIDEO, MediaKind.AUDIO -> {
+                // Reuse (or open once) a grabber for this file; seek instead of reopening per frame.
+                val path = file.absolutePath
+                val grabber = runCatching {
+                    grabbers.getOrPut(path) { FFmpegFrameGrabber(file).apply { start() } }
+                }.getOrNull() ?: return
+                runCatching {
+                    // Only seek when not already positioned just before the target — a per-frame seek is
+                    // expensive, and a forward export usually advances sequentially; grab the next frame
+                    // instead when the target is within ~0.5s ahead of the current position.
+                    val target = sourceMs * 1000L
+                    val current = grabber.timestamp
+                    if (current < 0 || target < current || target - current > 500_000L) {
+                        grabber.timestamp = target
+                    }
+                    var frame = grabber.grabImage() ?: return@runCatching null
                     var attempts = 0
                     while (frame.image == null && attempts++ < 5) {
-                        frame = grabber.grabImage() ?: return
+                        frame = grabber.grabImage() ?: return@runCatching null
                     }
                     converter.convert(frame)
-                } finally {
-                    grabber.stop()
-                    grabber.release()
-                }
-            }.getOrNull()
+                }.onFailure {
+                    // Evict a broken grabber so later frames don't keep hitting the same failure.
+                    grabbers.remove(path)
+                    runCatching { grabber.stop(); grabber.release() }
+                }.getOrNull()
+            }
         } ?: return
 
         // Apply color effects
@@ -341,11 +404,16 @@ object DesktopExporter {
         //  • removeBackground → matte the subject to alpha so the track beneath shows through
         //  • bokeh → keep the subject sharp and blur the background
         val segModel = DesktopRenderConfig.segModelPath
-        val drawImg = when {
+        val segImg = when {
             f.removeBackground && segModel.isNotBlank() -> DesktopSegmenter.matte(img, segModel)
             f.bokeh && segModel.isNotBlank() -> DesktopSegmenter.portraitBlur(img, segModel)
             else -> img
         }
+        // Custom GLSL/ISF shader, applied last (matches Android's order). Rendered through Skia's CPU
+        // raster runtime effect; a no-op if the shader can't be translated/compiled to SkSL.
+        val drawImg = if (f.shaderPath.isNotBlank()) {
+            DesktopShaderPass.apply(segImg, f.shaderPath, f.shaderParams, relMs.coerceAtLeast(0))
+        } else segImg
 
         // Keyframed transforms
         val scale = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)

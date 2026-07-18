@@ -1995,15 +1995,22 @@ class DesktopMcpTools(
         }
         val clip = resolveClipOrPlayhead(clipId)
         vm.updateClipFilters(clip.id) { it.copy(shaderPath = file.absolutePath, shaderParams = overrides) }
-        // TODO(desktop): no GLSL/Skia render pass exists yet, so the shader is recorded but not rendered.
+        // Desktop renders shaders through Skia (GLSL→SkSL); confirm THIS shader actually compiles so the
+        // report is honest — some advanced GLSL doesn't translate and would silently no-op.
+        val rendered = com.hereliesaz.guillotine.desktop.media.DesktopShaderPass.canRender(file.absolutePath)
         return ok().apply {
-            put("shaderRendered", false)
+            put("shaderRendered", rendered)
             put(
                 "humanSummary",
                 "Recorded shader ${file.name}" +
                     (if (overrides.isNotEmpty()) " with ${overrides.size} param(s)" else "") +
-                    " on clip ${clip.id}. Note: the shader is saved on the clip, but the live GLSL render " +
-                    "on desktop is still pending — it is NOT yet visible in preview or export.",
+                    " on clip ${clip.id}. " +
+                    if (rendered) {
+                        "It renders in the desktop preview and export via Skia."
+                    } else {
+                        "Note: this shader couldn't be translated to Skia's SkSL, so it is saved on the " +
+                            "clip but will NOT be visible in the desktop preview or export."
+                    },
             )
         }
     }
