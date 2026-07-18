@@ -55,7 +55,9 @@ object DesktopExporter {
         val converter = Java2DFrameConverter()
 
         val clips = document.clips.filterNot { it.trackId in document.disabledTrackIds }
-        val hasAudio = clips.any { it.type == ClipType.AUDIO }
+        val hasAudio = clips.any {
+            it.type == ClipType.AUDIO || (it.type == ClipType.VIDEO && document.mediaFor(it)?.hasAudio == true)
+        }
 
         val recorder = FFmpegFrameRecorder(outputFile, config.width, config.height)
         recorder.videoCodec = avcodec.AV_CODEC_ID_H264
@@ -196,7 +198,14 @@ object DesktopExporter {
         config: ExportConfig,
         totalDurationMs: Long,
     ) {
-        val audioClips = clips.filter { it.type == ClipType.AUDIO }
+        // Mix standalone + shadow audio clips as before, PLUS a video clip's own embedded audio when it
+        // has no linked shadow clip standing in for it — otherwise a video's sound was dropped from the
+        // export. (A shadowed video's audio still comes through its shadow, unchanged.)
+        val shadowedVideoIds = clips.mapNotNull { if (it.type == ClipType.AUDIO) it.linkedClipId else null }.toHashSet()
+        val audioClips = clips.filter { c ->
+            c.type == ClipType.AUDIO ||
+                (c.type == ClipType.VIDEO && document.mediaFor(c)?.hasAudio == true && c.id !in shadowedVideoIds)
+        }
         if (audioClips.isEmpty()) return
 
         val totalSamples = (totalDurationMs * config.sampleRate / 1000L).toInt()
