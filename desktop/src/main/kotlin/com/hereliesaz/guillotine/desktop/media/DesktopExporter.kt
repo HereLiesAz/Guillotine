@@ -246,6 +246,11 @@ object DesktopExporter {
             val volKfs = clip.keyframes.filter { it.property == KeyframeProperty.VOLUME }.sortedBy { it.timeMs }
             val panKfs = clip.keyframes.filter { it.property == KeyframeProperty.PAN }.sortedBy { it.timeMs }
             val animatedGain = volKfs.isNotEmpty() || panKfs.isNotEmpty()
+            // Mirror the video path's REMOVE handling: samples whose source time falls in a removed
+            // range are written as silence, so a marked-but-not-yet-applied cut is silent in the export
+            // exactly where the picture goes black. The audio here reads source 1:1 (speed is ignored in
+            // the mix), so source ms maps linearly from the sample offset.
+            val hasRemoves = clip.edits.any { it.action == com.hereliesaz.guillotine.model.EditAction.REMOVE }
 
             // Normalize gain
             val normGain = if (clip.filters.normalize) {
@@ -274,10 +279,16 @@ object DesktopExporter {
                     val buf = samples[0] as? ShortBuffer ?: continue
                     buf.rewind()
                     while (buf.remaining() >= 2 && sampleIdx < endSample) {
+                        val relMs = (sampleIdx - startSample) * 1000L / config.sampleRate
+                        // Drop samples inside a removed source range (read them, but mix silence).
+                        if (hasRemoves && TimelineMath.isRemoved(clip, clip.trimStartMs + relMs)) {
+                            buf.get(); buf.get()
+                            sampleIdx++
+                            continue
+                        }
                         var lg = leftGain
                         var rg = rightGain
                         if (animatedGain) {
-                            val relMs = (sampleIdx - startSample) * 1000L / config.sampleRate
                             val v = TimelineMath.interpolateSorted(volKfs, relMs, clip.filters.volume) * trackSettings.volume
                             val p = TimelineMath.interpolateSorted(panKfs, relMs, clip.filters.pan)
                             lg = v * if (p > 0f) 1f - p else 1f
@@ -332,6 +343,12 @@ object DesktopExporter {
         val media = document.mediaFor(clip) ?: return
         val file = uriToFile(media.uri) ?: return
         val sourceMs = TimelineMath.sourceTimeMs(clip, timeMs).coerceAtLeast(0)
+        // Honor un-applied REMOVE marks: if this frame samples a removed source range, draw nothing so
+        // the lower track / black shows through. The audio mixer gates on the same isRemoved check, so
+        // video and audio stay in sync. (Committed cuts ripple via applyCuts and carry no marks; this
+        // only affects clips exported while still carrying scissor marks — which desktop previously
+        // played straight through.)
+        if (TimelineMath.isRemoved(clip, sourceMs)) return
         val relMs = timeMs - clip.startTimeMs
 
         val img = when (media.kind) {
