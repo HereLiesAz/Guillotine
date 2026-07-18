@@ -70,6 +70,11 @@ object DesktopExporter {
         }
         recorder.start()
 
+        // One decoder per source file, reused across every frame that samples it. Opening/starting a
+        // fresh FFmpegFrameGrabber per frame (its header read + codec init) made export crawl; export is
+        // forward-sequential, so seeking a live grabber each frame is far cheaper. Released in `finally`.
+        val grabberCache = HashMap<String, FFmpegFrameGrabber>()
+
         try {
             // Video frames
             for (frameIdx in 0 until totalFrames) {
@@ -99,12 +104,12 @@ object DesktopExporter {
                     outgoing?.let { clip ->
                         val opacity = TimelineMath.valueAt(clip, KeyframeProperty.OPACITY, timeMs - clip.startTimeMs, 1f) *
                             trackSettings.opacity * (1f - (xfade ?: 0f))
-                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity)
+                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity, grabberCache)
                     }
                     incoming?.let { clip ->
                         val opacity = TimelineMath.valueAt(clip, KeyframeProperty.OPACITY, timeMs - clip.startTimeMs, 1f) *
                             trackSettings.opacity * (xfade ?: 0f)
-                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity)
+                        renderClipToCanvas(g, clip, document, timeMs, config.width, config.height, opacity, grabberCache)
                     }
                 }
 
@@ -175,6 +180,7 @@ object DesktopExporter {
                 exportAudio(recorder, document, clips, config, totalDurationMs)
             }
         } finally {
+            grabberCache.values.forEach { runCatching { it.stop(); it.release() } }
             recorder.stop()
             recorder.release()
         }
@@ -291,6 +297,7 @@ object DesktopExporter {
         canvasW: Int,
         canvasH: Int,
         opacity: Float,
+        grabbers: MutableMap<String, FFmpegFrameGrabber>,
     ) {
         if (opacity <= 0f) return
         val media = document.mediaFor(clip) ?: return
@@ -301,21 +308,16 @@ object DesktopExporter {
         val img = when (media.kind) {
             MediaKind.IMAGE -> runCatching { ImageIO.read(file) }.getOrNull()
             MediaKind.VIDEO, MediaKind.AUDIO -> runCatching {
-                val grabber = FFmpegFrameGrabber(file)
-                grabber.start()
-                try {
-                    grabber.timestamp = sourceMs * 1000L
-                    val converter = Java2DFrameConverter()
-                    var frame = grabber.grabImage() ?: return
-                    var attempts = 0
-                    while (frame.image == null && attempts++ < 5) {
-                        frame = grabber.grabImage() ?: return
-                    }
-                    converter.convert(frame)
-                } finally {
-                    grabber.stop()
-                    grabber.release()
+                // Reuse (or open once) a grabber for this file; seek instead of reopening per frame.
+                val grabber = grabbers.getOrPut(file.absolutePath) { FFmpegFrameGrabber(file).apply { start() } }
+                grabber.timestamp = sourceMs * 1000L
+                val converter = Java2DFrameConverter()
+                var frame = grabber.grabImage() ?: return
+                var attempts = 0
+                while (frame.image == null && attempts++ < 5) {
+                    frame = grabber.grabImage() ?: return
                 }
+                converter.convert(frame)
             }.getOrNull()
         } ?: return
 
