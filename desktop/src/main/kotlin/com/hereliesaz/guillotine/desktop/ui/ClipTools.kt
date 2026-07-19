@@ -140,10 +140,13 @@ private fun TextToolButton(vm: EditorViewModel, clip: TimelineClip) {
  */
 @Composable
 private fun KineticTypeToolButton(vm: EditorViewModel, clip: TimelineClip) {
-    val motions = remember(clip.id) {
-        com.hereliesaz.guillotine.ui.KineticTypographyPicker.listInstalled(
-            java.io.File(com.hereliesaz.guillotine.desktop.platform.DesktopStorage.dataDir, "extensions"),
-        )
+    // Read installed motions off the main thread — the `.azp` walk + parse is blocking I/O.
+    val motions by androidx.compose.runtime.produceState<List<com.hereliesaz.guillotine.ui.KineticTypographyPicker.InstalledMotion>>(emptyList(), clip.id) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.hereliesaz.guillotine.ui.KineticTypographyPicker.listInstalled(
+                java.io.File(com.hereliesaz.guillotine.desktop.platform.DesktopStorage.dataDir, "extensions"),
+            )
+        }
     }
     if (motions.isEmpty()) return
     var open by remember { mutableStateOf(false) }

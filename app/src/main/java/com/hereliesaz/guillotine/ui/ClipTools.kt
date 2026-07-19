@@ -63,7 +63,9 @@ import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral900
 import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Context-sensitive per-clip tool buttons, shown inline in the editor tool strip
@@ -350,7 +352,6 @@ fun TranscribeToolInline(state: EditorUiState, onTranscribe: (CaptionStyle) -> U
     }
 }
 
-@Composable
 /**
  * Kinetic-typography picker for a selected caption: lists the installed motion `.azp` plugins and, on
  * tap, bakes the chosen animation onto the caption (or clears it) via [KineticTypographyPicker]. Renders
@@ -360,8 +361,11 @@ fun TranscribeToolInline(state: EditorUiState, onTranscribe: (CaptionStyle) -> U
 @Composable
 fun KineticTypeToolInline(vm: EditorViewModel, clip: TimelineClip) {
     val context = LocalContext.current
-    val motions = remember(clip.id) {
-        KineticTypographyPicker.listInstalled(java.io.File(context.filesDir, "extensions"))
+    // Read installed motions off the main thread — the `.azp` walk + parse is blocking I/O.
+    val motions by produceState(emptyList<KineticTypographyPicker.InstalledMotion>(), clip.id) {
+        value = withContext(Dispatchers.IO) {
+            KineticTypographyPicker.listInstalled(java.io.File(context.filesDir, "extensions"))
+        }
     }
     if (motions.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
