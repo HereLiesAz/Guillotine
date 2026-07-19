@@ -103,6 +103,14 @@ data class AiSettings(
     /** Optional path to an `ffmpeg` executable for baking FFmpeg/Frei0r filtergraphs onto a clip (blank =
      *  feature off). Desktop-first; on Android, point at a bundled/downloaded ffmpeg binary. */
     val ffmpegPath: String = "",
+    /**
+     * Opt-in: allow a CLOUD assistant model to see the current frame. Off by default. When off, cloud
+     * brains stay strictly text-only (the on-device invariant: frame pixels never leave the device). When
+     * the user turns this on, a cloud provider that supports images may be sent the current frame — and
+     * ONLY the current frame, ONLY when the model calls `look_at_frame`. On-device vision never depends on
+     * this flag; it always runs locally.
+     */
+    val cloudVision: Boolean = false,
     /** Bring-your-own keys for image/video/music generation providers. */
     val genKeys: Map<GenProviderType, String> = emptyMap(),
     /** Chosen model id per generation provider (blank → provider default). */

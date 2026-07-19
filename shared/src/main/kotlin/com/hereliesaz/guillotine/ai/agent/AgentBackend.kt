@@ -57,6 +57,53 @@ interface AgentBackend {
 /** Hard cap on tool round-trips so a confused model can't loop forever / burn tokens. */
 const val MAX_AGENT_ITERATIONS = 12
 
+/** Name of the synthetic "look at the current frame" action offered to a vision-capable backend. */
+const val VISION_TOOL_NAME = "look_at_frame"
+
+/**
+ * The current frame encoded for a cloud image API — used ONLY on the explicitly opt-in cloud-vision path
+ * (the off-by-default `cloudVision` setting). This is deliberately separate from the on-device
+ * [FrameProvider], which hands raw pixels to a local model that never touches the network: this seam
+ * exists so that, when the user has turned cloud vision on, a cloud brain can be sent one frame as an
+ * image. It is only ever wired to a backend when that setting is enabled, so the "never send media"
+ * default holds unless the user opts in. Implemented by the concrete MCP tool surface.
+ */
+interface FrameImageSource {
+    /** The active video clip's frame at the playhead, base64-encoded, or null if there's none to send. */
+    fun currentFrameImage(): FrameImage?
+}
+
+/** A frame encoded for a cloud image API: base64 [data] plus its [mediaType] (e.g. `image/jpeg`). */
+data class FrameImage(val data: String, val mediaType: String)
+
+/**
+ * MCP-shaped definition for [VISION_TOOL_NAME], appended to a cloud backend's tool list only when
+ * cloud vision is enabled. Lets the model ask to actually see the current frame; the backend intercepts
+ * the call, sends the frame to the provider's image API, and returns the description as the tool result.
+ */
+fun visionToolDefinition(): JSONObject = JSONObject()
+    .put("name", VISION_TOOL_NAME)
+    .put(
+        "description",
+        "LOOK at the current frame (at the playhead) and get a description of what is actually on screen. " +
+            "Use it when you need to know what the footage shows before deciding — e.g. \"is this shot " +
+            "indoors?\", \"what's in this frame?\". Seek to the moment first if you need a specific one.",
+    )
+    .put(
+        "inputSchema",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject().put(
+                    "prompt",
+                    JSONObject()
+                        .put("type", "string")
+                        .put("description", "Optional question about the frame (default: describe it)"),
+                ),
+            ),
+    )
+
 /**
  * Soft cap on retained conversation messages across runs. When a stateful backend's history grows past
  * this, it starts a fresh conversation before the next turn — bounding token cost/latency and never leaving
@@ -399,6 +446,42 @@ data class ToolOutcome(val json: JSONObject, val isError: Boolean) {
         json.has("segmentsApplied") -> "${json.optInt("segmentsApplied")} applied"
         json.has("clipCount") -> "${json.optInt("clipCount")} clips"
         else -> "ok"
+    }
+}
+
+/**
+ * Handle a [VISION_TOOL_NAME] call for a cloud backend: pull the current frame from [frames] and hand it
+ * to the provider-specific [describe] (which sends it to that provider's image API and returns the
+ * description). Wraps the result as a [ToolOutcome] to feed back as the tool result — mirroring the
+ * on-device look, so the pixels-as-text flows through the normal tool loop. Any failure (no frame, a
+ * model that can't accept images) becomes a recoverable error result, never a thrown exception. Only
+ * ever reached when the user opted into cloud vision (that's the only time [frames] is non-null here).
+ */
+inline fun frameLookOutcome(
+    frames: FrameImageSource?,
+    prompt: String,
+    describe: (FrameImage, String) -> String?,
+): ToolOutcome {
+    val question = prompt.ifBlank { "Describe what is happening in this frame in detail." }
+    val image = frames?.currentFrameImage()
+        ?: return ToolOutcome(
+            JSONObject().put("error", "No video frame under the playhead — seek onto a video clip first."),
+            isError = true,
+        )
+    val text = try {
+        describe(image, question)
+    } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+        throw c
+    } catch (t: Throwable) {
+        null
+    }
+    return if (text.isNullOrBlank()) {
+        ToolOutcome(
+            JSONObject().put("error", "Couldn't describe the frame (this model may not accept images)."),
+            isError = true,
+        )
+    } else {
+        ToolOutcome(JSONObject().put("caption", text).put("humanSummary", text), isError = false)
     }
 }
 

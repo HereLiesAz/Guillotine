@@ -20,6 +20,9 @@ class OpenAiAgentBackend(
     private val endpoint: String,
     private val model: String,
     private val label: String,
+    // Non-null ONLY when the user opted into cloud vision. When set, the model is offered look_at_frame
+    // and the current frame is sent to the provider's vision API on demand. Null → strictly text-only.
+    private val frames: FrameImageSource? = null,
 ) : AgentBackend {
 
     // Conversation memory kept across run() calls (see AgentBackend.reset). The system prompt is added once
@@ -34,7 +37,9 @@ class OpenAiAgentBackend(
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         try {
-            val toolDefs = openAiTools(tools.definitions())
+            val defs = tools.definitions()
+            if (frames != null) defs.put(visionToolDefinition()) // offer look_at_frame only when opted in
+            val toolDefs = openAiTools(defs)
             if (messages.length() >= MAX_CONVERSATION_MESSAGES) messages = JSONArray() // bound growth across turns
             if (messages.length() == 0) {
                 messages.put(JSONObject().put("role", "system").put("content", AGENT_SYSTEM_PROMPT))
@@ -67,7 +72,11 @@ class OpenAiAgentBackend(
                             JSONObject(fn.optString("arguments").ifBlank { "{}" })
                         }.getOrDefault(JSONObject())
                         onEvent(AgentEvent.ToolStarted(name))
-                        val outcome = callTool(tools, name, args)
+                        val outcome = if (name == VISION_TOOL_NAME) {
+                            frameLookOutcome(frames, args.optString("prompt")) { img, q -> describeImage(img, q) }
+                        } else {
+                            callTool(tools, name, args)
+                        }
                         onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
                         messages.put(JSONObject().apply {
                             put("role", "tool")
@@ -90,6 +99,34 @@ class OpenAiAgentBackend(
             messages = JSONArray() // partial turn (assistant tool_calls with no tool result) — reset
             onEvent(AgentEvent.Failed(e.message ?: "$label agent failed"))
         }
+    }
+
+    /**
+     * One-shot vision request: send [image] and [question] as an image_url content part and return the
+     * text. Used only on the opt-in cloud-vision path (via look_at_frame). Reuses [post]; null on failure.
+     */
+    private fun describeImage(image: FrameImage, question: String): String? {
+        val body = JSONObject().apply {
+            put("model", model)
+            put(
+                "messages",
+                JSONArray().put(
+                    JSONObject().put("role", "user").put(
+                        "content",
+                        JSONArray()
+                            .put(JSONObject().put("type", "text").put("text", question))
+                            .put(
+                                JSONObject().put("type", "image_url").put(
+                                    "image_url",
+                                    JSONObject().put("url", "data:${image.mediaType};base64,${image.data}"),
+                                ),
+                            ),
+                    ),
+                ),
+            )
+        }
+        val message = post(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+        return message.optString("content").takeIf { it.isNotBlank() && it != "null" }
     }
 
     /** Map MCP tool defs to OpenAI's shape: `{type:"function", function:{name, description, parameters}}`. */

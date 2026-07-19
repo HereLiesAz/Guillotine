@@ -35,6 +35,9 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Long-edge cap (px) for a frame sent to a cloud vision API — bounds upload size and token cost. */
+private const val CLOUD_FRAME_MAX_DIM = 1024
+
 /**
  * MCP tool and resource implementations. Reads from / writes to the [vm] ViewModel.
  * Executed on NanoHTTPD's IO thread; ViewModel updates are thread-safe.
@@ -43,7 +46,57 @@ class McpTools(
     private val context: Context,
     private val vm: EditorViewModel,
     private val settingsProvider: () -> AiSettings,
-) : McpToolsSurface {
+) : McpToolsSurface,
+    com.hereliesaz.guillotine.ai.agent.FrameProvider,
+    com.hereliesaz.guillotine.ai.agent.FrameImageSource {
+
+    /**
+     * The active video clip's frame at the playhead as a Bitmap, or null if there's no video there /
+     * it can't be decoded. Lets the on-device assistant *see* the current frame (pixels stay on-device).
+     * The caller owns the bitmap and must recycle it. Mirrors the clip-resolution the frame tools use.
+     */
+    override fun currentFrame(): android.graphics.Bitmap? {
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+        ) ?: return null
+        val media = st.document.mediaFor(clip) ?: return null
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        return grabFrame(Uri.parse(media.uri), sourceMs)
+    }
+
+    /**
+     * The current frame encoded as a base64 JPEG for a CLOUD image API — used only on the opt-in
+     * cloud-vision path (McpAgent only wires this when the user enabled it). Downscales to at most
+     * [CLOUD_FRAME_MAX_DIM] on the long edge to bound upload size/cost, then recycles all bitmaps.
+     */
+    override fun currentFrameImage(): com.hereliesaz.guillotine.ai.agent.FrameImage? {
+        val frame = currentFrame() ?: return null
+        return try {
+            val longEdge = maxOf(frame.width, frame.height)
+            val scaled = if (longEdge > CLOUD_FRAME_MAX_DIM) {
+                val ratio = CLOUD_FRAME_MAX_DIM.toFloat() / longEdge
+                android.graphics.Bitmap.createScaledBitmap(
+                    frame, (frame.width * ratio).toInt().coerceAtLeast(1),
+                    (frame.height * ratio).toInt().coerceAtLeast(1), true,
+                )
+            } else {
+                frame
+            }
+            val bytes = java.io.ByteArrayOutputStream().use { out ->
+                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                out.toByteArray()
+            }
+            if (scaled !== frame) scaled.recycle()
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            com.hereliesaz.guillotine.ai.agent.FrameImage(b64, "image/jpeg")
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { frame.recycle() }
+        }
+    }
 
     // ---- tool definitions ---------------------------------------------------
 

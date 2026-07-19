@@ -48,6 +48,7 @@ class ApiKeyStore(context: Context) {
         leonardoModel = prefs.getString(KEY_LEONARDO_MODEL, "")
             ?.takeIf { it.isNotBlank() } ?: LeonardoDefaultModel,
         ffmpegPath = prefs.getString(KEY_FFMPEG_PATH, "").orEmpty(),
+        cloudVision = prefs.getBoolean(KEY_CLOUD_VISION, false),
         frameAnalysisCacheSize = prefs
             .getInt(KEY_FRAME_CACHE_SIZE, FrameAnalysisCache.DEFAULT_MAX_ENTRIES)
             .coerceIn(FrameAnalysisCache.MIN_MAX_ENTRIES, FrameAnalysisCache.MAX_MAX_ENTRIES),
@@ -75,6 +76,7 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_LEONARDO_KEY, settings.leonardoKey)
                 putString(KEY_LEONARDO_MODEL, settings.leonardoModel)
                 putString(KEY_FFMPEG_PATH, settings.ffmpegPath)
+                putBoolean(KEY_CLOUD_VISION, settings.cloudVision)
                 putInt(KEY_FRAME_CACHE_SIZE, settings.frameAnalysisCacheSize)
                 GenProviderType.entries.forEach {
                     putString(genKeyPref(it), settings.genKeys[it].orEmpty())
@@ -99,6 +101,7 @@ class ApiKeyStore(context: Context) {
         const val KEY_LEONARDO_KEY = "leonardo_key"
         const val KEY_LEONARDO_MODEL = "leonardo_model"
         const val KEY_FFMPEG_PATH = "ffmpeg_path"
+        const val KEY_CLOUD_VISION = "cloud_vision_optin"
         const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
         fun keyPref(p: AiProviderType) = "key_${p.name}"

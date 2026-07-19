@@ -115,6 +115,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
 
     var ffmpegPath by remember { mutableStateOf(current.ffmpegPath) }
+    var cloudVision by remember { mutableStateOf(current.cloudVision) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -181,6 +182,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         leonardoModel = leonardoModel,
 
         ffmpegPath = ffmpegPath.trim(),
+        cloudVision = cloudVision,
         frameAnalysisCacheSize = frameAnalysisCacheSize,
         genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
         genModels = genModels,
@@ -278,6 +280,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     provider = provider, keys = keys, models = models,
 
                     ffmpegPath = ffmpegPath.trim(),
+                    cloudVision = cloudVision,
                     frameAnalysisCacheSize = frameAnalysisCacheSize,
                     genKeys = genKeys, genModels = genModels, genExtras = genExtras,
                     genDefaults = current.genDefaults,
@@ -298,6 +301,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             leonardoModel = restored.leonardoModel
 
             ffmpegPath = restored.ffmpegPath
+            cloudVision = restored.cloudVision
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -435,6 +439,27 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         "How many per-frame vision results to keep so rescans of the same clip are near-" +
                             "instant. Default ${FrameAnalysisCache.DEFAULT_MAX_ENTRIES}. Higher = more scans " +
                             "stay fast but a bit more memory. 0 disables the cache.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    // Cloud vision (opt-in). Off by default — on-device vision is always local; this is the
+                    // ONLY path that sends a frame off-device, and only to the user's own cloud provider.
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Let cloud AI see frames (opt-in)", color = Neutral400, fontSize = 12.sp)
+                        androidx.compose.material3.Switch(
+                            checked = cloudVision,
+                            onCheckedChange = { cloudVision = it },
+                        )
+                    }
+                    Text(
+                        "OFF by default. When on, the current frame is sent to your CLOUD provider " +
+                            "(Claude / GPT / Gemini) — and only when the assistant chooses to look. On-device " +
+                            "models always see frames locally and never need this. Leave it off to keep your " +
+                            "footage strictly on-device.",
                         color = Neutral500, fontSize = 10.sp,
                     )
 

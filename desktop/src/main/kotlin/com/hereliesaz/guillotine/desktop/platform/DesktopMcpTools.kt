@@ -55,7 +55,35 @@ import java.net.URI
 class DesktopMcpTools(
     private val vm: EditorViewModel,
     private val settingsProvider: () -> AiSettings = { AiSettings() },
-) : McpToolsSurface {
+) : McpToolsSurface, com.hereliesaz.guillotine.ai.agent.FrameImageSource {
+
+    /**
+     * The current frame encoded as a base64 JPEG for a CLOUD image API — used only on the opt-in
+     * cloud-vision path (the agent factory only wires this when the user enabled it). Pulls the playhead
+     * frame in-process via JavaCV (long edge ≤ 1024 to bound upload size/cost). Null if there's no video
+     * under the playhead.
+     */
+    override fun currentFrameImage(): com.hereliesaz.guillotine.ai.agent.FrameImage? {
+        val st = vm.uiState.value
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips, ClipType.VIDEO, st.currentTimeMs,
+        ) ?: return null
+        val media = st.document.mediaFor(clip) ?: return null
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath
+            .sourceTimeMs(clip, st.currentTimeMs).coerceAtLeast(0L)
+        return try {
+            val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs, maxPx = 1024) }
+                ?: return null
+            val bytes = java.io.ByteArrayOutputStream().use { out ->
+                javax.imageio.ImageIO.write(frame, "jpg", out)
+                out.toByteArray()
+            }
+            val b64 = java.util.Base64.getEncoder().encodeToString(bytes)
+            com.hereliesaz.guillotine.ai.agent.FrameImage(b64, "image/jpeg")
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     override fun definitions(): JSONArray = JSONArray().apply {
         put(toolDefinition("get_timeline", "Get the current timeline state: all clips, tracks, and timing.", emptySchema()))

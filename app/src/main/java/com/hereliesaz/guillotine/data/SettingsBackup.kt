@@ -17,6 +17,7 @@ data class SettingsBundle(
     val leonardoKey: String = "",
     val leonardoModel: String = "",
     val ffmpegPath: String = "",
+    val cloudVision: Boolean = false,
     val frameAnalysisCacheSize: Int = 200,
     val genKeys: Map<String, String> = emptyMap(),
     val genModels: Map<String, String> = emptyMap(),
@@ -41,6 +42,7 @@ object SettingsBackup {
             leonardoKey = settings.leonardoKey,
             leonardoModel = settings.leonardoModel,
             ffmpegPath = settings.ffmpegPath,
+            cloudVision = settings.cloudVision,
             frameAnalysisCacheSize = settings.frameAnalysisCacheSize,
             genKeys = settings.genKeys.mapKeys { it.key.name },
             genModels = settings.genModels.mapKeys { it.key.name },
@@ -70,6 +72,7 @@ object SettingsBackup {
             leonardoKey = bundle.leonardoKey,
             leonardoModel = bundle.leonardoModel,
             ffmpegPath = bundle.ffmpegPath,
+            cloudVision = bundle.cloudVision,
             frameAnalysisCacheSize = bundle.frameAnalysisCacheSize,
             genKeys = bundle.genKeys.mapNotNull { (k, v) ->
                 runCatching { GenProviderType.valueOf(k) to v }.getOrNull()

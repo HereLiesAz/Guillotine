@@ -18,6 +18,9 @@ import java.net.URL
 class GeminiAgentBackend(
     private val apiKey: String,
     private val model: String,
+    // Non-null ONLY when the user opted into cloud vision. When set, the model is offered look_at_frame
+    // and the current frame is sent to Gemini's image API on demand. Null → strictly text-only.
+    private val frames: FrameImageSource? = null,
 ) : AgentBackend {
 
     private val base = "https://generativelanguage.googleapis.com"
@@ -34,8 +37,10 @@ class GeminiAgentBackend(
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         try {
+            val defs = tools.definitions()
+            if (frames != null) defs.put(visionToolDefinition()) // offer look_at_frame only when opted in
             val toolBlock = JSONArray().put(
-                JSONObject().put("function_declarations", geminiTools(tools.definitions())),
+                JSONObject().put("function_declarations", geminiTools(defs)),
             )
             if (contents.length() >= MAX_CONVERSATION_MESSAGES) contents = JSONArray() // bound growth across turns
             contents.put(
@@ -79,7 +84,11 @@ class GeminiAgentBackend(
                         val name = call.optString("name")
                         val args = call.optJSONObject("args") ?: JSONObject()
                         onEvent(AgentEvent.ToolStarted(name))
-                        val outcome = callTool(tools, name, args)
+                        val outcome = if (name == VISION_TOOL_NAME) {
+                            frameLookOutcome(frames, args.optString("prompt")) { img, q -> describeImage(img, q) }
+                        } else {
+                            callTool(tools, name, args)
+                        }
                         onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
                         responseParts.put(JSONObject().put("functionResponse", JSONObject().apply {
                             put("name", name)
@@ -102,6 +111,34 @@ class GeminiAgentBackend(
             contents = JSONArray() // partial turn (model functionCall with no functionResponse) — reset
             onEvent(AgentEvent.Failed(e.message ?: "Gemini agent failed"))
         }
+    }
+
+    /**
+     * One-shot vision request: send [image] and [question] as an inline_data part and return the text.
+     * Used only on the opt-in cloud-vision path (via look_at_frame). Reuses [post]; null on any failure.
+     */
+    private fun describeImage(image: FrameImage, question: String): String? {
+        val body = JSONObject().put(
+            "contents",
+            JSONArray().put(
+                JSONObject().put("role", "user").put(
+                    "parts",
+                    JSONArray()
+                        .put(JSONObject().put("text", question))
+                        .put(
+                            JSONObject().put(
+                                "inline_data",
+                                JSONObject().put("mime_type", image.mediaType).put("data", image.data),
+                            ),
+                        ),
+                ),
+            ),
+        )
+        val parts = post(body).optJSONArray("candidates")?.optJSONObject(0)
+            ?.optJSONObject("content")?.optJSONArray("parts") ?: return null
+        val sb = StringBuilder()
+        for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text"))
+        return sb.toString().ifBlank { null }
     }
 
     private fun geminiTools(defs: JSONArray): JSONArray = JSONArray().apply {
