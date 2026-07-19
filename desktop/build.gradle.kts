@@ -66,6 +66,26 @@ dependencies {
     implementation(variantOf(libs.ffmpeg) { classifier(javacppClassifier) })
 }
 
+// Bake the full four-part version (single source of truth: version.properties) into a resource so the
+// self-updater can compare the running build against the latest GitHub Release at runtime. jpackage's
+// three-part packageVersion isn't enough — we want the exact build. Read from the classpath root as
+// `/guillotine-version.properties`.
+val versionResourceDir = layout.buildDirectory.dir("generated/versionResource")
+val writeVersionResource = tasks.register("writeVersionResource") {
+    val versionName = rootProject.extra["versionName"] as String
+    val outFile = versionResourceDir.map { it.file("guillotine-version.properties") }
+    inputs.property("versionName", versionName)
+    outputs.file(outFile)
+    doLast {
+        outFile.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText("version=$versionName\n")
+        }
+    }
+}
+sourceSets.named("main") { resources.srcDir(versionResourceDir) }
+tasks.named("processResources") { dependsOn(writeVersionResource) }
+
 compose.desktop {
     application {
         mainClass = "com.hereliesaz.guillotine.desktop.MainKt"

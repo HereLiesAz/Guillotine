@@ -569,6 +569,24 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                             "before it's wired in. Press Save to keep the change.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+
+                    // Direct-download (github) build only: manual "check for updates" — the mounted
+                    // UpdatePrompt (near the app root) watches UpdateSignals and shows the dialog.
+                    if (com.hereliesaz.guillotine.BuildConfig.UPDATER_ENABLED) {
+                        Text("App updates", color = Neutral400, fontSize = 12.sp)
+                        Text(
+                            "Check for updates",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickableText {
+                                com.hereliesaz.guillotine.update.UpdateSignals.checkNow.value++
+                            },
+                        )
+                        Text(
+                            "This build updates itself from GitHub Releases — you're prompted when a newer " +
+                                "version is available. (The Play build updates through Google Play instead.)",
+                            color = Neutral500, fontSize = 10.sp,
+                        )
+                    }
                 }
             }
         }
