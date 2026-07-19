@@ -109,16 +109,43 @@ object VocabularyGraph {
     /** The active expander. Swap for a WordNet/embeddings/LLM-backed [LexiconExpander] to widen coverage. */
     var expander: LexiconExpander = RuleExpander
 
-    /** conceptId -> its fully expanded synonym set. */
-    val synonyms: Map<String, Set<String>> by lazy {
-        concepts.associate { it.id to expander.expand(it.seeds) }
+    /** Extra synonyms per concept from a generated pass (e.g. the LLM expander), merged on top of the seeds. */
+    private var overrideExpansion: Map<String, Set<String>> = emptyMap()
+
+    // Rebuildable (not `lazy`) so a generated expansion applied at runtime takes effect. Reference
+    // assignment is atomic; the expansion is applied once at startup, before heavy concurrent use.
+    private var synCache: Map<String, Set<String>>? = null
+    private var indexCache: Map<String, String>? = null
+
+    /** conceptId -> its fully expanded synonym set (seed expansion + any generated [overrideExpansion]). */
+    val synonyms: Map<String, Set<String>>
+        get() = synCache ?: buildSynonyms().also { synCache = it }
+
+    private fun buildSynonyms(): Map<String, Set<String>> = concepts.associate { c ->
+        val merged = LinkedHashSet(expander.expand(c.seeds))
+        overrideExpansion[c.id]?.forEach { s -> normalize(s).takeIf { it.isNotEmpty() }?.let(merged::add) }
+        c.id to merged
     }
 
     /** Reverse index: normalised synonym -> conceptId (first concept wins on the rare collision). */
-    private val index: Map<String, String> by lazy {
+    private val index: Map<String, String>
+        get() = indexCache ?: buildIndex().also { indexCache = it }
+
+    private fun buildIndex(): Map<String, String> {
         val m = LinkedHashMap<String, String>()
         for (c in concepts) for (s in synonyms.getValue(c.id)) m.putIfAbsent(normalize(s), c.id)
-        m
+        return m
+    }
+
+    /**
+     * Merge a generated synonym expansion (conceptId -> extra synonyms) into the graph and rebuild the
+     * indices. Unknown concept ids are ignored. Safe to call once at startup after loading a cache or a
+     * fresh LLM pass; see [VocabularyExpander].
+     */
+    fun applyExpansion(expansion: Map<String, Set<String>>) {
+        overrideExpansion = expansion.filterKeys { byId.containsKey(it) }
+        synCache = null
+        indexCache = null
     }
 
     /** Lowercase, strip punctuation, collapse whitespace. */
