@@ -135,7 +135,11 @@ fun NleScreen(
     val scope = rememberCoroutineScope()
     // One backend instance reused across turns so the assistant keeps its conversation memory. Rebuilt only
     // when the AI settings change (provider/model/key) — which naturally begins a fresh conversation.
-    val agentBackend = remember(settings) { DesktopMcpAgent.forSettings(settings) }
+    val agentBackend = remember(
+        settings.provider,
+        settings.keyFor(settings.provider),
+        settings.modelFor(settings.provider),
+    ) { DesktopMcpAgent.forSettings(settings) }
 
     // Headless assistant: the single prompt field in the tool strip runs the agent through this
     // when nothing is selected, and shows its status inline.
@@ -215,7 +219,10 @@ fun NleScreen(
             val doc = withContext(Dispatchers.IO) {
                 runCatching { DesktopProjectAutosave.loadFromFile(file) }.getOrNull()
             }
-            if (doc != null) vm.loadDocument(doc)
+            if (doc != null) {
+                vm.loadDocument(doc)
+                agentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
+            }
         }
     }
     
@@ -453,6 +460,7 @@ fun NleScreen(
                 TextButton(
                     onClick = {
                         vm.loadDocument(Document())
+                        agentBackend?.reset() // fresh project → fresh conversation
                         showNewProjectConfirm = false
                     },
                 ) {
