@@ -96,6 +96,21 @@ class OpenAiAgentBackend(
         }
     }
 
+    override suspend fun complete(prompt: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply {
+                put("model", model)
+                put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+            }
+            val message = post(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+            message.optString("content").takeIf { it.isNotBlank() && it != "null" }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun post(body: JSONObject): JSONObject {
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"

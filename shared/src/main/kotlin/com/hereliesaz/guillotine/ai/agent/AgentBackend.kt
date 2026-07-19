@@ -38,6 +38,13 @@ interface AgentBackend {
      * through [onEvent]. Must not throw: failures are reported as [AgentEvent.Failed].
      */
     suspend fun run(instruction: String, tools: McpToolsSurface, onEvent: (AgentEvent) -> Unit)
+
+    /**
+     * One-shot plain-text completion — NO tools and NOT the editing [AGENT_SYSTEM_PROMPT] — for auxiliary
+     * language tasks like vocabulary expansion. Returns the model's text, or null when the backend can't
+     * do a bare completion or anything fails. Must never throw. Default: unsupported.
+     */
+    suspend fun complete(prompt: String): String? = null
 }
 
 /** Hard cap on tool round-trips so a confused model can't loop forever / burn tokens. */
@@ -142,6 +149,17 @@ val AGENT_SYSTEM_PROMPT = """
       one of every three, step=1 turns it off. It's a LIVE filter: the clip stays the SAME length, its audio
       is untouched (stays in sync), and nothing is baked or added — prefer it over apply_ffmpeg_filter for
       this. Use apply_ffmpeg_filter with "framestep=N" only when the user explicitly wants a baked new clip.
+
+    NAMED VIDEO EFFECTS (on-device bake — PREFER these over hand-authoring a graph):
+    - Many common looks have a dedicated one-call tool that bakes the right FFmpeg graph for you. When one
+      matches the request, call it directly (each takes clip_id plus optional tuning params). They cover:
+        · detail/cleanup: sharpen, denoise_video, deband, deflicker, stabilize, lens_correction;
+        · motion: motion_trail;
+        · stylize: film_grain, vignette, vhs, chromatic_aberration, glow, old_film, edge_detect, pixelate,
+          night_vision, thermal, grid_overlay;
+        · geometry: mirror, flip_vertical, rotate_180;
+        · colour/tone: warm, cool, cinematic, increase_contrast, vintage, cross_process, darker, brighter, noir.
+      Reach for apply_ffmpeg_filter (below) ONLY for an effect that has no named tool here.
 
     FFMPEG FILTER GRAPHS — YOUR ESCAPE HATCH FOR EFFECTS WITH NO NAMED TOOL (on-device):
     - apply_ffmpeg_filter(clip_id, filter) runs a raw FFmpeg `-vf` filtergraph and bakes the result as a new
@@ -337,7 +355,7 @@ val AGENT_SYSTEM_PROMPT = """
     without a target length, or two clips both matching "the intro"). When you do ask, end your turn
     with a single sentence ending in "?" and stop — the user's answer will come back as a new turn
     with the original request and your question quoted for context, so continue from there.
-""".trimIndent()
+""".trimIndent() + "\n\n" + com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.promptAppendix()
 
 /** Result of executing one tool: the JSON to feed back to the model, plus an error flag. */
 data class ToolOutcome(val json: JSONObject, val isError: Boolean) {

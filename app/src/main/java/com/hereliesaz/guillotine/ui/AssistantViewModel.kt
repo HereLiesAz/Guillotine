@@ -76,6 +76,21 @@ class AssistantViewModel : ViewModel() {
         startRun(prompt, tools, agent, logAs = r, isReply = true)
     }
 
+    private var vocabExpansionStarted = false
+
+    /** Kick off the one-time background LLM vocabulary expansion (guarded; never blocks or throws). */
+    private fun maybeExpandVocabulary(agent: AgentBackend) {
+        if (vocabExpansionStarted) return
+        vocabExpansionStarted = true
+        viewModelScope.launch {
+            runCatching {
+                com.hereliesaz.guillotine.ai.vocab.VocabularyExpander.ensureExpanded(cached = null) { p ->
+                    agent.complete(p)
+                }
+            }
+        }
+    }
+
     private fun startRun(
         instruction: String,
         tools: McpToolsSurface,
@@ -90,6 +105,10 @@ class AssistantViewModel : ViewModel() {
             ActivityLog.error(msg)
             return
         }
+        // First time the assistant runs with a configured backend, grow the vocabulary graph via an LLM
+        // pass in the background (once per process, non-blocking, silent on failure) so later turns and
+        // lookup_vocabulary recognise more phrasings. Falls back to the built-in seed on any failure.
+        maybeExpandVocabulary(agent)
         // Log only what the user actually typed (the raw reply on a reply, the raw prompt otherwise) —
         // the synthesized continuation prompt is verbose and belongs to the agent, not the user log.
         ActivityLog.user(logAs)

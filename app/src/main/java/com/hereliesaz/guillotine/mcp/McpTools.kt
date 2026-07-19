@@ -762,6 +762,19 @@ class McpTools(
                 required = listOf("clip_id")
             )
         ))
+        put(toolDefinition(
+            "lookup_vocabulary",
+            "Look up an editing word/phrase in the vocabulary graph: returns the concept it maps to, its " +
+                "synonyms, its opposite (antonym), the tool it routes to, and — for the exact phrase — whether " +
+                "the sense is inverted (a negation like 'less/reduce/remove' flips it to the opposite tool). " +
+                "Use it to resolve unfamiliar or vague wording to a known tool before acting.",
+            objSchema("term" to stringProp("The word or phrase to look up, e.g. 'crispy' or 'less warm'."),
+                required = listOf("term")),
+        ))
+        // Named one-call video effects (sharpen, film_grain, vhs, mirror, thermal, …), each a standard
+        // FFmpeg -vf graph baked to a new clip. Shared registry so both platforms expose the same set.
+        val videoFx = VideoFilterCatalog.toolDefinitions()
+        for (i in 0 until videoFx.length()) put(videoFx.get(i))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -837,6 +850,10 @@ class McpTools(
         "list_azp_plugins" -> listAzpPlugins()
         "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
         "clear_azp_plugin" -> clearAzpPlugin(args.getString("clip_id"))
+        "lookup_vocabulary" -> com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.lookupJson(args.getString("term"))
+        in VideoFilterCatalog.names ->
+            applyFfmpegFilter(args.getString("clip_id"), VideoFilterCatalog.graphFor(name, args))
+                .apply { put("humanSummary", VideoFilterCatalog.summaryFor(name)) }
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
