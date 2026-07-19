@@ -351,6 +351,33 @@ fun TranscribeToolInline(state: EditorUiState, onTranscribe: (CaptionStyle) -> U
 }
 
 @Composable
+/**
+ * Kinetic-typography picker for a selected caption: lists the installed motion `.azp` plugins and, on
+ * tap, bakes the chosen animation onto the caption (or clears it) via [KineticTypographyPicker]. Renders
+ * nothing until the user installs a kinetic-typography plugin from the Azphalt Store — completing the
+ * per-caption UI the az-motion feature was missing (previously reachable only through the AI assistant).
+ */
+@Composable
+fun KineticTypeToolInline(vm: EditorViewModel, clip: TimelineClip) {
+    val context = LocalContext.current
+    val motions = remember(clip.id) {
+        KineticTypographyPicker.listInstalled(java.io.File(context.filesDir, "extensions"))
+    }
+    if (motions.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Kinetic type", color = Neutral400, fontSize = 12.sp)
+        CaptionStyleRow("None", "Remove the animated caption motion") {
+            KineticTypographyPicker.clear(vm, clip.id)
+        }
+        motions.forEach { m ->
+            CaptionStyleRow(m.name, "Animate this caption as each word/character appears") {
+                KineticTypographyPicker.apply(vm, m, clip.id)
+            }
+        }
+    }
+}
+
+@Composable
 private fun CaptionStyleRow(label: String, detail: String, onClick: () -> Unit) {
     Column(
         Modifier
