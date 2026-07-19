@@ -365,12 +365,16 @@ object Exporter {
             val color = VideoEffects.colorEffects(clip, clipLocalStartMs)
             val transform = VideoEffects.transformEffects(clip, clipLocalStartMs)
             val opacity = VideoEffects.opacityEffects(clip, clipLocalStartMs)
+            // Frame decimation (frameStep): drop frames to fps/step up front so the rest of the pipeline
+            // processes fewer frames. Kept frames keep their timestamps, so the presentationTime-driven
+            // color/opacity/fade animations below still line up. No-op when frameStep <= 1.
+            val decimate = VideoEffects.frameDrop(clip.filters.frameStep, document.settings.fps.toFloat())
             // Crossfade ramp: the incoming clip fades 0→1 across its overlap with the held outgoing clip.
             val fadeFx = fade?.let { listOf(VideoEffects.fadeIn(timelineStartMs, it.first, it.last)) } ?: emptyList()
             val overlay = if (withOverlays) listOfNotNull(overlaysFor(timelineStartMs)) else emptyList()
             return Effects(
                 audioFor(clip, clipLocalStartMs),
-                color + transform + opacity + fadeFx + geometry + overlay + alpha,
+                decimate + color + transform + opacity + fadeFx + geometry + overlay + alpha,
             )
         }
 

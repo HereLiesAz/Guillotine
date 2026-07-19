@@ -94,6 +94,27 @@ object TimelineMath {
     }
 
     /**
+     * Apply a clip's frame-decimation ([ClipFilters.frameStep]) to a source-media time. When frameStep
+     * is > 1, snaps [sourceMs] DOWN to the nearest kept source frame so the same picture is held for
+     * `frameStep` output frames — a choppy/stutter look at the SAME duration (audio, which never routes
+     * through here, stays in sync). [frameDurationMs] is one output frame's length in ms (`1000 / projectFps`).
+     * Returns [sourceMs] unchanged when frameStep <= 1 or [frameDurationMs] is non-positive.
+     *
+     * The kept-frame grid is anchored at the clip's [TimelineClip.trimStartMs] so it is stable regardless
+     * of where the clip sits on the timeline (and independent of any prior speed remap already folded into
+     * [sourceMs]). Used by the desktop frame-grab preview/export; Android achieves the same via a Media3
+     * FrameDropEffect targeting `projectFps / frameStep`.
+     */
+    fun decimateSourceMs(clip: TimelineClip, sourceMs: Long, frameDurationMs: Double): Long {
+        val step = clip.filters.frameStep
+        if (step <= 1 || frameDurationMs <= 0.0) return sourceMs
+        val rel = (sourceMs - clip.trimStartMs).coerceAtLeast(0L)
+        val frameIdx = (rel / frameDurationMs).toLong()
+        val keptIdx = (frameIdx / step) * step
+        return clip.trimStartMs + (keptIdx * frameDurationMs).toLong()
+    }
+
+    /**
      * The clip of [type] that should be shown/heard at [timelineMs]. When clips
      * overlap, the last one (topmost / most recently added) wins, which is
      * deterministic unlike a plain first-match.

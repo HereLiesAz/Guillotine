@@ -708,6 +708,20 @@ class McpTools(
             )
         ))
         put(toolDefinition(
+            "set_frame_step",
+            "Frame decimation — keep only every Nth frame of a clip for a choppy/stutter/strobe look, LIVE " +
+                "and on-device (no ffmpeg, no baking, no new clip). step=2 removes every other frame, step=3 " +
+                "keeps one of every three, step=1 turns it off. The clip stays the SAME length and its audio " +
+                "is untouched, so it stays in sync — this is the go-to for \"cut/remove every other frame\", " +
+                "\"make it choppy/stuttery\", \"low-frame-rate look\". Quantizes against the project frame rate. " +
+                "(For a baked-to-a-new-clip version, apply_ffmpeg_filter with \"framestep=N\" does the same.)",
+            objSchema(
+                "clip_id" to stringProp("The clip to decimate"),
+                "step" to intProp("Keep 1 of every N frames. 2 = every other frame; 1 = off."),
+                required = listOf("clip_id", "step"),
+            ),
+        ))
+        put(toolDefinition(
             "add_keyframe", "Adds a keyframe for a specific KeyframeProperty at a specific time in the clip.",
             objSchema(
                 "clip_id" to stringProp(), "property" to stringProp(), "time_ms" to intProp(), "value" to numberProp(),
@@ -817,6 +831,7 @@ class McpTools(
         "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
         "apply_transition" -> applyTransition(args.getString("from_clip_id"), args.getString("to_clip_id"), args.optString("type", "fade"), args.optDouble("duration_sec", 1.0).toFloat())
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
+        "set_frame_step" -> setFrameStep(args.getString("clip_id"), args.getInt("step"))
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
         "list_azp_plugins" -> listAzpPlugins()
@@ -2935,6 +2950,24 @@ class McpTools(
         }
 
         return ok().apply { put("humanSummary", "Set $property to $value on clip $clipId.") }
+    }
+
+    private fun setFrameStep(clipId: String, step: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val n = step.coerceAtLeast(1)
+        vm.updateClipFilters(clipId) { f -> f.copy(frameStep = n) }
+        val summary = if (n <= 1) "Turned off frame decimation on clip $clipId (every frame plays)."
+        else "Keeping every ${ordinal(n)} frame on clip $clipId (choppy look, same length)."
+        return ok().apply { put("humanSummary", summary) }
+    }
+
+    /** "2nd", "3rd", "4th"… for human summaries. */
+    private fun ordinal(n: Int): String {
+        val suffix = if (n % 100 in 11..13) "th" else when (n % 10) {
+            1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th"
+        }
+        return "$n$suffix"
     }
 
     private fun addKeyframe(clipId: String, property: String, timeMs: Long, value: Float): JSONObject {
