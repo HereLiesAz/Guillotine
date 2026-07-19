@@ -348,7 +348,7 @@ val AGENT_SYSTEM_PROMPT = """
     without a target length, or two clips both matching "the intro"). When you do ask, end your turn
     with a single sentence ending in "?" and stop — the user's answer will come back as a new turn
     with the original request and your question quoted for context, so continue from there.
-""".trimIndent()
+""".trimIndent() + "\n\n" + com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.promptAppendix()
 
 /** Result of executing one tool: the JSON to feed back to the model, plus an error flag. */
 data class ToolOutcome(val json: JSONObject, val isError: Boolean) {

@@ -699,6 +699,17 @@ class DesktopMcpTools(
                 required = listOf("clip_id"),
             ),
         ))
+        put(toolDefinition(
+            "lookup_vocabulary",
+            "Look up an editing word/phrase in the vocabulary graph: returns the concept it maps to, its " +
+                "synonyms, its opposite (antonym), the tool it routes to, and — for the exact phrase — whether " +
+                "the sense is inverted (a negation like 'less/reduce/remove' flips it to the opposite tool). " +
+                "Use it to resolve unfamiliar or vague wording to a known tool before acting.",
+            objSchema(
+                "term" to stringProp("The word or phrase to look up, e.g. 'crispy' or 'less warm'."),
+                required = listOf("term"),
+            ),
+        ))
         // Named one-call video effects (sharpen, film_grain, vhs, mirror, thermal, …), each a standard
         // FFmpeg -vf graph baked to a new clip. Shared registry so both platforms expose the same set.
         val videoFx = com.hereliesaz.guillotine.mcp.VideoFilterCatalog.toolDefinitions()
@@ -797,6 +808,7 @@ class DesktopMcpTools(
         "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
         "generate_video" -> generateMedia(GenKind.VIDEO, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
         "generate_music" -> generateMedia(GenKind.MUSIC, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
+        "lookup_vocabulary" -> com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.lookupJson(args.getString("term"))
         in com.hereliesaz.guillotine.mcp.VideoFilterCatalog.names ->
             applyFfmpegFilter(args.getString("clip_id"), com.hereliesaz.guillotine.mcp.VideoFilterCatalog.graphFor(name, args))
                 .apply { put("humanSummary", com.hereliesaz.guillotine.mcp.VideoFilterCatalog.summaryFor(name)) }

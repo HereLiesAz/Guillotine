@@ -109,7 +109,7 @@ literal default in code).
 
 | Category | Tools |
 | --- | --- |
-| [Timeline & editing](#timeline--editing) | 12 |
+| [Timeline & editing](#timeline--editing) | 13 |
 | [Vision & recognition](#vision--recognition) | 10 |
 | [Transcription, captions & speech](#transcription-captions--speech) | 6 |
 | [Audio](#audio) | 7 |
@@ -120,7 +120,7 @@ literal default in code).
 | [Beat-sync / rhythm](#beat-sync--rhythm) | 5 |
 | [Generation (cloud, BYO key)](#generation-cloud-byo-key) | 3 |
 | [User-defined tools & action recording](#user-defined-tools--action-recording) | 7 |
-| **Total** | **97** |
+| **Total** | **98** |
 
 ---
 
@@ -194,6 +194,16 @@ Set static values for a clip filter (e.g. brightness = 1.2, speed = 2.0).
 | `clip_id` | string | required | — | The clip to filter. |
 | `property` | string | required | — | Property name, e.g. `brightness`, `speed`. |
 | `value` | number | required | — | The value to set. |
+
+### `lookup_vocabulary`
+Resolve an editing word/phrase against the shared vocabulary graph. Returns the concept it maps to, its
+synonyms, its opposite (antonym), the tool it routes to, and — for the exact phrase — whether the sense is
+inverted (a negation like "less/reduce/remove" flips it to the opposite tool). The graph seeds a compact
+lexicon and expands it programmatically, and it also feeds a synonym/antonym appendix into the agent prompt.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `term` | string | required | — | The word or phrase to look up (e.g. `crispy`, `less warm`). |
 
 ### `set_frame_step`
 Frame decimation — keep only every Nth frame for a choppy/stutter look, live and on-device (no ffmpeg,
