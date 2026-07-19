@@ -23,15 +23,19 @@ object McpAgent {
         val provider = settings.provider
         val key = settings.keyFor(provider)
         val model = settings.modelFor(provider)
+        // The concrete tool surface knows how to decode the current frame; hand it to the on-device
+        // brain as its vision source. Cloud brains stay text-only (the on-device invariant), so they
+        // never receive it.
+        val frames = tools as? FrameProvider
         return when (provider) {
             AiProviderType.ANTHROPIC ->
-                if (key.isNotBlank()) AnthropicAgentBackend(key, model) else onDevice(context, settings)
+                if (key.isNotBlank()) AnthropicAgentBackend(key, model) else onDevice(context, settings, frames)
 
             AiProviderType.OPENAI ->
                 if (key.isNotBlank()) {
                     OpenAiAgentBackend(key, OPENAI_ENDPOINT, model, "OpenAI")
                 } else {
-                    onDevice(context, settings)
+                    onDevice(context, settings, frames)
                 }
 
             AiProviderType.OPENROUTER, AiProviderType.GROQ, AiProviderType.XAI, AiProviderType.MISTRAL -> {
@@ -39,21 +43,21 @@ object McpAgent {
                 if (key.isNotBlank() && compatUrl != null) {
                     OpenAiAgentBackend(key, compatUrl, model, provider.meta.label)
                 } else {
-                    onDevice(context, settings)
+                    onDevice(context, settings, frames)
                 }
             }
 
             AiProviderType.GEMINI ->
-                if (key.isNotBlank()) GeminiAgentBackend(key, model) else onDevice(context, settings)
+                if (key.isNotBlank()) GeminiAgentBackend(key, model) else onDevice(context, settings, frames)
 
             // Non-LLM on-device analyzers (the default): the brain is the on-device LLM if present.
-            AiProviderType.LOCAL, AiProviderType.MLKIT -> onDevice(context, settings)
+            AiProviderType.LOCAL, AiProviderType.MLKIT -> onDevice(context, settings, frames)
         }
     }
 
-    private fun onDevice(context: Context, settings: AiSettings): AgentBackend? =
+    private fun onDevice(context: Context, settings: AiSettings, frames: FrameProvider?): AgentBackend? =
         com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "agentModelPath").takeIf { it.isNotBlank() }
-            ?.let { OnDeviceAgentBackend(context, it) }
+            ?.let { OnDeviceAgentBackend(context, it, frames) }
 
     private const val OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 }

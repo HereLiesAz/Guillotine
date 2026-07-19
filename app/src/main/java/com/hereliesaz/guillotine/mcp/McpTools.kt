@@ -43,7 +43,23 @@ class McpTools(
     private val context: Context,
     private val vm: EditorViewModel,
     private val settingsProvider: () -> AiSettings,
-) : McpToolsSurface {
+) : McpToolsSurface, com.hereliesaz.guillotine.ai.agent.FrameProvider {
+
+    /**
+     * The active video clip's frame at the playhead as a Bitmap, or null if there's no video there /
+     * it can't be decoded. Lets the on-device assistant *see* the current frame (pixels stay on-device).
+     * The caller owns the bitmap and must recycle it. Mirrors the clip-resolution the frame tools use.
+     */
+    override fun currentFrame(): android.graphics.Bitmap? {
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+        ) ?: return null
+        val media = st.document.mediaFor(clip) ?: return null
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        return grabFrame(Uri.parse(media.uri), sourceMs)
+    }
 
     // ---- tool definitions ---------------------------------------------------
 
