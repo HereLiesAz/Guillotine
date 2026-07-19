@@ -189,7 +189,14 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val sharedMcpTools = remember { com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings } }
     // One backend instance reused across turns so the assistant keeps its conversation memory. Rebuilt only
     // when the AI settings change (provider/model/key) — which naturally begins a fresh conversation.
-    val agentBackend = remember(settings) {
+    val agentBackend = remember(
+        settings.provider,
+        settings.keyFor(settings.provider),
+        settings.modelFor(settings.provider),
+        // onDevice() reads the on-device model path (not a settings field), so include it or an on-device
+        // model change would leave a stale backend.
+        com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "agentModelPath"),
+    ) {
         com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)
     }
     // Headless assistant (no separate bar): the single prompt field below the tools runs the agent
@@ -284,7 +291,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val openLauncher = rememberOpenProjectLauncher { uri ->
         scope.launch {
             val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
-            if (doc != null) vm.loadDocument(doc)
+            if (doc != null) {
+                vm.loadDocument(doc)
+                agentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
+            }
         }
     }
     
@@ -662,6 +672,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 androidx.compose.material3.TextButton(
                     onClick = {
                         vm.loadDocument(com.hereliesaz.guillotine.model.Document())
+                        agentBackend?.reset() // fresh project → fresh conversation
                         showNewProjectConfirm = false
                     },
                 ) {
