@@ -62,7 +62,8 @@ touch the tool surface, use the Android impl as the behavior spec for the deskto
   ./gradlew :shared:test
   ```
   Use the Gradle **wrapper** (`./gradlew`), not a system Gradle.
-- **Android:** requires the Android SDK. `./gradlew :app:assembleDebug`.
+- **Android:** requires the Android SDK. `./gradlew :app:assembleGithubDebug` (the ad-free
+  direct-download flavor; `play` is the Play Store flavor with AdMob).
 - **Desktop:** `./gradlew :desktop:packageDistributionForCurrentOS` (CI packages `.deb`/`.dmg`/`.msi`
   across Ubuntu/macOS/Windows via `.github/workflows/desktop-build.yml` — that workflow is the
   authoritative cross-platform compile check).
