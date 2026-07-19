@@ -133,6 +133,9 @@ fun NleScreen(
     val state by vm.uiState.collectAsState()
     val settings by keyStore.settings.collectAsState()
     val scope = rememberCoroutineScope()
+    // One backend instance reused across turns so the assistant keeps its conversation memory. Rebuilt only
+    // when the AI settings change (provider/model/key) — which naturally begins a fresh conversation.
+    val agentBackend = remember(settings) { DesktopMcpAgent.forSettings(settings) }
 
     // Headless assistant: the single prompt field in the tool strip runs the agent through this
     // when nothing is selected, and shows its status inline.
@@ -377,10 +380,7 @@ fun NleScreen(
             assistant = assistantState,
             onAgentInput = assistantVm::setInput,
             onAgentRun = { t ->
-                assistantVm.run(
-                    t, mcpTools,
-                    DesktopMcpAgent.forSettings(settings),
-                )
+                assistantVm.run(t, mcpTools, agentBackend)
             },
             onImport = { importTargetTrack = null; importLauncher() },
             onHelp = { showHelp = true },
@@ -404,10 +404,7 @@ fun NleScreen(
             // synthesizes an "original request + question + reply" continuation prompt so any
             // backend picks up where it left off without needing message-log state.
             onReply = { t ->
-                assistantVm.sendReply(
-                    t, mcpTools,
-                    DesktopMcpAgent.forSettings(settings),
-                )
+                assistantVm.sendReply(t, mcpTools, agentBackend)
             },
         )
         } // editor + panel Box

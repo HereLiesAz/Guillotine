@@ -187,6 +187,11 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // One shared MCP tool surface: the embedded server, the optional relay, and the in-app AI
     // assistant all drive the editor through this same object ({ settings } reads live).
     val sharedMcpTools = remember { com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings } }
+    // One backend instance reused across turns so the assistant keeps its conversation memory. Rebuilt only
+    // when the AI settings change (provider/model/key) — which naturally begins a fresh conversation.
+    val agentBackend = remember(settings) {
+        com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)
+    }
     // Headless assistant (no separate bar): the single prompt field below the tools runs the agent
     // through this when nothing is selected, and shows its status inline.
     val assistantVm: AssistantViewModel = viewModel()
@@ -570,7 +575,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 .weight(timelineWeight)
                 .fillMaxWidth()
         ) {
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath"))
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath"))
             
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack, 
@@ -596,11 +601,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             // synthesizes an "original request + question + reply" continuation prompt so any
             // backend picks up where it left off without needing message-log state.
             onReply = { t ->
-                assistantVm.sendReply(
-                    t,
-                    sharedMcpTools,
-                    com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools),
-                )
+                assistantVm.sendReply(t, sharedMcpTools, agentBackend)
             },
         )
         } // editor + sheet Box

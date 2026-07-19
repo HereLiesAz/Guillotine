@@ -22,6 +22,12 @@ class GeminiAgentBackend(
 
     private val base = "https://generativelanguage.googleapis.com"
 
+    // Conversation memory kept across run() calls (see AgentBackend.reset). system_instruction is sent in the
+    // request body each turn, so it's not part of this. Reset on any non-clean exit to avoid a corrupt tail.
+    private var contents = JSONArray()
+
+    override fun reset() { contents = JSONArray() }
+
     override suspend fun run(
         instruction: String,
         tools: McpToolsSurface,
@@ -31,7 +37,8 @@ class GeminiAgentBackend(
             val toolBlock = JSONArray().put(
                 JSONObject().put("function_declarations", geminiTools(tools.definitions())),
             )
-            val contents = JSONArray().put(
+            if (contents.length() >= MAX_CONVERSATION_MESSAGES) contents = JSONArray() // bound growth across turns
+            contents.put(
                 JSONObject()
                     .put("role", "user")
                     .put("parts", JSONArray().put(JSONObject().put("text", instruction))),
@@ -87,9 +94,12 @@ class GeminiAgentBackend(
                 return@withContext
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
+            contents = JSONArray() // stopped mid-task; drop the (possibly unbalanced) history
         } catch (e: kotlinx.coroutines.CancellationException) {
+            contents = JSONArray() // partial turn — reset so the next run starts clean
             throw e
         } catch (e: Exception) {
+            contents = JSONArray() // partial turn (model functionCall with no functionResponse) — reset
             onEvent(AgentEvent.Failed(e.message ?: "Gemini agent failed"))
         }
     }

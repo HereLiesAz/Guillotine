@@ -45,10 +45,24 @@ interface AgentBackend {
      * do a bare completion or anything fails. Must never throw. Default: unsupported.
      */
     suspend fun complete(prompt: String): String? = null
+
+    /**
+     * Forget the accumulated conversation and start a fresh one on the next [run]. Stateful backends keep
+     * the running message history between runs so the model remembers earlier turns (edits it made, what
+     * the user asked); call this to begin a brand-new conversation. Default: no-op (stateless backend).
+     */
+    fun reset() {}
 }
 
 /** Hard cap on tool round-trips so a confused model can't loop forever / burn tokens. */
 const val MAX_AGENT_ITERATIONS = 12
+
+/**
+ * Soft cap on retained conversation messages across runs. When a stateful backend's history grows past
+ * this, it starts a fresh conversation before the next turn — bounding token cost/latency and never leaving
+ * a half-finished exchange around. Successful runs under the cap keep their memory.
+ */
+const val MAX_CONVERSATION_MESSAGES = 60
 
 /** Shared role prompt: tells the model it operates the editor purely through the tools. */
 val AGENT_SYSTEM_PROMPT = """

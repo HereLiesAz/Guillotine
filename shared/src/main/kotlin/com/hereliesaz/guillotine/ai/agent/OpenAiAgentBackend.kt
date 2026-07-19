@@ -22,6 +22,12 @@ class OpenAiAgentBackend(
     private val label: String,
 ) : AgentBackend {
 
+    // Conversation memory kept across run() calls (see AgentBackend.reset). The system prompt is added once
+    // at the head of a fresh history; reset on any non-clean exit so a partial turn can't corrupt the next.
+    private var messages = JSONArray()
+
+    override fun reset() { messages = JSONArray() }
+
     override suspend fun run(
         instruction: String,
         tools: McpToolsSurface,
@@ -29,9 +35,11 @@ class OpenAiAgentBackend(
     ) = withContext(Dispatchers.IO) {
         try {
             val toolDefs = openAiTools(tools.definitions())
-            val messages = JSONArray()
-                .put(JSONObject().put("role", "system").put("content", AGENT_SYSTEM_PROMPT))
-                .put(JSONObject().put("role", "user").put("content", instruction))
+            if (messages.length() >= MAX_CONVERSATION_MESSAGES) messages = JSONArray() // bound growth across turns
+            if (messages.length() == 0) {
+                messages.put(JSONObject().put("role", "system").put("content", AGENT_SYSTEM_PROMPT))
+            }
+            messages.put(JSONObject().put("role", "user").put("content", instruction))
 
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
@@ -74,9 +82,12 @@ class OpenAiAgentBackend(
                 return@withContext
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
+            messages = JSONArray() // stopped mid-task; drop the (possibly unbalanced) history
         } catch (e: kotlinx.coroutines.CancellationException) {
+            messages = JSONArray() // partial turn — reset so the next run starts clean
             throw e
         } catch (e: Exception) {
+            messages = JSONArray() // partial turn (assistant tool_calls with no tool result) — reset
             onEvent(AgentEvent.Failed(e.message ?: "$label agent failed"))
         }
     }
