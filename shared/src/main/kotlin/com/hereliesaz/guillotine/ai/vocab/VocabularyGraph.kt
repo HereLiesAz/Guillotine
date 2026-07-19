@@ -89,6 +89,16 @@ object VocabularyGraph {
         Concept("zoom_out", listOf("zoom out", "wider", "pull back", "further")),
         Concept("longer", listOf("longer", "extend", "lengthen", "stretch"), antonym = "shorter"),
         Concept("shorter", listOf("shorter", "shorten", "tighten", "condense")),
+        // Timeline verbs (map to the core TimelineTools).
+        Concept("seek", listOf("seek", "go to", "jump to", "scrub", "move the playhead", "skip to"), tool = "seek"),
+        Concept("move_clip", listOf("move", "reposition", "shift", "slide", "relocate", "drag"), tool = "move_clip"),
+        Concept("trim", listOf("trim", "shorten the edge", "clip the edge", "trim the ends"), tool = "trim_clip"),
+        Concept("title", listOf("title", "caption", "subtitle", "lower third", "label", "text card"), tool = "add_text"),
+        Concept("undo", listOf("undo", "revert", "take it back", "go back"), tool = "undo", antonym = "redo"),
+        Concept("redo", listOf("redo", "put it back", "restore"), tool = "redo"),
+        Concept("add_track", listOf("new track", "add track", "add layer", "another track"), tool = "add_track"),
+        Concept("mute", listOf("mute", "silence", "unmute", "hide track", "solo"), tool = "set_track"),
+        Concept("reframe", listOf("reframe", "crop the clip", "punch in", "scale the clip", "reposition the frame"), tool = "transform_clip"),
     )
 
     // ---- graph assembly ------------------------------------------------------

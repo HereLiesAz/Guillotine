@@ -1224,6 +1224,31 @@ open class EditorViewModel {
     }
 
     /**
+     * Add a TEXT clip with [text] on [trackId] at [startMs] for [durationMs], returning its id. Unlike
+     * [addEmptyTextClip] (playhead-anchored, no return) this takes explicit content/placement — used by
+     * the `add_text` MCP tool so the agent can author title/caption cards.
+     */
+    fun addTextClip(trackId: String, text: String, startMs: Long, durationMs: Long): String {
+        require(trackId in document.videoTracks) { "Track $trackId does not exist or is not a video track." }
+        val id = newId()
+        mutateDocument { doc ->
+            doc.copy(
+                clips = doc.clips + TimelineClip(
+                    id = id,
+                    mediaId = "",
+                    type = ClipType.TEXT,
+                    trackId = trackId,
+                    startTimeMs = startMs.coerceAtLeast(0),
+                    trimStartMs = 0,
+                    durationMs = durationMs.coerceAtLeast(100),
+                    text = text,
+                ),
+            )
+        }
+        return id
+    }
+
+    /**
      * Turn a transcript of [sourceClipId]'s media into text/caption clips on the text track
      * above the video, and group them with the source clip so they select/delete together.
      * Cue times are source-media ms; only the part inside the clip's trimmed window is used.

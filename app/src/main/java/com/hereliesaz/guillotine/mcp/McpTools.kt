@@ -775,6 +775,10 @@ class McpTools(
         // FFmpeg -vf graph baked to a new clip. Shared registry so both platforms expose the same set.
         val videoFx = VideoFilterCatalog.toolDefinitions()
         for (i in 0 until videoFx.length()) put(videoFx.get(i))
+        // Core timeline verbs (seek, move_clip, trim, add_text, tracks, undo/redo, …), shared across
+        // platforms and backed by the editor view-model.
+        val timelineFx = TimelineTools.toolDefinitions()
+        for (i in 0 until timelineFx.length()) put(timelineFx.get(i))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -851,6 +855,7 @@ class McpTools(
         "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
         "clear_azp_plugin" -> clearAzpPlugin(args.getString("clip_id"))
         "lookup_vocabulary" -> com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.lookupJson(args.getString("term"))
+        in TimelineTools.names -> TimelineTools.call(vm, name, args)
         in VideoFilterCatalog.names ->
             applyFfmpegFilter(args.getString("clip_id"), VideoFilterCatalog.graphFor(name, args))
                 .apply { put("humanSummary", VideoFilterCatalog.summaryFor(name)) }
@@ -891,6 +896,21 @@ class McpTools(
             put("audioTracks", JSONArray(doc.audioTracks))
             put("clipCount", doc.clips.size)
             put("clips", JSONArray().apply { doc.clips.forEach { put(clipJson(it)) } })
+            put("selectedClipIds", JSONArray(vm.uiState.value.selectedClipIds))
+            put("globalSettings", JSONObject().apply {
+                put("fps", doc.settings.fps)
+                put("aspectRatio", doc.settings.aspectRatio.name)
+                val c = doc.settings.crop
+                put("crop", JSONObject().put("x", c.x).put("y", c.y).put("w", c.w).put("h", c.h))
+            })
+            put("trackSettings", JSONObject().apply {
+                (doc.videoTracks + doc.audioTracks).forEach { tid ->
+                    val ts = doc.trackSettingsFor(tid)
+                    put(tid, JSONObject()
+                        .put("volume", ts.volume).put("opacity", ts.opacity)
+                        .put("muted", ts.muted).put("disabled", ts.disabled))
+                }
+            })
             put(
                 "humanSummary",
                 "Read timeline: ${doc.clips.size} clip(s), ${msFmt(doc.totalDurationMs)} total, playhead ${msFmt(now)}.",
