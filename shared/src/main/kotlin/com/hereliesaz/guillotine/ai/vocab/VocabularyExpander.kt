@@ -70,7 +70,13 @@ object VocabularyExpander {
                 return null
             }
         }
-        val reply = runCatching { complete(buildPrompt()) }.getOrNull() ?: return null
+        val reply = try {
+            complete(buildPrompt())
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            throw e // don't swallow cancellation — let structured concurrency cancel this job
+        } catch (e: Exception) {
+            null
+        } ?: return null
         val parsed = parse(reply)
         if (parsed.isEmpty()) return null
         VocabularyGraph.applyExpansion(parsed)
