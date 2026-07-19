@@ -477,19 +477,25 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         // so there's no separate status strip here.
         var timelineWeight by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.4f) }
 
+        // Split between the preview and the clip-properties panel (AdvancedToolView), resizable by a
+        // divider in BOTH arrangements: a vertical grip when they sit side-by-side (wide) and a
+        // horizontal grip when stacked (tall). Each orientation remembers its own fraction.
+        var previewWeightWide by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.65f) }
+        var previewWeightTall by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.5f) }
         androidx.compose.foundation.layout.BoxWithConstraints(
             androidx.compose.ui.Modifier
                 .weight(1f - timelineWeight)
                 .fillMaxWidth()
         ) {
             val isWide = maxWidth > maxHeight * 1.1f
+            val totalWidthPx = constraints.maxWidth.toFloat()
+            val totalHeightPx = constraints.maxHeight.toFloat()
             if (isWide) {
                 androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxSize()) {
                     androidx.compose.foundation.layout.Column(
                         androidx.compose.ui.Modifier
-                            .weight(0.65f)
+                            .weight(previewWeightWide)
                             .fillMaxHeight()
-                            .animateContentSize()
                     ) {
                         PreviewPlayer(
                             state,
@@ -500,18 +506,25 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         )
                         TransportControls(vm, state)
                     }
+                    DraggableVerticalDivider(
+                        onDrag = { dragAmount ->
+                            if (totalWidthPx > 0f) {
+                                previewWeightWide = (previewWeightWide + dragAmount / totalWidthPx).coerceIn(0.25f, 0.85f)
+                            }
+                        }
+                    )
                     AdvancedToolView(
                         vm = vm,
                         state = state,
                         onTranscribe = onTranscribe,
                         modifier = androidx.compose.ui.Modifier
-                            .weight(0.35f)
+                            .weight(1f - previewWeightWide)
                             .fillMaxHeight()
                     )
                 }
             } else {
-                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().animateContentSize()) {
-                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(0.5f).fillMaxWidth()) {
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(previewWeightTall).fillMaxWidth()) {
                         PreviewPlayer(
                             state,
                             androidx.compose.ui.Modifier.weight(1f).fillMaxWidth(),
@@ -521,12 +534,19 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         )
                         TransportControls(vm, state)
                     }
+                    DraggableTimelineDivider(
+                        onDrag = { dragAmount ->
+                            if (totalHeightPx > 0f) {
+                                previewWeightTall = (previewWeightTall + dragAmount / totalHeightPx).coerceIn(0.25f, 0.85f)
+                            }
+                        }
+                    )
                     AdvancedToolView(
                         vm = vm,
                         state = state,
                         onTranscribe = onTranscribe,
                         modifier = androidx.compose.ui.Modifier
-                            .weight(0.5f)
+                            .weight(1f - previewWeightTall)
                             .fillMaxWidth()
                     )
                 }
