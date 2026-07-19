@@ -424,13 +424,18 @@ class DesktopMcpTools(
             "apply_ffmpeg_filter",
             "Bake a standard **FFmpeg `-vf` filtergraph** onto a clip ON-DEVICE and add the result as a new " +
                 "clip — the whole FFmpeg filter ecosystem, and **Frei0r** plugins via `frei0r=<name>:<params>`. " +
-                "Use for \"apply the ffmpeg filter <graph>\", \"run a frei0r plugin\", \"add a vintage/vhs/" +
-                "chromashift filter\", \"eq/curves/deband this\". `filter` is the raw -vf graph, e.g. " +
-                "\"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Runs in-process via the bundled FFmpeg; " +
-                "this is a bake-to-new-clip step, not a live filter.",
+                "The ESCAPE HATCH for effects with no dedicated tool: AUTHOR the `-vf` graph yourself from the " +
+                "user's plain-English request. Frame decimation/stutter — \"cut/remove every other frame\", " +
+                "\"drop every 2nd frame\", \"make it choppy\" → \"framestep=2\" (every third → \"framestep=3\"); " +
+                "\"choppy N-fps look\" → \"fps=8\"; \"frame-blend/motion trail\" → \"tmix=frames=3\". Also " +
+                "\"run a frei0r plugin\", \"vintage/vhs/chromashift\", \"eq/curves/deband this\". `filter` is the " +
+                "raw -vf graph, e.g. \"framestep=2\", \"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Audio is " +
+                "passed through unchanged, so prefer duration-preserving graphs (framestep/fps/tmix/eq) and " +
+                "avoid setpts/trim/atempo, which change the video length and desync the audio. Runs in-process " +
+                "via the bundled FFmpeg; this is a bake-to-new-clip step, not a live filter.",
             objSchema(
                 "clip_id" to stringProp("The clip whose video to filter"),
-                "filter" to stringProp("An FFmpeg -vf filtergraph (Frei0r via frei0r=name:params)"),
+                "filter" to stringProp("An FFmpeg -vf filtergraph you author from the request, e.g. framestep=2 for \"every other frame\" (Frei0r via frei0r=name:params)"),
                 required = listOf("clip_id", "filter"),
             ),
         ))
