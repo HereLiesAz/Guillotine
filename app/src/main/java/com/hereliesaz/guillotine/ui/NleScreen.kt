@@ -194,11 +194,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val agentModelPath = remember(settings) {
         com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "agentModelPath")
     }
-    // Holder so remembered lambdas (e.g. openLauncher) always reset the CURRENT backend, not a stale one
-    // captured before a settings-driven rebuild.
-    val agentBackendHolder = remember {
-        java.util.concurrent.atomic.AtomicReference<com.hereliesaz.guillotine.ai.agent.AgentBackend?>()
-    }
     val agentBackend = remember(
         settings.provider,
         settings.keyFor(settings.provider),
@@ -206,8 +201,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         agentModelPath,
     ) {
         com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)
-            .also { agentBackendHolder.set(it) }
     }
+    // Read through this in remembered lambdas (e.g. openLauncher) so they always reset the CURRENT backend,
+    // not a stale one captured before a settings-driven rebuild.
+    val currentAgentBackend by androidx.compose.runtime.rememberUpdatedState(agentBackend)
     // Headless assistant (no separate bar): the single prompt field below the tools runs the agent
     // through this when nothing is selected, and shows its status inline.
     val assistantVm: AssistantViewModel = viewModel()
@@ -302,7 +299,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
             if (doc != null) {
                 vm.loadDocument(doc)
-                agentBackendHolder.get()?.reset() // new project → fresh conversation (don't carry prior edits over)
+                currentAgentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
             }
         }
     }
@@ -681,7 +678,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 androidx.compose.material3.TextButton(
                     onClick = {
                         vm.loadDocument(com.hereliesaz.guillotine.model.Document())
-                        agentBackendHolder.get()?.reset() // fresh project → fresh conversation
+                        currentAgentBackend?.reset() // fresh project → fresh conversation
                         showNewProjectConfirm = false
                     },
                 ) {

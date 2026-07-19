@@ -135,16 +135,14 @@ fun NleScreen(
     val scope = rememberCoroutineScope()
     // One backend instance reused across turns so the assistant keeps its conversation memory. Rebuilt only
     // when the AI settings change (provider/model/key) — which naturally begins a fresh conversation.
-    // Holder so remembered lambdas (e.g. openLauncher) always reset the CURRENT backend, not a stale one
-    // captured before a settings-driven rebuild.
-    val agentBackendHolder = remember {
-        java.util.concurrent.atomic.AtomicReference<com.hereliesaz.guillotine.ai.agent.AgentBackend?>()
-    }
     val agentBackend = remember(
         settings.provider,
         settings.keyFor(settings.provider),
         settings.modelFor(settings.provider),
-    ) { DesktopMcpAgent.forSettings(settings).also { agentBackendHolder.set(it) } }
+    ) { DesktopMcpAgent.forSettings(settings) }
+    // Read through this in remembered lambdas (e.g. openLauncher) so they always reset the CURRENT backend,
+    // not a stale one captured before a settings-driven rebuild.
+    val currentAgentBackend by androidx.compose.runtime.rememberUpdatedState(agentBackend)
 
     // Headless assistant: the single prompt field in the tool strip runs the agent through this
     // when nothing is selected, and shows its status inline.
@@ -226,7 +224,7 @@ fun NleScreen(
             }
             if (doc != null) {
                 vm.loadDocument(doc)
-                agentBackendHolder.get()?.reset() // new project → fresh conversation (don't carry prior edits over)
+                currentAgentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
             }
         }
     }
@@ -465,7 +463,7 @@ fun NleScreen(
                 TextButton(
                     onClick = {
                         vm.loadDocument(Document())
-                        agentBackendHolder.get()?.reset() // fresh project → fresh conversation
+                        currentAgentBackend?.reset() // fresh project → fresh conversation
                         showNewProjectConfirm = false
                     },
                 ) {
