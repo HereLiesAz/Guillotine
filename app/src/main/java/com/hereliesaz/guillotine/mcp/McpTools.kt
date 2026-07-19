@@ -502,7 +502,7 @@ class McpTools(
                 "\"run a frei0r plugin\", \"vintage/vhs/chromashift\", \"eq/curves/deband this\". `filter` is the " +
                 "raw -vf graph, e.g. \"framestep=2\", \"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Audio is " +
                 "copied unchanged (`-c:a copy`), so prefer duration-preserving graphs (framestep/fps/tmix/eq) " +
-                "and avoid setpts/trim/atempo, which desync the audio. Requires an ffmpeg executable set in " +
+                "and avoid setpts/trim, which desync the audio. Requires an ffmpeg executable set in " +
                 "Settings → AI Analyzer → FFmpeg filters (desktop-first; relay its error if unset). This is " +
                 "a bake-to-new-clip step, not a live filter.",
             objSchema(

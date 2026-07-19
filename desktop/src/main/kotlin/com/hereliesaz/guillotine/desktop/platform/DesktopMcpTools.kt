@@ -431,7 +431,7 @@ class DesktopMcpTools(
                 "\"run a frei0r plugin\", \"vintage/vhs/chromashift\", \"eq/curves/deband this\". `filter` is the " +
                 "raw -vf graph, e.g. \"framestep=2\", \"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Audio is " +
                 "passed through unchanged, so prefer duration-preserving graphs (framestep/fps/tmix/eq) and " +
-                "avoid setpts/trim/atempo, which change the video length and desync the audio. Runs in-process " +
+                "avoid setpts/trim, which change the video length and desync the audio. Runs in-process " +
                 "via the bundled FFmpeg; this is a bake-to-new-clip step, not a live filter.",
             objSchema(
                 "clip_id" to stringProp("The clip whose video to filter"),

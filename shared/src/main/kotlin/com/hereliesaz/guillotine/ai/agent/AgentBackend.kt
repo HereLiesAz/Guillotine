@@ -155,8 +155,8 @@ val AGENT_SYSTEM_PROMPT = """
       — don't invent filter names.
     - IMPORTANT — audio is copied through unchanged (`-c:a copy`), so prefer graphs that KEEP the clip's
       duration (framestep, fps, tmix, eq, hue…). These read as "every other frame removed" via choppy motion
-      at the same length, which keeps audio in sync. Avoid speed/trim-style graphs (setpts, trim, atempo)
-      that change video length — they desync the copied audio.
+      at the same length, which keeps audio in sync. Avoid speed/trim-style graphs (setpts, trim) that
+      change the video length — they desync the copied audio.
     - Needs an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters; if it's unset the tool returns
       an error naming that setting — relay it and don't retry. Bake-to-new-clip (not live) and heavy —
       desktop-first.
