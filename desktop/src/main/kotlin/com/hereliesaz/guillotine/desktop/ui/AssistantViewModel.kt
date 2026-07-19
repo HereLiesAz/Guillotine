@@ -67,7 +67,7 @@ class AssistantViewModel {
         if (vocabExpansionStarted) return
         vocabExpansionStarted = true
         scope.launch {
-            runCatching {
+            try {
                 val cache = vocabCache
                 val cached = cache?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { it.load() } }
                 val fresh = com.hereliesaz.guillotine.ai.vocab.VocabularyExpander.ensureExpanded(cached) { p ->
@@ -76,6 +76,10 @@ class AssistantViewModel {
                 if (fresh != null && cache != null) {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.save(fresh) }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // don't swallow cancellation — structured concurrency
+            } catch (e: Exception) {
+                // Vocabulary expansion is optional; ignore failures (the seed vocabulary stays in effect).
             }
         }
     }
