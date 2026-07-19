@@ -193,6 +193,14 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var azpStatus by remember { mutableStateOf<String?>(null) }
     // When a package is valid but unsigned/untrusted, hold its bytes so the user can confirm.
     var azpUntrusted by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    // A package whose id was first installed from a different publisher key — confirm before overwriting.
+    var azpPublisherChange by remember { mutableStateOf<AzpModelInstall.PublisherChangedException?>(null) }
+    var azpChangeBytes by remember { mutableStateOf<ByteArray?>(null) }
+    val publisherPins = remember {
+        com.hereliesaz.guillotine.azphalt.AzpPublisherPins(
+            java.io.File(context.filesDir, "azp-publishers.json"),
+        )
+    }
 
     // Fold each installed model's on-disk path into the matching visible field, then persist. Slots
     // the app renders as ML Kit built-ins (segmentation/face-detect/labeling) are stored on desktop;
@@ -204,14 +212,17 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         onSave(buildSettings())
     }
 
-    fun installAzp(bytes: ByteArray, allowUntrusted: Boolean) {
+    fun installAzp(bytes: ByteArray, allowUntrusted: Boolean, allowPublisherChange: Boolean = false) {
         scope.launch {
             azpBusy = true
             azpStatus = "Reading package…"
             try {
                 val dir = java.io.File(context.filesDir, "azp-models")
                 val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    AzpModelInstall.install(bytes, emptySet(), dir, allowUntrusted) { p ->
+                    AzpModelInstall.install(
+                        bytes, emptySet(), dir, allowUntrusted,
+                        pins = publisherPins, allowPublisherChange = allowPublisherChange,
+                    ) { p ->
                         val pct = p.bytesTotal?.takeIf { it > 0 }?.let { (p.bytesDone * 100 / it) }
                         azpStatus = when (p.phase) {
                             AzpModelInstall.Phase.DOWNLOADING ->
@@ -226,6 +237,10 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                 azpStatus = "Installed ${result.installed.size} model(s) from ${result.packageId}" +
                     (if (result.trust.trusted) " (trusted)" else " (unsigned)") +
                     if (routed < result.installed.size) " — ${result.installed.size - routed} need manual wiring." else "."
+            } catch (e: AzpModelInstall.PublisherChangedException) {
+                azpPublisherChange = e
+                azpChangeBytes = bytes
+                azpStatus = null
             } catch (e: AzpModelInstall.UntrustedException) {
                 azpUntrusted = bytes to e.trust.reason
                 azpStatus = null
@@ -629,6 +644,33 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             },
             dismissButton = {
                 Text("Cancel", modifier = Modifier.clickableText { azpUntrusted = null })
+            },
+        )
+    }
+
+    azpPublisherChange?.let { change ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { azpPublisherChange = null; azpChangeBytes = null },
+            title = { Text("Different publisher") },
+            text = {
+                Text(
+                    "\"${change.packageId}\" was first installed from one publisher, but this update is " +
+                        "signed by " + (if (change.newSignerKey == null) "no key" else "a different key") +
+                        ". This can be a legitimate key change — or someone else trying to replace the " +
+                        "plugin. Only continue if you trust the new publisher.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val bytes = azpChangeBytes
+                    azpPublisherChange = null; azpChangeBytes = null
+                    if (bytes != null) installAzp(bytes, allowUntrusted = true, allowPublisherChange = true)
+                }) { Text("Trust new publisher", color = Red500, fontWeight = FontWeight.Medium) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { azpPublisherChange = null; azpChangeBytes = null },
+                ) { Text("Cancel") }
             },
         )
     }
