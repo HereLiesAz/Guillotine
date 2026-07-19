@@ -1229,6 +1229,7 @@ open class EditorViewModel {
      * the `add_text` MCP tool so the agent can author title/caption cards.
      */
     fun addTextClip(trackId: String, text: String, startMs: Long, durationMs: Long): String {
+        require(trackId in document.videoTracks) { "Track $trackId does not exist or is not a video track." }
         val id = newId()
         mutateDocument { doc ->
             doc.copy(

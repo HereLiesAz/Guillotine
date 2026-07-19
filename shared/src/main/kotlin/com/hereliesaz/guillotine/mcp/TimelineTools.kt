@@ -95,6 +95,13 @@ object TimelineTools {
             val clip = clipOrThrow(vm, args.getString("clip_id"))
             val startMs = args.getLong("start_ms").coerceAtLeast(0L)
             val track = args.optString("track_id").ifBlank { clip.trackId }
+            val doc = vm.uiState.value.document
+            // moveClip silently no-ops on a type-mismatched track, which would look like success — reject it.
+            val compatible = when (clip.type) {
+                ClipType.AUDIO -> track in doc.audioTracks
+                else -> track in doc.videoTracks // VIDEO + TEXT live on video tracks
+            }
+            require(compatible) { "Track $track can't hold a ${clip.type.name.lowercase()} clip." }
             vm.moveClip(clip.id, track, startMs)
             ok("Moved the clip to ${startMs}ms on $track.")
         }
@@ -102,8 +109,10 @@ object TimelineTools {
             val clip = clipOrThrow(vm, args.getString("clip_id"))
             val startDelta = args.optLong("start_delta_ms", 0L)
             val endDelta = args.optLong("end_delta_ms", 0L)
+            // Contract: positive shortens, negative lengthens. trimClipStart already subtracts from the
+            // duration (positive shortens); trimClipEnd ADDS to it, so negate to keep the same sense.
             if (startDelta != 0L) vm.trimClipStart(clip.id, startDelta)
-            if (endDelta != 0L) vm.trimClipEnd(clip.id, endDelta)
+            if (endDelta != 0L) vm.trimClipEnd(clip.id, -endDelta)
             ok("Trimmed the clip (start $startDelta ms, end $endDelta ms).")
         }
         "add_text" -> {
@@ -125,6 +134,9 @@ object TimelineTools {
         }
         "set_track" -> {
             val trackId = args.getString("track_id")
+            val doc = vm.uiState.value.document
+            // Guard: updateTrackSettings would otherwise create a default entry for a non-existent track.
+            require(trackId in doc.videoTracks || trackId in doc.audioTracks) { "Track not found: $trackId" }
             vm.updateTrackSettings(trackId) { ts ->
                 var out = ts
                 if (args.has("muted")) out = out.copy(muted = args.getBoolean("muted"))
@@ -139,10 +151,16 @@ object TimelineTools {
             val clip = clipOrThrow(vm, args.getString("clip_id"))
             vm.updateClip(clip.id) { c ->
                 c.copy(
-                    scale = if (args.has("scale")) args.getDouble("scale").toFloat().coerceAtLeast(0f) else c.scale,
-                    offsetX = if (args.has("offset_x")) args.getDouble("offset_x").toFloat() else c.offsetX,
-                    offsetY = if (args.has("offset_y")) args.getDouble("offset_y").toFloat() else c.offsetY,
-                    rotation = if (args.has("rotation")) args.getDouble("rotation").toFloat() else c.rotation,
+                    // Bound to sane ranges so the clip can't be scaled to nothing or panned fully off-screen.
+                    scale = if (args.has("scale")) args.getDouble("scale").toFloat().coerceIn(0.1f, 6f) else c.scale,
+                    offsetX = if (args.has("offset_x")) args.getDouble("offset_x").toFloat().coerceIn(-1.5f, 1.5f) else c.offsetX,
+                    offsetY = if (args.has("offset_y")) args.getDouble("offset_y").toFloat().coerceIn(-1.5f, 1.5f) else c.offsetY,
+                    rotation = if (args.has("rotation")) {
+                        val r = args.getDouble("rotation").toFloat()
+                        ((r + 180f) % 360f + 360f) % 360f - 180f // normalize to [-180, 180)
+                    } else {
+                        c.rotation
+                    },
                 )
             }
             ok("Transformed the clip.")
