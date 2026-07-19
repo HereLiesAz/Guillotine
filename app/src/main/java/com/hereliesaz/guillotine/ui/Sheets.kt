@@ -661,17 +661,16 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                 )
             },
             confirmButton = {
-                Text(
-                    "Trust new publisher", color = Red500, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickableText {
-                        val bytes = azpChangeBytes
-                        azpPublisherChange = null; azpChangeBytes = null
-                        if (bytes != null) installAzp(bytes, allowUntrusted = true, allowPublisherChange = true)
-                    },
-                )
+                androidx.compose.material3.TextButton(onClick = {
+                    val bytes = azpChangeBytes
+                    azpPublisherChange = null; azpChangeBytes = null
+                    if (bytes != null) installAzp(bytes, allowUntrusted = true, allowPublisherChange = true)
+                }) { Text("Trust new publisher", color = Red500, fontWeight = FontWeight.Medium) }
             },
             dismissButton = {
-                Text("Cancel", modifier = Modifier.clickableText { azpPublisherChange = null; azpChangeBytes = null })
+                androidx.compose.material3.TextButton(
+                    onClick = { azpPublisherChange = null; azpChangeBytes = null },
+                ) { Text("Cancel") }
             },
         )
     }

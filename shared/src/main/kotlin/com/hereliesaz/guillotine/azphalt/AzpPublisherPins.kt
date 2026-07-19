@@ -19,27 +19,43 @@ import java.io.File
  */
 class AzpPublisherPins(private val file: File) {
 
+    // Installs run on background (Dispatchers.IO) coroutines, so two of them can read-modify-write the
+    // pins file concurrently. Serialize all access so a pin can't be lost to a lost-update race.
+    private val lock = Any()
+
     private fun readAll(): LinkedHashMap<String, String> {
-        if (!file.isFile) return LinkedHashMap()
-        return runCatching {
+        if (!file.isFile || file.length() == 0L) return LinkedHashMap()
+        return try {
             val o = JSONObject(file.readText())
             val m = LinkedHashMap<String, String>()
             for (k in o.keys()) o.optString(k).takeIf { it.isNotBlank() }?.let { m[k] = it }
             m
-        }.getOrDefault(LinkedHashMap())
+        } catch (e: Exception) {
+            // A present-but-unparseable file must fail loud, never read as empty: an empty read would let
+            // pin() overwrite the file and silently discard every other publisher's pin — a security hole.
+            throw IllegalStateException("azp: publisher pins file is unreadable: ${file.absolutePath}", e)
+        }
     }
 
     /** The pinned publisher key for [packageId], or null if this id has never been installed. */
-    fun keyFor(packageId: String): String? = readAll()[packageId]
+    fun keyFor(packageId: String): String? = synchronized(lock) { readAll()[packageId] }
 
     /** Record [publicKey] as the publisher of [packageId] (first install, or a caller-approved rotation). */
-    fun pin(packageId: String, publicKey: String) {
+    fun pin(packageId: String, publicKey: String) = synchronized(lock) {
         val m = readAll()
-        if (m[packageId] == publicKey) return
-        m[packageId] = publicKey
-        file.parentFile?.mkdirs()
-        val o = JSONObject()
-        for ((k, v) in m) o.put(k, v)
-        file.writeText(o.toString(2))
+        if (m[packageId] != publicKey) {
+            m[packageId] = publicKey
+            val o = JSONObject()
+            for ((k, v) in m) o.put(k, v)
+            file.parentFile?.mkdirs()
+            // Write to a temp file and rename so a crash mid-write can never truncate the live file
+            // (it would only leave a stray .tmp), keeping the pin store self-consistent.
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(o.toString(2))
+            if (!tmp.renameTo(file)) {
+                file.writeText(o.toString(2))
+                tmp.delete()
+            }
+        }
     }
 }
