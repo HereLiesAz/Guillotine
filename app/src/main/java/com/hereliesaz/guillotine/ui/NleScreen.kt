@@ -199,6 +199,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         settings.keyFor(settings.provider),
         settings.modelFor(settings.provider),
         agentModelPath,
+        settings.cloudVision,
     ) {
         com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)
     }

@@ -59,6 +59,7 @@ class DesktopKeyStore {
                 leonardoModel = json.optString("leonardo_model", "")
                     .takeIf { it.isNotBlank() } ?: LeonardoDefaultModel,
 
+                cloudVision = json.optBoolean("cloud_vision_optin", false),
                 frameAnalysisCacheSize = json.optInt(
                     "frame_analysis_cache_size",
                     FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
@@ -77,6 +78,7 @@ class DesktopKeyStore {
             put("leonardo_key", settings.leonardoKey)
             put("leonardo_model", settings.leonardoModel)
 
+            put("cloud_vision_optin", settings.cloudVision)
             put("frame_analysis_cache_size", settings.frameAnalysisCacheSize)
         }
         dataFile.writeBytes(encrypt(json.toString()))

@@ -139,7 +139,8 @@ fun NleScreen(
         settings.provider,
         settings.keyFor(settings.provider),
         settings.modelFor(settings.provider),
-    ) { DesktopMcpAgent.forSettings(settings) }
+        settings.cloudVision,
+    ) { DesktopMcpAgent.forSettings(settings, mcpTools) }
     // Read through this in remembered lambdas (e.g. openLauncher) so they always reset the CURRENT backend,
     // not a stale one captured before a settings-driven rebuild.
     val currentAgentBackend by androidx.compose.runtime.rememberUpdatedState(agentBackend)

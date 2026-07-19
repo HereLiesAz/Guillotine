@@ -19,6 +19,9 @@ import java.net.URL
 class AnthropicAgentBackend(
     private val apiKey: String,
     private val model: String,
+    // Non-null ONLY when the user opted into cloud vision. When set, the model is offered look_at_frame
+    // and the current frame is sent to Claude's image API on demand. Null → strictly text-only.
+    private val frames: FrameImageSource? = null,
 ) : AgentBackend {
 
     private val url = "https://api.anthropic.com/v1/messages"
@@ -36,7 +39,9 @@ class AnthropicAgentBackend(
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         try {
-            val toolDefs = anthropicTools(tools.definitions())
+            val defs = tools.definitions()
+            if (frames != null) defs.put(visionToolDefinition()) // offer look_at_frame only when opted in
+            val toolDefs = anthropicTools(defs)
             if (messages.length() >= MAX_CONVERSATION_MESSAGES) messages = JSONArray() // bound growth across turns
             messages.put(JSONObject().put("role", "user").put("content", instruction))
 
@@ -73,7 +78,11 @@ class AnthropicAgentBackend(
                         val name = tu.optString("name")
                         val input = tu.optJSONObject("input") ?: JSONObject()
                         onEvent(AgentEvent.ToolStarted(name))
-                        val outcome = callTool(tools, name, input)
+                        val outcome = if (name == VISION_TOOL_NAME) {
+                            frameLookOutcome(frames, input.optString("prompt")) { img, q -> describeImage(img, q) }
+                        } else {
+                            callTool(tools, name, input)
+                        }
                         onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
                         results.put(JSONObject().apply {
                             put("type", "tool_result")
@@ -119,6 +128,43 @@ class AnthropicAgentBackend(
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * One-shot vision request: send [image] and [question] to Claude's image API and return the text.
+     * Used only on the opt-in cloud-vision path (via look_at_frame). Reuses [post]; null on any failure.
+     */
+    private fun describeImage(image: FrameImage, question: String): String? {
+        val body = JSONObject().apply {
+            put("model", model)
+            put("max_tokens", 1024)
+            put(
+                "messages",
+                JSONArray().put(
+                    JSONObject().put("role", "user").put(
+                        "content",
+                        JSONArray()
+                            .put(JSONObject().put("type", "text").put("text", question))
+                            .put(
+                                JSONObject().put("type", "image").put(
+                                    "source",
+                                    JSONObject()
+                                        .put("type", "base64")
+                                        .put("media_type", image.mediaType)
+                                        .put("data", image.data),
+                                ),
+                            ),
+                    ),
+                ),
+            )
+        }
+        val content = post(body).optJSONArray("content") ?: return null
+        val sb = StringBuilder()
+        for (i in 0 until content.length()) {
+            val b = content.getJSONObject(i)
+            if (b.optString("type") == "text") sb.append(b.optString("text"))
+        }
+        return sb.toString().ifBlank { null }
     }
 
     /** Map MCP tool defs to Anthropic's shape: `inputSchema` (MCP) → `input_schema` (Anthropic). */
