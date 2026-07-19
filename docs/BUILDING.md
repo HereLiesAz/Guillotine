@@ -38,34 +38,53 @@ Studio's **AGP Upgrade Assistant** pick the matching versions — that is the so
 Compose UI artifacts are pinned explicitly rather than via a BOM); see the notes in
 `gradle/libs.versions.toml`.
 
+## Distributions (product flavors)
+
+The app ships in two flavors of the **same** app (same `applicationId` and signing key, so either can
+update the other in place):
+
+| Flavor   | Distributed as         | Ads          | Updates                        |
+| -------- | ---------------------- | ------------ | ------------------------------ |
+| `github` | direct-download `.apk` | **none**     | self-updates from GitHub Releases |
+| `play`   | Play Store `.aab`      | AdMob        | Google Play                    |
+
+The difference is a build-time `BuildConfig.ADS_ENABLED` / `UPDATER_ENABLED` flag; the ad and updater
+code paths are gated on it. Variant tasks are named `…Github…` / `…Play…` (e.g. `assembleGithubDebug`,
+`bundlePlayRelease`).
+
 ## Build & run
 
-From Android Studio: select the `app` configuration and Run (▶).
+From Android Studio: select the `app` configuration, pick the **githubDebug** or **playDebug** build
+variant, and Run (▶).
 
 From the command line:
 ```
-gradlew.bat :app:assembleDebug      # build a debug APK
-gradlew.bat :app:installDebug       # install on a connected device/emulator
-gradlew.bat test                    # run the JVM unit tests (no device needed)
+gradlew.bat :app:assembleGithubDebug   # build the ad-free (direct-download) debug APK
+gradlew.bat :app:installGithubDebug    # install it on a connected device/emulator
+gradlew.bat test                       # run the JVM unit tests (no device needed)
 ```
 
-The debug APK lands in `app/build/outputs/apk/debug/`.
+The debug APK lands in `app/build/outputs/apk/github/debug/`.
 
 ## Release build (signed AAB for Google Play)
 
 The Play Store takes an **Android App Bundle** (`.aab`), not an APK. This is a single-module app,
-so one bundle is all you need — Google generates the per-device density/ABI/language splits.
+so one bundle is all you need — Google generates the per-device density/ABI/language splits. Use the
+`play` flavor for Play (AdMob enabled, no self-updater — Play delivers updates):
 
 Build one locally (signed):
 ```
-gradlew.bat bundleRelease -PversionBuild=<code> ^
+gradlew.bat bundlePlayRelease -PversionBuild=<code> ^
   -Pandroid.injected.signing.store.file=<path-to>.jks ^
   -Pandroid.injected.signing.store.password=*** ^
   -Pandroid.injected.signing.key.alias=*** ^
   -Pandroid.injected.signing.key.password=***
-# -> app/build/outputs/bundle/release/app-release.aab
+# -> app/build/outputs/bundle/playRelease/app-play-release.aab
 ```
 or use Android Studio -> **Build -> Generate Signed App Bundle / APK -> Android App Bundle**.
+
+The **ad-free** direct-download APK is the `github` flavor — build it with
+`gradlew.bat assembleGithubRelease` (-> `app/build/outputs/apk/github/release/`).
 
 `-PversionBuild=<code>` sets `versionCode` explicitly (CI uses the git commit count so it always
 increases — Play rejects a duplicate or lower `versionCode`). Without it, `versionCode` falls back

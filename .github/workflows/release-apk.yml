@@ -79,7 +79,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           # version.properties auto-increments inside the build — no version override is passed.
-          ./gradlew assembleRelease \
+          # The GitHub-distributed APK is the `github` flavor: no ads, self-updates from Releases.
+          ./gradlew assembleGithubRelease \
             -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.jks \
             -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
             -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
@@ -105,10 +106,10 @@ jobs:
           VERSION_NAME="${MAJOR}.${MINOR}.${PATCH}.${BUILD_NUMBER}"
           TAG_NAME="latest-release-v${MAJOR}.${MINOR}"
 
-          # Locate built APK
-          APK_ORIGINAL=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          # Locate built APK (github flavor → app/build/outputs/apk/github/release)
+          APK_ORIGINAL=$(find app/build/outputs/apk/github/release -name "*.apk" | head -n 1)
           if [ -z "$APK_ORIGINAL" ]; then
-            echo "Error: No APK found in app/build/outputs/apk/release/"
+            echo "Error: No APK found in app/build/outputs/apk/github/release/"
             find app/build/outputs/ -name "*.apk"
             exit 1
           fi
