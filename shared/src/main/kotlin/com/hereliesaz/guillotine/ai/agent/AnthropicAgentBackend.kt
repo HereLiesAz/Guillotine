@@ -24,6 +24,12 @@ class AnthropicAgentBackend(
     private val url = "https://api.anthropic.com/v1/messages"
     private val version = "2023-06-01"
 
+    // Conversation memory: retained across run() calls so the model remembers earlier turns. Reset on any
+    // non-clean exit so a partial exchange (an assistant tool_use with no tool_result) can't corrupt the next.
+    private var messages = JSONArray()
+
+    override fun reset() { messages = JSONArray() }
+
     override suspend fun run(
         instruction: String,
         tools: McpToolsSurface,
@@ -31,9 +37,8 @@ class AnthropicAgentBackend(
     ) = withContext(Dispatchers.IO) {
         try {
             val toolDefs = anthropicTools(tools.definitions())
-            val messages = JSONArray().put(
-                JSONObject().put("role", "user").put("content", instruction),
-            )
+            if (messages.length() >= MAX_CONVERSATION_MESSAGES) messages = JSONArray() // bound growth across turns
+            messages.put(JSONObject().put("role", "user").put("content", instruction))
 
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
@@ -85,9 +90,12 @@ class AnthropicAgentBackend(
                 return@withContext
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
+            messages = JSONArray() // stopped mid-task; drop the (possibly unbalanced) history
         } catch (e: kotlinx.coroutines.CancellationException) {
+            messages = JSONArray() // partial turn — reset so the next run starts clean
             throw e
         } catch (e: Exception) {
+            messages = JSONArray() // partial turn (e.g. tool_use with no tool_result) — reset
             onEvent(AgentEvent.Failed(e.message ?: "Anthropic agent failed"))
         }
     }
