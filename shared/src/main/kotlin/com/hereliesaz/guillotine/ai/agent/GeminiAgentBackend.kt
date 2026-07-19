@@ -119,6 +119,27 @@ class GeminiAgentBackend(
         schema.optJSONObject("items")?.let { put("items", toGeminiSchema(it)) }
     }
 
+    override suspend fun complete(prompt: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().put(
+                "contents",
+                JSONArray().put(
+                    JSONObject().put("role", "user")
+                        .put("parts", JSONArray().put(JSONObject().put("text", prompt))),
+                ),
+            )
+            val parts = post(body).optJSONArray("candidates")?.optJSONObject(0)
+                ?.optJSONObject("content")?.optJSONArray("parts") ?: return@withContext null
+            val sb = StringBuilder()
+            for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text"))
+            sb.toString().ifBlank { null }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun post(body: JSONObject): JSONObject {
         // Pass the key in the x-goog-api-key header, not the URL query string — a key in the URL leaks
         // into request logs, proxy access logs, and any crash trace that captures the endpoint.

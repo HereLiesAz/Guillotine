@@ -52,6 +52,21 @@ class AssistantViewModel {
         startRun(prompt, tools, agent, logAs = r, isReply = true)
     }
 
+    private var vocabExpansionStarted = false
+
+    /** Kick off the one-time background LLM vocabulary expansion (guarded; never blocks or throws). */
+    private fun maybeExpandVocabulary(agent: AgentBackend) {
+        if (vocabExpansionStarted) return
+        vocabExpansionStarted = true
+        scope.launch {
+            runCatching {
+                com.hereliesaz.guillotine.ai.vocab.VocabularyExpander.ensureExpanded(cached = null) { p ->
+                    agent.complete(p)
+                }
+            }
+        }
+    }
+
     private fun startRun(
         instruction: String,
         tools: McpToolsSurface,
@@ -66,6 +81,9 @@ class AssistantViewModel {
             ActivityLog.error(msg)
             return
         }
+        // Grow the vocabulary graph via a one-time background LLM pass (guarded, non-blocking, silent on
+        // failure) so later turns and lookup_vocabulary recognise more phrasings. Seed is the fallback.
+        maybeExpandVocabulary(agent)
         ActivityLog.user(logAs)
         ActivityLog.info("Thinking…")
         if (!isReply) originalPrompt = logAs

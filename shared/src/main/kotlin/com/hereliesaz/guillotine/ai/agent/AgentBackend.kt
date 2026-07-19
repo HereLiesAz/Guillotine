@@ -38,6 +38,13 @@ interface AgentBackend {
      * through [onEvent]. Must not throw: failures are reported as [AgentEvent.Failed].
      */
     suspend fun run(instruction: String, tools: McpToolsSurface, onEvent: (AgentEvent) -> Unit)
+
+    /**
+     * One-shot plain-text completion — NO tools and NOT the editing [AGENT_SYSTEM_PROMPT] — for auxiliary
+     * language tasks like vocabulary expansion. Returns the model's text, or null when the backend can't
+     * do a bare completion or anything fails. Must never throw. Default: unsupported.
+     */
+    suspend fun complete(prompt: String): String? = null
 }
 
 /** Hard cap on tool round-trips so a confused model can't loop forever / burn tokens. */

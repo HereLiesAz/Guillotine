@@ -92,6 +92,27 @@ class AnthropicAgentBackend(
         }
     }
 
+    override suspend fun complete(prompt: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply {
+                put("model", model)
+                put("max_tokens", 2048)
+                put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+            }
+            val content = post(body).optJSONArray("content") ?: return@withContext null
+            val sb = StringBuilder()
+            for (i in 0 until content.length()) {
+                val b = content.getJSONObject(i)
+                if (b.optString("type") == "text") sb.append(b.optString("text"))
+            }
+            sb.toString().ifBlank { null }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Map MCP tool defs to Anthropic's shape: `inputSchema` (MCP) → `input_schema` (Anthropic). */
     private fun anthropicTools(defs: JSONArray): JSONArray = JSONArray().apply {
         for (i in 0 until defs.length()) {
