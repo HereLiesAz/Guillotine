@@ -78,14 +78,26 @@ class AssistantViewModel : ViewModel() {
 
     private var vocabExpansionStarted = false
 
-    /** Kick off the one-time background LLM vocabulary expansion (guarded; never blocks or throws). */
+    /** Disk persistence for the LLM vocabulary expansion; set once by the screen (has a Context). */
+    var vocabCache: com.hereliesaz.guillotine.ai.vocab.VocabularyCache? = null
+
+    /**
+     * One-time background LLM vocabulary expansion (guarded; never blocks or throws). Loads the cached
+     * expansion if present (no API call), else runs the model once and persists the result so the next
+     * launch is offline. File IO is kept off the main thread.
+     */
     private fun maybeExpandVocabulary(agent: AgentBackend) {
         if (vocabExpansionStarted) return
         vocabExpansionStarted = true
         viewModelScope.launch {
             runCatching {
-                com.hereliesaz.guillotine.ai.vocab.VocabularyExpander.ensureExpanded(cached = null) { p ->
+                val cache = vocabCache
+                val cached = cache?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { it.load() } }
+                val fresh = com.hereliesaz.guillotine.ai.vocab.VocabularyExpander.ensureExpanded(cached) { p ->
                     agent.complete(p)
+                }
+                if (fresh != null && cache != null) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.save(fresh) }
                 }
             }
         }

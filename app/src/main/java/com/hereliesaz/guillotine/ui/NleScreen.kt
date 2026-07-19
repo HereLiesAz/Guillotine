@@ -191,6 +191,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // through this when nothing is selected, and shows its status inline.
     val assistantVm: AssistantViewModel = viewModel()
     val assistantState by assistantVm.state.collectAsState()
+    // Give the assistant a disk cache so the one-time LLM vocabulary expansion persists across launches.
+    androidx.compose.runtime.LaunchedEffect(context) {
+        assistantVm.vocabCache = com.hereliesaz.guillotine.platform.AndroidVocabularyCache(context)
+    }
 
     // Integrated activity feed (AI chat output, running process, progress, errors) shown in the
     // AzNavRail bottom sheet. The single AI prompt stays in the tool strip; this sheet is output-only.
