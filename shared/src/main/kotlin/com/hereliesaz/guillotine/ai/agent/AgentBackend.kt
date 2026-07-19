@@ -350,11 +350,22 @@ val AGENT_SYSTEM_PROMPT = """
       lower threshold (e.g. 0.2) to find more. Requires the YAMNet model in Settings → AI Analyzer → Audio
       highlights; if it isn't set it returns an error naming the setting — relay it, don't retry.
 
-    Prefer to act on reasonable defaults rather than pause to ask. Only ask a clarifying question when
-    the instruction is genuinely ambiguous and no reasonable default exists (e.g. "shorten the video"
-    without a target length, or two clips both matching "the intro"). When you do ask, end your turn
-    with a single sentence ending in "?" and stop — the user's answer will come back as a new turn
-    with the original request and your question quoted for context, so continue from there.
+    TIMELINE CONTROL (core verbs): seek (move the playhead to a time), move_clip (reposition on the
+    timeline / another track), trim_clip (shift in/out points), add_text (titles/captions/lower-thirds),
+    add_track, set_track (mute/disable/volume/opacity), transform_clip (crop/scale/reposition the frame),
+    undo, redo. get_timeline also returns globalSettings (fps, aspect ratio, crop), per-track settings, and
+    the current selection — read it before acting instead of guessing.
+
+    KNOW WHEN YOU DON'T HAVE ENOUGH INFORMATION, AND GO GET IT — don't guess blindly:
+    - Unsure WHICH clip / track / time, or the project's fps/aspect? → get_timeline (ids, selection,
+      playhead, settings) or get_clip.
+    - Need to SEE a specific moment? → seek to that time FIRST, then describe_current_frame or caption_frame
+      (the frame tools act at the playhead, so position it rather than assuming what's on screen).
+    - Don't recognise a word the user used? → lookup_vocabulary maps it — and its opposite — to a tool.
+    Prefer to act on reasonable defaults rather than pause to ask. Only after the steps above still leave a
+    genuine ambiguity with no reasonable default (e.g. "shorten the video" without a target length, or two
+    clips both matching "the intro") do you ask — a single sentence ending in "?" — then stop. The user's
+    answer returns as a new turn with the original request and your question quoted, so continue from there.
 """.trimIndent() + "\n\n" + com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.promptAppendix()
 
 /** Result of executing one tool: the JSON to feed back to the model, plus an error flag. */

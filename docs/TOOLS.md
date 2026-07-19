@@ -109,7 +109,7 @@ literal default in code).
 
 | Category | Tools |
 | --- | --- |
-| [Timeline & editing](#timeline--editing) | 13 |
+| [Timeline & editing](#timeline--editing) | 22 |
 | [Vision & recognition](#vision--recognition) | 10 |
 | [Transcription, captions & speech](#transcription-captions--speech) | 6 |
 | [Audio](#audio) | 7 |
@@ -120,7 +120,7 @@ literal default in code).
 | [Beat-sync / rhythm](#beat-sync--rhythm) | 5 |
 | [Generation (cloud, BYO key)](#generation-cloud-byo-key) | 3 |
 | [User-defined tools & action recording](#user-defined-tools--action-recording) | 7 |
-| **Total** | **98** |
+| **Total** | **107** |
 
 ---
 
@@ -233,6 +233,26 @@ Remove all keyframes for a specified property on a clip.
 | --- | --- | --- | --- | --- |
 | `clip_id` | string | required | — | The clip. |
 | `property` | string | required | — | The property to clear. |
+
+### Core timeline verbs
+
+Thin wrappers over the editor's own operations (shared across platforms), giving the agent direct control
+of the timeline rather than only analysis/effects.
+
+| Tool | What it does | Key args |
+| --- | --- | --- |
+| `seek` | Move the playhead to a time (so the frame tools can inspect/act there) | `time_ms` |
+| `move_clip` | Reposition a clip in time / to another track | `clip_id`, `start_ms`, `track_id?` |
+| `trim_clip` | Shift a clip's in/out points by a delta | `clip_id`, `start_delta_ms?`, `end_delta_ms?` |
+| `add_text` | Add a title/caption text clip | `text`, `track_id?`, `start_ms?`, `duration_ms?` |
+| `add_track` | Add a video/audio track (returns its id) | `type` |
+| `set_track` | Set track mute/disable/volume/opacity (absolute) | `track_id`, `muted?`, `disabled?`, `volume?`, `opacity?` |
+| `transform_clip` | Set a clip's crop/scale/offset/rotation (absolute) | `clip_id`, `scale?`, `offset_x?`, `offset_y?`, `rotation?` |
+| `undo` | Undo the last edit | — |
+| `redo` | Redo the last undone edit | — |
+
+`get_timeline` also now reports `globalSettings` (fps, aspect ratio, crop), per-track settings, and the
+current `selectedClipIds`, so the agent can read project state instead of guessing.
 
 ---
 
