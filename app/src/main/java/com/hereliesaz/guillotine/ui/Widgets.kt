@@ -1,10 +1,13 @@
 package com.hereliesaz.guillotine.ui
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.dp
 
 import androidx.compose.foundation.background
@@ -90,6 +93,38 @@ fun DraggableTimelineDivider(
             modifier = androidx.compose.ui.Modifier
                 .fillMaxWidth(0.15f)
                 .height(4.dp)
+                .background(androidx.compose.ui.graphics.Color(0xFF525252), RoundedCornerShape(2.dp))
+                .align(androidx.compose.ui.Alignment.Center)
+        )
+    }
+}
+
+/**
+ * Vertical sibling of [DraggableTimelineDivider]: a full-height grip that reports HORIZONTAL drag,
+ * for resizing side-by-side panes (e.g. preview | clip-properties in the wide layout). [onDrag] gets
+ * the horizontal drag delta in px (positive = dragged right).
+ */
+@Composable
+fun DraggableVerticalDivider(
+    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    onDrag: (Float) -> Unit
+) {
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(16.dp)
+            .background(androidx.compose.ui.graphics.Color(0xFF171717))
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDrag(dragAmount)
+                }
+            }
+    ) {
+        Box(
+            modifier = androidx.compose.ui.Modifier
+                .fillMaxHeight(0.15f)
+                .width(4.dp)
                 .background(androidx.compose.ui.graphics.Color(0xFF525252), RoundedCornerShape(2.dp))
                 .align(androidx.compose.ui.Alignment.Center)
         )

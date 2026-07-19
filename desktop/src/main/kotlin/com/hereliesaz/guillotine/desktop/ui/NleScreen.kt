@@ -356,11 +356,21 @@ fun NleScreen(
             onFaq = { showFaq = true },
         )
 
-        // Always use expanded layout on desktop: preview at top 60%, timeline at bottom 40%.
-        Column(Modifier.weight(0.6f).fillMaxWidth()) {
+        // Preview (top) over the timeline (bottom), split resizable via the divider below the preview.
+        // Defaults to 60/40; the tool strip in between is fixed-height, so dragging trades preview for
+        // timeline space.
+        var previewWeight by remember { mutableFloatStateOf(0.6f) }
+        Column(Modifier.weight(previewWeight).fillMaxWidth()) {
             VideoPreview(vm, Modifier.weight(1f).fillMaxWidth())
             TransportControls(vm, state)
         }
+        DraggableSplitDivider(
+            onDrag = { dragAmount ->
+                // Fixed sensitivity (no measured height here); ~1px → 0.0011 weight feels right on a
+                // typical desktop editor pane. Positive drag = down = grow the preview.
+                previewWeight = (previewWeight + dragAmount * 0.0011f).coerceIn(0.25f, 0.85f)
+            },
+        )
         EditorToolStrip(
             vm, state, onAnalyze, onTranscribe, providerLabel,
             { showSettings = true },
@@ -375,7 +385,7 @@ fun NleScreen(
             onImport = { importTargetTrack = null; importLauncher() },
             onHelp = { showHelp = true },
         )
-        TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
+        TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(1f - previewWeight).fillMaxWidth())
         } // editor Column
 
         // Integrated activity log (AI chat, running process, progress, errors) -- anchored to

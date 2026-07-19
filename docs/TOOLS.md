@@ -109,7 +109,7 @@ literal default in code).
 
 | Category | Tools |
 | --- | --- |
-| [Timeline & editing](#timeline--editing) | 11 |
+| [Timeline & editing](#timeline--editing) | 12 |
 | [Vision & recognition](#vision--recognition) | 10 |
 | [Transcription, captions & speech](#transcription-captions--speech) | 6 |
 | [Audio](#audio) | 7 |
@@ -119,7 +119,7 @@ literal default in code).
 | [Beat-sync / rhythm](#beat-sync--rhythm) | 5 |
 | [Generation (cloud, BYO key)](#generation-cloud-byo-key) | 3 |
 | [User-defined tools & action recording](#user-defined-tools--action-recording) | 7 |
-| **Total** | **66** |
+| **Total** | **67** |
 
 ---
 
@@ -193,6 +193,17 @@ Set static values for a clip filter (e.g. brightness = 1.2, speed = 2.0).
 | `clip_id` | string | required | — | The clip to filter. |
 | `property` | string | required | — | Property name, e.g. `brightness`, `speed`. |
 | `value` | number | required | — | The value to set. |
+
+### `set_frame_step`
+Frame decimation — keep only every Nth frame for a choppy/stutter look, live and on-device (no ffmpeg,
+no baking). The clip stays the same length and its audio is untouched, so it stays in sync. Quantizes
+against the project frame rate; desktop snaps the frame-grab source time, Android drops to `fps / step`
+via a Media3 `FrameDropEffect`. `apply_ffmpeg_filter` with `framestep=N` is the baked-to-a-new-clip equivalent.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `clip_id` | string | required | — | The clip to decimate. |
+| `step` | integer | required | — | Keep 1 of every N frames. 2 = every other frame; 1 = off. |
 
 ### `add_keyframe`
 Add a keyframe for a specific `KeyframeProperty` at a specific time in the clip.
