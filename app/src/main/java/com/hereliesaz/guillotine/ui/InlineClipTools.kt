@@ -39,7 +39,10 @@ fun InlineClipTools(
                 if (processable != null) SplitToolButton(vm, processable)
             }
             EditorTool.SELECT, EditorTool.MARQUEE -> {
-                if (text != null) TextToolInline(vm, text)
+                if (text != null) {
+                    TextToolInline(vm, text)
+                    KineticTypeToolInline(vm, text)
+                }
                 if (video != null) {
                     BackgroundToolButton(vm, video)
                     FaceBlurToolButton(vm, video)

@@ -12,11 +12,15 @@ import com.hereliesaz.guillotine.ai.gen.GenProviderType
 import com.hereliesaz.guillotine.ai.gen.GenRequest
 import com.hereliesaz.guillotine.ai.gen.PollConfig
 import com.hereliesaz.guillotine.ai.gen.meta
+import com.hereliesaz.guillotine.desktop.media.DesktopDiarizer
 import com.hereliesaz.guillotine.desktop.media.DesktopFaceBlur
 import com.hereliesaz.guillotine.desktop.media.DesktopFaceDetector
+import com.hereliesaz.guillotine.desktop.media.DesktopImageEffect
 import com.hereliesaz.guillotine.desktop.media.DesktopImageEmbedder
 import com.hereliesaz.guillotine.desktop.media.DesktopFfmpegFilter
 import com.hereliesaz.guillotine.desktop.media.DesktopImageLabeler
+import com.hereliesaz.guillotine.desktop.media.DesktopInpaint
+import com.hereliesaz.guillotine.desktop.media.DesktopTts
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaImport
 import com.hereliesaz.guillotine.desktop.media.DesktopVoskTranscriber
@@ -75,8 +79,14 @@ class DesktopMcpTools(
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("analyze_clip_with_reference", "Analyze using reference frame (not yet available on desktop).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
-        put(toolDefinition("remove_object_generative", "Remove object with inpainting (not yet available on desktop).",
-            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+        put(toolDefinition(
+            "remove_object_generative",
+            "Remove the salient subject from the clip's current frame ON-DEVICE and add the inpainted " +
+                "result as an image clip. Masks the subject with the segmentation model and fills it with " +
+                "a LaMa inpaint model (both installed via .azp). Desktop stays fully on-device (no cloud), " +
+                "so it removes the segmented subject rather than an arbitrary named object.",
+            objSchema("clip_id" to stringProp("The clip whose current frame to clean"), required = listOf("clip_id")),
+        ))
         put(toolDefinition("describe_current_frame", "Describe the video frame at the playhead using on-device image labels (needs the footage-search model).", emptySchema()))
         put(toolDefinition(
             "transcribe_clip",
@@ -105,9 +115,9 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "add_voiceover",
-            "Synthesize speech from text ON-DEVICE (offline neural TTS via sherpa-onnx) and add it to the " +
-                "timeline as an audio clip. NOTE: not yet available on desktop (no clean sherpa-onnx JVM " +
-                "distribution); returns an error rather than faking it.",
+            "Synthesize speech from text ON-DEVICE (offline neural TTS: a VITS/Piper .onnx voice run " +
+                "through ONNX Runtime) and add it to the timeline as an audio clip. Requires a TTS voice " +
+                ".azp installed; if none is set it returns an error naming the setting — relay it.",
             objSchema(
                 "text" to stringProp("The words to speak"),
                 "speed" to numberProp("Speaking rate (default 1.0; <1 slower, >1 faster)"),
@@ -116,8 +126,9 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "diarize_clip",
-            "Speaker diarization ON-DEVICE (who spoke when). NOTE: not yet available on desktop (no clean " +
-                "sherpa-onnx JVM distribution); returns an error rather than faking it.",
+            "Speaker diarization ON-DEVICE (who spoke when): energy VAD + an ONNX speaker-embedding model " +
+                "+ clustering. Requires the diarization .azp (speaker-embedding model); if it isn't set it " +
+                "returns an error naming the setting — relay it.",
             objSchema(
                 "clip_id" to stringProp("The clip whose audio to diarize"),
                 "num_speakers" to intProp("Known speaker count (0 = infer automatically)"),
@@ -513,9 +524,8 @@ class DesktopMcpTools(
             "apply_image_effect",
             "Run an ON-DEVICE image model on the current preview frame and add the result as a new image " +
                 "clip. effect = superres (upscale) | style (style transfer) | depth (depth map) | lowlight " +
-                "(brighten a dark/low-light frame). Requires that effect's .tflite model to be set in " +
-                "Settings → AI Analyzer → Image effects; if it isn't, returns an error naming the setting " +
-                "(relay it, don't retry).",
+                "(brighten a dark/low-light frame). Requires that effect's .onnx model installed via .azp; " +
+                "if it isn't, returns an error naming the setting (relay it, don't retry).",
             objSchema(
                 "effect" to stringProp("superres | style | depth | lowlight"),
                 "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
@@ -709,11 +719,9 @@ class DesktopMcpTools(
         "add_reference" -> addReference(
             args.getString("name"), args.optString("term"), args.optBoolean("negative", false),
         )
-        "remove_object_generative" ->
-            visionToolUnavailable(name, "an on-device object mask (ML Kit) before cloud repaint")
+        "remove_object_generative" -> removeObjectGenerative(args.optString("clip_id"))
         "apply_bokeh" -> applyBokehTool(args.optString("clip_id"))
-        "apply_image_effect" ->
-            visionToolUnavailable(name, "an on-device TFLite image model")
+        "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
         "denoise_clip" ->
             visionToolUnavailable(name, "the on-device GTCRN speech-denoiser model")
         "apply_transition" -> applyTransition(
@@ -728,8 +736,8 @@ class DesktopMcpTools(
         "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
         "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
         "transcribe_precise" -> transcribeClip(args.getString("clip_id"))
-        "add_voiceover" -> speechToolUnavailable("add_voiceover", "an offline neural TTS (sherpa-onnx) voice")
-        "diarize_clip" -> speechToolUnavailable("diarize_clip", "the sherpa-onnx speaker-diarization models")
+        "add_voiceover" -> addVoiceover(args.getString("text"), args.optDouble("speed", 1.0).toFloat())
+        "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
         "remove_fillers" -> removeFillers(args.getString("clip_id"))
         "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
         "create_user_tool" -> createUserTool(args.getString("name"), args.getString("description"))
@@ -785,6 +793,132 @@ class DesktopMcpTools(
             put("clips", JSONArray().apply { vm.uiState.value.document.clips.forEach { put(clipJson(it)) } })
         }
         else -> throw IllegalArgumentException("Unknown resource: $uri")
+    }
+
+    /**
+     * On-device image effect via an ONNX model (desktop analogue of Android's TFLite `apply_image_effect`).
+     * effect ∈ {superres, style, depth, lowlight}; each resolves its own `.onnx` slot. Grabs the frame at
+     * the playhead (or the given clip), runs the model, and adds the result as an image clip.
+     */
+    private fun applyImageEffect(effect: String, clipId: String): JSONObject {
+        val key = effect.lowercase().trim()
+        val path = ModelResolver.resolve("effect_$key")
+        require(path.isNotBlank()) {
+            "No on-device model set for \"$effect\". Install its .azp (superres/style/depth/lowlight) from the Azphalt Storefront."
+        }
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = (if (clipId.isNotBlank()) st.document.clips.firstOrNull { it.id == clipId } else null)
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(st.document.clips, ClipType.VIDEO, now)
+            ?: throw IllegalStateException("No video clip to apply the effect to — scrub onto one.")
+        val media = st.document.mediaFor(clip) ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs, maxPx = 1920) }
+            ?: throw IllegalStateException("Could not read the current frame.")
+        val out = DesktopImageEffect.run(frame, path)
+            ?: throw IllegalStateException("The $key model produced no output — check the .onnx file.")
+        val file = File(File(DesktopStorage.dataDir, "gen").apply { mkdirs() }, "effect_${System.currentTimeMillis()}.png")
+        javax.imageio.ImageIO.write(out, "png", file)
+        val probed = DesktopMediaImport.probe(file) ?: throw IllegalStateException("The effect output couldn't be read.")
+        vm.addMedia(listOf(probed.copy(name = "$key: ${media.name}")))
+        return ok().apply {
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Applied on-device $key and added the result as an image clip.")
+        }
+    }
+
+    /**
+     * On-device object removal (desktop keeps the on-device invariant — no cloud, unlike Android's
+     * Leonardo path): mask the salient subject with the segmentation model and fill it with a LaMa-style
+     * inpaint model, adding the cleaned frame as an image clip. Requires both models.
+     */
+    private fun removeObjectGenerative(clipId: String): JSONObject {
+        val seg = ModelResolver.resolve("segModelPath")
+        val inpaint = ModelResolver.resolve("inpaintModelPath")
+        require(seg.isNotBlank()) { "Object removal needs a segmentation model. Install the selfie-segmentation .azp." }
+        require(inpaint.isNotBlank()) { "Object removal needs an inpaint model. Install the LaMa inpaint .azp." }
+        val clip = resolveClipOrPlayhead(clipId)
+        val st = vm.uiState.value
+        val media = st.document.mediaFor(clip) ?: throw IllegalStateException("Media missing for clip ${clip.id}.")
+        val now = st.currentTimeMs
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs, maxPx = 1280) }
+            ?: throw IllegalStateException("Could not read the current frame.")
+        val out = DesktopInpaint.removeSubject(frame, seg, inpaint)
+            ?: throw IllegalStateException("Inpainting produced no output — check the models.")
+        val file = File(File(DesktopStorage.dataDir, "gen").apply { mkdirs() }, "inpaint_${System.currentTimeMillis()}.png")
+        javax.imageio.ImageIO.write(out, "png", file)
+        val probed = DesktopMediaImport.probe(file) ?: throw IllegalStateException("The inpainted frame couldn't be read.")
+        vm.addMedia(listOf(probed.copy(name = "removed: ${media.name}")))
+        return ok().apply {
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put(
+                "humanSummary",
+                "Removed the segmented subject and added the inpainted frame as an image clip. " +
+                    "(Desktop removes the salient subject on-device; it does not localize an arbitrary named object.)",
+            )
+        }
+    }
+
+    /**
+     * On-device neural TTS via a VITS/Piper `.onnx` voice ([DesktopTts]) — desktop analogue of Android's
+     * sherpa `add_voiceover`. Synthesizes the text to a WAV and adds it as an audio clip.
+     */
+    private fun addVoiceover(text: String, speed: Float): JSONObject {
+        require(text.isNotBlank()) { "Give the voiceover some text to speak." }
+        val model = ModelResolver.resolve("ttsModelPath")
+        require(model.isNotBlank()) {
+            "No TTS voice set. Install a VITS/Piper voice .azp from the Azphalt Storefront."
+        }
+        val out = File(File(DesktopStorage.dataDir, "gen").apply { mkdirs() }, "voiceover_${System.currentTimeMillis()}.wav")
+        val result = DesktopTts.synthesize(model, text.trim(), out.absolutePath, speed.coerceIn(0.5f, 2.0f))
+        val probed = DesktopMediaImport.probe(File(result.wavPath))
+            ?: throw IllegalStateException("The synthesized voiceover couldn't be read.")
+        val duration = result.durationMs.coerceAtLeast(500L)
+        vm.addMedia(listOf(probed.copy(name = "VO: ${text.trim().take(40)}")))
+        return ok().apply {
+            put("durationMs", duration)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Added a ${msFmt(duration)} voiceover to the timeline.")
+        }
+    }
+
+    /**
+     * On-device speaker diarization ([DesktopDiarizer]: energy VAD + ONNX speaker embeddings + clustering)
+     * — desktop analogue of Android's sherpa `diarize_clip`. Returns speaker turns mapped to timeline ms.
+     */
+    private fun diarizeClip(clipId: String, numSpeakers: Int): JSONObject {
+        val embed = ModelResolver.resolve("diarizeEmbedModelPath")
+        require(embed.isNotBlank()) {
+            "Speaker diarization needs a speaker-embedding model. Install the diarization .azp from the Azphalt Storefront."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 16_000) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to diarize.")
+        val turns = DesktopDiarizer.diarize(embed, pcm.samples, numSpeakers)
+        val arr = JSONArray()
+        val speakers = HashSet<Int>()
+        for (t in turns) {
+            speakers += t.speaker
+            arr.put(JSONObject().apply {
+                put("speaker", t.speaker)
+                put("startMs", clip.startTimeMs + (t.startMs - clip.trimStartMs))
+                put("endMs", clip.startTimeMs + (t.endMs - clip.trimStartMs))
+            })
+        }
+        return ok().apply {
+            put("speakerCount", speakers.size)
+            put("turnCount", turns.size)
+            put("turns", arr)
+            put(
+                "humanSummary",
+                if (turns.isEmpty()) "No distinct speakers detected."
+                else "Found ${speakers.size} speaker(s) across ${turns.size} turn(s).",
+            )
+        }
     }
 
     /**
@@ -1995,15 +2129,22 @@ class DesktopMcpTools(
         }
         val clip = resolveClipOrPlayhead(clipId)
         vm.updateClipFilters(clip.id) { it.copy(shaderPath = file.absolutePath, shaderParams = overrides) }
-        // TODO(desktop): no GLSL/Skia render pass exists yet, so the shader is recorded but not rendered.
+        // Desktop renders shaders through Skia (GLSL→SkSL); confirm THIS shader actually compiles so the
+        // report is honest — some advanced GLSL doesn't translate and would silently no-op.
+        val rendered = com.hereliesaz.guillotine.desktop.media.DesktopShaderPass.canRender(file.absolutePath)
         return ok().apply {
-            put("shaderRendered", false)
+            put("shaderRendered", rendered)
             put(
                 "humanSummary",
                 "Recorded shader ${file.name}" +
                     (if (overrides.isNotEmpty()) " with ${overrides.size} param(s)" else "") +
-                    " on clip ${clip.id}. Note: the shader is saved on the clip, but the live GLSL render " +
-                    "on desktop is still pending — it is NOT yet visible in preview or export.",
+                    " on clip ${clip.id}. " +
+                    if (rendered) {
+                        "It renders in the desktop preview and export via Skia."
+                    } else {
+                        "Note: this shader couldn't be translated to Skia's SkSL, so it is saved on the " +
+                            "clip but will NOT be visible in the desktop preview or export."
+                    },
             )
         }
     }

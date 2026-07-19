@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Tune
@@ -77,7 +78,10 @@ fun ClipToolButtons(
     val audioTarget = sel.firstOrNull { it.type == ClipType.AUDIO && it.linkedClipId == null } ?: video
     val processable = video ?: sel.firstOrNull { it.type == ClipType.AUDIO }
 
-    if (text != null) TextToolButton(vm, text)
+    if (text != null) {
+        TextToolButton(vm, text)
+        KineticTypeToolButton(vm, text)
+    }
     if (video != null) {
         BackgroundToolButton(vm, state, video)
         FiltersToolButton(vm, video)
@@ -125,6 +129,37 @@ private fun TextToolButton(vm: EditorViewModel, clip: TimelineClip) {
             }
         }
         Text("One-tap looks set font, size and placement — tweak further with the crop tool.", color = Neutral500, fontSize = 10.sp)
+    }
+}
+
+/**
+ * Kinetic-typography picker for a selected caption: lists installed motion `.azp` plugins and bakes the
+ * chosen animation onto the caption (or clears it) via the shared
+ * [com.hereliesaz.guillotine.ui.KineticTypographyPicker]. Hidden until a kinetic-typography plugin is
+ * installed — the desktop half of the per-caption UI the az-motion feature was missing.
+ */
+@Composable
+private fun KineticTypeToolButton(vm: EditorViewModel, clip: TimelineClip) {
+    // Read installed motions off the main thread — the `.azp` walk + parse is blocking I/O.
+    val motions by androidx.compose.runtime.produceState<List<com.hereliesaz.guillotine.ui.KineticTypographyPicker.InstalledMotion>>(emptyList(), clip.id) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.hereliesaz.guillotine.ui.KineticTypographyPicker.listInstalled(
+                java.io.File(com.hereliesaz.guillotine.desktop.platform.DesktopStorage.dataDir, "extensions"),
+            )
+        }
+    }
+    if (motions.isEmpty()) return
+    var open by remember { mutableStateOf(false) }
+    IconToolButton(Icons.Filled.Animation, "Kinetic type", active = open) { open = !open }
+    if (open) ToolPopup("Kinetic type", { open = false }) {
+        Chip(label = "None", selected = false) {
+            com.hereliesaz.guillotine.ui.KineticTypographyPicker.clear(vm, clip.id)
+        }
+        motions.forEach { m ->
+            Chip(label = m.name, selected = false) {
+                com.hereliesaz.guillotine.ui.KineticTypographyPicker.apply(vm, m, clip.id)
+            }
+        }
     }
 }
 
