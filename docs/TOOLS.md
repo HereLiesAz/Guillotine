@@ -114,12 +114,13 @@ literal default in code).
 | [Transcription, captions & speech](#transcription-captions--speech) | 6 |
 | [Audio](#audio) | 7 |
 | [Color, LUT, shader, FFmpeg/Frei0r & transitions](#color-lut-shader-ffmpegfrei0r--transitions) | 9 |
+| [Named video effects (FFmpeg bake)](#named-video-effects-ffmpeg-bake) | 30 |
 | [Neural image effects & compositing](#neural-image-effects--compositing) | 4 |
 | [Scene, highlights, reframe & export](#scene-highlights-reframe--export) | 4 |
 | [Beat-sync / rhythm](#beat-sync--rhythm) | 5 |
 | [Generation (cloud, BYO key)](#generation-cloud-byo-key) | 3 |
 | [User-defined tools & action recording](#user-defined-tools--action-recording) | 7 |
-| **Total** | **67** |
+| **Total** | **97** |
 
 ---
 
@@ -544,6 +545,49 @@ Bake-to-new-clip, desktop-first.
 | `to_clip_id` | string | required | — | The incoming (second) clip. |
 | `type` | string | optional | `fade` | `xfade` transition type. |
 | `duration_sec` | number | optional | `1` | Transition/overlap length in seconds. |
+
+---
+
+## Named video effects (FFmpeg bake)
+
+One-call video looks, each backed by a standard FFmpeg `-vf` filtergraph and **baked to a new clip**. They
+share the `apply_ffmpeg_filter` engine (desktop bakes in-process via the bundled FFmpeg; Android needs an
+ffmpeg executable set in Settings → AI Analyzer → FFmpeg filters). Every effect is duration-preserving
+(audio is copied through, so the clip length is unchanged). All take a required `clip_id`; the optional
+tuning parameter (if any) is listed below.
+
+| Tool | Effect | Optional param (default) |
+| --- | --- | --- |
+| `sharpen` | Sharpen a soft/blurry clip | `amount` (1.5) |
+| `denoise_video` | Reduce video noise/grain | — |
+| `deband` | Remove colour banding in gradients | — |
+| `deflicker` | Remove flicker / brightness pulsing | — |
+| `stabilize` | Stabilise shaky footage (one pass) | — |
+| `lens_correction` | Fix barrel/fisheye distortion | `amount` (0.2) |
+| `motion_trail` | Frame-blend into a motion trail / echo | `frames` (3) |
+| `film_grain` | Add film grain / analog noise | `strength` (20) |
+| `vignette` | Darken the edges | — |
+| `vhs` | Retro VHS chroma-shift + noise | `strength` (5) |
+| `chromatic_aberration` | RGB channel-split fringe | `amount` (4) |
+| `glow` | Dreamy soft glow / bloom | `strength` (0.5) |
+| `old_film` | Vintage curve + grain + vignette | — |
+| `edge_detect` | Line-art / sketch outline | — |
+| `pixelate` | Pixelate / mosaic | `size` (16) |
+| `mirror` | Flip horizontally (left-right) | — |
+| `flip_vertical` | Flip vertically (upside-down) | — |
+| `rotate_180` | Rotate 180° | — |
+| `grid_overlay` | Overlay an alignment grid | `size` (64) |
+| `warm` | Warm the colour (orange/gold) | — |
+| `cool` | Cool the colour (blue) | — |
+| `cinematic` | Teal-and-orange grade | — |
+| `increase_contrast` | Punchy contrast S-curve | — |
+| `vintage` | Faded vintage colour curve | — |
+| `cross_process` | Cross-process / lomo look | — |
+| `darker` | Lower the exposure | — |
+| `brighter` | Lift the exposure | — |
+| `noir` | High-contrast B&W film-noir | — |
+| `night_vision` | Green night-vision + noise | — |
+| `thermal` | False-colour thermal / infrared | — |
 
 ---
 

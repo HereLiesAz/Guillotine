@@ -762,6 +762,10 @@ class McpTools(
                 required = listOf("clip_id")
             )
         ))
+        // Named one-call video effects (sharpen, film_grain, vhs, mirror, thermal, …), each a standard
+        // FFmpeg -vf graph baked to a new clip. Shared registry so both platforms expose the same set.
+        val videoFx = VideoFilterCatalog.toolDefinitions()
+        for (i in 0 until videoFx.length()) put(videoFx.get(i))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -837,6 +841,9 @@ class McpTools(
         "list_azp_plugins" -> listAzpPlugins()
         "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
         "clear_azp_plugin" -> clearAzpPlugin(args.getString("clip_id"))
+        in VideoFilterCatalog.names ->
+            applyFfmpegFilter(args.getString("clip_id"), VideoFilterCatalog.graphFor(name, args))
+                .apply { put("humanSummary", VideoFilterCatalog.summaryFor(name)) }
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 

@@ -143,6 +143,17 @@ val AGENT_SYSTEM_PROMPT = """
       is untouched (stays in sync), and nothing is baked or added — prefer it over apply_ffmpeg_filter for
       this. Use apply_ffmpeg_filter with "framestep=N" only when the user explicitly wants a baked new clip.
 
+    NAMED VIDEO EFFECTS (on-device bake — PREFER these over hand-authoring a graph):
+    - Many common looks have a dedicated one-call tool that bakes the right FFmpeg graph for you. When one
+      matches the request, call it directly (each takes clip_id plus optional tuning params). They cover:
+        · detail/cleanup: sharpen, denoise_video, deband, deflicker, stabilize, lens_correction;
+        · motion: motion_trail;
+        · stylize: film_grain, vignette, vhs, chromatic_aberration, glow, old_film, edge_detect, pixelate,
+          night_vision, thermal, grid_overlay;
+        · geometry: mirror, flip_vertical, rotate_180;
+        · colour/tone: warm, cool, cinematic, increase_contrast, vintage, cross_process, darker, brighter, noir.
+      Reach for apply_ffmpeg_filter (below) ONLY for an effect that has no named tool here.
+
     FFMPEG FILTER GRAPHS — YOUR ESCAPE HATCH FOR EFFECTS WITH NO NAMED TOOL (on-device):
     - apply_ffmpeg_filter(clip_id, filter) runs a raw FFmpeg `-vf` filtergraph and bakes the result as a new
       clip. This is the general escape hatch: when the user asks for a frame-rate, timing, or per-frame

@@ -699,6 +699,10 @@ class DesktopMcpTools(
                 required = listOf("clip_id"),
             ),
         ))
+        // Named one-call video effects (sharpen, film_grain, vhs, mirror, thermal, …), each a standard
+        // FFmpeg -vf graph baked to a new clip. Shared registry so both platforms expose the same set.
+        val videoFx = com.hereliesaz.guillotine.mcp.VideoFilterCatalog.toolDefinitions()
+        for (i in 0 until videoFx.length()) put(videoFx.get(i))
     }
 
     override fun call(name: String, args: JSONObject): JSONObject = when (name) {
@@ -793,6 +797,9 @@ class DesktopMcpTools(
         "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
         "generate_video" -> generateMedia(GenKind.VIDEO, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
         "generate_music" -> generateMedia(GenKind.MUSIC, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
+        in com.hereliesaz.guillotine.mcp.VideoFilterCatalog.names ->
+            applyFfmpegFilter(args.getString("clip_id"), com.hereliesaz.guillotine.mcp.VideoFilterCatalog.graphFor(name, args))
+                .apply { put("humanSummary", com.hereliesaz.guillotine.mcp.VideoFilterCatalog.summaryFor(name)) }
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
