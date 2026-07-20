@@ -63,28 +63,53 @@ const val MAX_AGENT_ITERATIONS = 24
 
 /**
  * Early-stop for a stalled agent, so the higher [MAX_AGENT_ITERATIONS] ceiling can't be burned by a model
- * that's looping without progress. Trips when the SAME tool+args is repeated [repeatLimit] times in a row
- * (spinning on one call) or [errorLimit] tool results in a row are errors (flailing). Productive, varied
- * tool use never trips it, so long legitimate tasks get the full ceiling. Each run makes its own instance.
+ * that's looping without progress. Trips when the recent calls form a repeating CYCLE — one call spun on
+ * ([repeatLimit] identical calls, period 1), an A,B,A,B,… alternation (period 2), and so on — or when
+ * [errorLimit] tool results in a row are errors (flailing). Productive, varied tool use never trips it,
+ * so long legitimate tasks get the full ceiling. Each run makes its own instance.
  */
-class LoopGuard(private val repeatLimit: Int = 3, private val errorLimit: Int = 4) {
-    private var lastSig: String? = null
-    private var repeatCount = 0
+class LoopGuard(
+    private val repeatLimit: Int = 3,
+    private val errorLimit: Int = 4,
+    private val window: Int = 6,
+) {
+    // A sliding window of the most recent call signatures — NOT just the immediate last one — so an
+    // A,B,A,B,… alternation can't dodge detection by resetting a single "last" slot each time.
+    private val recent = ArrayDeque<String>()
     private var errorStreak = 0
 
     /** Record one tool result; returns a stop reason if the run should abort now, else null. */
     fun check(name: String, args: String, isError: Boolean): String? {
         val sig = "$name($args)"
-        if (sig == lastSig) repeatCount++ else { repeatCount = 1; lastSig = sig }
+        recent.addLast(sig)
+        while (recent.size > window) recent.removeFirst()
         errorStreak = if (isError) errorStreak + 1 else 0
         return when {
-            repeatCount >= repeatLimit ->
-                "Stopped: repeated the same call to $name $repeatCount times with no new result — " +
+            isCycling() ->
+                "Stopped: the recent tool calls keep repeating the same cycle with no new result — " +
                     "the task may need a different approach or more information."
             errorStreak >= errorLimit ->
                 "Stopped: $errorStreak tool calls in a row failed — please check the request and try again."
             else -> null
         }
+    }
+
+    /**
+     * True when the tail of the window is a single block of [period] calls repeated at least [repeatLimit]
+     * times — a genuine cycle. We look for an actual periodic pattern rather than counting bare occurrences
+     * of one signature: a read-only call like get_timeline recurring between DISTINCT edits
+     * (get_timeline → edit A → get_timeline → edit B → …) is productive interleaving, not a stall, and must
+     * not trip the guard.
+     */
+    private fun isCycling(): Boolean {
+        val calls = recent.toList()
+        val n = calls.size
+        for (period in 1..(n / repeatLimit)) {
+            val span = period * repeatLimit
+            val tail = calls.subList(n - span, n)
+            if ((period until span).all { tail[it] == tail[it - period] }) return true
+        }
+        return false
     }
 }
 

@@ -108,9 +108,9 @@ class OnDeviceAgentBackend(
                 // Intercept the vision action: it's served by the model's own eyes, not the MCP tools.
                 if (name == visionTool) {
                     onEvent(AgentEvent.ToolStarted(name))
-                    val observation = lookAtFrame(args.optString("prompt"))
-                    onEvent(AgentEvent.ToolFinished(name, observation.take(80), false))
-                    guard.check(name, args.toString(), false)?.let { stop ->
+                    val (observation, isError) = lookAtFrame(args.optString("prompt"))
+                    onEvent(AgentEvent.ToolFinished(name, observation.take(80), isError))
+                    guard.check(name, args.toString(), isError)?.let { stop ->
                         onEvent(AgentEvent.Failed(stop))
                         return@withContext
                     }
@@ -146,21 +146,27 @@ class OnDeviceAgentBackend(
      * text engine first, so only one model is ever resident). Pixels stay on-device. Any failure (no
      * frame, or a text-only model that can't accept images) degrades gracefully into guidance rather
      * than crashing the run, and a "can't view" failure disables further look attempts for this run.
+     *
+     * Returns (observation, isError): isError is true for every failure path (no frame, model can't see)
+     * so the caller feeds the real status to [LoopGuard] — otherwise a model spinning on failing looks
+     * would never trip the error streak.
      */
-    private fun lookAtFrame(prompt: String): String {
-        val fp = frames ?: return "Vision isn't available here."
+    private fun lookAtFrame(prompt: String): Pair<String, Boolean> {
+        val fp = frames ?: return "Vision isn't available here." to true
         if (visionUnsupported) {
-            return "This model can't view images directly. Use caption_frame (a separate vision model) instead."
+            return ("This model can't view images directly. Use caption_frame (a separate vision model) " +
+                "instead.") to true
         }
         val frame = fp.currentFrame()
-            ?: return "There's no video frame under the playhead to look at — scrub onto a video clip first."
+            ?: return ("There's no video frame under the playhead to look at — scrub onto a video clip " +
+                "first.") to true
         val question = prompt.ifBlank { "Describe what is happening in this frame in detail." }
         return try {
             // Upgrade the one engine to vision mode (closes the text engine → single-model residency).
             val llm = EngineCache.get(context, modelPath, wantVision = true)
             visionEngaged = true
             generateVision(llm, question, frame)
-                .ifBlank { "The frame looks empty or couldn't be described." }
+                .ifBlank { "The frame looks empty or couldn't be described." } to false
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -169,8 +175,8 @@ class OnDeviceAgentBackend(
             visionUnsupported = true
             visionEngaged = false
             runCatching { EngineCache.get(context, modelPath, wantVision = false) }
-            "This on-device model can't view images directly. Use caption_frame (a separate vision " +
-                "model set in Settings) to describe the frame instead."
+            ("This on-device model can't view images directly. Use caption_frame (a separate vision " +
+                "model set in Settings) to describe the frame instead.") to true
         } finally {
             runCatching { frame.recycle() }
         }
