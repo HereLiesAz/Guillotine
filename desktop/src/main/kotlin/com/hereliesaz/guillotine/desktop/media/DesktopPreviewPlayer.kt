@@ -129,6 +129,7 @@ fun DesktopPreviewPlayer(
                     mediaFor = state.document::mediaFor,
                     now = now,
                     isPlaying = state.isPlaying,
+                    frameDurationMs = state.document.settings.frameDurationMs,
                 )
             }
         }
@@ -176,6 +177,7 @@ private fun VideoTrackLayer(
     mediaFor: (TimelineClip) -> MediaItem?,
     now: Long,
     isPlaying: Boolean,
+    frameDurationMs: Double,
 ) {
     val active = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
         .filter { it.trackId == trackId }
@@ -198,8 +200,8 @@ private fun VideoTrackLayer(
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
     }?.times(trackOpacity)?.times(xfade ?: 0f) ?: 0f
 
-    VideoSlot(outgoing, mediaFor, opacityA, now, isPlaying)
-    VideoSlot(incoming, mediaFor, opacityB, now, isPlaying)
+    VideoSlot(outgoing, mediaFor, opacityA, now, isPlaying, frameDurationMs)
+    VideoSlot(incoming, mediaFor, opacityB, now, isPlaying, frameDurationMs)
 }
 
 @Composable
@@ -209,11 +211,18 @@ private fun VideoSlot(
     alpha: Float,
     now: Long,
     isPlaying: Boolean,
+    frameDurationMs: Double,
 ) {
     if (clip == null || alpha <= 0f) return
     val media = mediaFor(clip) ?: return
 
-    val sourceMs = TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0)
+    // Frame decimation (frameStep): hold the same grabbed frame across `frameStep` output frames by
+    // snapping the source time to the project's kept-frame grid. No-op when frameStep <= 1.
+    val sourceMs = TimelineMath.decimateSourceMs(
+        clip,
+        TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0),
+        frameDurationMs,
+    )
     var frame by remember(clip.id, media.id) { mutableStateOf<ImageBitmap?>(null) }
     var lastDecodedMs by remember(clip.id, media.id) { mutableStateOf(-1L) }
 

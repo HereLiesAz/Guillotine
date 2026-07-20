@@ -15,6 +15,7 @@ import com.hereliesaz.guillotine.ads.ConsentManager
 import com.hereliesaz.guillotine.editor.AndroidEditorViewModel
 import com.hereliesaz.guillotine.ui.NleScreen
 import com.hereliesaz.guillotine.ui.theme.GuillotineTheme
+import com.hereliesaz.guillotine.update.UpdatePrompt
 
 class MainActivity : ComponentActivity() {
     // POST_NOTIFICATIONS is now requested inside the onboarding flow (OnboardingDialog).
@@ -70,15 +71,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // Gather UMP consent (AdMob Privacy & messaging), then start ads once allowed.
-        val app = application as GuillotineApplication
-        val consent = ConsentManager(this)
-        consent.gatherConsent(this) { if (consent.canRequestAds) app.startAdsAfterConsent() }
-        if (consent.canRequestAds) app.startAdsAfterConsent() // already consented from a prior run
+        // Ads exist only in the Play distribution. Gather UMP consent (AdMob Privacy & messaging),
+        // then start ads once allowed. The github build skips all of this (BuildConfig.ADS_ENABLED).
+        if (BuildConfig.ADS_ENABLED) {
+            val app = application as GuillotineApplication
+            val consent = ConsentManager(this)
+            consent.gatherConsent(this) { if (consent.canRequestAds) app.startAdsAfterConsent() }
+            if (consent.canRequestAds) app.startAdsAfterConsent() // already consented from a prior run
+        }
         setContent {
             val windowSizeClass = calculateWindowSizeClass(this)
             GuillotineTheme {
                 NleScreen(widthClass = windowSizeClass.widthSizeClass)
+                // Direct-download (github) build: check GitHub Releases on launch and offer to
+                // self-update. No-op in the Play build (BuildConfig.UPDATER_ENABLED == false).
+                if (BuildConfig.UPDATER_ENABLED) UpdatePrompt()
             }
         }
     }

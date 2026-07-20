@@ -109,17 +109,18 @@ literal default in code).
 
 | Category | Tools |
 | --- | --- |
-| [Timeline & editing](#timeline--editing) | 11 |
+| [Timeline & editing](#timeline--editing) | 22 |
 | [Vision & recognition](#vision--recognition) | 10 |
 | [Transcription, captions & speech](#transcription-captions--speech) | 6 |
 | [Audio](#audio) | 7 |
 | [Color, LUT, shader, FFmpeg/Frei0r & transitions](#color-lut-shader-ffmpegfrei0r--transitions) | 9 |
+| [Named video effects (FFmpeg bake)](#named-video-effects-ffmpeg-bake) | 30 |
 | [Neural image effects & compositing](#neural-image-effects--compositing) | 4 |
 | [Scene, highlights, reframe & export](#scene-highlights-reframe--export) | 4 |
 | [Beat-sync / rhythm](#beat-sync--rhythm) | 5 |
 | [Generation (cloud, BYO key)](#generation-cloud-byo-key) | 3 |
 | [User-defined tools & action recording](#user-defined-tools--action-recording) | 7 |
-| **Total** | **66** |
+| **Total** | **107** |
 
 ---
 
@@ -194,6 +195,27 @@ Set static values for a clip filter (e.g. brightness = 1.2, speed = 2.0).
 | `property` | string | required | — | Property name, e.g. `brightness`, `speed`. |
 | `value` | number | required | — | The value to set. |
 
+### `lookup_vocabulary`
+Resolve an editing word/phrase against the shared vocabulary graph. Returns the concept it maps to, its
+synonyms, its opposite (antonym), the tool it routes to, and — for the exact phrase — whether the sense is
+inverted (a negation like "less/reduce/remove" flips it to the opposite tool). The graph seeds a compact
+lexicon and expands it programmatically, and it also feeds a synonym/antonym appendix into the agent prompt.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `term` | string | required | — | The word or phrase to look up (e.g. `crispy`, `less warm`). |
+
+### `set_frame_step`
+Frame decimation — keep only every Nth frame for a choppy/stutter look, live and on-device (no ffmpeg,
+no baking). The clip stays the same length and its audio is untouched, so it stays in sync. Quantizes
+against the project frame rate; desktop snaps the frame-grab source time, Android drops to `fps / step`
+via a Media3 `FrameDropEffect`. `apply_ffmpeg_filter` with `framestep=N` is the baked-to-a-new-clip equivalent.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `clip_id` | string | required | — | The clip to decimate. |
+| `step` | integer | required | — | Keep 1 of every N frames. 2 = every other frame; 1 = off. |
+
 ### `add_keyframe`
 Add a keyframe for a specific `KeyframeProperty` at a specific time in the clip.
 
@@ -211,6 +233,26 @@ Remove all keyframes for a specified property on a clip.
 | --- | --- | --- | --- | --- |
 | `clip_id` | string | required | — | The clip. |
 | `property` | string | required | — | The property to clear. |
+
+### Core timeline verbs
+
+Thin wrappers over the editor's own operations (shared across platforms), giving the agent direct control
+of the timeline rather than only analysis/effects.
+
+| Tool | What it does | Key args |
+| --- | --- | --- |
+| `seek` | Move the playhead to a time (so the frame tools can inspect/act there) | `time_ms` |
+| `move_clip` | Reposition a clip in time / to another track | `clip_id`, `start_ms`, `track_id?` |
+| `trim_clip` | Shift a clip's in/out points by a delta | `clip_id`, `start_delta_ms?`, `end_delta_ms?` |
+| `add_text` | Add a title/caption text clip | `text`, `track_id?`, `start_ms?`, `duration_ms?` |
+| `add_track` | Add a video/audio track (returns its id) | `type` |
+| `set_track` | Set track mute/disable/volume/opacity (absolute) | `track_id`, `muted?`, `disabled?`, `volume?`, `opacity?` |
+| `transform_clip` | Set a clip's crop/scale/offset/rotation (absolute) | `clip_id`, `scale?`, `offset_x?`, `offset_y?`, `rotation?` |
+| `undo` | Undo the last edit | — |
+| `redo` | Redo the last undone edit | — |
+
+`get_timeline` also now reports `globalSettings` (fps, aspect ratio, crop), per-track settings, and the
+current `selectedClipIds`, so the agent can read project state instead of guessing.
 
 ---
 
@@ -533,6 +575,49 @@ Bake-to-new-clip, desktop-first.
 | `to_clip_id` | string | required | — | The incoming (second) clip. |
 | `type` | string | optional | `fade` | `xfade` transition type. |
 | `duration_sec` | number | optional | `1` | Transition/overlap length in seconds. |
+
+---
+
+## Named video effects (FFmpeg bake)
+
+One-call video looks, each backed by a standard FFmpeg `-vf` filtergraph and **baked to a new clip**. They
+share the `apply_ffmpeg_filter` engine (desktop bakes in-process via the bundled FFmpeg; Android needs an
+ffmpeg executable set in Settings → AI Analyzer → FFmpeg filters). Every effect is duration-preserving
+(audio is copied through, so the clip length is unchanged). All take a required `clip_id`; the optional
+tuning parameter (if any) is listed below.
+
+| Tool | Effect | Optional param (default) |
+| --- | --- | --- |
+| `sharpen` | Sharpen a soft/blurry clip | `amount` (1.5) |
+| `denoise_video` | Reduce video noise/grain | — |
+| `deband` | Remove colour banding in gradients | — |
+| `deflicker` | Remove flicker / brightness pulsing | — |
+| `stabilize` | Stabilise shaky footage (one pass) | — |
+| `lens_correction` | Fix barrel/fisheye distortion | `amount` (0.2) |
+| `motion_trail` | Frame-blend into a motion trail / echo | `frames` (3) |
+| `film_grain` | Add film grain / analog noise | `strength` (20) |
+| `vignette` | Darken the edges | — |
+| `vhs` | Retro VHS chroma-shift + noise | `strength` (5) |
+| `chromatic_aberration` | RGB channel-split fringe | `amount` (4) |
+| `glow` | Dreamy soft glow / bloom | `strength` (0.5) |
+| `old_film` | Vintage curve + grain + vignette | — |
+| `edge_detect` | Line-art / sketch outline | — |
+| `pixelate` | Pixelate / mosaic | `size` (16) |
+| `mirror` | Flip horizontally (left-right) | — |
+| `flip_vertical` | Flip vertically (upside-down) | — |
+| `rotate_180` | Rotate 180° | — |
+| `grid_overlay` | Overlay an alignment grid | `size` (64) |
+| `warm` | Warm the colour (orange/gold) | — |
+| `cool` | Cool the colour (blue) | — |
+| `cinematic` | Teal-and-orange grade | — |
+| `increase_contrast` | Punchy contrast S-curve | — |
+| `vintage` | Faded vintage colour curve | — |
+| `cross_process` | Cross-process / lomo look | — |
+| `darker` | Lower the exposure | — |
+| `brighter` | Lift the exposure | — |
+| `noir` | High-contrast B&W film-noir | — |
+| `night_vision` | Green night-vision + noise | — |
+| `thermal` | False-colour thermal / infrared | — |
 
 ---
 

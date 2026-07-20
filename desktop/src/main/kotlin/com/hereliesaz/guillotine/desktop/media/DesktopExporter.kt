@@ -342,7 +342,14 @@ object DesktopExporter {
         if (opacity <= 0f) return
         val media = document.mediaFor(clip) ?: return
         val file = uriToFile(media.uri) ?: return
-        val sourceMs = TimelineMath.sourceTimeMs(clip, timeMs).coerceAtLeast(0)
+        // Frame decimation (frameStep): hold the same source frame across `frameStep` output frames by
+        // snapping the source time to the project's kept-frame grid. Audio is mixed separately and stays
+        // in sync (same duration). No-op when frameStep <= 1.
+        val sourceMs = TimelineMath.decimateSourceMs(
+            clip,
+            TimelineMath.sourceTimeMs(clip, timeMs).coerceAtLeast(0),
+            document.settings.frameDurationMs,
+        )
         // Honor un-applied REMOVE marks: if this frame samples a removed source range, draw nothing so
         // the lower track / black shows through. The audio mixer gates on the same isRemoved check, so
         // video and audio stay in sync. (Committed cuts ripple via applyCuts and carry no marks; this

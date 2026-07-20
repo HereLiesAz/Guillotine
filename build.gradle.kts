@@ -49,6 +49,41 @@ allprojects {
 }
 
 // ============================================================================
+// Security: pin patched versions of TRANSITIVE dependencies flagged by Dependabot.
+// ============================================================================
+// None of these are direct dependencies (they arrive transitively via the ML / crypto
+// stack), so there is nothing to bump in libs.versions.toml — a resolution force is the
+// only lever. Versions below are the latest patched releases verified to exist on Maven
+// Central. Applied to every project's configurations so it covers :app, :shared and :desktop.
+allprojects {
+    configurations.configureEach {
+        resolutionStrategy.eachDependency {
+            val g = requested.group
+            val n = requested.name
+            when {
+                // Netty — ~30 CVEs across codec/http/http2/handler/common/proxy (smuggling, DoS, request
+                // smuggling, the late-2025 HttpProxyHandler injection). netty-tcnative is on its own 2.0.x
+                // line, so never rewrite it.
+                g == "io.netty" && n.startsWith("netty-") && !n.contains("tcnative") ->
+                    useVersion("4.2.16.Final")
+                // Bouncy Castle — GOST CTR keystream reuse (critical), bcpkix broken algorithm, LDAP injection.
+                // Keep all *-jdk18on modules on one version (BC requires them to match).
+                g == "org.bouncycastle" && n.endsWith("-jdk18on") -> useVersion("1.85")
+                g == "org.apache.httpcomponents" && n == "httpclient" -> useVersion("4.5.14")   // XSS
+                g == "org.apache.commons" && n == "commons-lang3" -> useVersion("3.20.0")       // uncontrolled recursion
+                g == "org.bitbucket.b_c" && n == "jose4j" -> useVersion("0.9.6")                // JWE decompression DoS
+                g == "org.jdom" && n == "jdom2" -> useVersion("2.0.6.1")                        // XXE
+                // protobuf-javalite DoS (fixed in 3.25.5 / 4.27.5+). Only nudge a 3.x line up to the patched
+                // 3.25.5; leave any 4.x (already ≥ patched) alone to avoid a major downgrade that could break
+                // the generated code it parses.
+                g == "com.google.protobuf" && n == "protobuf-javalite" &&
+                    requested.version?.startsWith("3.") == true -> useVersion("3.25.5")
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Versioning — version.properties is the single source of truth.
 // ============================================================================
 //

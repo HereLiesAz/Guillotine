@@ -95,6 +95,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var leonardoKey by remember { mutableStateOf(current.leonardoKey) }
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
+    var cloudVision by remember { mutableStateOf(current.cloudVision) }
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
 
@@ -106,6 +107,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         models = models,
         leonardoKey = leonardoKey.trim(),
         leonardoModel = leonardoModel,
+        cloudVision = cloudVision,
         frameAnalysisCacheSize = frameAnalysisCacheSize,
     )
 
@@ -113,6 +115,16 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var azpBusy by remember { mutableStateOf(false) }
     var azpStatus by remember { mutableStateOf<String?>(null) }
     var azpUntrusted by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    // A package whose id was first installed from a different publisher key — prompt before overwriting.
+    var azpPublisherChange by remember {
+        mutableStateOf<com.hereliesaz.guillotine.azphalt.AzpModelInstall.PublisherChangedException?>(null)
+    }
+    var azpChangeBytes by remember { mutableStateOf<ByteArray?>(null) }
+    val publisherPins = remember {
+        com.hereliesaz.guillotine.azphalt.AzpPublisherPins(
+            java.io.File(DesktopStorage.dataDir, "azp-publishers.json"),
+        )
+    }
 
     fun applyInstalled(result: AzpModelInstall.Result) {
         result.installed.forEach { inst ->
@@ -121,14 +133,17 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         onSave(buildSettings())
     }
 
-    fun installAzp(bytes: ByteArray, allowUntrusted: Boolean) {
+    fun installAzp(bytes: ByteArray, allowUntrusted: Boolean, allowPublisherChange: Boolean = false) {
         scope.launch {
             azpBusy = true
             azpStatus = "Reading package…"
             try {
                 val dir = java.io.File(DesktopStorage.dataDir, "azp-models")
                 val result = withContext(Dispatchers.IO) {
-                    AzpModelInstall.install(bytes, emptySet(), dir, allowUntrusted) { p ->
+                    AzpModelInstall.install(
+                        bytes, emptySet(), dir, allowUntrusted,
+                        pins = publisherPins, allowPublisherChange = allowPublisherChange,
+                    ) { p ->
                         val pct = p.bytesTotal?.takeIf { it > 0 }?.let { p.bytesDone * 100 / it }
                         azpStatus = when (p.phase) {
                             AzpModelInstall.Phase.DOWNLOADING ->
@@ -143,6 +158,10 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                 azpStatus = "Installed ${result.installed.size} model(s) from ${result.packageId}" +
                     (if (result.trust.trusted) " (trusted)" else " (unsigned)") +
                     if (routed < result.installed.size) " — ${result.installed.size - routed} need manual wiring." else "."
+            } catch (e: com.hereliesaz.guillotine.azphalt.AzpModelInstall.PublisherChangedException) {
+                azpPublisherChange = e
+                azpChangeBytes = bytes
+                azpStatus = null
             } catch (e: com.hereliesaz.guillotine.azphalt.AzpModelInstall.UntrustedException) {
                 azpUntrusted = bytes to e.trust.reason
                 azpStatus = null
@@ -274,6 +293,26 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         color = Neutral500, fontSize = 10.sp,
                     )
 
+                    // Cloud vision (opt-in). Off by default — the ONLY path that sends a frame off-device,
+                    // and only to the user's own cloud provider.
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Let cloud AI see frames (opt-in)", color = Neutral400, fontSize = 12.sp)
+                        androidx.compose.material3.Switch(
+                            checked = cloudVision,
+                            onCheckedChange = { cloudVision = it },
+                        )
+                    }
+                    Text(
+                        "OFF by default. When on, the current frame is sent to your CLOUD provider " +
+                            "(Claude / GPT / Gemini) — and only when the assistant chooses to look. Leave it " +
+                            "off to keep your footage strictly on your machine.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
                 }
                 1 -> {
                     Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
@@ -343,6 +382,33 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             },
             dismissButton = {
                 Text("Cancel", modifier = Modifier.clickable { azpUntrusted = null })
+            },
+        )
+    }
+
+    azpPublisherChange?.let { change ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { azpPublisherChange = null; azpChangeBytes = null },
+            title = { Text("Different publisher") },
+            text = {
+                Text(
+                    "\"${change.packageId}\" was first installed from one publisher, but this update is " +
+                        "signed by " + (if (change.newSignerKey == null) "no key" else "a different key") +
+                        ". This can mean a legitimate key change — or that someone else is trying to " +
+                        "replace the plugin. Only continue if you trust the new publisher.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val bytes = azpChangeBytes
+                    azpPublisherChange = null; azpChangeBytes = null
+                    if (bytes != null) installAzp(bytes, allowUntrusted = true, allowPublisherChange = true)
+                }) { Text("Trust new publisher", color = Red500, fontWeight = FontWeight.Medium) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { azpPublisherChange = null; azpChangeBytes = null },
+                ) { Text("Cancel") }
             },
         )
     }

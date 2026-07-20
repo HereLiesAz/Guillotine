@@ -52,6 +52,38 @@ class AssistantViewModel {
         startRun(prompt, tools, agent, logAs = r, isReply = true)
     }
 
+    private var vocabExpansionStarted = false
+
+    /** Disk persistence for the LLM vocabulary expansion; defaults to the app data dir. */
+    var vocabCache: com.hereliesaz.guillotine.ai.vocab.VocabularyCache? =
+        com.hereliesaz.guillotine.desktop.platform.DesktopVocabularyCache
+
+    /**
+     * One-time background LLM vocabulary expansion (guarded; never blocks or throws). Loads the cached
+     * expansion if present (no API call), else runs the model once and persists the result so the next
+     * launch is offline. File IO is kept off the main thread.
+     */
+    private fun maybeExpandVocabulary(agent: AgentBackend) {
+        if (vocabExpansionStarted) return
+        vocabExpansionStarted = true
+        scope.launch {
+            try {
+                val cache = vocabCache
+                val cached = cache?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { it.load() } }
+                val fresh = com.hereliesaz.guillotine.ai.vocab.VocabularyExpander.ensureExpanded(cached) { p ->
+                    agent.complete(p)
+                }
+                if (fresh != null && cache != null) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.save(fresh) }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // don't swallow cancellation — structured concurrency
+            } catch (e: Exception) {
+                // Vocabulary expansion is optional; ignore failures (the seed vocabulary stays in effect).
+            }
+        }
+    }
+
     private fun startRun(
         instruction: String,
         tools: McpToolsSurface,
@@ -66,6 +98,9 @@ class AssistantViewModel {
             ActivityLog.error(msg)
             return
         }
+        // Grow the vocabulary graph via a one-time background LLM pass (guarded, non-blocking, silent on
+        // failure) so later turns and lookup_vocabulary recognise more phrasings. Seed is the fallback.
+        maybeExpandVocabulary(agent)
         ActivityLog.user(logAs)
         ActivityLog.info("Thinking…")
         if (!isReply) originalPrompt = logAs

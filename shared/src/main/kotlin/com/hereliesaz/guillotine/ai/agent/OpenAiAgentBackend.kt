@@ -20,7 +20,16 @@ class OpenAiAgentBackend(
     private val endpoint: String,
     private val model: String,
     private val label: String,
+    // Non-null ONLY when the user opted into cloud vision. When set, the model is offered look_at_frame
+    // and the current frame is sent to the provider's vision API on demand. Null → strictly text-only.
+    private val frames: FrameImageSource? = null,
 ) : AgentBackend {
+
+    // Conversation memory kept across run() calls (see AgentBackend.reset). The system prompt is added once
+    // at the head of a fresh history; reset on any non-clean exit so a partial turn can't corrupt the next.
+    private var messages = JSONArray()
+
+    override fun reset() { messages = JSONArray() }
 
     override suspend fun run(
         instruction: String,
@@ -28,11 +37,16 @@ class OpenAiAgentBackend(
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         try {
-            val toolDefs = openAiTools(tools.definitions())
-            val messages = JSONArray()
-                .put(JSONObject().put("role", "system").put("content", AGENT_SYSTEM_PROMPT))
-                .put(JSONObject().put("role", "user").put("content", instruction))
+            val defs = tools.definitions()
+            if (frames != null) defs.put(visionToolDefinition()) // offer look_at_frame only when opted in
+            val toolDefs = openAiTools(defs)
+            if (messages.length() >= MAX_CONVERSATION_MESSAGES) messages = JSONArray() // bound growth across turns
+            if (messages.length() == 0) {
+                messages.put(JSONObject().put("role", "system").put("content", AGENT_SYSTEM_PROMPT))
+            }
+            messages.put(JSONObject().put("role", "user").put("content", instruction))
 
+            val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
                 ensureActive() // honor cancellation between turns — stop issuing paid API calls once cancelled
@@ -59,8 +73,17 @@ class OpenAiAgentBackend(
                             JSONObject(fn.optString("arguments").ifBlank { "{}" })
                         }.getOrDefault(JSONObject())
                         onEvent(AgentEvent.ToolStarted(name))
-                        val outcome = callTool(tools, name, args)
+                        val outcome = if (name == VISION_TOOL_NAME) {
+                            frameLookOutcome(frames, args.optString("prompt")) { img, q -> describeImage(img, q) }
+                        } else {
+                            callTool(tools, name, args)
+                        }
                         onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
+                        guard.check(name, args.toString(), outcome.isError)?.let { stop ->
+                            onEvent(AgentEvent.Failed(stop))
+                            messages = JSONArray() // stalled mid-turn — drop the unbalanced tail
+                            return@withContext
+                        }
                         messages.put(JSONObject().apply {
                             put("role", "tool")
                             put("tool_call_id", tc.optString("id"))
@@ -74,11 +97,42 @@ class OpenAiAgentBackend(
                 return@withContext
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
+            messages = JSONArray() // stopped mid-task; drop the (possibly unbalanced) history
         } catch (e: kotlinx.coroutines.CancellationException) {
+            messages = JSONArray() // partial turn — reset so the next run starts clean
             throw e
         } catch (e: Exception) {
+            messages = JSONArray() // partial turn (assistant tool_calls with no tool result) — reset
             onEvent(AgentEvent.Failed(e.message ?: "$label agent failed"))
         }
+    }
+
+    /**
+     * One-shot vision request: send [image] and [question] as an image_url content part and return the
+     * text. Used only on the opt-in cloud-vision path (via look_at_frame). Reuses [post]; null on failure.
+     */
+    private fun describeImage(image: FrameImage, question: String): String? {
+        val body = JSONObject().apply {
+            put("model", model)
+            put(
+                "messages",
+                JSONArray().put(
+                    JSONObject().put("role", "user").put(
+                        "content",
+                        JSONArray()
+                            .put(JSONObject().put("type", "text").put("text", question))
+                            .put(
+                                JSONObject().put("type", "image_url").put(
+                                    "image_url",
+                                    JSONObject().put("url", "data:${image.mediaType};base64,${image.data}"),
+                                ),
+                            ),
+                    ),
+                ),
+            )
+        }
+        val message = post(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+        return message.optString("content").takeIf { it.isNotBlank() && it != "null" }
     }
 
     /** Map MCP tool defs to OpenAI's shape: `{type:"function", function:{name, description, parameters}}`. */
@@ -93,6 +147,21 @@ class OpenAiAgentBackend(
                     put("parameters", d.getJSONObject("inputSchema"))
                 })
             })
+        }
+    }
+
+    override suspend fun complete(prompt: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply {
+                put("model", model)
+                put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+            }
+            val message = post(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+            message.optString("content").takeIf { it.isNotBlank() && it != "null" }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
         }
     }
 

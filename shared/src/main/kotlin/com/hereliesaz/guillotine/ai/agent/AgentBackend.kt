@@ -38,10 +38,134 @@ interface AgentBackend {
      * through [onEvent]. Must not throw: failures are reported as [AgentEvent.Failed].
      */
     suspend fun run(instruction: String, tools: McpToolsSurface, onEvent: (AgentEvent) -> Unit)
+
+    /**
+     * One-shot plain-text completion — NO tools and NOT the editing [AGENT_SYSTEM_PROMPT] — for auxiliary
+     * language tasks like vocabulary expansion. Returns the model's text, or null when the backend can't
+     * do a bare completion or anything fails. Must never throw. Default: unsupported.
+     */
+    suspend fun complete(prompt: String): String? = null
+
+    /**
+     * Forget the accumulated conversation and start a fresh one on the next [run]. Stateful backends keep
+     * the running message history between runs so the model remembers earlier turns (edits it made, what
+     * the user asked); call this to begin a brand-new conversation. Default: no-op (stateless backend).
+     */
+    fun reset() {}
 }
 
-/** Hard cap on tool round-trips so a confused model can't loop forever / burn tokens. */
-const val MAX_AGENT_ITERATIONS = 12
+/**
+ * Hard ceiling on tool round-trips per run. Raised from the old 12 (which cut off legitimate multi-step
+ * edits — e.g. split-then-grade several clips, or a batch of per-clip ops) now that [LoopGuard] catches
+ * the "confused model spinning" case directly instead of relying on a low ceiling to bound it.
+ */
+const val MAX_AGENT_ITERATIONS = 24
+
+/**
+ * Early-stop for a stalled agent, so the higher [MAX_AGENT_ITERATIONS] ceiling can't be burned by a model
+ * that's looping without progress. Trips when the recent calls form a repeating CYCLE — one call spun on
+ * ([repeatLimit] identical calls, period 1), an A,B,A,B,… alternation (period 2), and so on — or when
+ * [errorLimit] tool results in a row are errors (flailing). Productive, varied tool use never trips it,
+ * so long legitimate tasks get the full ceiling. Each run makes its own instance.
+ */
+class LoopGuard(
+    private val repeatLimit: Int = 3,
+    private val errorLimit: Int = 4,
+    private val window: Int = 6,
+) {
+    // A sliding window of the most recent call signatures — NOT just the immediate last one — so an
+    // A,B,A,B,… alternation can't dodge detection by resetting a single "last" slot each time.
+    private val recent = ArrayDeque<String>()
+    private var errorStreak = 0
+
+    /** Record one tool result; returns a stop reason if the run should abort now, else null. */
+    fun check(name: String, args: String, isError: Boolean): String? {
+        val sig = "$name($args)"
+        recent.addLast(sig)
+        while (recent.size > window) recent.removeFirst()
+        errorStreak = if (isError) errorStreak + 1 else 0
+        return when {
+            isCycling() ->
+                "Stopped: the recent tool calls keep repeating the same cycle with no new result — " +
+                    "the task may need a different approach or more information."
+            errorStreak >= errorLimit ->
+                "Stopped: $errorStreak tool calls in a row failed — please check the request and try again."
+            else -> null
+        }
+    }
+
+    /**
+     * True when the tail of the window is a single block of [period] calls repeated at least [repeatLimit]
+     * times — a genuine cycle. We look for an actual periodic pattern rather than counting bare occurrences
+     * of one signature: a read-only call like get_timeline recurring between DISTINCT edits
+     * (get_timeline → edit A → get_timeline → edit B → …) is productive interleaving, not a stall, and must
+     * not trip the guard.
+     */
+    private fun isCycling(): Boolean {
+        val calls = recent.toList()
+        val n = calls.size
+        for (period in 1..(n / repeatLimit)) {
+            val span = period * repeatLimit
+            val tail = calls.subList(n - span, n)
+            if ((period until span).all { tail[it] == tail[it - period] }) return true
+        }
+        return false
+    }
+}
+
+/** Name of the synthetic "look at the current frame" action offered to a vision-capable backend. */
+const val VISION_TOOL_NAME = "look_at_frame"
+
+/**
+ * The current frame encoded for a cloud image API — used ONLY on the explicitly opt-in cloud-vision path
+ * (the off-by-default `cloudVision` setting). This is deliberately separate from the on-device
+ * [FrameProvider], which hands raw pixels to a local model that never touches the network: this seam
+ * exists so that, when the user has turned cloud vision on, a cloud brain can be sent one frame as an
+ * image. It is only ever wired to a backend when that setting is enabled, so the "never send media"
+ * default holds unless the user opts in. Implemented by the concrete MCP tool surface.
+ */
+interface FrameImageSource {
+    /** The active video clip's frame at the playhead, base64-encoded, or null if there's none to send. */
+    fun currentFrameImage(): FrameImage?
+}
+
+/** A frame encoded for a cloud image API: base64 [data] plus its [mediaType] (e.g. `image/jpeg`). */
+data class FrameImage(val data: String, val mediaType: String)
+
+/**
+ * MCP-shaped definition for [VISION_TOOL_NAME], appended to a cloud backend's tool list only when
+ * cloud vision is enabled. Lets the model ask to actually see the current frame; the backend intercepts
+ * the call, sends the frame to the provider's image API, and returns the description as the tool result.
+ */
+fun visionToolDefinition(): JSONObject = JSONObject()
+    .put("name", VISION_TOOL_NAME)
+    .put(
+        "description",
+        "LOOK at the current frame (at the playhead) and get a description of what is actually on screen. " +
+            "Use it when you need to know what the footage shows before deciding — e.g. \"is this shot " +
+            "indoors?\", \"what's in this frame?\". Seek to the moment first if you need a specific one.",
+    )
+    .put(
+        "inputSchema",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject().put(
+                    "prompt",
+                    JSONObject()
+                        .put("type", "string")
+                        .put("description", "Optional question about the frame (default: describe it)"),
+                ),
+            ),
+    )
+
+/**
+ * Soft cap on retained conversation messages across runs. When a stateful backend's history grows past
+ * this, it starts a fresh conversation before the next turn — bounding token cost/latency and never leaving
+ * a half-finished exchange around. Successful runs under the cap keep their memory.
+ */
+const val MAX_CONVERSATION_MESSAGES = 60
 
 /** Shared role prompt: tells the model it operates the editor purely through the tools. */
 val AGENT_SYSTEM_PROMPT = """
@@ -136,12 +260,49 @@ val AGENT_SYSTEM_PROMPT = """
       circleopen/circleclose, dissolve, pixelize, radial, smoothleft, distance, … (default fade);
       duration_sec is the overlap (default 1). Needs an ffmpeg executable (Settings → FFmpeg filters).
 
-    FFMPEG / FREI0R FILTERS (on-device, advanced):
-    - "apply the ffmpeg filter <graph>", "run a frei0r plugin", "add a vhs/vintage/chromashift filter",
-      "deband/curves/eq this" → apply_ffmpeg_filter(clip_id, filter) where filter is a raw FFmpeg -vf
-      graph (e.g. "hue=s=0, gblur=sigma=2" or "frei0r=cartoon"). It bakes the filter and adds a new clip.
-      Needs an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters; relay its error if unset.
-      Bake-to-new-clip (not live) and heavy — desktop-first.
+    FRAME DECIMATION / STUTTER (on-device, live, no ffmpeg):
+    - "cut/remove/drop every other frame", "delete every 2nd frame", "make it choppy/stuttery/strobey",
+      "low-frame-rate look" → set_frame_step(clip_id, step). step=2 keeps every other frame, step=3 keeps
+      one of every three, step=1 turns it off. It's a LIVE filter: the clip stays the SAME length, its audio
+      is untouched (stays in sync), and nothing is baked or added — prefer it over apply_ffmpeg_filter for
+      this. Use apply_ffmpeg_filter with "framestep=N" only when the user explicitly wants a baked new clip.
+
+    NAMED VIDEO EFFECTS (on-device bake — PREFER these over hand-authoring a graph):
+    - Many common looks have a dedicated one-call tool that bakes the right FFmpeg graph for you. When one
+      matches the request, call it directly (each takes clip_id plus optional tuning params). They cover:
+        · detail/cleanup: sharpen, denoise_video, deband, deflicker, stabilize, lens_correction;
+        · motion: motion_trail;
+        · stylize: film_grain, vignette, vhs, chromatic_aberration, glow, old_film, edge_detect, pixelate,
+          night_vision, thermal, grid_overlay;
+        · geometry: mirror, flip_vertical, rotate_180;
+        · colour/tone: warm, cool, cinematic, increase_contrast, vintage, cross_process, darker, brighter, noir.
+      Reach for apply_ffmpeg_filter (below) ONLY for an effect that has no named tool here.
+
+    FFMPEG FILTER GRAPHS — YOUR ESCAPE HATCH FOR EFFECTS WITH NO NAMED TOOL (on-device):
+    - apply_ffmpeg_filter(clip_id, filter) runs a raw FFmpeg `-vf` filtergraph and bakes the result as a new
+      clip. This is the general escape hatch: when the user asks for a frame-rate, timing, or per-frame
+      visual effect that NONE of the named tools above cover, do NOT reply that you can't do it and do NOT
+      try to fake it with split_clip/delete_clip. If the effect can be written as a standard FFmpeg `-vf`
+      graph, AUTHOR the graph yourself from their plain-English request and call apply_ffmpeg_filter — you
+      are expected to translate intent into the filter, not to wait for the user to hand you one.
+    - Frame decimation / stutter / frame-rate — prefer the live set_frame_step tool above; use these graphs
+      only when the user explicitly wants a baked new clip:
+        · "cut/remove/drop every other frame", "delete every 2nd frame", "halve the frames", "make it
+          choppy/stuttery/strobey" → "framestep=2" (keep every 2nd frame; "framestep=3" = every third, etc.);
+        · "choppy N-fps / low-frame-rate look" → "fps=8" (or another target);
+        · "frame-blend / smear the motion", "motion-trail" → "tmix=frames=3";
+        · "smooth slow-motion / interpolate frames" → "minterpolate=fps=60".
+    - Look / color / stylize with no named tool: "hue=s=0", "gblur=sigma=2", "eq=contrast=1.3:saturation=1.4",
+      "curves=…", "vignette", "noise=alls=20:allf=t", "rgbashift=rh=5:bh=-5" (chroma shift), "frei0r=<plugin>".
+    - Chain several with commas ("framestep=2, eq=contrast=1.3"). Stick to standard, widely-available filters
+      — don't invent filter names.
+    - IMPORTANT — audio is copied through unchanged (`-c:a copy`), so prefer graphs that KEEP the clip's
+      duration (framestep, fps, tmix, eq, hue…). These read as "every other frame removed" via choppy motion
+      at the same length, which keeps audio in sync. Avoid speed/trim-style graphs (setpts, trim) that
+      change the video length — they desync the copied audio.
+    - Needs an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters; if it's unset the tool returns
+      an error naming that setting — relay it and don't retry. Bake-to-new-clip (not live) and heavy —
+      desktop-first.
 
     GLSL / ISF SHADER EFFECTS (on-device):
     - "apply this ISF shader", "add a glitch/CRT/kaleidoscope shader", "run this .fs/.glsl on the clip" →
@@ -306,12 +467,35 @@ val AGENT_SYSTEM_PROMPT = """
       lower threshold (e.g. 0.2) to find more. Requires the YAMNet model in Settings → AI Analyzer → Audio
       highlights; if it isn't set it returns an error naming the setting — relay it, don't retry.
 
-    Prefer to act on reasonable defaults rather than pause to ask. Only ask a clarifying question when
-    the instruction is genuinely ambiguous and no reasonable default exists (e.g. "shorten the video"
-    without a target length, or two clips both matching "the intro"). When you do ask, end your turn
-    with a single sentence ending in "?" and stop — the user's answer will come back as a new turn
-    with the original request and your question quoted for context, so continue from there.
-""".trimIndent()
+    TIMELINE CONTROL (core verbs): seek (move the playhead to a time), move_clip (reposition on the
+    timeline / another track), trim_clip (shift in/out points), add_text (titles/captions/lower-thirds),
+    add_track, set_track (mute/disable/volume/opacity), transform_clip (crop/scale/reposition the frame),
+    undo, redo. get_timeline also returns globalSettings (fps, aspect ratio, crop), per-track settings, and
+    the current selection — read it before acting instead of guessing.
+
+    KNOW WHEN YOU DON'T HAVE ENOUGH INFORMATION, AND GO GET IT — don't guess blindly:
+    - Unsure WHICH clip / track / time, or the project's fps/aspect? → get_timeline (ids, selection,
+      playhead, settings) or get_clip.
+    - Need to SEE a specific moment? → seek to that time FIRST, then describe_current_frame or caption_frame
+      (the frame tools act at the playhead, so position it rather than assuming what's on screen).
+    - Don't recognise a word the user used? → lookup_vocabulary maps it — and its opposite — to a tool.
+    Prefer to act on reasonable defaults rather than pause to ask. Only after the steps above still leave a
+    genuine ambiguity with no reasonable default (e.g. "shorten the video" without a target length, or two
+    clips both matching "the intro") do you ask — a single sentence ending in "?" — then stop. The user's
+    answer returns as a new turn with the original request and your question quoted, so continue from there.
+
+    CHECK YOUR WORK ON VISUAL EDITS — don't assume a change looked right just because the tool returned ok:
+    after an edit whose RESULT is visual (a crop/reframe, a color grade or LUT, a background replace, an
+    applied effect, a generated/inpainted segment), and when it matters that it landed well, seek to the
+    affected moment and LOOK — describe_current_frame, caption_frame, or look_at_frame — then judge from what
+    you actually see and refine if needed. A JSON "ok" only confirms the operation ran, not that it looks good.
+
+    BATCH / "ALL CLIPS" WORK — plan for the round-trip budget: each tool call handles ONE clip, so "do X to
+    every clip" means one call per clip. Get the clip list once (get_timeline), then work through them
+    deliberately, newest information first; don't re-list between each. If there are more clips than you can
+    finish in a reasonable number of steps, do the most important ones and tell the user which remain rather
+    than spinning until the step limit cuts you off.
+""".trimIndent() + "\n\n" + com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.promptAppendix()
 
 /** Result of executing one tool: the JSON to feed back to the model, plus an error flag. */
 data class ToolOutcome(val json: JSONObject, val isError: Boolean) {
@@ -330,6 +514,42 @@ data class ToolOutcome(val json: JSONObject, val isError: Boolean) {
         json.has("segmentsApplied") -> "${json.optInt("segmentsApplied")} applied"
         json.has("clipCount") -> "${json.optInt("clipCount")} clips"
         else -> "ok"
+    }
+}
+
+/**
+ * Handle a [VISION_TOOL_NAME] call for a cloud backend: pull the current frame from [frames] and hand it
+ * to the provider-specific [describe] (which sends it to that provider's image API and returns the
+ * description). Wraps the result as a [ToolOutcome] to feed back as the tool result — mirroring the
+ * on-device look, so the pixels-as-text flows through the normal tool loop. Any failure (no frame, a
+ * model that can't accept images) becomes a recoverable error result, never a thrown exception. Only
+ * ever reached when the user opted into cloud vision (that's the only time [frames] is non-null here).
+ */
+inline fun frameLookOutcome(
+    frames: FrameImageSource?,
+    prompt: String,
+    describe: (FrameImage, String) -> String?,
+): ToolOutcome {
+    val question = prompt.ifBlank { "Describe what is happening in this frame in detail." }
+    val image = frames?.currentFrameImage()
+        ?: return ToolOutcome(
+            JSONObject().put("error", "No video frame under the playhead — seek onto a video clip first."),
+            isError = true,
+        )
+    val text = try {
+        describe(image, question)
+    } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+        throw c
+    } catch (t: Throwable) {
+        null
+    }
+    return if (text.isNullOrBlank()) {
+        ToolOutcome(
+            JSONObject().put("error", "Couldn't describe the frame (this model may not accept images)."),
+            isError = true,
+        )
+    } else {
+        ToolOutcome(JSONObject().put("caption", text).put("humanSummary", text), isError = false)
     }
 }
 
