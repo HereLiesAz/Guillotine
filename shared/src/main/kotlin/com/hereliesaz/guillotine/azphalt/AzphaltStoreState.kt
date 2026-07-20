@@ -114,9 +114,16 @@ class AzphaltStoreState(
             val bytes = repository.download(pkg.id, pkg.version)
             AzpPackage.load(bytes) // integrity gate: throws AzpException on any verification failure
             val signed = AzpPackage.signatureStatus(bytes)
+            // A present-but-invalid signature means tampering/corruption — refuse it. (Unsigned is
+            // allowed: integrity without provenance, surfaced to the user, per spec/package-format.md.)
+            if (signed.signed && !signed.valid) {
+                return InstallResult.Failure("“${pkg.name}” has an invalid signature and was not installed: ${signed.error ?: "verification failed"}")
+            }
             val dir = File(extensionsDirPath).apply { mkdirs() }
-            // A package id is reverse-DNS, but sanitize anyway so it can never escape the dir.
-            val safeName = pkg.id.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".azp"
+            // A package id is reverse-DNS, but sanitize anyway so it can never escape the dir, and cap
+            // its length so a pathological id can't blow the filesystem's 255-char name limit.
+            val sanitized = pkg.id.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val safeName = sanitized.take(120) + ".azp"
             File(dir, safeName).writeBytes(bytes)
             InstallResult.Success(pkg.id, signed = signed.signed, signatureValid = signed.valid)
         } catch (e: AzpPackage.AzpException) {

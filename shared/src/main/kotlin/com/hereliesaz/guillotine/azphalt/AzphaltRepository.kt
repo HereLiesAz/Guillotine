@@ -176,11 +176,11 @@ class AzphaltRepository(
                 throw RepoException("registry: cannot reach ${hostOf(url)} — ${e.message}")
             }
             if (code != HttpURLConnection.HTTP_OK) {
-                val err = conn.errorStream?.let { runCatching { it.readBounded(maxBytes) }.getOrNull() }
+                val err = conn.errorStream?.use { runCatching { it.readBounded(maxBytes) }.getOrNull() }
                     ?.toString(Charsets.UTF_8)
                 throw RepoException(describeError(code, err))
             }
-            return conn.inputStream.readBounded(maxBytes)
+            return conn.inputStream.use { it.readBounded(maxBytes) }
         } finally {
             conn.disconnect()
         }

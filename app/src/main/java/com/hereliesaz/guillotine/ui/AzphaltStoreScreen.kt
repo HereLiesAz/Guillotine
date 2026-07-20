@@ -89,7 +89,9 @@ fun AzphaltStoreScreen(
     val extensionsDir = remember { File(context.filesDir, "extensions").absolutePath }
 
     // Browse the hosted storefront, scoped to this host so packages for other apps are hidden.
+    // Guard against overlapping fetches (e.g. rapid Retry taps launching concurrent requests).
     fun refresh() {
+        if (loading) return
         scope.launch { withContext(Dispatchers.IO) { storeState.loadCatalog(context.packageName) } }
     }
     LaunchedEffect(Unit) { refresh() }
