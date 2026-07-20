@@ -17,10 +17,11 @@ class TimelineMathTest {
         trackId: String = "V1",
         kfs: List<Keyframe> = emptyList(),
         edits: List<EditSegment> = emptyList(),
+        filters: ClipFilters = ClipFilters(),
     ) = TimelineClip(
         id = id, mediaId = "m", type = type, trackId = trackId,
         startTimeMs = start, trimStartMs = trim, durationMs = dur,
-        keyframes = kfs, edits = edits,
+        keyframes = kfs, edits = edits, filters = filters,
     )
 
     private val linear = CubicBezier(1f / 3f, 1f / 3f, 2f / 3f, 2f / 3f)
@@ -243,6 +244,44 @@ class TimelineMathTest {
                 0f,
             )
         }
+    }
+
+    // ---- decimateSourceMs: frame-hold quantization for the desktop frame-grab paths ----
+
+    @Test fun decimate_is_identity_when_frameStep_is_one() {
+        val c = clip(0, 0, 1000) // default frameStep = 1
+        for (t in longArrayOf(0, 50, 100, 133, 999)) {
+            assertEquals(t, TimelineMath.decimateSourceMs(c, t, 100.0))
+        }
+    }
+
+    @Test fun decimate_holds_every_other_frame() {
+        val c = clip(0, 0, 1000, filters = ClipFilters(frameStep = 2))
+        // 100ms/frame grid, step 2 → kept frames at 0,200,400… each held for two frames.
+        assertEquals(0L, TimelineMath.decimateSourceMs(c, 0, 100.0))
+        assertEquals(0L, TimelineMath.decimateSourceMs(c, 100, 100.0))   // frame 1 → held on frame 0
+        assertEquals(0L, TimelineMath.decimateSourceMs(c, 199, 100.0))
+        assertEquals(200L, TimelineMath.decimateSourceMs(c, 200, 100.0)) // frame 2 → new kept frame
+        assertEquals(200L, TimelineMath.decimateSourceMs(c, 350, 100.0)) // frame 3 → held on frame 2
+    }
+
+    @Test fun decimate_every_third_frame() {
+        val c = clip(0, 0, 1000, filters = ClipFilters(frameStep = 3))
+        assertEquals(0L, TimelineMath.decimateSourceMs(c, 250, 100.0))   // frames 0,1,2 → held on 0
+        assertEquals(300L, TimelineMath.decimateSourceMs(c, 550, 100.0)) // frame 5 → held on kept frame 3
+    }
+
+    @Test fun decimate_grid_is_anchored_at_trimStart() {
+        // trimStart=1000: the kept-frame grid starts there, not at source 0.
+        val c = clip(0, 1000, 1000, filters = ClipFilters(frameStep = 2))
+        assertEquals(1000L, TimelineMath.decimateSourceMs(c, 1100, 100.0)) // rel 100 → held on kept frame 0
+        assertEquals(1200L, TimelineMath.decimateSourceMs(c, 1350, 100.0)) // rel 350 → kept frame 2
+    }
+
+    @Test fun decimate_is_identity_for_nonpositive_frameDuration() {
+        val c = clip(0, 0, 1000, filters = ClipFilters(frameStep = 2))
+        assertEquals(150L, TimelineMath.decimateSourceMs(c, 150, 0.0))
+        assertEquals(150L, TimelineMath.decimateSourceMs(c, 150, -33.0))
     }
 
     @Test fun keptRanges_remove_outside_trim_is_ignored() {

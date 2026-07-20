@@ -146,6 +146,7 @@ fun PreviewPlayer(
                     playbackRate = state.playbackRate,
                     maxVideoDim = state.previewQuality.maxDimension,
                     aspectMod = aspectMod,
+                    projectFps = state.document.settings.fps,
                 )
             }
         }
@@ -241,6 +242,7 @@ private fun VideoTrackLayer(
     playbackRate: Float,
     maxVideoDim: Int,
     aspectMod: Modifier,
+    projectFps: Int,
 ) {
     val context = LocalContext.current
     val gainA = remember { LiveAudioProcessor() }
@@ -289,8 +291,8 @@ private fun VideoTrackLayer(
     // A bg-removed clip is drawn as a cutout (no player surface), so don't keep a decoder running for it.
     val playClipA = outgoing?.takeIf { !it.filters.removeBackground }
     val playClipB = incoming?.takeIf { !it.filters.removeBackground }
-    wireVideoPlayer(playerA, gainA, playClipA, playClipA?.let(mediaFor), now, isPlaying, playbackRate)
-    wireVideoPlayer(playerB, gainB, playClipB, playClipB?.let(mediaFor), now, isPlaying, playbackRate)
+    wireVideoPlayer(playerA, gainA, playClipA, playClipA?.let(mediaFor), now, isPlaying, playbackRate, projectFps)
+    wireVideoPlayer(playerB, gainB, playClipB, playClipB?.let(mediaFor), now, isPlaying, playbackRate, projectFps)
 
     // On-device matte cutouts for background-removed clips, recomputed per ~150 ms bucket
     // (crisp when paused, frame-coarse while playing). Null unless the clip removes its background.
@@ -418,6 +420,7 @@ private fun wireVideoPlayer(
     now: Long,
     isPlaying: Boolean,
     playbackRate: Float,
+    projectFps: Int,
 ) {
     LaunchedEffect(media?.id) {
         if (media == null || clip == null) {
@@ -429,10 +432,16 @@ private fun wireVideoPlayer(
             player.seekTo(TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0))
         }
     }
-    LaunchedEffect(clip?.id, clip?.filters, clip?.keyframes) {
+    LaunchedEffect(clip?.id, clip?.filters, clip?.keyframes, projectFps) {
         // Color filters; keyframe-aware so a keyframed color animates per frame (startMs = -trimStart
-        // maps the picture player's source-time position to clip-relative keyframe time).
-        if (clip != null) runCatching { player.setVideoEffects(VideoEffects.colorEffects(clip, -clip.trimStartMs)) }
+        // maps the picture player's source-time position to clip-relative keyframe time). A frameStep
+        // decimation drops frames to fps/step live (same length, choppy look), matching the exporter.
+        if (clip != null) runCatching {
+            player.setVideoEffects(
+                VideoEffects.colorEffects(clip, -clip.trimStartMs) +
+                    VideoEffects.frameDrop(clip.filters.frameStep, projectFps.toFloat()),
+            )
+        }
     }
     // Picture-only and NEVER outputs its own audio — the clip's sound plays through the audio player.
     LaunchedEffect(Unit) { player.volume = 0f; gain.gain = 0f }

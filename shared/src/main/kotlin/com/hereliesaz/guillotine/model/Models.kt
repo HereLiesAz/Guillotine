@@ -157,6 +157,15 @@ data class ClipFilters(
     val invert: Float = 0f,       // 0..100 (%)
     val grayscale: Float = 0f,    // 0..100 (%)
     val speed: Float = 1f,        // 0.1..10.0x
+    /**
+     * Frame decimation ("keep every Nth frame"). 1 = every frame (off); 2 = every other frame; N = keep
+     * one of every N. Produces a choppy/stutter look at the SAME duration (audio is untouched, so it stays
+     * in sync). Quantizes relative to the project frame rate ([GlobalSettings.fps]): desktop's frame-grab
+     * preview/export snap the source time to the kept-frame grid, and Android drops to `fps / frameStep`
+     * via a Media3 FrameDropEffect. This is the live, on-device, ffmpeg-free path; `apply_ffmpeg_filter`
+     * with `framestep=N` is the bake equivalent.
+     */
+    val frameStep: Int = 1,
     /** On-device subject segmentation: keep the foreground, drop the background so a lower layer shows through. */
     val removeBackground: Boolean = false,
     /** On-device face detection: blur every detected face for privacy/anonymization. */

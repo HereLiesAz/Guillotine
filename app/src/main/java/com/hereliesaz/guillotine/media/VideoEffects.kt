@@ -6,6 +6,7 @@ import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.Crop
+import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.GaussianBlur
 import androidx.media3.effect.HslAdjustment
 import androidx.media3.effect.MatrixTransformation
@@ -89,6 +90,21 @@ object VideoEffects {
 
         return effects
     }
+
+    /**
+     * Frame decimation ([ClipFilters.frameStep]): drop frames down to ~`baseFps / frameStep` while the
+     * timeline keeps running, so the clip looks choppy/stuttery at the SAME length and its audio (handled
+     * separately) stays in sync. Empty when frameStep <= 1. This is the Android counterpart to desktop's
+     * frame-grab snap ([TimelineMath.decimateSourceMs]); both quantize against the project frame rate, and
+     * the SAME Media3 effect pipeline runs it in live preview (`ExoPlayer.setVideoEffects`) and export
+     * (`Transformer`).
+     */
+    fun frameDrop(frameStep: Int, baseFps: Float): List<Effect> =
+        if (frameStep > 1 && baseFps > 0f) {
+            listOf(FrameDropEffect.createDefaultFrameDropEffect((baseFps / frameStep).coerceAtLeast(1f)))
+        } else {
+            emptyList()
+        }
 
     /**
      * Per-clip Crop-tool transform: uniform [scale] about center, [rotationDeg] clockwise, and a

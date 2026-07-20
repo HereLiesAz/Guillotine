@@ -18,9 +18,18 @@ import java.net.URL
 class GeminiAgentBackend(
     private val apiKey: String,
     private val model: String,
+    // Non-null ONLY when the user opted into cloud vision. When set, the model is offered look_at_frame
+    // and the current frame is sent to Gemini's image API on demand. Null → strictly text-only.
+    private val frames: FrameImageSource? = null,
 ) : AgentBackend {
 
     private val base = "https://generativelanguage.googleapis.com"
+
+    // Conversation memory kept across run() calls (see AgentBackend.reset). system_instruction is sent in the
+    // request body each turn, so it's not part of this. Reset on any non-clean exit to avoid a corrupt tail.
+    private var contents = JSONArray()
+
+    override fun reset() { contents = JSONArray() }
 
     override suspend fun run(
         instruction: String,
@@ -28,15 +37,19 @@ class GeminiAgentBackend(
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         try {
+            val defs = tools.definitions()
+            if (frames != null) defs.put(visionToolDefinition()) // offer look_at_frame only when opted in
             val toolBlock = JSONArray().put(
-                JSONObject().put("function_declarations", geminiTools(tools.definitions())),
+                JSONObject().put("function_declarations", geminiTools(defs)),
             )
-            val contents = JSONArray().put(
+            if (contents.length() >= MAX_CONVERSATION_MESSAGES) contents = JSONArray() // bound growth across turns
+            contents.put(
                 JSONObject()
                     .put("role", "user")
                     .put("parts", JSONArray().put(JSONObject().put("text", instruction))),
             )
 
+            val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
                 ensureActive() // honor cancellation between turns — stop issuing paid API calls once cancelled
@@ -72,8 +85,17 @@ class GeminiAgentBackend(
                         val name = call.optString("name")
                         val args = call.optJSONObject("args") ?: JSONObject()
                         onEvent(AgentEvent.ToolStarted(name))
-                        val outcome = callTool(tools, name, args)
+                        val outcome = if (name == VISION_TOOL_NAME) {
+                            frameLookOutcome(frames, args.optString("prompt")) { img, q -> describeImage(img, q) }
+                        } else {
+                            callTool(tools, name, args)
+                        }
                         onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
+                        guard.check(name, args.toString(), outcome.isError)?.let { stop ->
+                            onEvent(AgentEvent.Failed(stop))
+                            contents = JSONArray() // stalled mid-turn — drop the unbalanced tail
+                            return@withContext
+                        }
                         responseParts.put(JSONObject().put("functionResponse", JSONObject().apply {
                             put("name", name)
                             put("response", outcome.json)
@@ -87,11 +109,42 @@ class GeminiAgentBackend(
                 return@withContext
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
+            contents = JSONArray() // stopped mid-task; drop the (possibly unbalanced) history
         } catch (e: kotlinx.coroutines.CancellationException) {
+            contents = JSONArray() // partial turn — reset so the next run starts clean
             throw e
         } catch (e: Exception) {
+            contents = JSONArray() // partial turn (model functionCall with no functionResponse) — reset
             onEvent(AgentEvent.Failed(e.message ?: "Gemini agent failed"))
         }
+    }
+
+    /**
+     * One-shot vision request: send [image] and [question] as an inline_data part and return the text.
+     * Used only on the opt-in cloud-vision path (via look_at_frame). Reuses [post]; null on any failure.
+     */
+    private fun describeImage(image: FrameImage, question: String): String? {
+        val body = JSONObject().put(
+            "contents",
+            JSONArray().put(
+                JSONObject().put("role", "user").put(
+                    "parts",
+                    JSONArray()
+                        .put(JSONObject().put("text", question))
+                        .put(
+                            JSONObject().put(
+                                "inline_data",
+                                JSONObject().put("mime_type", image.mediaType).put("data", image.data),
+                            ),
+                        ),
+                ),
+            ),
+        )
+        val parts = post(body).optJSONArray("candidates")?.optJSONObject(0)
+            ?.optJSONObject("content")?.optJSONArray("parts") ?: return null
+        val sb = StringBuilder()
+        for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text"))
+        return sb.toString().ifBlank { null }
     }
 
     private fun geminiTools(defs: JSONArray): JSONArray = JSONArray().apply {
@@ -117,6 +170,27 @@ class GeminiAgentBackend(
         }
         schema.optJSONArray("required")?.let { put("required", it) }
         schema.optJSONObject("items")?.let { put("items", toGeminiSchema(it)) }
+    }
+
+    override suspend fun complete(prompt: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().put(
+                "contents",
+                JSONArray().put(
+                    JSONObject().put("role", "user")
+                        .put("parts", JSONArray().put(JSONObject().put("text", prompt))),
+                ),
+            )
+            val parts = post(body).optJSONArray("candidates")?.optJSONObject(0)
+                ?.optJSONObject("content")?.optJSONArray("parts") ?: return@withContext null
+            val sb = StringBuilder()
+            for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text"))
+            sb.toString().ifBlank { null }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun post(body: JSONObject): JSONObject {

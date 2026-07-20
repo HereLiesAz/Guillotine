@@ -133,6 +133,17 @@ fun NleScreen(
     val state by vm.uiState.collectAsState()
     val settings by keyStore.settings.collectAsState()
     val scope = rememberCoroutineScope()
+    // One backend instance reused across turns so the assistant keeps its conversation memory. Rebuilt only
+    // when the AI settings change (provider/model/key) — which naturally begins a fresh conversation.
+    val agentBackend = remember(
+        settings.provider,
+        settings.keyFor(settings.provider),
+        settings.modelFor(settings.provider),
+        settings.cloudVision,
+    ) { DesktopMcpAgent.forSettings(settings, mcpTools) }
+    // Read through this in remembered lambdas (e.g. openLauncher) so they always reset the CURRENT backend,
+    // not a stale one captured before a settings-driven rebuild.
+    val currentAgentBackend by androidx.compose.runtime.rememberUpdatedState(agentBackend)
 
     // Headless assistant: the single prompt field in the tool strip runs the agent through this
     // when nothing is selected, and shows its status inline.
@@ -212,7 +223,10 @@ fun NleScreen(
             val doc = withContext(Dispatchers.IO) {
                 runCatching { DesktopProjectAutosave.loadFromFile(file) }.getOrNull()
             }
-            if (doc != null) vm.loadDocument(doc)
+            if (doc != null) {
+                vm.loadDocument(doc)
+                currentAgentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
+            }
         }
     }
     
@@ -356,26 +370,33 @@ fun NleScreen(
             onFaq = { showFaq = true },
         )
 
-        // Always use expanded layout on desktop: preview at top 60%, timeline at bottom 40%.
-        Column(Modifier.weight(0.6f).fillMaxWidth()) {
+        // Preview (top) over the timeline (bottom), split resizable via the divider below the preview.
+        // Defaults to 60/40; the tool strip in between is fixed-height, so dragging trades preview for
+        // timeline space.
+        var previewWeight by remember { mutableFloatStateOf(0.6f) }
+        Column(Modifier.weight(previewWeight).fillMaxWidth()) {
             VideoPreview(vm, Modifier.weight(1f).fillMaxWidth())
             TransportControls(vm, state)
         }
+        DraggableSplitDivider(
+            onDrag = { dragAmount ->
+                // Fixed sensitivity (no measured height here); ~1px → 0.0011 weight feels right on a
+                // typical desktop editor pane. Positive drag = down = grow the preview.
+                previewWeight = (previewWeight + dragAmount * 0.0011f).coerceIn(0.25f, 0.85f)
+            },
+        )
         EditorToolStrip(
             vm, state, onAnalyze, onTranscribe, providerLabel,
             { showSettings = true },
             assistant = assistantState,
             onAgentInput = assistantVm::setInput,
             onAgentRun = { t ->
-                assistantVm.run(
-                    t, mcpTools,
-                    DesktopMcpAgent.forSettings(settings),
-                )
+                assistantVm.run(t, mcpTools, agentBackend)
             },
             onImport = { importTargetTrack = null; importLauncher() },
             onHelp = { showHelp = true },
         )
-        TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(0.4f).fillMaxWidth())
+        TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(1f - previewWeight).fillMaxWidth())
         } // editor Column
 
         // Integrated activity log (AI chat, running process, progress, errors) -- anchored to
@@ -394,10 +415,7 @@ fun NleScreen(
             // synthesizes an "original request + question + reply" continuation prompt so any
             // backend picks up where it left off without needing message-log state.
             onReply = { t ->
-                assistantVm.sendReply(
-                    t, mcpTools,
-                    DesktopMcpAgent.forSettings(settings),
-                )
+                assistantVm.sendReply(t, mcpTools, agentBackend)
             },
         )
         } // editor + panel Box
@@ -446,6 +464,7 @@ fun NleScreen(
                 TextButton(
                     onClick = {
                         vm.loadDocument(Document())
+                        currentAgentBackend?.reset() // fresh project → fresh conversation
                         showNewProjectConfirm = false
                     },
                 ) {

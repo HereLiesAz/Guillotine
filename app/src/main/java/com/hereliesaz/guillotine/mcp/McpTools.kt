@@ -35,6 +35,9 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Long-edge cap (px) for a frame sent to a cloud vision API — bounds upload size and token cost. */
+private const val CLOUD_FRAME_MAX_DIM = 1024
+
 /**
  * MCP tool and resource implementations. Reads from / writes to the [vm] ViewModel.
  * Executed on NanoHTTPD's IO thread; ViewModel updates are thread-safe.
@@ -43,7 +46,57 @@ class McpTools(
     private val context: Context,
     private val vm: EditorViewModel,
     private val settingsProvider: () -> AiSettings,
-) : McpToolsSurface {
+) : McpToolsSurface,
+    com.hereliesaz.guillotine.ai.agent.FrameProvider,
+    com.hereliesaz.guillotine.ai.agent.FrameImageSource {
+
+    /**
+     * The active video clip's frame at the playhead as a Bitmap, or null if there's no video there /
+     * it can't be decoded. Lets the on-device assistant *see* the current frame (pixels stay on-device).
+     * The caller owns the bitmap and must recycle it. Mirrors the clip-resolution the frame tools use.
+     */
+    override fun currentFrame(): android.graphics.Bitmap? {
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+        ) ?: return null
+        val media = st.document.mediaFor(clip) ?: return null
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        return grabFrame(Uri.parse(media.uri), sourceMs)
+    }
+
+    /**
+     * The current frame encoded as a base64 JPEG for a CLOUD image API — used only on the opt-in
+     * cloud-vision path (McpAgent only wires this when the user enabled it). Downscales to at most
+     * [CLOUD_FRAME_MAX_DIM] on the long edge to bound upload size/cost, then recycles all bitmaps.
+     */
+    override fun currentFrameImage(): com.hereliesaz.guillotine.ai.agent.FrameImage? {
+        val frame = currentFrame() ?: return null
+        return try {
+            val longEdge = maxOf(frame.width, frame.height)
+            val scaled = if (longEdge > CLOUD_FRAME_MAX_DIM) {
+                val ratio = CLOUD_FRAME_MAX_DIM.toFloat() / longEdge
+                android.graphics.Bitmap.createScaledBitmap(
+                    frame, (frame.width * ratio).toInt().coerceAtLeast(1),
+                    (frame.height * ratio).toInt().coerceAtLeast(1), true,
+                )
+            } else {
+                frame
+            }
+            val bytes = java.io.ByteArrayOutputStream().use { out ->
+                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                out.toByteArray()
+            }
+            if (scaled !== frame) scaled.recycle()
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            com.hereliesaz.guillotine.ai.agent.FrameImage(b64, "image/jpeg")
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { frame.recycle() }
+        }
+    }
 
     // ---- tool definitions ---------------------------------------------------
 
@@ -495,14 +548,19 @@ class McpTools(
             "apply_ffmpeg_filter",
             "Bake a standard **FFmpeg `-vf` filtergraph** onto a clip ON-DEVICE and add the result as a new " +
                 "clip — the whole FFmpeg filter ecosystem, and **Frei0r** plugins via `frei0r=<name>:<params>`. " +
-                "Use for \"apply the ffmpeg filter <graph>\", \"run a frei0r plugin\", \"add a vintage/vhs/" +
-                "chromashift filter\", \"eq/curves/deband this\". `filter` is the raw -vf graph, e.g. " +
-                "\"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Requires an ffmpeg executable set in " +
+                "The ESCAPE HATCH for effects with no dedicated tool: AUTHOR the `-vf` graph yourself from the " +
+                "user's plain-English request. Frame decimation/stutter — \"cut/remove every other frame\", " +
+                "\"drop every 2nd frame\", \"make it choppy\" → \"framestep=2\" (every third → \"framestep=3\"); " +
+                "\"choppy N-fps look\" → \"fps=8\"; \"frame-blend/motion trail\" → \"tmix=frames=3\". Also " +
+                "\"run a frei0r plugin\", \"vintage/vhs/chromashift\", \"eq/curves/deband this\". `filter` is the " +
+                "raw -vf graph, e.g. \"framestep=2\", \"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Audio is " +
+                "copied unchanged (`-c:a copy`), so prefer duration-preserving graphs (framestep/fps/tmix/eq) " +
+                "and avoid setpts/trim, which desync the audio. Requires an ffmpeg executable set in " +
                 "Settings → AI Analyzer → FFmpeg filters (desktop-first; relay its error if unset). This is " +
                 "a bake-to-new-clip step, not a live filter.",
             objSchema(
                 "clip_id" to stringProp("The clip whose video to filter"),
-                "filter" to stringProp("An FFmpeg -vf filtergraph (Frei0r via frei0r=name:params)"),
+                "filter" to stringProp("An FFmpeg -vf filtergraph you author from the request, e.g. framestep=2 for \"every other frame\" (Frei0r via frei0r=name:params)"),
                 required = listOf("clip_id", "filter"),
             ),
         ))
@@ -703,6 +761,20 @@ class McpTools(
             )
         ))
         put(toolDefinition(
+            "set_frame_step",
+            "Frame decimation — keep only every Nth frame of a clip for a choppy/stutter/strobe look, LIVE " +
+                "and on-device (no ffmpeg, no baking, no new clip). step=2 removes every other frame, step=3 " +
+                "keeps one of every three, step=1 turns it off. The clip stays the SAME length and its audio " +
+                "is untouched, so it stays in sync — this is the go-to for \"cut/remove every other frame\", " +
+                "\"make it choppy/stuttery\", \"low-frame-rate look\". Quantizes against the project frame rate. " +
+                "(For a baked-to-a-new-clip version, apply_ffmpeg_filter with \"framestep=N\" does the same.)",
+            objSchema(
+                "clip_id" to stringProp("The clip to decimate"),
+                "step" to intProp("Keep 1 of every N frames. 2 = every other frame; 1 = off."),
+                required = listOf("clip_id", "step"),
+            ),
+        ))
+        put(toolDefinition(
             "add_keyframe", "Adds a keyframe for a specific KeyframeProperty at a specific time in the clip.",
             objSchema(
                 "clip_id" to stringProp(), "property" to stringProp(), "time_ms" to intProp(), "value" to numberProp(),
@@ -743,6 +815,23 @@ class McpTools(
                 required = listOf("clip_id")
             )
         ))
+        put(toolDefinition(
+            "lookup_vocabulary",
+            "Look up an editing word/phrase in the vocabulary graph: returns the concept it maps to, its " +
+                "synonyms, its opposite (antonym), the tool it routes to, and — for the exact phrase — whether " +
+                "the sense is inverted (a negation like 'less/reduce/remove' flips it to the opposite tool). " +
+                "Use it to resolve unfamiliar or vague wording to a known tool before acting.",
+            objSchema("term" to stringProp("The word or phrase to look up, e.g. 'crispy' or 'less warm'."),
+                required = listOf("term")),
+        ))
+        // Named one-call video effects (sharpen, film_grain, vhs, mirror, thermal, …), each a standard
+        // FFmpeg -vf graph baked to a new clip. Shared registry so both platforms expose the same set.
+        val videoFx = VideoFilterCatalog.toolDefinitions()
+        for (i in 0 until videoFx.length()) put(videoFx.get(i))
+        // Core timeline verbs (seek, move_clip, trim, add_text, tracks, undo/redo, …), shared across
+        // platforms and backed by the editor view-model.
+        val timelineFx = TimelineTools.toolDefinitions()
+        for (i in 0 until timelineFx.length()) put(timelineFx.get(i))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -812,11 +901,17 @@ class McpTools(
         "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
         "apply_transition" -> applyTransition(args.getString("from_clip_id"), args.getString("to_clip_id"), args.optString("type", "fade"), args.optDouble("duration_sec", 1.0).toFloat())
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
+        "set_frame_step" -> setFrameStep(args.getString("clip_id"), args.getInt("step"))
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
         "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
         "list_azp_plugins" -> listAzpPlugins()
         "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
         "clear_azp_plugin" -> clearAzpPlugin(args.getString("clip_id"))
+        "lookup_vocabulary" -> com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.lookupJson(args.getString("term"))
+        in TimelineTools.names -> TimelineTools.call(vm, name, args)
+        in VideoFilterCatalog.names ->
+            applyFfmpegFilter(args.getString("clip_id"), VideoFilterCatalog.graphFor(name, args))
+                .apply { put("humanSummary", VideoFilterCatalog.summaryFor(name)) }
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
 
@@ -854,6 +949,21 @@ class McpTools(
             put("audioTracks", JSONArray(doc.audioTracks))
             put("clipCount", doc.clips.size)
             put("clips", JSONArray().apply { doc.clips.forEach { put(clipJson(it)) } })
+            put("selectedClipIds", JSONArray(vm.uiState.value.selectedClipIds))
+            put("globalSettings", JSONObject().apply {
+                put("fps", doc.settings.fps)
+                put("aspectRatio", doc.settings.aspectRatio.name)
+                val c = doc.settings.crop
+                put("crop", JSONObject().put("x", c.x).put("y", c.y).put("w", c.w).put("h", c.h))
+            })
+            put("trackSettings", JSONObject().apply {
+                (doc.videoTracks + doc.audioTracks).forEach { tid ->
+                    val ts = doc.trackSettingsFor(tid)
+                    put(tid, JSONObject()
+                        .put("volume", ts.volume).put("opacity", ts.opacity)
+                        .put("muted", ts.muted).put("disabled", ts.disabled))
+                }
+            })
             put(
                 "humanSummary",
                 "Read timeline: ${doc.clips.size} clip(s), ${msFmt(doc.totalDurationMs)} total, playhead ${msFmt(now)}.",
@@ -2930,6 +3040,24 @@ class McpTools(
         }
 
         return ok().apply { put("humanSummary", "Set $property to $value on clip $clipId.") }
+    }
+
+    private fun setFrameStep(clipId: String, step: Int): JSONObject {
+        val doc = vm.uiState.value.document
+        doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val n = step.coerceAtLeast(1)
+        vm.updateClipFilters(clipId) { f -> f.copy(frameStep = n) }
+        val summary = if (n <= 1) "Turned off frame decimation on clip $clipId (every frame plays)."
+        else "Keeping every ${ordinal(n)} frame on clip $clipId (choppy look, same length)."
+        return ok().apply { put("humanSummary", summary) }
+    }
+
+    /** "2nd", "3rd", "4th"… for human summaries. */
+    private fun ordinal(n: Int): String {
+        val suffix = if (n % 100 in 11..13) "th" else when (n % 10) {
+            1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th"
+        }
+        return "$n$suffix"
     }
 
     private fun addKeyframe(clipId: String, property: String, timeMs: Long, value: Float): JSONObject {

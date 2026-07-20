@@ -76,6 +76,37 @@ class AssistantViewModel : ViewModel() {
         startRun(prompt, tools, agent, logAs = r, isReply = true)
     }
 
+    private var vocabExpansionStarted = false
+
+    /** Disk persistence for the LLM vocabulary expansion; set once by the screen (has a Context). */
+    var vocabCache: com.hereliesaz.guillotine.ai.vocab.VocabularyCache? = null
+
+    /**
+     * One-time background LLM vocabulary expansion (guarded; never blocks or throws). Loads the cached
+     * expansion if present (no API call), else runs the model once and persists the result so the next
+     * launch is offline. File IO is kept off the main thread.
+     */
+    private fun maybeExpandVocabulary(agent: AgentBackend) {
+        if (vocabExpansionStarted) return
+        vocabExpansionStarted = true
+        viewModelScope.launch {
+            try {
+                val cache = vocabCache
+                val cached = cache?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { it.load() } }
+                val fresh = com.hereliesaz.guillotine.ai.vocab.VocabularyExpander.ensureExpanded(cached) { p ->
+                    agent.complete(p)
+                }
+                if (fresh != null && cache != null) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cache.save(fresh) }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // don't swallow cancellation — structured concurrency
+            } catch (e: Exception) {
+                // Vocabulary expansion is optional; ignore failures (the seed vocabulary stays in effect).
+            }
+        }
+    }
+
     private fun startRun(
         instruction: String,
         tools: McpToolsSurface,
@@ -90,6 +121,10 @@ class AssistantViewModel : ViewModel() {
             ActivityLog.error(msg)
             return
         }
+        // First time the assistant runs with a configured backend, grow the vocabulary graph via an LLM
+        // pass in the background (once per process, non-blocking, silent on failure) so later turns and
+        // lookup_vocabulary recognise more phrasings. Falls back to the built-in seed on any failure.
+        maybeExpandVocabulary(agent)
         // Log only what the user actually typed (the raw reply on a reply, the raw prompt otherwise) —
         // the synthesized continuation prompt is verbose and belongs to the agent, not the user log.
         ActivityLog.user(logAs)

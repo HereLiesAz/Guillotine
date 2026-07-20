@@ -187,10 +187,33 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // One shared MCP tool surface: the embedded server, the optional relay, and the in-app AI
     // assistant all drive the editor through this same object ({ settings } reads live).
     val sharedMcpTools = remember { com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings } }
+    // One backend instance reused across turns so the assistant keeps its conversation memory. Rebuilt only
+    // when the AI settings change (provider/model/key) — which naturally begins a fresh conversation.
+    // onDevice() reads the on-device model path (not a settings field), so it's part of the backend
+    // identity — but resolve it inside a remember so it isn't hit on every (per-frame) recomposition.
+    val agentModelPath = remember(settings) {
+        com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "agentModelPath")
+    }
+    val agentBackend = remember(
+        settings.provider,
+        settings.keyFor(settings.provider),
+        settings.modelFor(settings.provider),
+        agentModelPath,
+        settings.cloudVision,
+    ) {
+        com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)
+    }
+    // Read through this in remembered lambdas (e.g. openLauncher) so they always reset the CURRENT backend,
+    // not a stale one captured before a settings-driven rebuild.
+    val currentAgentBackend by androidx.compose.runtime.rememberUpdatedState(agentBackend)
     // Headless assistant (no separate bar): the single prompt field below the tools runs the agent
     // through this when nothing is selected, and shows its status inline.
     val assistantVm: AssistantViewModel = viewModel()
     val assistantState by assistantVm.state.collectAsState()
+    // Give the assistant a disk cache so the one-time LLM vocabulary expansion persists across launches.
+    androidx.compose.runtime.LaunchedEffect(context) {
+        assistantVm.vocabCache = com.hereliesaz.guillotine.platform.AndroidVocabularyCache(context)
+    }
 
     // Integrated activity feed (AI chat output, running process, progress, errors) shown in the
     // AzNavRail bottom sheet. The single AI prompt stays in the tool strip; this sheet is output-only.
@@ -275,7 +298,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val openLauncher = rememberOpenProjectLauncher { uri ->
         scope.launch {
             val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
-            if (doc != null) vm.loadDocument(doc)
+            if (doc != null) {
+                vm.loadDocument(doc)
+                currentAgentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
+            }
         }
     }
     
@@ -477,19 +503,25 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         // so there's no separate status strip here.
         var timelineWeight by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.4f) }
 
+        // Split between the preview and the clip-properties panel (AdvancedToolView), resizable by a
+        // divider in BOTH arrangements: a vertical grip when they sit side-by-side (wide) and a
+        // horizontal grip when stacked (tall). Each orientation remembers its own fraction.
+        var previewWeightWide by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.65f) }
+        var previewWeightTall by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.5f) }
         androidx.compose.foundation.layout.BoxWithConstraints(
             androidx.compose.ui.Modifier
                 .weight(1f - timelineWeight)
                 .fillMaxWidth()
         ) {
             val isWide = maxWidth > maxHeight * 1.1f
+            val totalWidthPx = constraints.maxWidth.toFloat()
+            val totalHeightPx = constraints.maxHeight.toFloat()
             if (isWide) {
                 androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxSize()) {
                     androidx.compose.foundation.layout.Column(
                         androidx.compose.ui.Modifier
-                            .weight(0.65f)
+                            .weight(previewWeightWide)
                             .fillMaxHeight()
-                            .animateContentSize()
                     ) {
                         PreviewPlayer(
                             state,
@@ -500,18 +532,25 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         )
                         TransportControls(vm, state)
                     }
+                    DraggableVerticalDivider(
+                        onDrag = { dragAmount ->
+                            if (totalWidthPx > 0f) {
+                                previewWeightWide = (previewWeightWide + dragAmount / totalWidthPx).coerceIn(0.25f, 0.85f)
+                            }
+                        }
+                    )
                     AdvancedToolView(
                         vm = vm,
                         state = state,
                         onTranscribe = onTranscribe,
                         modifier = androidx.compose.ui.Modifier
-                            .weight(0.35f)
+                            .weight(1f - previewWeightWide)
                             .fillMaxHeight()
                     )
                 }
             } else {
-                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().animateContentSize()) {
-                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(0.5f).fillMaxWidth()) {
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(previewWeightTall).fillMaxWidth()) {
                         PreviewPlayer(
                             state,
                             androidx.compose.ui.Modifier.weight(1f).fillMaxWidth(),
@@ -521,12 +560,19 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         )
                         TransportControls(vm, state)
                     }
+                    DraggableTimelineDivider(
+                        onDrag = { dragAmount ->
+                            if (totalHeightPx > 0f) {
+                                previewWeightTall = (previewWeightTall + dragAmount / totalHeightPx).coerceIn(0.25f, 0.85f)
+                            }
+                        }
+                    )
                     AdvancedToolView(
                         vm = vm,
                         state = state,
                         onTranscribe = onTranscribe,
                         modifier = androidx.compose.ui.Modifier
-                            .weight(0.5f)
+                            .weight(1f - previewWeightTall)
                             .fillMaxWidth()
                     )
                 }
@@ -546,7 +592,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 .weight(timelineWeight)
                 .fillMaxWidth()
         ) {
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath"))
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath"))
             
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack, 
@@ -572,11 +618,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             // synthesizes an "original request + question + reply" continuation prompt so any
             // backend picks up where it left off without needing message-log state.
             onReply = { t ->
-                assistantVm.sendReply(
-                    t,
-                    sharedMcpTools,
-                    com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools),
-                )
+                assistantVm.sendReply(t, sharedMcpTools, agentBackend)
             },
         )
         } // editor + sheet Box
@@ -637,6 +679,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 androidx.compose.material3.TextButton(
                     onClick = {
                         vm.loadDocument(com.hereliesaz.guillotine.model.Document())
+                        currentAgentBackend?.reset() // fresh project → fresh conversation
                         showNewProjectConfirm = false
                     },
                 ) {

@@ -95,6 +95,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var leonardoKey by remember { mutableStateOf(current.leonardoKey) }
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
+    var cloudVision by remember { mutableStateOf(current.cloudVision) }
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
 
@@ -106,6 +107,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         models = models,
         leonardoKey = leonardoKey.trim(),
         leonardoModel = leonardoModel,
+        cloudVision = cloudVision,
         frameAnalysisCacheSize = frameAnalysisCacheSize,
     )
 
@@ -288,6 +290,26 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                     Text(
                         "How many per-frame vision results to keep so rescans are near-instant. " +
                             "Default ${FrameAnalysisCache.DEFAULT_MAX_ENTRIES}. 0 disables the cache.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    // Cloud vision (opt-in). Off by default — the ONLY path that sends a frame off-device,
+                    // and only to the user's own cloud provider.
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Let cloud AI see frames (opt-in)", color = Neutral400, fontSize = 12.sp)
+                        androidx.compose.material3.Switch(
+                            checked = cloudVision,
+                            onCheckedChange = { cloudVision = it },
+                        )
+                    }
+                    Text(
+                        "OFF by default. When on, the current frame is sent to your CLOUD provider " +
+                            "(Claude / GPT / Gemini) — and only when the assistant chooses to look. Leave it " +
+                            "off to keep your footage strictly on your machine.",
                         color = Neutral500, fontSize = 10.sp,
                     )
 
