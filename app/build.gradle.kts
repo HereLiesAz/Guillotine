@@ -68,6 +68,27 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    // Two distributions of the SAME app (same applicationId + signing key, so either can update the
+    // other in place): `play` ships to Google Play with AdMob; `github` is the direct-download build
+    // — no ads, and it self-updates from GitHub Releases (Play forbids self-updating APKs, so that
+    // path is github-only). The distinction is a build-time BuildConfig flag; the ad and updater code
+    // paths are gated on it. CI builds the AAB from `play` (bundlePlayRelease) and the APK from
+    // `github` (assembleGithubRelease).
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            isDefault = true
+            buildConfigField("boolean", "ADS_ENABLED", "true")
+            buildConfigField("boolean", "UPDATER_ENABLED", "false")
+        }
+        create("github") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ADS_ENABLED", "false")
+            buildConfigField("boolean", "UPDATER_ENABLED", "true")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21

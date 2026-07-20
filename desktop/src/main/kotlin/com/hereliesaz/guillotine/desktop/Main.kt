@@ -12,6 +12,7 @@ import com.hereliesaz.guillotine.desktop.platform.DesktopMcpAuth
 import com.hereliesaz.guillotine.desktop.platform.DesktopMcpTools
 import com.hereliesaz.guillotine.desktop.platform.DesktopProjectAutosave
 import com.hereliesaz.guillotine.desktop.ui.DesktopApp
+import com.hereliesaz.guillotine.desktop.ui.DesktopUpdateGate
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.mcp.McpServer
 import kotlinx.coroutines.Dispatchers
@@ -44,5 +45,7 @@ fun main() = application {
         state = rememberWindowState(width = 1280.dp, height = 800.dp),
     ) {
         DesktopApp(editor, mcpTools, keyStore)
+        // Check GitHub Releases for a newer installer on launch and offer to self-update.
+        DesktopUpdateGate()
     }
 }

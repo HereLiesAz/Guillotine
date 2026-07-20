@@ -17,8 +17,10 @@ is fully usable with zero configuration.
 
 ## Download
 
-- **Android** — [latest AAB / APK](https://github.com/HereLiesAz/Guillotine/releases/latest) (also
-  on Google Play internal / alpha tracks).
+- **Android** — [latest APK](https://github.com/HereLiesAz/Guillotine/releases/latest): the
+  direct-download build is **ad-free** and **updates itself** from GitHub Releases (you're prompted
+  when a newer version is available). The [Google Play](https://github.com/HereLiesAz/Guillotine/releases/latest)
+  build (internal / alpha tracks) is ad-supported and updates through Play.
 - **macOS** — [`.dmg`](https://github.com/HereLiesAz/Guillotine/releases/latest) (Apple Silicon;
   unsigned — right-click → Open on first launch).
 - **Windows** — [`.msi`](https://github.com/HereLiesAz/Guillotine/releases/latest) (unsigned — if
@@ -27,7 +29,8 @@ is fully usable with zero configuration.
   ./guillotine_*.deb`).
 
 Desktop installers are built by CI (`.github/workflows/release-desktop.yml`) on every `v*` tag and
-attached to the matching GitHub Release.
+attached to the matching GitHub Release. The desktop apps also **self-update**: on launch they check
+GitHub Releases and offer to download and run the newer installer for your OS.
 
 > Guillotine began as a web prototype (Vite + React + Express). That code has been removed; the
 > product is the shipping app under `app/` (Android) and `desktop/` (Compose Multiplatform),

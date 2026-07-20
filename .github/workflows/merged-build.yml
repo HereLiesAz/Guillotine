@@ -67,7 +67,9 @@ jobs:
       - name: Run unit tests
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest test --continue --build-cache
+          # The app now has product flavors (github/play), so the variant-specific unit-test task is
+          # testGithubDebugUnitTest; `test` still aggregates every module's unit tests.
+          ./gradlew testGithubDebugUnitTest test --continue --build-cache
 
       - name: Upload test reports
         if: failure()
@@ -135,7 +137,8 @@ jobs:
         run: |
           set +e
           # version.properties auto-increments inside the build — no version override is passed.
-          ./gradlew assembleDebug --build-cache > build.log 2>&1
+          # The direct-download (github) flavor is the one shipped as a debug APK here (no ads).
+          ./gradlew assembleGithubDebug --build-cache > build.log 2>&1
 
           EXIT_CODE=$?
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
@@ -213,8 +216,8 @@ jobs:
              APP_NAME="App"
           fi
 
-          # Locate built APK
-          APK_ORIGINAL=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          # Locate built APK (github flavor → app/build/outputs/apk/github/debug)
+          APK_ORIGINAL=$(find app/build/outputs/apk/github/debug -name "*.apk" | head -n 1)
 
           if [ -z "$APK_ORIGINAL" ]; then
              echo "Error: No APK found to release!"

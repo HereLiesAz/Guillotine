@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- AndroidUpdater downloads into cacheDir/updates; expose exactly that to the installer. -->
+    <cache-path name="updates" path="updates/" />
+</paths>

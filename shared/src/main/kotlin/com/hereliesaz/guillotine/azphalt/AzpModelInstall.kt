@@ -35,6 +35,23 @@ object AzpModelInstall {
     class UntrustedException(val trust: AzpPackage.TrustResult) :
         Exception("azp: package is not from a trusted signer — ${trust.reason}")
 
+    /**
+     * This package's id was previously installed from a *different* publisher key (or was signed before
+     * and is now unsigned). Trust-on-first-use pins the first signer; a mismatched signer on a later
+     * install of the same id is a publisher change — most likely a hijack, occasionally a legitimate key
+     * rotation. UI catches this to surface a distinct "different publisher" warning and re-invoke with
+     * `allowPublisherChange = true` only on the user's explicit confirmation.
+     */
+    class PublisherChangedException(
+        val packageId: String,
+        val pinnedKey: String,
+        val newSignerKey: String?,
+    ) : Exception(
+        "azp: '$packageId' was first installed from a different publisher; this update is signed by " +
+            (if (newSignerKey == null) "no key" else "a different key") +
+            " — refusing without explicit approval of the publisher change",
+    )
+
     enum class Phase { DOWNLOADING, VERIFYING, WRITING }
 
     /** Progress for a single model. [bytesTotal] is null when the size wasn't declared. */
@@ -56,6 +73,8 @@ object AzpModelInstall {
         val trust: AzpPackage.TrustResult,
         val packageId: String,
         val installed: List<Installed>,
+        /** The base64 SPKI key that signed this package, or null if it was unsigned. Now pinned for [packageId]. */
+        val signerPublicKey: String? = null,
     ) {
         /** (Deprecated) Legacy routing hook; models now load straight from the registry. */
         fun applyTo(settings: AiSettings): AiSettings = settings
@@ -80,15 +99,34 @@ object AzpModelInstall {
         trustedKeys: Set<String>,
         modelsDir: File,
         allowUntrusted: Boolean = false,
+        pins: AzpPublisherPins? = null,
+        allowPublisherChange: Boolean = false,
         onProgress: (Progress) -> Unit = {},
     ): Result {
         val plan = AzpModelInstaller.plan(azpBytes, trustedKeys) // throws on integrity/signature failure
+        val packageId = plan.loaded.manifest.id
+        val signer = plan.trust.signerPublicKey
+
+        // Publisher continuity (trust-on-first-use): if this id was installed before, the signer must
+        // match the pinned key. Checked before the trust-store prompt so a hijacked update surfaces as a
+        // publisher change, not a generic "untrusted signer". Dormant until packages are signed.
+        val pinned = pins?.keyFor(packageId)
+        if (pinned != null && signer != pinned && !allowPublisherChange) {
+            throw PublisherChangedException(packageId, pinned, signer)
+        }
+
         if (!plan.trust.trusted && !allowUntrusted) throw UntrustedException(plan.trust)
         if (!modelsDir.isDirectory && !modelsDir.mkdirs()) {
             throw AzpPackage.AzpException("azp: cannot create models directory ${modelsDir.absolutePath}")
         }
         val installed = plan.models.map { model -> installOne(plan, model, modelsDir, onProgress) }
-        return Result(plan.trust, plan.loaded.manifest.id, installed)
+
+        // Pin the publisher on first install, or when the caller approved a rotation. Only signed
+        // packages pin — an unsigned package leaves no key to enforce against.
+        if (signer != null && pins != null && (pinned == null || allowPublisherChange)) {
+            pins.pin(packageId, signer)
+        }
+        return Result(plan.trust, packageId, installed, signer)
     }
 
     private fun installOne(
