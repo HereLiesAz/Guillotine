@@ -67,20 +67,28 @@ const val MAX_AGENT_ITERATIONS = 24
  * (spinning on one call) or [errorLimit] tool results in a row are errors (flailing). Productive, varied
  * tool use never trips it, so long legitimate tasks get the full ceiling. Each run makes its own instance.
  */
-class LoopGuard(private val repeatLimit: Int = 3, private val errorLimit: Int = 4) {
-    private var lastSig: String? = null
-    private var repeatCount = 0
+class LoopGuard(
+    private val repeatLimit: Int = 3,
+    private val errorLimit: Int = 4,
+    private val window: Int = 6,
+) {
+    // A sliding window of the most recent call signatures — NOT just the immediate last one — so an
+    // A,B,A,B,… alternation (or several parallel calls in one turn) can't dodge repeat detection by
+    // resetting a single "last" slot each time.
+    private val recent = ArrayDeque<String>()
     private var errorStreak = 0
 
     /** Record one tool result; returns a stop reason if the run should abort now, else null. */
     fun check(name: String, args: String, isError: Boolean): String? {
         val sig = "$name($args)"
-        if (sig == lastSig) repeatCount++ else { repeatCount = 1; lastSig = sig }
+        recent.addLast(sig)
+        while (recent.size > window) recent.removeFirst()
+        val repeats = recent.count { it == sig }
         errorStreak = if (isError) errorStreak + 1 else 0
         return when {
-            repeatCount >= repeatLimit ->
-                "Stopped: repeated the same call to $name $repeatCount times with no new result — " +
-                    "the task may need a different approach or more information."
+            repeats >= repeatLimit ->
+                "Stopped: called $name with the same arguments $repeats times in quick succession with no " +
+                    "new result — the task may need a different approach or more information."
             errorStreak >= errorLimit ->
                 "Stopped: $errorStreak tool calls in a row failed — please check the request and try again."
             else -> null
