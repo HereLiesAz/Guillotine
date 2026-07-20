@@ -126,6 +126,19 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   models directory. **Settings → Advanced → Install AI model (.azp)** drives it on both platforms; an
   unsigned package is installed only after an explicit trust warning. So a speech, segmentation, or
   labeling model can be delivered and adopted without a new app build.
+- ✅ **Tracks the current manifest spec (format `0.1`).** [`AzpManifest`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpManifest.kt)
+  models the latest `spec/extension-manifest.md`: the `app` (companion-app) and `mcp` (MCP-server)
+  package kinds alongside `asset`/`code`/`mixed`, plus `targetApps` (host scoping) and a `preview`
+  store-card still/clip.
+- ✅ **Browses the hosted storefront over the Repository API.** The **Azphalt Store** is a client of a
+  conforming registry (azphalt `spec/repository-api.md`), defaulting to the flagship at
+  [azphalt.store](https://azphalt.store) — the catalog lives at the registry, not embedded in the app.
+  [`AzphaltRepository`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzphaltRepository.kt)
+  fetches `GET /packages` (scoped to this host by `targetApps`), and installing a chosen package
+  downloads its `.azp` from `/packages/{id}/versions/{version}/download`, **verifies it on-device**
+  through [`AzpPackage`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpPackage.kt), and
+  only then writes it into the app's extensions dir. Discovery is remote; trust + install stay
+  on-device.
 - ⏳ **Capabilities, WASM substrate, UI schema (jobs #2–#6).** Running extension code on a WASM sandbox
   (QuickJS-in-WASM for JS), granting least-privilege capabilities, and rendering the declarative UI
   schema natively in Compose are the remaining work to become a full **conforming host**.

@@ -23,7 +23,7 @@ data class AzpManifest(
     val name: String,
     /** Semver of the package itself. */
     val version: String,
-    /** `asset` | `code` | `mixed`. */
+    /** `asset` | `code` | `mixed` | `app` | `mcp`. */
     val kind: String,
     /** SPDX license id. */
     val license: String,
@@ -34,6 +34,14 @@ data class AzpManifest(
     val description: String? = null,
     val author: String? = null,
     val homepage: String? = null,
+    /**
+     * Reverse-DNS host-app ids this package is scoped to (e.g. `["com.hereliesaz.guillotine"]`).
+     * Empty/absent = **global** (offered to every conforming host). A store filters on it — see
+     * [targetsApp].
+     */
+    val targetApps: List<String> = emptyList(),
+    /** Static store-card preview (`image` still and/or `clip` motion). See [AzpPreview]. */
+    val preview: AzpPreview? = null,
     /** Contributed assets (asset/mixed kinds). */
     val assets: List<AzpAsset> = emptyList(),
     /** Code entry module (code/mixed kinds), e.g. `code/main.js`. */
@@ -44,10 +52,45 @@ data class AzpManifest(
     val capabilities: List<String> = emptyList(),
     /** Extension points the code registers (filters/tools/commands). Free-form while pre-stable. */
     val contributes: JsonElement? = null,
+    /**
+     * Companion-app header (required when `kind == "app"`): how a host installs/invokes an Android app
+     * or PWA and the handoffs it offers. Free-form while pre-stable — the host only reads it, never
+     * surfaces its own engine to it. See azphalt `spec/extension-manifest.md`.
+     */
+    val app: JsonElement? = null,
+    /**
+     * MCP-server header (required when `kind == "mcp"`): how a host reaches a local (`wasi`/native) or
+     * `remote` (http/sse) server, its connect-time `inputs`, and the tools/resources/prompts it
+     * `offers`. Free-form while pre-stable. See azphalt `spec/extension-manifest.md`.
+     */
+    val mcp: JsonElement? = null,
 ) {
     val isAsset: Boolean get() = kind == "asset" || kind == "mixed"
     val isCode: Boolean get() = kind == "code" || kind == "mixed"
+
+    /** A `kind == "app"` companion app (Android app / PWA the host launches to hand a result back). */
+    val isApp: Boolean get() = kind == "app"
+
+    /** A `kind == "mcp"` server package (the manifest is a header describing how to reach the server). */
+    val isMcp: Boolean get() = kind == "mcp"
+
+    /**
+     * Whether this package is offered to the host app [hostId]: true when it declares no [targetApps]
+     * (global) or lists [hostId] among them. A store should hide packages scoped to other hosts.
+     */
+    fun targetsApp(hostId: String): Boolean = targetApps.isEmpty() || targetApps.contains(hostId)
 }
+
+/**
+ * A package's static store-card preview (azphalt `spec/extension-manifest.md`). Each field is an
+ * in-package path (into the `.azp`) or an `https:` URL. [image] is a still (LUT swatch, brush stroke,
+ * shader still); [clip] an optional short motion preview for time-based packages.
+ */
+@Serializable
+data class AzpPreview(
+    val image: String? = null,
+    val clip: String? = null,
+)
 
 /**
  * A contributed asset inside a `.azp` — a traditional asset (`brush`/`lut`/`shader`/`transition`/…)
