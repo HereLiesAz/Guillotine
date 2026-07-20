@@ -45,6 +45,7 @@ class AnthropicAgentBackend(
             if (messages.length() >= MAX_CONVERSATION_MESSAGES) messages = JSONArray() // bound growth across turns
             messages.put(JSONObject().put("role", "user").put("content", instruction))
 
+            val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
                 ensureActive() // honor cancellation between turns — stop issuing paid API calls once cancelled
@@ -84,6 +85,11 @@ class AnthropicAgentBackend(
                             callTool(tools, name, input)
                         }
                         onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
+                        guard.check(name, input.toString(), outcome.isError)?.let { stop ->
+                            onEvent(AgentEvent.Failed(stop))
+                            messages = JSONArray() // stalled mid-turn — drop the unbalanced tail
+                            return@withContext
+                        }
                         results.put(JSONObject().apply {
                             put("type", "tool_result")
                             put("tool_use_id", tu.optString("id"))

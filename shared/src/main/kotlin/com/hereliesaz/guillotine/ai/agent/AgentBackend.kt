@@ -54,8 +54,39 @@ interface AgentBackend {
     fun reset() {}
 }
 
-/** Hard cap on tool round-trips so a confused model can't loop forever / burn tokens. */
-const val MAX_AGENT_ITERATIONS = 12
+/**
+ * Hard ceiling on tool round-trips per run. Raised from the old 12 (which cut off legitimate multi-step
+ * edits — e.g. split-then-grade several clips, or a batch of per-clip ops) now that [LoopGuard] catches
+ * the "confused model spinning" case directly instead of relying on a low ceiling to bound it.
+ */
+const val MAX_AGENT_ITERATIONS = 24
+
+/**
+ * Early-stop for a stalled agent, so the higher [MAX_AGENT_ITERATIONS] ceiling can't be burned by a model
+ * that's looping without progress. Trips when the SAME tool+args is repeated [repeatLimit] times in a row
+ * (spinning on one call) or [errorLimit] tool results in a row are errors (flailing). Productive, varied
+ * tool use never trips it, so long legitimate tasks get the full ceiling. Each run makes its own instance.
+ */
+class LoopGuard(private val repeatLimit: Int = 3, private val errorLimit: Int = 4) {
+    private var lastSig: String? = null
+    private var repeatCount = 0
+    private var errorStreak = 0
+
+    /** Record one tool result; returns a stop reason if the run should abort now, else null. */
+    fun check(name: String, args: String, isError: Boolean): String? {
+        val sig = "$name($args)"
+        if (sig == lastSig) repeatCount++ else { repeatCount = 1; lastSig = sig }
+        errorStreak = if (isError) errorStreak + 1 else 0
+        return when {
+            repeatCount >= repeatLimit ->
+                "Stopped: repeated the same call to $name $repeatCount times with no new result — " +
+                    "the task may need a different approach or more information."
+            errorStreak >= errorLimit ->
+                "Stopped: $errorStreak tool calls in a row failed — please check the request and try again."
+            else -> null
+        }
+    }
+}
 
 /** Name of the synthetic "look at the current frame" action offered to a vision-capable backend. */
 const val VISION_TOOL_NAME = "look_at_frame"
@@ -427,6 +458,18 @@ val AGENT_SYSTEM_PROMPT = """
     genuine ambiguity with no reasonable default (e.g. "shorten the video" without a target length, or two
     clips both matching "the intro") do you ask — a single sentence ending in "?" — then stop. The user's
     answer returns as a new turn with the original request and your question quoted, so continue from there.
+
+    CHECK YOUR WORK ON VISUAL EDITS — don't assume a change looked right just because the tool returned ok:
+    after an edit whose RESULT is visual (a crop/reframe, a color grade or LUT, a background replace, an
+    applied effect, a generated/inpainted segment), and when it matters that it landed well, seek to the
+    affected moment and LOOK — describe_current_frame, caption_frame, or look_at_frame — then judge from what
+    you actually see and refine if needed. A JSON "ok" only confirms the operation ran, not that it looks good.
+
+    BATCH / "ALL CLIPS" WORK — plan for the round-trip budget: each tool call handles ONE clip, so "do X to
+    every clip" means one call per clip. Get the clip list once (get_timeline), then work through them
+    deliberately, newest information first; don't re-list between each. If there are more clips than you can
+    finish in a reasonable number of steps, do the most important ones and tell the user which remain rather
+    than spinning until the step limit cuts you off.
 """.trimIndent() + "\n\n" + com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.promptAppendix()
 
 /** Result of executing one tool: the JSON to feed back to the model, plus an error flag. */
