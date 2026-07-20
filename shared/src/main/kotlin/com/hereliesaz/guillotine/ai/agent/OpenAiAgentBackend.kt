@@ -46,6 +46,7 @@ class OpenAiAgentBackend(
             }
             messages.put(JSONObject().put("role", "user").put("content", instruction))
 
+            val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
                 ensureActive() // honor cancellation between turns — stop issuing paid API calls once cancelled
@@ -78,6 +79,11 @@ class OpenAiAgentBackend(
                             callTool(tools, name, args)
                         }
                         onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
+                        guard.check(name, args.toString(), outcome.isError)?.let { stop ->
+                            onEvent(AgentEvent.Failed(stop))
+                            messages = JSONArray() // stalled mid-turn — drop the unbalanced tail
+                            return@withContext
+                        }
                         messages.put(JSONObject().apply {
                             put("role", "tool")
                             put("tool_call_id", tc.optString("id"))

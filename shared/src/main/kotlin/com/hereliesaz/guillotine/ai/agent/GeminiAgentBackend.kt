@@ -49,6 +49,7 @@ class GeminiAgentBackend(
                     .put("parts", JSONArray().put(JSONObject().put("text", instruction))),
             )
 
+            val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
                 ensureActive() // honor cancellation between turns — stop issuing paid API calls once cancelled
@@ -90,6 +91,11 @@ class GeminiAgentBackend(
                             callTool(tools, name, args)
                         }
                         onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
+                        guard.check(name, args.toString(), outcome.isError)?.let { stop ->
+                            onEvent(AgentEvent.Failed(stop))
+                            contents = JSONArray() // stalled mid-turn — drop the unbalanced tail
+                            return@withContext
+                        }
                         responseParts.put(JSONObject().put("functionResponse", JSONObject().apply {
                             put("name", name)
                             put("response", outcome.json)

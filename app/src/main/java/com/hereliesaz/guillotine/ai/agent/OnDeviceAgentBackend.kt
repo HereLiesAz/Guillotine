@@ -84,6 +84,7 @@ class OnDeviceAgentBackend(
             val transcript = StringBuilder()
             transcript.append("USER: ").append(instruction).append('\n')
 
+            val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
                 val prompt = preamble + "\n" + transcript + "ASSISTANT: "
@@ -109,6 +110,10 @@ class OnDeviceAgentBackend(
                     onEvent(AgentEvent.ToolStarted(name))
                     val observation = lookAtFrame(args.optString("prompt"))
                     onEvent(AgentEvent.ToolFinished(name, observation.take(80), false))
+                    guard.check(name, args.toString(), false)?.let { stop ->
+                        onEvent(AgentEvent.Failed(stop))
+                        return@withContext
+                    }
                     transcript.append("ASSISTANT: ").append(obj.toString()).append('\n')
                     transcript.append("OBSERVATION: ").append(observation.take(1500)).append('\n')
                     continue
@@ -117,6 +122,10 @@ class OnDeviceAgentBackend(
                 onEvent(AgentEvent.ToolStarted(name))
                 val outcome = callTool(tools, name, args)
                 onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
+                guard.check(name, args.toString(), outcome.isError)?.let { stop ->
+                    onEvent(AgentEvent.Failed(stop))
+                    return@withContext
+                }
 
                 transcript.append("ASSISTANT: ").append(obj.toString()).append('\n')
                 transcript.append("OBSERVATION: ").append(outcome.content().take(1500)).append('\n')
