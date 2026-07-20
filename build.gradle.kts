@@ -1,5 +1,24 @@
 import java.util.Properties
 
+buildscript {
+    configurations.all {
+        resolutionStrategy {
+            force("org.jdom:jdom2:2.0.6.1")
+            force("org.apache.httpcomponents:httpclient:4.5.14")
+            force("com.google.protobuf:protobuf-javalite:4.28.3")
+            force("com.google.protobuf:protobuf-java:4.28.3")
+            force("io.netty:netty-codec-http2:4.1.115.Final")
+            force("io.netty:netty-handler:4.1.115.Final")
+            force("io.netty:netty-codec-http:4.1.115.Final")
+            force("io.netty:netty-codec:4.1.115.Final")
+            force("org.bouncycastle:bcprov-jdk18on:1.79")
+            force("org.bouncycastle:bcpkix-jdk18on:1.79")
+            force("org.apache.commons:commons-lang3:3.17.0")
+            force("org.bitbucket.b_c:jose4j:0.9.6")
+        }
+    }
+}
+
 // Top-level build file. Plugins are declared here with `apply false` and applied
 // in module build files. Versions come from gradle/libs.versions.toml.
 plugins {
@@ -8,6 +27,25 @@ plugins {
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.compose.multiplatform) apply false
+}
+
+allprojects {
+    configurations.all {
+        resolutionStrategy {
+            force("org.jdom:jdom2:2.0.6.1")
+            force("org.apache.httpcomponents:httpclient:4.5.14")
+            force("com.google.protobuf:protobuf-javalite:4.28.3")
+            force("com.google.protobuf:protobuf-java:4.28.3")
+            force("io.netty:netty-codec-http2:4.1.115.Final")
+            force("io.netty:netty-handler:4.1.115.Final")
+            force("io.netty:netty-codec-http:4.1.115.Final")
+            force("io.netty:netty-codec:4.1.115.Final")
+            force("org.bouncycastle:bcprov-jdk18on:1.79")
+            force("org.bouncycastle:bcpkix-jdk18on:1.79")
+            force("org.apache.commons:commons-lang3:3.17.0")
+            force("org.bitbucket.b_c:jose4j:0.9.6")
+        }
+    }
 }
 
 // ============================================================================
