@@ -70,9 +70,9 @@ fun DesktopUpdateGate() {
                         val file = withContext(Dispatchers.IO) { DesktopUpdater.download(a) { progress = it } }
                         downloading = false
                         // Launch the installer; if we can't download or launch it, open the release page.
-                        if (file == null || !DesktopUpdater.launchInstaller(file)) {
-                            DesktopUpdater.openInBrowser(a.htmlUrl)
-                        }
+                        // launchInstaller/openInBrowser do blocking OS/AWT work, so keep them off the UI thread.
+                        val launched = file != null && withContext(Dispatchers.IO) { DesktopUpdater.launchInstaller(file) }
+                        if (!launched) withContext(Dispatchers.IO) { DesktopUpdater.openInBrowser(a.htmlUrl) }
                         available = null
                     }
                 }) { Text("Download & install") }

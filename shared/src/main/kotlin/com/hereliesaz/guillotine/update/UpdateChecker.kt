@@ -109,14 +109,16 @@ object UpdateChecker {
         val pa = versionParts(a)
         val pb = versionParts(b)
         for (i in 0 until maxOf(pa.size, pb.size)) {
-            val cmp = pa.getOrElse(i) { 0 }.compareTo(pb.getOrElse(i) { 0 })
+            val cmp = pa.getOrElse(i) { 0L }.compareTo(pb.getOrElse(i) { 0L })
             if (cmp != 0) return cmp
         }
         return 0
     }
 
-    private fun versionParts(v: String): List<Int> =
-        Regex("""\d+""").findAll(v).map { it.value.toIntOrNull() ?: 0 }.toList()
+    // Long, not Int: the build component is a monotonic timestamp-ish number that can exceed
+    // Int.MAX_VALUE, which toIntOrNull would silently turn into 0 and break the comparison.
+    private fun versionParts(v: String): List<Long> =
+        Regex("""\d+""").findAll(v).map { it.value.toLongOrNull() ?: 0L }.toList()
 
     /**
      * Stream [url] to [dest], reporting (bytesRead, totalBytes) as it goes (totalBytes is -1 if the
