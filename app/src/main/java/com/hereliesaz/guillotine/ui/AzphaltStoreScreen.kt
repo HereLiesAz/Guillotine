@@ -1,5 +1,6 @@
 package com.hereliesaz.guillotine.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -49,6 +52,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -73,7 +78,8 @@ fun AzphaltStoreScreen(
     
     LaunchedEffect(Unit) {
         val baseDir = java.io.File(context.filesDir, "extensions").absolutePath
-        storeState.loadPlugins(baseDir)
+        // Scope to this host so packages targeting other azphalt hosts are hidden (spec: targetApps).
+        storeState.loadPlugins(baseDir, context.packageName)
     }
 
     val filteredPlugins = if (selectedCategory == "All") plugins else plugins.filter { it.category == selectedCategory }
@@ -125,6 +131,8 @@ fun AzphaltStoreScreen(
                             "layer-effects-scenery" -> "Scenery"
                             "kinetic-typography" -> "Kinetic Type"
                             "kinetic-typography-smart" -> "Smart Type"
+                            "companion-apps" -> "Apps"
+                            "mcp-servers" -> "MCP"
                             else -> category
                         }
                         
@@ -177,6 +185,16 @@ fun PluginCard(plugin: AzphaltPlugin, onApply: () -> Unit) {
         Column(
             modifier = Modifier.padding(20.dp)
         ) {
+            // A bundled preview still (spec: preview.image) when present; otherwise a kind glyph.
+            val previewBitmap = remember(plugin.id) {
+                plugin.previewImage?.let {
+                    try {
+                        android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+            }
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -184,12 +202,26 @@ fun PluginCard(plugin: AzphaltPlugin, onApply: () -> Unit) {
                     .background(MaterialTheme.colorScheme.tertiaryContainer),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (plugin.category.contains("kinetic")) Icons.Default.AutoFixHigh else Icons.Default.Extension,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.size(28.dp)
-                )
+                if (previewBitmap != null) {
+                    Image(
+                        bitmap = previewBitmap,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = when {
+                            plugin.category == "companion-apps" -> Icons.Default.Apps
+                            plugin.category == "mcp-servers" -> Icons.Default.Hub
+                            plugin.category.contains("kinetic") -> Icons.Default.AutoFixHigh
+                            else -> Icons.Default.Extension
+                        },
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(16.dp))

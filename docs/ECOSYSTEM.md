@@ -126,6 +126,11 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   models directory. **Settings → Advanced → Install AI model (.azp)** drives it on both platforms; an
   unsigned package is installed only after an explicit trust warning. So a speech, segmentation, or
   labeling model can be delivered and adopted without a new app build.
+- ✅ **Tracks the current manifest spec (format `0.1`).** [`AzpManifest`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpManifest.kt)
+  models the latest `spec/extension-manifest.md`: the `app` (companion-app) and `mcp` (MCP-server)
+  package kinds alongside `asset`/`code`/`mixed`, plus `targetApps` (host scoping) and a `preview`
+  store-card still/clip. The **Azphalt Store** honors them — it hides packages scoped to other hosts
+  (`targetApps`) and shows a bundled `preview.image` on the card when one ships in the `.azp`.
 - ⏳ **Capabilities, WASM substrate, UI schema (jobs #2–#6).** Running extension code on a WASM sandbox
   (QuickJS-in-WASM for JS), granting least-privilege capabilities, and rendering the declarative UI
   schema natively in Compose are the remaining work to become a full **conforming host**.
