@@ -6,15 +6,13 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /**
  * Covers the azphalt `spec/extension-manifest.md` (format `0.1`) fields added since the host's first
  * cut: the `app` / `mcp` kinds and the `targetApps` / `preview` / `app` / `mcp` manifest fields, plus
- * the store's `targetApps` scoping.
+ * the manifest-level `targetsApp` scoping helper.
  */
 class AzpManifestSpecTest {
 
@@ -111,37 +109,5 @@ class AzpManifestSpecTest {
         assertTrue(mcpM.isMcp)
         assertTrue(mcpM.mcp != null)
     }
-
-    @Test fun storeHidesPackagesScopedToOtherHosts() {
-        val dir: File = Files.createTempDirectory("azp-store").toFile()
-        try {
-            // (1) scoped to this host, (2) global, (3) scoped to a different host.
-            fun write(name: String, id: String, targetApps: String) {
-                val azp = azp(
-                    { d ->
-                        """
-                        {"azphalt":"0.1","id":"$id","name":"$id","version":"1.0.0",
-                         "kind":"asset","license":"MIT","compat":">=0.1"$targetApps,
-                         "assets":[{"type":"lut","path":"assets/x.cube"}],
-                         "files":{"assets/x.cube":"${d["assets/x.cube"]}"}}
-                        """.trimIndent()
-                    },
-                    mapOf("assets/x.cube" to "TITLE$id".encodeToByteArray()),
-                )
-                File(dir, name).writeBytes(azp)
-            }
-            write("mine.azp", "com.hereliesaz.mine", ",\"targetApps\":[\"$hostId\"]")
-            write("global.azp", "com.hereliesaz.any", "")
-            write("theirs.azp", "com.hereliesaz.theirs", ",\"targetApps\":[\"com.example.other\"]")
-
-            val state = AzphaltStoreState()
-            state.loadPlugins(dir.absolutePath, hostId)
-            val ids = state.plugins.value.map { it.id }.toSet()
-            assertTrue(ids.contains("com.hereliesaz.mine"))
-            assertTrue(ids.contains("com.hereliesaz.any"))
-            assertFalse("package scoped to another host must be hidden", ids.contains("com.hereliesaz.theirs"))
-        } finally {
-            dir.deleteRecursively()
-        }
-    }
+    // Store-level host scoping (over the remote catalog) is covered in AzphaltRepositoryTest.
 }
