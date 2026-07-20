@@ -2,6 +2,8 @@ package com.hereliesaz.guillotine.azphalt
 
 import org.json.JSONObject
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * Trust-on-first-use publisher pins: plugin id → the base64 SPKI Ed25519 public key that signed the
@@ -48,13 +50,21 @@ class AzpPublisherPins(private val file: File) {
             val o = JSONObject()
             for ((k, v) in m) o.put(k, v)
             file.parentFile?.mkdirs()
-            // Write to a temp file and rename so a crash mid-write can never truncate the live file
-            // (it would only leave a stray .tmp), keeping the pin store self-consistent.
+            // Write to a temp file and move it into place so a crash mid-write can never truncate the
+            // live file (it would only leave a stray .tmp). Files.move with ATOMIC_MOVE is robust where
+            // File.renameTo isn't (e.g. Windows won't rename onto an existing file); fall back through a
+            // plain replace, then a direct write, if a filesystem rejects the atomic move.
             val tmp = File(file.parentFile, file.name + ".tmp")
             tmp.writeText(o.toString(2))
-            if (!tmp.renameTo(file)) {
-                file.writeText(o.toString(2))
-                tmp.delete()
+            try {
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: Exception) {
+                try {
+                    Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                } catch (_: Exception) {
+                    file.writeText(o.toString(2))
+                    tmp.delete()
+                }
             }
         }
     }
