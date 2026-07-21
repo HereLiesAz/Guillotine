@@ -41,7 +41,6 @@ fun InlineClipTools(
             EditorTool.SELECT, EditorTool.MARQUEE -> {
                 if (text != null) {
                     TextToolInline(vm, text)
-                    KineticTypeToolInline(vm, text)
                 }
                 if (video != null) {
                     BackgroundToolButton(vm, video)
@@ -52,6 +51,9 @@ fun InlineClipTools(
                 if (processable != null) {
                     TranscribeToolInline(state, onTranscribe)
                 }
+                // Plugin/extension-contributed sections (kinetic typography, and any azphalt UI later)
+                // render here through the standard host seam — see ClipPanelContribution.
+                ClipPanelHost(vm, state)
             }
         }
     }
