@@ -141,7 +141,11 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   on-device.
 - ⏳ **Capabilities, WASM substrate, UI schema (jobs #2–#6).** Running extension code on a WASM sandbox
   (QuickJS-in-WASM for JS), granting least-privilege capabilities, and rendering the declarative UI
-  schema natively in Compose are the remaining work to become a full **conforming host**.
+  schema natively in Compose are the remaining work to become a full **conforming host**. The **host UI
+  seam is now in place**: extensions contribute controls/options/preview to the editor's
+  clip-properties panel through [`ClipPanelContribution`](../app/src/main/java/com/hereliesaz/guillotine/ui/ClipPanelContribution.kt)
+  (built-in kinetic typography is the first consumer) — so the UI-schema renderer, when it lands, is just
+  one more contributor. See **[PLUGIN_PANELS.md](PLUGIN_PANELS.md)**.
 
 The fit is deliberate: azphalt's **never-list** (a host must never expose its engine, camera, sensors,
 filesystem, or network to extensions) is the same on-device, least-authority boundary Guillotine already
