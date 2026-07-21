@@ -505,18 +505,34 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
         // Split between the preview and the clip-properties panel (AdvancedToolView), resizable by a
         // divider in BOTH arrangements: a vertical grip when they sit side-by-side (wide) and a
-        // horizontal grip when stacked (tall). Each orientation remembers its own fraction.
-        var previewWeightWide by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.65f) }
-        var previewWeightTall by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.5f) }
+        // horizontal grip when stacked (tall). Each orientation remembers its own fraction. The
+        // fraction, and any pinned orientation, persist across sessions via PanelLayoutPrefs.
+        val savedLayout = androidx.compose.runtime.remember { PanelLayoutPrefs.load(context) }
+        var previewWeightWide by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.previewWeightWide) }
+        var previewWeightTall by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.previewWeightTall) }
+        // Pinned orientation: null = follow the screen shape; true = force side-by-side; false = stacked.
+        // Double-tapping the preview/panel grip toggles it.
+        var orientationOverride by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.orientationOverride) }
         androidx.compose.foundation.layout.BoxWithConstraints(
             androidx.compose.ui.Modifier
                 .weight(1f - timelineWeight)
                 .fillMaxWidth()
         ) {
-            val isWide = maxWidth > maxHeight * 1.1f
+            // Orientation follows the screen shape unless the user has pinned one by double-tapping the grip.
+            val isWide = orientationOverride ?: (maxWidth > maxHeight * 1.1f)
             val totalWidthPx = constraints.maxWidth.toFloat()
             val totalHeightPx = constraints.maxHeight.toFloat()
+            // Double-tap the grip to flip between side-by-side and stacked; the choice persists.
+            val toggleOrientation = {
+                val next = !isWide
+                orientationOverride = next
+                PanelLayoutPrefs.saveOrientation(context, next)
+            }
+            // A weight of 0 is illegal in Compose, so once the panel is dragged (nearly) shut we drop it
+            // entirely and let the preview fill — the grip stays put so it can be dragged back open.
+            val panelCollapseThreshold = 0.02f
             if (isWide) {
+                val panelWeight = 1f - previewWeightWide
                 androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxSize()) {
                     androidx.compose.foundation.layout.Column(
                         androidx.compose.ui.Modifier
@@ -533,22 +549,28 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         TransportControls(vm, state)
                     }
                     DraggableVerticalDivider(
+                        onDoubleTap = toggleOrientation,
                         onDrag = { dragAmount ->
                             if (totalWidthPx > 0f) {
-                                previewWeightWide = (previewWeightWide + dragAmount / totalWidthPx).coerceIn(0.25f, 0.85f)
+                                // Upper bound 1f lets the panel close all the way (preview takes it all).
+                                previewWeightWide = (previewWeightWide + dragAmount / totalWidthPx).coerceIn(0.25f, 1f)
+                                PanelLayoutPrefs.saveWide(context, previewWeightWide)
                             }
                         }
                     )
-                    AdvancedToolView(
-                        vm = vm,
-                        state = state,
-                        onTranscribe = onTranscribe,
-                        modifier = androidx.compose.ui.Modifier
-                            .weight(1f - previewWeightWide)
-                            .fillMaxHeight()
-                    )
+                    if (panelWeight > panelCollapseThreshold) {
+                        AdvancedToolView(
+                            vm = vm,
+                            state = state,
+                            onTranscribe = onTranscribe,
+                            modifier = androidx.compose.ui.Modifier
+                                .weight(panelWeight)
+                                .fillMaxHeight()
+                        )
+                    }
                 }
             } else {
+                val panelWeight = 1f - previewWeightTall
                 androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
                     androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(previewWeightTall).fillMaxWidth()) {
                         PreviewPlayer(
@@ -561,20 +583,24 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         TransportControls(vm, state)
                     }
                     DraggableTimelineDivider(
+                        onDoubleTap = toggleOrientation,
                         onDrag = { dragAmount ->
                             if (totalHeightPx > 0f) {
-                                previewWeightTall = (previewWeightTall + dragAmount / totalHeightPx).coerceIn(0.25f, 0.85f)
+                                previewWeightTall = (previewWeightTall + dragAmount / totalHeightPx).coerceIn(0.25f, 1f)
+                                PanelLayoutPrefs.saveTall(context, previewWeightTall)
                             }
                         }
                     )
-                    AdvancedToolView(
-                        vm = vm,
-                        state = state,
-                        onTranscribe = onTranscribe,
-                        modifier = androidx.compose.ui.Modifier
-                            .weight(1f - previewWeightTall)
-                            .fillMaxWidth()
-                    )
+                    if (panelWeight > panelCollapseThreshold) {
+                        AdvancedToolView(
+                            vm = vm,
+                            state = state,
+                            onTranscribe = onTranscribe,
+                            modifier = androidx.compose.ui.Modifier
+                                .weight(panelWeight)
+                                .fillMaxWidth()
+                        )
+                    }
                 }
             }
         }

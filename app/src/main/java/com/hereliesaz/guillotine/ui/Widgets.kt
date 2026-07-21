@@ -1,6 +1,7 @@
 package com.hereliesaz.guillotine.ui
 
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Box
@@ -75,6 +76,7 @@ fun IconToolButton(
 @Composable
 fun DraggableTimelineDivider(
     modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    onDoubleTap: (() -> Unit)? = null,
     onDrag: (Float) -> Unit
 ) {
     Box(
@@ -88,6 +90,13 @@ fun DraggableTimelineDivider(
                     onDrag(dragAmount)
                 }
             }
+            .then(
+                if (onDoubleTap != null) {
+                    androidx.compose.ui.Modifier.pointerInput(Unit) {
+                        detectTapGestures(onDoubleTap = { onDoubleTap() })
+                    }
+                } else androidx.compose.ui.Modifier
+            )
     ) {
         Box(
             modifier = androidx.compose.ui.Modifier
@@ -107,6 +116,7 @@ fun DraggableTimelineDivider(
 @Composable
 fun DraggableVerticalDivider(
     modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    onDoubleTap: (() -> Unit)? = null,
     onDrag: (Float) -> Unit
 ) {
     Box(
@@ -120,6 +130,13 @@ fun DraggableVerticalDivider(
                     onDrag(dragAmount)
                 }
             }
+            .then(
+                if (onDoubleTap != null) {
+                    androidx.compose.ui.Modifier.pointerInput(Unit) {
+                        detectTapGestures(onDoubleTap = { onDoubleTap() })
+                    }
+                } else androidx.compose.ui.Modifier
+            )
     ) {
         Box(
             modifier = androidx.compose.ui.Modifier
