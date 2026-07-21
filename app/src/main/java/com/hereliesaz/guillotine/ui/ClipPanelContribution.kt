@@ -56,21 +56,30 @@ interface ClipPanelContribution {
 object ClipPanelContributions {
     private val entries = mutableStateListOf<ClipPanelContribution>()
 
+    // Mutations are synchronized: a contribution may register from a background thread (e.g. an Azphalt
+    // Store install on an IO dispatcher), so the compound read-modify-write below must be atomic against
+    // other writers. Reads via [all] stay snapshot-safe for composition without the lock.
+    private val lock = Any()
+
     /** All registered contributions, in registration order. Read from composition to observe changes. */
     val all: List<ClipPanelContribution> get() = entries
 
     /** Add [contribution], replacing any existing one with the same [ClipPanelContribution.id]. */
     fun register(contribution: ClipPanelContribution) {
-        val i = entries.indexOfFirst { it.id == contribution.id }
-        if (i >= 0) entries[i] = contribution else entries.add(contribution)
+        synchronized(lock) {
+            val i = entries.indexOfFirst { it.id == contribution.id }
+            if (i >= 0) entries[i] = contribution else entries.add(contribution)
+        }
     }
 
     fun unregister(id: String) {
-        entries.removeAll { it.id == id }
+        synchronized(lock) { entries.removeAll { it.id == id } }
     }
 
     /** Test hook: drop all registrations. */
-    fun clear() = entries.clear()
+    fun clear() {
+        synchronized(lock) { entries.clear() }
+    }
 }
 
 /**
