@@ -13,9 +13,14 @@ object PanelLayoutPrefs {
     private const val KEY_WIDE = "preview_weight_wide"
     private const val KEY_TALL = "preview_weight_tall"
     private const val KEY_ORIENTATION = "orientation_override" // 1 = wide, 0 = tall, absent = auto
+    private const val KEY_ZOOM = "preview_zoom"
+    private const val KEY_PAN_X = "preview_pan_x"
+    private const val KEY_PAN_Y = "preview_pan_y"
 
     const val DEFAULT_WIDE = 0.65f
     const val DEFAULT_TALL = 0.5f
+    const val DEFAULT_ZOOM = 1f // 1x = fit-to-view (the floor: the preview never zooms out past fit)
+    const val MAX_ZOOM = 5f
 
     /** [orientationOverride]: true = force side-by-side, false = force stacked, null = follow screen. */
     data class Layout(
@@ -44,4 +49,20 @@ object PanelLayoutPrefs {
         if (o == null) e.remove(KEY_ORIENTATION) else e.putInt(KEY_ORIENTATION, if (o) 1 else 0)
         e.apply()
     }
+
+    /** Persistent preview viewport: [zoom] (>= 1; 1 = fit) and pan offset in px from centre. */
+    data class PreviewView(val zoom: Float, val panX: Float, val panY: Float)
+
+    fun loadPreview(context: Context): PreviewView {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return PreviewView(
+            zoom = p.getFloat(KEY_ZOOM, DEFAULT_ZOOM).coerceIn(DEFAULT_ZOOM, MAX_ZOOM),
+            panX = p.getFloat(KEY_PAN_X, 0f),
+            panY = p.getFloat(KEY_PAN_Y, 0f),
+        )
+    }
+
+    fun savePreview(context: Context, zoom: Float, panX: Float, panY: Float) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putFloat(KEY_ZOOM, zoom).putFloat(KEY_PAN_X, panX).putFloat(KEY_PAN_Y, panY).apply()
 }

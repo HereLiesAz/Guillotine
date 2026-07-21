@@ -5,13 +5,25 @@ package com.hereliesaz.guillotine.ui
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -28,11 +40,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -121,13 +136,66 @@ fun PreviewPlayer(
         Modifier
     }
 
+    // ---- persistent preview viewport (zoom + pan) ----
+    // Default 1x = fit. A popup slider sets the zoom; a one-finger drag pans while zoomed in. (Two-finger
+    // gestures are reserved for manipulating a selected component.) Loaded from / saved to
+    // PanelLayoutPrefs, so where the user zoomed persists across sessions.
+    val savedView = remember { PanelLayoutPrefs.loadPreview(context) }
+    var zoom by remember { mutableStateOf(savedView.zoom) }
+    var panX by remember { mutableStateOf(savedView.panX) }
+    var panY by remember { mutableStateOf(savedView.panY) }
+    var showZoom by remember { mutableStateOf(false) }
+
+    // Keep pan within bounds: a frame scaled by `zoom` can slide at most half its overflow each way, so
+    // at 1x (fit) the pan is pinned to centre. Runs after any zoom or size change.
+    fun clampPan() {
+        val maxX = (previewSize.width * (zoom - 1f) / 2f).coerceAtLeast(0f)
+        val maxY = (previewSize.height * (zoom - 1f) / 2f).coerceAtLeast(0f)
+        panX = panX.coerceIn(-maxX, maxX)
+        panY = panY.coerceIn(-maxY, maxY)
+    }
+    LaunchedEffect(zoom, previewSize) { clampPan() }
+    // Debounce disk writes: zoom/pan change rapidly during a drag; persist ~0.4s after they settle.
+    LaunchedEffect(zoom, panX, panY) {
+        delay(400)
+        PanelLayoutPrefs.savePreview(context, zoom, panX, panY)
+    }
+
+    // One-finger drag pans the zoomed preview (no-op at 1x; in crop mode the transform gesture edits the
+    // selected clip instead, so this yields to cropModifier there).
+    val panModifier = Modifier.pointerInput(Unit) {
+        detectDragGestures { change, drag ->
+            if (zoom > 1f) {
+                change.consume()
+                panX += drag.x
+                panY += drag.y
+                clampPan()
+            }
+        }
+    }
+    val gestureModifier = if (cropMode) cropModifier else panModifier
+
     Box(
         modifier = modifier
             .background(Neutral950)
             .onSizeChanged { previewSize = it }
-            .then(cropModifier),
+            .clipToBounds()
+            .then(gestureModifier),
         contentAlignment = Alignment.Center,
     ) {
+      // The composited frame — video (TextureView), captions, and guides — lives in this inner box,
+      // which the zoom/pan graphicsLayer scales and translates as one.
+      Box(
+          modifier = Modifier
+              .fillMaxSize()
+              .graphicsLayer {
+                  scaleX = zoom
+                  scaleY = zoom
+                  translationX = panX
+                  translationY = panY
+              },
+          contentAlignment = Alignment.Center,
+      ) {
         if (!anyActiveVideo) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
         }
@@ -217,6 +285,69 @@ fun PreviewPlayer(
                     size = androidx.compose.ui.geometry.Size(w - left - right, h - top - bottom),
                     style = stroke,
                 )
+            }
+        }
+      } // end inner zoomed frame
+
+        // Zoom control — fixed size, OUTSIDE the zoomed layer so it never scales with the preview.
+        PreviewZoomControl(
+            zoom = zoom,
+            expanded = showZoom,
+            onExpandedChange = { showZoom = it },
+            onZoomChange = { z ->
+                zoom = z.coerceIn(1f, PanelLayoutPrefs.MAX_ZOOM)
+                if (zoom <= 1f) { panX = 0f; panY = 0f } else clampPan()
+            },
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+        )
+    }
+}
+
+/**
+ * Preview-zoom affordance: a magnifier button that opens a popup with a slider (1x–[PanelLayoutPrefs.MAX_ZOOM]).
+ * Fixed-size and rendered outside the zoomed layer, so it never scales with the preview. "Fit" resets to 1x.
+ */
+@Composable
+private fun PreviewZoomControl(
+    zoom: Float,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onZoomChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier) {
+        IconButton(onClick = { onExpandedChange(!expanded) }) {
+            Icon(
+                Icons.Filled.ZoomIn,
+                contentDescription = "Zoom preview",
+                tint = if (zoom > 1f) White else Neutral500,
+            )
+        }
+        if (expanded) {
+            Popup(
+                alignment = Alignment.TopEnd,
+                onDismissRequest = { onExpandedChange(false) },
+                properties = PopupProperties(focusable = true),
+            ) {
+                Surface(
+                    color = Neutral950,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.width(220.dp).padding(top = 44.dp),
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Zoom  ${"%.1f".format(zoom)}x", color = White, fontSize = 12.sp)
+                        Slider(
+                            value = zoom.coerceIn(1f, PanelLayoutPrefs.MAX_ZOOM),
+                            onValueChange = onZoomChange,
+                            valueRange = 1f..PanelLayoutPrefs.MAX_ZOOM,
+                        )
+                        Row {
+                            TextButton(onClick = { onZoomChange(1f) }) {
+                                Text("Fit", color = White, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -389,8 +520,11 @@ private fun VideoSlot(
             }
         } else {
             AndroidView(
+                // Inflated from XML so the surface is a TextureView (transformable by the zoom/pan
+                // graphicsLayer, and genuinely transparent for the crossfade overlay slot).
                 factory = { ctx ->
-                    PlayerView(ctx).apply {
+                    (android.view.LayoutInflater.from(ctx)
+                        .inflate(com.hereliesaz.guillotine.R.layout.preview_player_view, null) as PlayerView).apply {
                         useController = false
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setBackgroundColor(
