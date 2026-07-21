@@ -6,6 +6,7 @@ import com.hereliesaz.guillotine.ads.AdsState
 import com.hereliesaz.guillotine.ads.AppOpenAdManager
 import com.hereliesaz.guillotine.ads.InterstitialAdManager
 import com.hereliesaz.guillotine.crash.CrashReporter
+import com.hereliesaz.guillotine.ui.AzpAssetContribution
 import com.hereliesaz.guillotine.ui.ClipPanelContributions
 import com.hereliesaz.guillotine.ui.KineticTypographyContribution
 
@@ -34,6 +35,7 @@ class GuillotineApplication : Application() {
         // Register the built-in clip-properties-panel contributions (the plugin host seam). Azphalt
         // UI-schema sections will register here too once that runtime lands — see docs/PLUGIN_PANELS.md.
         ClipPanelContributions.register(KineticTypographyContribution())
+        ClipPanelContributions.register(AzpAssetContribution())
         if (BuildConfig.ADS_ENABLED) {
             appOpenAdManager = AppOpenAdManager(this).also { it.register() }
             interstitialAdManager = InterstitialAdManager(AdsState.RENDER_INTERSTITIAL_UNIT)

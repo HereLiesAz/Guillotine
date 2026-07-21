@@ -69,8 +69,30 @@ is the first built-in contribution and the reference for a real one:
 An azphalt UI-schema renderer will be *another* `ClipPanelContribution` whose `Content` interprets a
 package's declarative UI — no special-casing in the panel, just one more registration.
 
+## azphalt UI-schema sections
+
+An azphalt asset package can ship a **declarative control panel** — azphalt `spec/ui-schema.md`, a
+`{ "controls": [ … ] }` document referenced by the asset's `ui` field — so its controls render as native
+widgets in every conforming host. Guillotine renders these through the same panel seam:
+
+- [`AzpUiSchema.parse`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt)
+  (`:shared`, pure Kotlin) parses the schema into typed controls — `slider`, `number`, `toggle`,
+  `select`, `color`, `text`, `button`, `group`. Unknown types are skipped (forward-compatible).
+- [`AzpUiSchemaControls`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzpUiSchemaControls.kt)
+  renders each control as a native Compose widget, reading/writing raw azphalt `params` JSON.
+- [`AzpInstalledUi.list`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpInstalledUi.kt)
+  finds installed packages (scoped to this host) that ship a `ui`, and
+  [`AzpAssetContribution`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzpAssetContribution.kt)
+  renders each as a panel section, persisting values with
+  [`AzpParamStore`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzpParamStore.kt).
+
+**Honest scope:** this renders the schema and stores the params — both real. It does **not** yet run the
+extension against your media; that's the azphalt runtime (jobs #2–#5). The section says so, and when the
+runtime lands it reads these same params. A LUT/shader/brush author writes the schema once (`ui` in the
+manifest) and its panel appears here, no Guillotine change needed.
+
 ## What's next
 
+- The extension **runtime** (jobs #2–#5) so a panel's `params` actually transform the clip.
 - A per-section collapse toggle (the panel already collapses as a whole).
-- The azphalt UI-schema → Compose renderer as a `ClipPanelContribution` (ECOSYSTEM.md §3b, job #6).
-- Capability-based `appliesTo` once azphalt capabilities are granted on install.
+- Capability- and clip-type-aware `appliesTo` once azphalt capabilities/`mediaDomains` are read on install.
