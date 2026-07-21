@@ -67,6 +67,23 @@ sealed interface AzpControl {
 
 /** A whole control panel: the ordered [controls] a host renders. */
 data class AzpUiSchema(val controls: List<AzpControl>) {
+
+    /** Flatten (through groups) to every control, in order. */
+    fun flatten(): List<AzpControl> = controls.flatMap { flattenOne(it) }
+
+    private fun flattenOne(c: AzpControl): List<AzpControl> =
+        if (c is AzpControl.Group) c.controls.flatMap { flattenOne(it) } else listOf(c)
+
+    /** The numeric control defaults keyed by control key — used to seed a shader's params on apply. */
+    fun numericDefaults(): Map<String, Float> = flatten().mapNotNull { c ->
+        when (c) {
+            is AzpControl.Slider -> c.key to c.default.toFloat()
+            is AzpControl.Number -> c.key to c.default.toFloat()
+            is AzpControl.Toggle -> c.key to if (c.default) 1f else 0f
+            else -> null
+        }
+    }.toMap()
+
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 

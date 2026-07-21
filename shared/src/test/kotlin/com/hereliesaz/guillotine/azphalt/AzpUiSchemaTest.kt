@@ -84,6 +84,24 @@ class AzpUiSchemaTest {
         assertEquals("reset", (schema.controls.single() as AzpControl.Button).action)
     }
 
+    @Test fun `numericDefaults seeds slider, number and toggle values through groups`() {
+        val schema = AzpUiSchema.parse(
+            """{ "controls": [
+                { "type": "slider", "key": "cellSize", "label": "Cell", "min": 2, "max": 40, "default": 8 },
+                { "type": "toggle", "key": "cmyk", "label": "CMYK", "default": true },
+                { "type": "text", "key": "note", "label": "Note", "default": "hi" },
+                { "type": "group", "label": "Adv", "controls": [
+                    { "type": "number", "key": "seed", "label": "Seed", "default": 3 }
+                ] }
+            ] }""",
+        )!!
+        val defaults = schema.numericDefaults()
+        assertEquals(8f, defaults["cellSize"])
+        assertEquals(1f, defaults["cmyk"])   // toggle true -> 1
+        assertEquals(3f, defaults["seed"])   // reached through the group
+        assertEquals(null, defaults["note"]) // text is not numeric
+    }
+
     @Test fun `returns null for non-schema input`() {
         assertNull(AzpUiSchema.parse("not json"))
         assertNull(AzpUiSchema.parse("""{ "nope": [] }"""))
