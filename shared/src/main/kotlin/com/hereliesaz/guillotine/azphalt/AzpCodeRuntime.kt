@@ -51,7 +51,7 @@ interface AzpCodeRuntime {
  * packages installable and their capabilities user-approvable while the sandbox (jobs #2–#5) is built.
  */
 object UnavailableAzpCodeRuntime : AzpCodeRuntime {
-    override fun run(pkg: AzpPackage.Loaded, inputJson: String, grant: Grant): AzpCodeRuntime.Outcome {
+    override fun run(pkg: AzpPackage.Loaded, inputJson: String, grant: AzpCodeRuntime.Grant): AzpCodeRuntime.Outcome {
         if (!pkg.manifest.isCode) {
             return AzpCodeRuntime.Outcome.Error("not a code extension (kind=${pkg.manifest.kind})")
         }
