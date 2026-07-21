@@ -40,7 +40,7 @@ mediapipeTasksGenai = "0.10.35"
 # version: tasks-vision's Maven metadata advertises the old 0.20230731 as <release>, and version
 # comparison treats 0.20230731 > 0.10.35, so `0.10.+`/`+` would resolve back to the stale 2023 build.
 mediapipeTasksVision = "0.20230731"
-aznavrail = "11.0"
+aznavrail = "11.2"
 playServicesAds = "25.4.0"
 userMessaging = "4.0.0"
 billing = "9.1.0"
