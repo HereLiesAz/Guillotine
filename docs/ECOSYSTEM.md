@@ -139,9 +139,18 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   through [`AzpPackage`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpPackage.kt), and
   only then writes it into the app's extensions dir. Discovery is remote; trust + install stay
   on-device.
-- ⏳ **Capabilities, WASM substrate, UI schema (jobs #2–#6).** Running extension code on a WASM sandbox
-  (QuickJS-in-WASM for JS), granting least-privilege capabilities, and rendering the declarative UI
-  schema natively in Compose are the remaining work to become a full **conforming host**.
+- ✅ **UI schema → native Compose (job #6).** An extension's declarative control panel
+  (azphalt `spec/ui-schema.md`, `{ "controls": […] }` referenced by an asset's `ui`) is parsed by
+  [`AzpUiSchema`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt) and rendered
+  as native widgets by [`AzpUiSchemaControls`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzpUiSchemaControls.kt),
+  surfaced in the editor's clip-properties panel through the [`ClipPanelContribution`](../app/src/main/java/com/hereliesaz/guillotine/ui/ClipPanelContribution.kt)
+  seam (built-in kinetic typography is the first consumer; installed asset packages that ship a `ui`
+  render automatically). Params are rendered and stored on-device; **applying** them to media still
+  awaits the runtime below. See **[PLUGIN_PANELS.md](PLUGIN_PANELS.md)**.
+- ⏳ **Capabilities & WASM substrate (jobs #2–#5).** Running extension code on a WASM sandbox
+  (QuickJS-in-WASM for JS) and granting least-privilege capabilities are the remaining work to become a
+  full **conforming host** — the layer that turns a rendered UI-schema panel's `params` into an actual
+  on-device transform.
 
 The fit is deliberate: azphalt's **never-list** (a host must never expose its engine, camera, sensors,
 filesystem, or network to extensions) is the same on-device, least-authority boundary Guillotine already

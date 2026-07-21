@@ -26,7 +26,11 @@ class BillingManager(private val context: Context, private val coroutineScope: C
     fun initialize() {
         billingClient = BillingClient.newBuilder(context)
             .setListener(this)
-            .enablePendingPurchases()
+            .enablePendingPurchases(
+                PendingPurchasesParams.newBuilder()
+                    .enableOneTimeProducts()
+                    .build()
+            )
             .build()
             
         connectToPlayBilling()
@@ -59,9 +63,10 @@ class BillingManager(private val context: Context, private val coroutineScope: C
             )
             .build()
 
-        billingClient.queryProductDetailsAsync(queryProductDetailsParams) { billingResult, productDetailsList ->
+        billingClient.queryProductDetailsAsync(queryProductDetailsParams) { billingResult, queryProductDetailsResult ->
             if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                _adFreeProductDetails.value = productDetailsList.firstOrNull { it.productId == adFreeProductId }
+                _adFreeProductDetails.value =
+                    queryProductDetailsResult.productDetailsList.firstOrNull { it.productId == adFreeProductId }
             }
         }
     }

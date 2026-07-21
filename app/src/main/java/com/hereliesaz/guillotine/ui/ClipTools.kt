@@ -368,8 +368,9 @@ fun KineticTypeToolInline(vm: EditorViewModel, clip: TimelineClip) {
         }
     }
     if (motions.isEmpty()) return
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Kinetic type", color = Neutral400, fontSize = 12.sp)
+    // Rendered through the plugin-panel seam (see KineticTypographyContribution); ClipPanelSection is the
+    // standard wrapper so this looks the same as any azphalt-contributed section.
+    ClipPanelSection("Kinetic type") {
         CaptionStyleRow("None", "Remove the animated caption motion") {
             KineticTypographyPicker.clear(vm, clip.id)
         }

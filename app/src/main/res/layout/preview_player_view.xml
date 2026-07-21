@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Preview video surface for the editor. Uses a TextureView (not the default SurfaceView) so the
+  Compose graphicsLayer that zooms/pans the preview actually transforms the video, and so the
+  crossfade overlay slot can be truly transparent. resize_mode=fit keeps the picture letterboxed to
+  its own aspect within the (already aspect-constrained) preview box.
+-->
+<androidx.media3.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:surface_type="texture_view"
+    app:use_controller="false"
+    app:resize_mode="fit" />
