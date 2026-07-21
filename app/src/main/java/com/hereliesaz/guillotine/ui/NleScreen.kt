@@ -513,6 +513,16 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         // Pinned orientation: null = follow the screen shape; true = force side-by-side; false = stacked.
         // Double-tapping the preview/panel grip toggles it.
         var orientationOverride by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.orientationOverride) }
+        // Debounce the split-fraction writes: a drag mutates the weight every frame, so save to disk only
+        // ~0.5s after the user settles rather than on every frame. (Orientation is a rare tap, saved inline.)
+        androidx.compose.runtime.LaunchedEffect(previewWeightWide) {
+            kotlinx.coroutines.delay(500)
+            PanelLayoutPrefs.saveWide(context, previewWeightWide)
+        }
+        androidx.compose.runtime.LaunchedEffect(previewWeightTall) {
+            kotlinx.coroutines.delay(500)
+            PanelLayoutPrefs.saveTall(context, previewWeightTall)
+        }
         androidx.compose.foundation.layout.BoxWithConstraints(
             androidx.compose.ui.Modifier
                 .weight(1f - timelineWeight)
@@ -553,8 +563,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         onDrag = { dragAmount ->
                             if (totalWidthPx > 0f) {
                                 // Upper bound 1f lets the panel close all the way (preview takes it all).
+                                // The debounced LaunchedEffect above persists the settled value.
                                 previewWeightWide = (previewWeightWide + dragAmount / totalWidthPx).coerceIn(0.25f, 1f)
-                                PanelLayoutPrefs.saveWide(context, previewWeightWide)
                             }
                         }
                     )
@@ -587,7 +597,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         onDrag = { dragAmount ->
                             if (totalHeightPx > 0f) {
                                 previewWeightTall = (previewWeightTall + dragAmount / totalHeightPx).coerceIn(0.25f, 1f)
-                                PanelLayoutPrefs.saveTall(context, previewWeightTall)
                             }
                         }
                     )

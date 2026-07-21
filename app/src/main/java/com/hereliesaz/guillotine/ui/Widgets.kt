@@ -79,6 +79,9 @@ fun DraggableTimelineDivider(
     onDoubleTap: (() -> Unit)? = null,
     onDrag: (Float) -> Unit
 ) {
+    // rememberUpdatedState keeps the tap detector stable (pointerInput(Unit)) while always invoking the
+    // latest lambda — onDoubleTap is recreated each recomposition and captures state that changes.
+    val latestDoubleTap = androidx.compose.runtime.rememberUpdatedState(onDoubleTap)
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -93,7 +96,7 @@ fun DraggableTimelineDivider(
             .then(
                 if (onDoubleTap != null) {
                     androidx.compose.ui.Modifier.pointerInput(Unit) {
-                        detectTapGestures(onDoubleTap = { onDoubleTap() })
+                        detectTapGestures(onDoubleTap = { latestDoubleTap.value?.invoke() })
                     }
                 } else androidx.compose.ui.Modifier
             )
@@ -119,6 +122,7 @@ fun DraggableVerticalDivider(
     onDoubleTap: (() -> Unit)? = null,
     onDrag: (Float) -> Unit
 ) {
+    val latestDoubleTap = androidx.compose.runtime.rememberUpdatedState(onDoubleTap)
     Box(
         modifier = modifier
             .fillMaxHeight()
@@ -133,7 +137,7 @@ fun DraggableVerticalDivider(
             .then(
                 if (onDoubleTap != null) {
                     androidx.compose.ui.Modifier.pointerInput(Unit) {
-                        detectTapGestures(onDoubleTap = { onDoubleTap() })
+                        detectTapGestures(onDoubleTap = { latestDoubleTap.value?.invoke() })
                     }
                 } else androidx.compose.ui.Modifier
             )
