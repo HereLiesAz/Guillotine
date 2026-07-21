@@ -177,12 +177,19 @@ def upload_bundle(session: AuthorizedSession, package: str, edit_id: str, aab: s
     raise RuntimeError("Upload loop exited without a terminal response.")
 
 
-EDIT_CONFLICT_RETRIES = 3
+EDIT_CONFLICT_RETRIES = 5
 
 
-def _is_edit_conflict(exc: Exception) -> bool:
+def _is_retryable_error(exc: Exception) -> bool:
     exc_str = str(exc).lower()
-    return "outside of this edit" in exc_str or "edit has expired" in exc_str
+    return (
+        "outside of this edit" in exc_str
+        or "edit has expired" in exc_str
+        or "not completed yet" in exc_str
+        or "internal error" in exc_str
+        or "service is currently unavailable" in exc_str
+        or "try again" in exc_str
+    )
 
 
 def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
@@ -193,7 +200,8 @@ def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
     PERMISSION_DENIED — see the module docstring). A draft uploads the bundle
     without rolling out, so the commit always succeeds; roll out from the console.
 
-    Retries on edit conflicts (another edit committed between open and commit).
+    Retries on edit conflicts (another edit committed between open and commit),
+    or asynchronous bundle processing delays.
     """
     for attempt in range(1, EDIT_CONFLICT_RETRIES + 1):
         edit_id = insert_edit(session, package)
@@ -207,9 +215,10 @@ def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
             return version_code
         except Exception as e:
             delete_edit(session, package, edit_id)
-            if _is_edit_conflict(e) and attempt < EDIT_CONFLICT_RETRIES:
-                wait = 2 ** attempt
-                print(f"Edit conflict (attempt {attempt}/{EDIT_CONFLICT_RETRIES}); retrying in {wait}s…")
+            if _is_retryable_error(e) and attempt < EDIT_CONFLICT_RETRIES:
+                # Give Google more time to process the AAB
+                wait = (2 ** attempt) * 5
+                print(f"Retryable error: {e} (attempt {attempt}/{EDIT_CONFLICT_RETRIES}); retrying in {wait}s…")
                 time.sleep(wait)
                 continue
             raise
@@ -228,9 +237,9 @@ def stage_track(session: AuthorizedSession, package: str, track: str, status: st
             return
         except Exception as e:
             delete_edit(session, package, edit_id)
-            if _is_edit_conflict(e) and attempt < EDIT_CONFLICT_RETRIES:
-                wait = 2 ** attempt
-                print(f"Edit conflict on track {track} (attempt {attempt}/{EDIT_CONFLICT_RETRIES}); retrying in {wait}s…")
+            if _is_retryable_error(e) and attempt < EDIT_CONFLICT_RETRIES:
+                wait = (2 ** attempt) * 5
+                print(f"Retryable error on track {track}: {e} (attempt {attempt}/{EDIT_CONFLICT_RETRIES}); retrying in {wait}s…")
                 time.sleep(wait)
                 continue
             raise
