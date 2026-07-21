@@ -86,13 +86,22 @@ widgets in every conforming host. Guillotine renders these through the same pane
   renders each as a panel section, persisting values with
   [`AzpParamStore`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzpParamStore.kt).
 
-**Honest scope:** this renders the schema and stores the params — both real. It does **not** yet run the
-extension against your media; that's the azphalt runtime (jobs #2–#5). The section says so, and when the
-runtime lands it reads these same params. A LUT/shader/brush author writes the schema once (`ui` in the
-manifest) and its panel appears here, no Guillotine change needed.
+**Applying asset extensions.** For the types Guillotine renders natively — a GLSL **shader**, a `.cube`
+**LUT** — the section shows an **Apply to clip** button. [`AzpAssetApplier`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzpAssetApplier.kt)
+re-reads and integrity-verifies the `.azp`, writes the asset into the clip's real render filters
+(`shaderPath` / `lutPath`), and — for a shader — seeds `shaderParams` from the schema defaults. From then
+on the schema's sliders drive the clip's live `shaderParams`, so a move changes the picture in **preview
+and export**. No sandbox needed: the asset is declarative data the host already knows how to render.
+
+**`code` extensions.** A `code`-kind package (a JS/WASM filter) needs a sandbox to run. The capability
+boundary is live — [`AzpCodeRuntime.missingGrants`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpCodeRuntime.kt)
+enforces least-privilege grants — but the shipped runtime is `Unavailable`: it **refuses to execute
+rather than fake a result** until a WASM engine is bundled (azphalt jobs #2–#5). Non-shader/LUT panels
+therefore store their params as config, clearly labeled, ready for that runtime.
 
 ## What's next
 
-- The extension **runtime** (jobs #2–#5) so a panel's `params` actually transform the clip.
+- The **WASM sandbox** (jobs #2–#5) so `code` extensions run behind `AzpCodeRuntime` under granted
+  capabilities — the last step to a full conforming host.
 - A per-section collapse toggle (the panel already collapses as a whole).
-- Capability- and clip-type-aware `appliesTo` once azphalt capabilities/`mediaDomains` are read on install.
+- Clip-type-aware `appliesTo` once azphalt `mediaDomains` are read on install.

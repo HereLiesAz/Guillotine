@@ -145,12 +145,19 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   as native widgets by [`AzpUiSchemaControls`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzpUiSchemaControls.kt),
   surfaced in the editor's clip-properties panel through the [`ClipPanelContribution`](../app/src/main/java/com/hereliesaz/guillotine/ui/ClipPanelContribution.kt)
   seam (built-in kinetic typography is the first consumer; installed asset packages that ship a `ui`
-  render automatically). Params are rendered and stored on-device; **applying** them to media still
-  awaits the runtime below. See **[PLUGIN_PANELS.md](PLUGIN_PANELS.md)**.
-- ⏳ **Capabilities & WASM substrate (jobs #2–#5).** Running extension code on a WASM sandbox
-  (QuickJS-in-WASM for JS) and granting least-privilege capabilities are the remaining work to become a
-  full **conforming host** — the layer that turns a rendered UI-schema panel's `params` into an actual
-  on-device transform.
+  render automatically). See **[PLUGIN_PANELS.md](PLUGIN_PANELS.md)**.
+- ✅ **Apply asset extensions to media (asset-kind runtime).** For the extension types Guillotine already
+  renders natively — a GLSL **shader**, a `.cube` **LUT** — an installed `.azp` is applied to the selected
+  clip on-device ([`AzpAssetApplier`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzpAssetApplier.kt)):
+  its bytes are written into the clip's real render filters, so it takes effect in **both live preview and
+  export**, and a shader package's UI-schema controls drive the clip's `shaderParams` live. No sandbox is
+  needed — the asset is declarative data. This closes the loop end-to-end for asset extensions.
+- ⏳ **Capabilities & WASM substrate for `code` extensions (jobs #2–#5).** The capability boundary and
+  runtime seam are in place — [`AzpCodeRuntime`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpCodeRuntime.kt)
+  enforces least-privilege grants (`missingGrants`) and the shipped runtime honestly refuses to execute
+  rather than fake a result. The remaining piece is the sandbox itself: a WASM engine hosting
+  QuickJS-in-WASM (`js`) or a module against the host ABI (`wasm`), to run arbitrary `code`-kind
+  extensions. That's the last step to a full **conforming host**.
 
 The fit is deliberate: azphalt's **never-list** (a host must never expose its engine, camera, sensors,
 filesystem, or network to extensions) is the same on-device, least-authority boundary Guillotine already
