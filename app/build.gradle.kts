@@ -5,6 +5,9 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -63,21 +66,9 @@ val isMinorBumped = verMinor != lastMinor
 var currentVersionCode = versionProps.getProperty("versionBuild", "1").toInt()
 var currentPatch = if (isMinorBumped) 0 else versionProps.getProperty("versionPatch", "0").toInt()
 
-if (isBuilding) {
-    currentVersionCode++ // build never resets
-    // A minor bump makes this build the new minor's .0; otherwise advance the patch.
-    if (!isMinorBumped) currentPatch++
 
-    versionProps.setProperty("versionBuild", currentVersionCode.toString())
-    versionProps.setProperty("versionPatch", currentPatch.toString())
-    versionProps.setProperty("versionMinorLast", verMinor)
-    versionPropsFile.outputStream().use {
-        versionProps.store(it, "Auto-incremented on compile")
-    }
-}
-
-val currentVersionName = "$verMajor.$verMinor.$currentPatch"
-
+val versionBuildOverride = project.findProperty("versionBuild")?.toString()?.toIntOrNull()
+val buildNumber = versionBuildOverride ?: (versionProps.getProperty("build", "0").toInt() + 1)
 
 android {
     namespace = "com.hereliesaz.guillotine"
@@ -87,8 +78,8 @@ android {
         applicationId = "com.hereliesaz.guillotine"
         minSdk = 26
         targetSdk = 37
-        versionCode = computedVersionCode
-        versionName = computedVersionName
+        versionCode = buildNumber
+        versionName = "$verMajor.$verMinor.$currentPatch.$buildNumber"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
