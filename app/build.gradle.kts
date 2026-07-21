@@ -9,10 +9,6 @@ import org.gradle.api.tasks.TaskAction
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.compose)
-    alias(libs.plugins.hilt)
-    alias(libs.plugins.ksp)
-    alias(libs.plugins.kotlin.parcelize)
-    alias(libs.plugins.kotlinx.serialization)
 }
 
 // Load version properties
