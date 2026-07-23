@@ -144,7 +144,7 @@ jobs:
       # to multiple tracks in one shot.
       - name: Set up Python
         if: ${{ inputs.publish != 'false' }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
