@@ -67,9 +67,9 @@ jobs:
       - name: Run unit tests
         run: |
           chmod +x gradlew
-          # The app now has product flavors (github/play), so the variant-specific unit-test task is
-          # testGithubDebugUnitTest; `test` still aggregates every module's unit tests.
-          ./gradlew testGithubDebugUnitTest test --continue --build-cache
+          # app/ has no product flavors (just debug/release build types), so its variant-specific
+          # unit-test task is testDebugUnitTest; `test` aggregates every other module's unit tests.
+          ./gradlew testDebugUnitTest test --continue --build-cache
 
       - name: Upload test reports
         if: failure()
