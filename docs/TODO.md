@@ -31,6 +31,11 @@ its own merits.
   events — unused attack surface.
 
 **Bugs**
+- ~~**CI's `unit-tests` job was broken on `main`, not just here.**~~ **Fixed in this PR.**
+  `merged-build.yml` ran `testGithubDebugUnitTest`, a task name from a product-flavor split
+  (`github`/`play`) that was later removed from `app/build.gradle.kts` (only `debug`/`release`
+  build types remain) — the task never existed post-removal, so every CI run on `main` since has
+  failed red. Corrected to `testDebugUnitTest`.
 - **Cancelling a background operation leaves the UI stuck.** `OperationController.kt:119-131`:
   the `CancellationException` catch block is empty and never calls `onComplete()`/`onError()`, but
   every caller only clears its "busy" flag inside those callbacks. Cancelling analysis
