@@ -9,6 +9,22 @@ A repo-wide audit (Guillotine `shared/`, `app/`, `desktop/`, tests/CI, plus the 
 this section is newly surfaced. Not yet triaged into "confirmed"/"deferred" — read each item on
 its own merits.
 
+**🔴 `app/` currently does not compile on `main` at all (found while fixing CI, see below).**
+`GuillotineApplication.kt`, `MainActivity.kt`, `CrashReporter.kt`, and `Sheets.kt` all reference
+`BuildConfig.ADS_ENABLED`, `BuildConfig.UPDATER_ENABLED`, and `BuildConfig.DEFAULT_CRASH_RELAY_URL`,
+none of which are defined anywhere — `app/build.gradle.kts` has no `buildConfigField` for any of
+them (only `GH_TOKEN`). `git log -S` traces this to `be9f7a6` ("Refactor build.gradle.kts for
+versioning and dependencies"): it removed the `productFlavors`/`flavorDimensions` block (and the
+per-flavor `buildConfigField`s that lived inside it) but left `app/src/github/` (a flavor source
+set — `AndroidManifest.xml`, `update_file_paths.xml`) orphaned with no `sourceSets` wiring to pick
+it up, and left every `BuildConfig.*_ENABLED` reference in source dangling. This means the
+ad-free-on-GitHub / ad-supported-on-Play split and the self-updater gating described in README.md
+are currently **entirely broken** — every `:app:compileDebugKotlin` on `main` fails. This wasn't
+caught by CI because the `unit-tests` job's task-name bug (see Bugs, below) meant CI had been
+failing before ever reaching Kotlin compilation, since `#211` merged. Needs a product decision
+(restore flavors, or move these to a single-variant default + some other distribution-time switch)
+— not fixed here; flagged instead of guessed at.
+
 **Security**
 - **Azphalt Store install path skips trust verification for non-model packages.**
   `AzphaltStoreState.install()` (`shared/.../azphalt/AzphaltStoreState.kt:112-136`, used by
