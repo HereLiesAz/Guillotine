@@ -72,6 +72,7 @@ import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.azphalt.AzphaltPlugin
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreState
 import com.hereliesaz.guillotine.azphalt.AzpPublisherPins
+import com.hereliesaz.guillotine.editor.EditorViewModel
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -135,7 +136,7 @@ private fun categoryDisplayName(category: String): String =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AzphaltStoreScreen(
-    onApplyPlugin: (String) -> Unit,
+    vm: EditorViewModel,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -193,8 +194,23 @@ fun AzphaltStoreScreen(
             when (result) {
                 is AzphaltStoreState.InstallResult.Success -> {
                     val note = if (!result.signed) " (unsigned — integrity verified, provenance not)" else ""
-                    snackbar.showMessage("Installed “${plugin.name}”$note")
-                    onApplyPlugin(plugin.id) // apply to the selected clip and close, as before
+                    val clipId = vm.uiState.value.selectedClipIds.firstOrNull()
+                    if (clipId == null) {
+                        snackbar.showMessage(
+                            "Installed “${plugin.name}”$note. Select a clip, then reopen the store to apply it.",
+                        )
+                        return@launch
+                    }
+                    // Actually apply it — install() alone used to only stamp an unread id and close, which
+                    // for every kind but kinetic-typography motion meant nothing ever rendered.
+                    when (val outcome = withContext(Dispatchers.IO) { AzpPluginApplier.apply(context, vm, clipId, plugin.id) }) {
+                        is AzpPluginApplier.Outcome.Applied -> {
+                            snackbar.showMessage("Applied “${plugin.name}”$note to the selected clip.")
+                            onDismiss()
+                        }
+                        is AzpPluginApplier.Outcome.Unsupported -> snackbar.showMessage(outcome.message)
+                        is AzpPluginApplier.Outcome.Failure -> snackbar.showMessage(outcome.message)
+                    }
                 }
                 is AzphaltStoreState.InstallResult.Failure ->
                     snackbar.showMessage(result.message)

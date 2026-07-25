@@ -2,6 +2,38 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Azphalt Store install was a no-op past the download (2026-07-25)
+
+Follow-up to the 2026-07-24 audit's Azphalt Store trust-verification fix: install itself worked
+(bytes download, verify, land on disk), but **using** an installed package didn't. `onApplyPlugin`
+as wired from `AzphaltStoreScreen` (`NleScreen.kt`) only stamped the selected clip's unread
+`azpPluginId` field and closed the dialog — nothing ever read that field for rendering. Two other
+bugs compounded it: `AzpInstalledUi.list()` (the "Extensions" clip-panel enumerator, the one other
+UI surface that could apply a package) silently dropped every asset that didn't ship a `ui` control
+schema — which is **100% of the current live catalog** (the teal-orange/cool-noir LUT submissions
+have none, since a static LUT has nothing to adjust) — so that path was equally unreachable for
+real content. And `McpTools.applyAzpPlugin` (the AI-assistant tool) reported `"Applied plugin …"`
+success for the same inert stamp on anything but a kinetic-typography motion package — a false
+positive an agent would relay to the user as done when nothing rendered.
+
+**Fixed:**
+- `AzpInstalledUi.list()` no longer requires a `ui` schema — a schema-less asset still gets a panel
+  (an empty one, no controls), since it can still be applied, just with no adjustable params.
+- New `AzpPluginApplier` (`app/.../ui/AzpPluginApplier.kt`) is the one apply implementation both the
+  Store and the MCP tool now call: motion packages bake real caption keyframes (`TEXT` clips only,
+  via the existing `KineticTypographyPicker`), asset packages (shader/LUT) write real render filters
+  (via the existing `AzpAssetApplier`), and anything else (bare `code`/`app`/`mcp` packages) returns
+  an honest "not wired to a clip yet" message instead of a false success.
+- The Store's install flow now actually applies the package to the selected clip (or, if none is
+  selected, says so instead of silently no-opping) and only auto-closes on a real success.
+
+**Still not wired to anything, by design scope of this fix** (unchanged from the 2026-07-24 audit):
+`code`-kind packages (`AzpCodeRuntime` sandbox has no caller in production code at all), `app`-kind
+companion apps (nothing reads `manifest.app` to launch an intent/PWA), and `mcp`-kind packages
+(nothing reads `manifest.mcp` to register tools with the assistant — `McpTools`/`DesktopMcpTools`
+are still a fixed, hard-coded set). These are real features, not bugs in the fixed path; `AzpPluginApplier`
+reports them honestly as unsupported rather than silently pretending they work.
+
 ## Full codebase + azphalt audit (2026-07-24)
 
 A repo-wide audit (Guillotine `shared/`, `app/`, `desktop/`, tests/CI, plus the sibling

@@ -31,6 +31,7 @@ import com.hereliesaz.guillotine.data.LearnedConceptStore
 import com.hereliesaz.guillotine.operation.OperationController
 import com.hereliesaz.guillotine.operation.OperationKind
 import com.hereliesaz.guillotine.ui.ActivityLog
+import com.hereliesaz.guillotine.ui.AzpPluginApplier
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -3146,39 +3147,16 @@ class McpTools(
     }
     
     private fun applyAzpPlugin(clipId: String, pluginId: String): JSONObject {
-        val clip = vm.uiState.value.document.clips.find { it.id == clipId }
-            ?: throw IllegalArgumentException("Clip $clipId not found.")
-
-        // Find the installed .azp whose manifest id matches, and try to pull a `motion` (kinetic
-        // typography) asset out of it. A motion plugin is baked into real keyframes on the caption so it
-        // renders in preview + export; anything else just records the applied-plugin id as before.
-        val baseDir = java.io.File(context.filesDir, "extensions")
-        // Track whether an installed .azp actually matches pluginId, so applying an unknown plugin fails
-        // loudly instead of silently stamping the clip with an id that resolves to nothing.
-        var pluginExists = false
-        val motionBytes: ByteArray? = baseDir.listFiles { _, name -> name.endsWith(".azp") }
-            ?.firstNotNullOfOrNull { f ->
-                runCatching {
-                    val bytes = f.readBytes()
-                    val plan = com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(bytes, emptySet())
-                    if (plan.loaded.manifest.id != pluginId) return@runCatching null
-                    pluginExists = true
-                    val motion = plan.motions.firstOrNull() ?: return@runCatching null
-                    com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.bundledBytes(plan, motion)
-                }.getOrNull()
-            }
-        if (!pluginExists) throw IllegalArgumentException("Plugin $pluginId not found in the extensions directory.")
-
-        if (motionBytes != null && clip.type == com.hereliesaz.guillotine.model.ClipType.TEXT) {
-            vm.applyCaptionMotion(clipId, motionBytes, pluginId)
-            return ok().apply {
-                put("humanSummary", "Applied kinetic-typography preset $pluginId to caption $clipId (baked keyframes).")
-            }
-        }
-
-        vm.updateClip(clipId) { c -> c.copy(azpPluginId = pluginId) }
-        return ok().apply {
-            put("humanSummary", "Applied plugin $pluginId to clip $clipId.")
+        // Delegates to the same applier the Azphalt Store's install flow uses, so this tool can't
+        // report success for a package kind (asset-without-motion, code, app, mcp) that never actually
+        // rendered anything — the bug this replaced silently stamped an unread field and called it done.
+        return when (val outcome = AzpPluginApplier.apply(context, vm, clipId, pluginId)) {
+            is AzpPluginApplier.Outcome.Applied ->
+                ok().apply { put("humanSummary", "Applied plugin $pluginId to clip $clipId.") }
+            is AzpPluginApplier.Outcome.Unsupported ->
+                ok().apply { put("applied", false); put("humanSummary", outcome.message) }
+            is AzpPluginApplier.Outcome.Failure ->
+                throw IllegalArgumentException(outcome.message)
         }
     }
 
