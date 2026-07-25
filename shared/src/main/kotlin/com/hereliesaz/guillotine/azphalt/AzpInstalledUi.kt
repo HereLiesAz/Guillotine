@@ -46,8 +46,12 @@ object AzpInstalledUi {
 
     /**
      * Enumerate the panels of installed asset packages in [extensionsDir], scoped to [hostAppId]
-     * (packages targeting other hosts are skipped). Blocking I/O — call off the main thread. Invalid or
-     * schema-less packages are skipped; the result is package-name-sorted for a stable UI.
+     * (packages targeting other hosts are skipped). Blocking I/O — call off the main thread. Invalid
+     * packages are skipped; a package's asset that ships **no** `ui` schema still gets a panel (an empty
+     * one, no controls) rather than being dropped — a static LUT or fixed-look shader has nothing to
+     * adjust, and requiring a schema anyway would make every ui-less asset silently unappliable (this
+     * is, in practice, every current real catalog package — none of them ship a `ui` file). The result
+     * is package-name-sorted for a stable UI.
      */
     fun list(extensionsDir: File, hostAppId: String): List<Panel> {
         val files = extensionsDir.listFiles { _, name -> name.endsWith(".azp") } ?: return emptyList()
@@ -57,10 +61,10 @@ object AzpInstalledUi {
                 val loaded = AzpPackage.read(f.readBytes())
                 if (!loaded.manifest.targetsApp(hostAppId)) return@runCatching
                 for (asset in loaded.manifest.assets) {
-                    val uiPath = asset.ui ?: continue
-                    val schemaBytes = loaded.payload[uiPath] ?: continue
-                    val schema = AzpUiSchema.parse(schemaBytes.decodeToString()) ?: continue
-                    if (schema.controls.isEmpty()) continue
+                    val schema = asset.ui
+                        ?.let { loaded.payload[it] }
+                        ?.let { AzpUiSchema.parse(it.decodeToString()) }
+                        ?: AzpUiSchema(emptyList())
                     out.add(
                         Panel(
                             packageId = loaded.manifest.id,

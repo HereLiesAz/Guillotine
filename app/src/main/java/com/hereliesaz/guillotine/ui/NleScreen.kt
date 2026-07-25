@@ -807,13 +807,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     if (showAdFree) AdFreeDialog(billingManager = billingManager, onDismiss = { showAdFree = false })
     if (showAzphaltStore) {
         AzphaltStoreScreen(
-            onApplyPlugin = { pluginId ->
-                val clipId = vm.uiState.value.selectedClipIds.firstOrNull()
-                if (clipId != null) {
-                    vm.updateClip(clipId) { it.copy(azpPluginId = pluginId) }
-                }
-                showAzphaltStore = false
-            },
+            vm = vm,
             onDismiss = { showAzphaltStore = false }
         )
     }
