@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -49,7 +50,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +65,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.hereliesaz.guillotine.azphalt.AzphaltPlugin
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreState
+import com.hereliesaz.guillotine.azphalt.AzpPublisherPins
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +91,15 @@ fun AzphaltStoreScreen(
     // Per-package install-in-flight flags, so a card shows a spinner while its bytes download + verify.
     val installing = remember { mutableStateMapOf<String, Boolean>() }
     val extensionsDir = remember { File(context.filesDir, "extensions").absolutePath }
+    // Shared with the AI-model install flow (Sheets.kt) — trust-on-first-use pins are keyed by package
+    // id, so both install paths enforcing the same publisher continuity is the point, not a collision.
+    val publisherPins = remember { AzpPublisherPins(File(context.filesDir, "azp-publishers.json")) }
+    // A package that verified but isn't from a trusted signer (or is unsigned) — confirm before installing.
+    var pendingUntrusted by remember { mutableStateOf<Pair<AzphaltPlugin, String>?>(null) }
+    // A package whose id was previously installed from a different publisher key — confirm before overwriting.
+    var pendingPublisherChange by remember {
+        mutableStateOf<Pair<AzphaltPlugin, AzphaltStoreState.InstallResult.PublisherChanged>?>(null)
+    }
 
     // Browse the hosted storefront, scoped to this host so packages for other apps are hidden.
     // Guard against overlapping fetches (e.g. rapid Retry taps launching concurrent requests).
@@ -96,11 +109,18 @@ fun AzphaltStoreScreen(
     }
     LaunchedEffect(Unit) { refresh() }
 
-    fun install(plugin: AzphaltPlugin) {
+    fun install(plugin: AzphaltPlugin, allowUntrusted: Boolean = false, allowPublisherChange: Boolean = false) {
         if (installing[plugin.id] == true) return
         installing[plugin.id] = true
         scope.launch {
-            val result = withContext(Dispatchers.IO) { storeState.install(plugin, extensionsDir) }
+            val result = withContext(Dispatchers.IO) {
+                storeState.install(
+                    plugin, extensionsDir,
+                    pins = publisherPins,
+                    allowUntrusted = allowUntrusted,
+                    allowPublisherChange = allowPublisherChange,
+                )
+            }
             installing[plugin.id] = false
             when (result) {
                 is AzphaltStoreState.InstallResult.Success -> {
@@ -110,11 +130,56 @@ fun AzphaltStoreScreen(
                 }
                 is AzphaltStoreState.InstallResult.Failure ->
                     snackbar.showMessage(result.message)
+                is AzphaltStoreState.InstallResult.Untrusted ->
+                    pendingUntrusted = plugin to result.reason
+                is AzphaltStoreState.InstallResult.PublisherChanged ->
+                    pendingPublisherChange = plugin to result
             }
         }
     }
 
     val filteredPlugins = if (selectedCategory == "All") plugins else plugins.filter { it.category == selectedCategory }
+
+    pendingUntrusted?.let { (plugin, reason) ->
+        AlertDialog(
+            onDismissRequest = { pendingUntrusted = null },
+            title = { Text("Not from a trusted publisher") },
+            text = {
+                Text(
+                    "“${plugin.name}” passed integrity verification, but it's not from a signer this " +
+                        "app already trusts ($reason). Install it anyway?",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingUntrusted = null
+                    install(plugin, allowUntrusted = true)
+                }) { Text("Install anyway") }
+            },
+            dismissButton = { TextButton(onClick = { pendingUntrusted = null }) { Text("Cancel") } },
+        )
+    }
+
+    pendingPublisherChange?.let { (plugin, _) ->
+        AlertDialog(
+            onDismissRequest = { pendingPublisherChange = null },
+            title = { Text("Publisher changed") },
+            text = {
+                Text(
+                    "“${plugin.name}” was previously installed from a different publisher key than this " +
+                        "update carries. This could mean a legitimate key rotation — or a hijacked " +
+                        "listing. Install this update anyway?",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingPublisherChange = null
+                    install(plugin, allowPublisherChange = true)
+                }) { Text("Install anyway") }
+            },
+            dismissButton = { TextButton(onClick = { pendingPublisherChange = null }) { Text("Cancel") } },
+        )
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
