@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,13 +19,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -36,6 +40,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -63,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.azphalt.AzphaltPlugin
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreState
 import com.hereliesaz.guillotine.azphalt.AzpPublisherPins
@@ -72,6 +78,59 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/**
+ * What lives in each store category, and what a user could ask the AI assistant for once it's
+ * installed — the single source of truth for both the category chip labels and the store guide
+ * ([AzphaltStoreGuideDialog]), so the two can't drift out of sync.
+ */
+private data class AzphaltCategoryInfo(
+    val key: String,
+    val displayName: String,
+    val description: String,
+    val example: String,
+)
+
+private val AZPHALT_CATEGORIES = listOf(
+    AzphaltCategoryInfo(
+        "vegas-inspired", "Vegas FX",
+        "Layer-blend and transition effects in the style of classic NLE compositing tools.",
+        "\"add a vegas-style crossfade to this cut\"",
+    ),
+    AzphaltCategoryInfo(
+        "layer-effects", "Layer FX",
+        "Color grades (LUTs), shaders, and filters that apply to a single clip or layer.",
+        "\"give this clip a teal and orange grade\"",
+    ),
+    AzphaltCategoryInfo(
+        "layer-effects-scenery", "Scenery",
+        "Background/backdrop effects and generated-scenery looks for composited layers.",
+        "\"put a generated sunset behind the subject\"",
+    ),
+    AzphaltCategoryInfo(
+        "kinetic-typography", "Kinetic Type",
+        "Animated caption and title styles — text that moves with the words being spoken.",
+        "\"make my captions animate like they're being typed\"",
+    ),
+    AzphaltCategoryInfo(
+        "kinetic-typography-smart", "Smart Type",
+        "Kinetic typography styles that react to the audio — beat- or syllable-driven text motion.",
+        "\"animate the captions to grow on each syllable\"",
+    ),
+    AzphaltCategoryInfo(
+        "companion-apps", "Apps",
+        "Standalone companion apps that work alongside Guillotine (not installed into the timeline).",
+        "an app you launch separately, listed here for discovery.",
+    ),
+    AzphaltCategoryInfo(
+        "mcp-servers", "MCP",
+        "Extra tools for the AI assistant to call — expands what you can ask it to do.",
+        "unlocks new commands the assistant can run for you.",
+    ),
+)
+
+private fun categoryDisplayName(category: String): String =
+    AZPHALT_CATEGORIES.find { it.key == category }?.displayName ?: category
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +158,15 @@ fun AzphaltStoreScreen(
     // A package whose id was previously installed from a different publisher key — confirm before overwriting.
     var pendingPublisherChange by remember {
         mutableStateOf<Pair<AzphaltPlugin, AzphaltStoreState.InstallResult.PublisherChanged>?>(null)
+    }
+    // What's-in-the-store walkthrough: shown automatically the first time this screen opens, and
+    // reachable afterward via the help icon in the top bar.
+    val keyStore = remember { ApiKeyStore(context) }
+    var showGuide by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { if (!keyStore.azphaltStoreGuideSeen) showGuide = true }
+    fun dismissGuide() {
+        showGuide = false
+        keyStore.markAzphaltStoreGuideSeen()
     }
 
     // Browse the hosted storefront, scoped to this host so packages for other apps are hidden.
@@ -139,6 +207,10 @@ fun AzphaltStoreScreen(
     }
 
     val filteredPlugins = if (selectedCategory == "All") plugins else plugins.filter { it.category == selectedCategory }
+
+    if (showGuide) {
+        AzphaltStoreGuideDialog(onDismiss = { dismissGuide() })
+    }
 
     pendingUntrusted?.let { (plugin, reason) ->
         AlertDialog(
@@ -200,6 +272,11 @@ fun AzphaltStoreScreen(
                             Icon(Icons.Default.Close, contentDescription = "Close")
                         }
                     },
+                    actions = {
+                        IconButton(onClick = { showGuide = true }) {
+                            Icon(Icons.Default.HelpOutline, contentDescription = "What's in the store")
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface,
                         titleContentColor = MaterialTheme.colorScheme.primary
@@ -223,16 +300,7 @@ fun AzphaltStoreScreen(
                 ) {
                     items(storeState.categories) { category ->
                         val isSelected = selectedCategory == category
-                        val displayName = when(category) {
-                            "vegas-inspired" -> "Vegas FX"
-                            "layer-effects" -> "Layer FX"
-                            "layer-effects-scenery" -> "Scenery"
-                            "kinetic-typography" -> "Kinetic Type"
-                            "kinetic-typography-smart" -> "Smart Type"
-                            "companion-apps" -> "Apps"
-                            "mcp-servers" -> "MCP"
-                            else -> category
-                        }
+                        val displayName = if (category == "All") "All" else categoryDisplayName(category)
 
                         FilterChip(
                             selected = isSelected,
@@ -290,6 +358,56 @@ fun AzphaltStoreScreen(
             }
         }
     }
+}
+
+/**
+ * A one-time (then help-icon-reachable) tour of what the store carries, so a first-time visitor
+ * doesn't have to guess what "Vegas FX" or "MCP" mean from the category chip alone. Content comes
+ * from [AZPHALT_CATEGORIES] — the same list that drives the chip labels — so this can't drift.
+ */
+@Composable
+private fun AzphaltStoreGuideDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("What's in the store") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "Everything here installs on-device and shows up as something you can ask the AI " +
+                        "assistant for. Browse by category, or just describe what you want:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                AZPHALT_CATEGORIES.forEachIndexed { index, info ->
+                    if (index > 0) HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Spacer(Modifier.height(if (index == 0) 12.dp else 0.dp))
+                    Text(
+                        text = info.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = info.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Try: ${info.example}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Got it") } },
+    )
 }
 
 private suspend fun SnackbarHostState.showMessage(message: String) {
