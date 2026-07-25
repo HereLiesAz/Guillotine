@@ -107,17 +107,16 @@ class AzphaltStoreStateTest {
         assertTrue(ok.signatureValid)
     }
 
-    @Test fun unsignedPackageRequiresExplicitApproval() {
+    @Test fun unsignedPackageInstallsWithoutExtraApproval() {
+        // Unsigned has no provenance claim to warn about — it's exactly as trustworthy as every
+        // install was before the trust gate existed, so it must not require allowUntrusted.
         val id = "com.hereliesaz.unsigned"
         body = unsignedPackage(id)
         val state = AzphaltStoreState(repository())
         val dir = tmp.newFolder("ext").absolutePath
 
-        val first = state.install(plugin(id), dir)
-        assertTrue(first is AzphaltStoreState.InstallResult.Untrusted)
-
-        val second = state.install(plugin(id), dir, allowUntrusted = true)
-        val ok = second as? AzphaltStoreState.InstallResult.Success ?: error("expected Success, got $second")
+        val result = state.install(plugin(id), dir)
+        val ok = result as? AzphaltStoreState.InstallResult.Success ?: error("expected Success, got $result")
         assertEquals(false, ok.signed)
     }
 

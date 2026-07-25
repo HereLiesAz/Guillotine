@@ -108,14 +108,16 @@ class AzphaltStoreState(
      * verified `.azp` into [extensionsDirPath] — the directory the editor reads installed extensions
      * from. Discovery is remote; this is where the bytes finally land locally, and only after
      * [AzpPackage.verifyTrust] accepts them (an HTML error page, truncated body, or tampered signature
-     * fails here instead of installing). Mirrors [AzpModelInstall.install]'s trust gate exactly, so the
-     * store's "shader/LUT/code" install path gets the same protection the model-install path already
-     * had: [trustedKeys] gates whether a signed package is auto-trusted (empty ⇒ nothing is, matching
-     * [AzpModelInstall]'s current default), [allowUntrusted] is the caller's explicit "install anyway"
-     * after prompting the user, and [pins] enforces trust-on-first-use — a later update of the same
-     * package id signed by a *different* key returns [InstallResult.PublisherChanged] instead of
-     * silently overwriting, unless [allowPublisherChange] is the user's explicit confirmation. Blocks —
-     * call off-thread.
+     * fails here instead of installing). Mirrors [AzpModelInstall.install]'s trust gate, so the store's
+     * "shader/LUT/code" install path gets the same protection the model-install path already had —
+     * with one deliberate difference: [InstallResult.Untrusted] only fires for a package that IS signed
+     * but by a key [trustedKeys] doesn't recognize, never for a merely-unsigned package. Before this
+     * trust gate existed, every install was integrity-only (equivalent to today's "unsigned" case), so
+     * gating unsigned installs behind an extra confirmation would be new friction with no matching new
+     * protection — nothing in the ecosystem is signed yet, so it would fire on literally every install.
+     * [pins] still enforces trust-on-first-use — a later update of the same package id signed by a
+     * *different* key returns [InstallResult.PublisherChanged] instead of silently overwriting, unless
+     * [allowPublisherChange] is the user's explicit confirmation. Blocks — call off-thread.
      */
     fun install(
         pkg: AzphaltPlugin,
@@ -138,7 +140,10 @@ class AzphaltStoreState(
             if (pinnedKey != null && trust.signerPublicKey != pinnedKey && !allowPublisherChange) {
                 return InstallResult.PublisherChanged(pkg.id, pinnedKey, trust.signerPublicKey)
             }
-            if (!trust.trusted && !allowUntrusted) {
+            // Only a *signed* package with an unrecognized signer needs a confirmation — an unsigned
+            // package has no provenance claim to be suspicious of; it's exactly as trustworthy as every
+            // install was before this trust gate existed.
+            if (trust.signed && !trust.trusted && !allowUntrusted) {
                 return InstallResult.Untrusted(trust.reason)
             }
             val dir = File(extensionsDirPath).apply { mkdirs() }

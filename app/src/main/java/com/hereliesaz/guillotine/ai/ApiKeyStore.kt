@@ -96,6 +96,10 @@ class ApiKeyStore(context: Context) {
 
     fun markOnboardingDone() { prefs.edit().putBoolean(KEY_ONBOARDING_DONE, true).apply() }
 
+    val azphaltStoreGuideSeen: Boolean get() = prefs.getBoolean(KEY_AZPHALT_STORE_GUIDE_SEEN, false)
+
+    fun markAzphaltStoreGuideSeen() { prefs.edit().putBoolean(KEY_AZPHALT_STORE_GUIDE_SEEN, true).apply() }
+
     private companion object {
         const val KEY_PROVIDER = "ai_provider"
         const val KEY_LEONARDO_KEY = "leonardo_key"
@@ -104,6 +108,7 @@ class ApiKeyStore(context: Context) {
         const val KEY_CLOUD_VISION = "cloud_vision_optin"
         const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
+        const val KEY_AZPHALT_STORE_GUIDE_SEEN = "azphalt_store_guide_seen"
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"
         fun genKeyPref(p: GenProviderType) = "gen_key_${p.name}"
