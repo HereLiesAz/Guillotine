@@ -243,6 +243,11 @@ dependencies {
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)
     implementation(libs.play.services.ads)
+    // play-services-ads pulls in an old androidx.work:work-runtime:2.7.0 transitively (bundling
+    // Room 2.2.5), which nothing else in the graph outbids — that combo is known to crash on
+    // startup on modern Android ("Failed to create an instance of androidx.work.impl.WorkDatabase").
+    // Declared explicitly so it wins dependency resolution over the ads SDK's stale transitive pin.
+    implementation(libs.androidx.work.runtime)
     implementation(libs.billing.ktx)
     implementation(libs.user.messaging.platform)
     implementation(libs.kotlinx.coroutines.android)
