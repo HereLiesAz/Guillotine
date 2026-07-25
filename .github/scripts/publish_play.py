@@ -6,23 +6,29 @@ add uploads and track releases to it, then commit once. Committing an edit is
 atomic; uncommitted edits are throwaway.
 
 Rollout policy (fixed):
-  - internal      → draft      (bundle uploaded; roll out with one click in the console)
+  - internal      → completed  (live immediately — internal testers see it with no manual step)
   - alpha         → draft      (closed testing, staged; promote by hand)
   - beta          → draft      (open testing, staged; promote by hand)
   - production    → draft      (staged; promote by hand)
 
-Why internal is `draft`, not `completed`: a `completed` release is an immediate
-LIVE rollout, and Play runs a precondition on live rollouts — every existing
-user on the track must have an upgrade path to the new bundle. When the new
-bundle's device targeting (e.g. minSdk, ABIs, screen densities) doesn't cover
-every existing user, Play rejects the rollout with
-HTTP 403 PERMISSION_DENIED: "You cannot rollout this release because it does not
-allow any existing users to upgrade to the newly added APKs." A `draft` release
-uploads and commits the bundle WITHOUT rolling it out, so that check never runs —
-the versionCode lands in the Play Console ready for a human to review and roll
-out (or to fix targeting / retain prior versionCodes first). This is the correct
-posture for a serious app anyway: CI delivers the build to Play; a person decides
-when it goes live.
+Why internal is `completed`, not `draft`: internal testing is meant to be the
+zero-friction inner loop — a push to main should just show up for internal
+testers. `completed` is an immediate LIVE rollout, and Play runs a precondition
+on live rollouts — every existing user on the track must have an upgrade path
+to the new bundle. When the new bundle's device targeting (e.g. minSdk, ABIs,
+screen densities) doesn't cover every existing user, Play rejects the rollout
+with HTTP 403 PERMISSION_DENIED: "You cannot rollout this release because it
+does not allow any existing users to upgrade to the newly added APKs." (This
+bit the project for real once — an accidental `ndk.abiFilters` restriction
+dropped ABI coverage some installed testers were on; fixed at the source, not
+here, once identified.) Rather than trust that no future change ever narrows
+device targeting again, `publish_internal` tries `completed` first and, ONLY
+on that specific precondition error, falls back to staging the same
+versionCode as `draft` with a loud warning — so a targeting regression costs a
+manual rollout click instead of silently failing the whole release.
+
+alpha/beta/production stay `draft`: those are deliberate promotion gates, not
+places you want every commit landing automatically.
 
 Structure: one bootstrap edit that uploads the AAB AND creates the internal
 release (committed as the atomic critical path), then one small edit per
@@ -192,13 +198,20 @@ def _is_retryable_error(exc: Exception) -> bool:
     )
 
 
-def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
-    """Bootstrap edit: upload bundle + create internal release (draft). Commit.
+def _is_upgrade_path_precondition_error(exc: Exception) -> bool:
+    """True for Play's "existing users can't upgrade" 403 — see the module docstring."""
+    exc_str = str(exc).lower()
+    return "existing users" in exc_str and "upgrade" in exc_str
 
-    Draft, not completed: a live rollout is rejected by Play when the bundle's
-    device targeting doesn't cover every existing user on the track (403
-    PERMISSION_DENIED — see the module docstring). A draft uploads the bundle
-    without rolling out, so the commit always succeeds; roll out from the console.
+
+def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
+    """Bootstrap edit: upload bundle + release to internal (live). Commit.
+
+    Tries a `completed` (live) internal release first. If Play rejects it with
+    the upgrade-path precondition (device targeting doesn't cover every
+    existing user on the track — see the module docstring), falls back to
+    `draft` in the same edit so the build still reaches Play instead of the
+    whole release failing; a human then reviews and rolls out by hand.
 
     Retries on edit conflicts (another edit committed between open and commit),
     or asynchronous bundle processing delays.
@@ -209,9 +222,23 @@ def publish_internal(session: AuthorizedSession, package: str, aab: str) -> int:
         try:
             version_code = upload_bundle(session, package, edit_id, aab)
             print(f"Uploaded bundle versionCode={version_code}")
-            update_track(session, package, edit_id, "internal", "draft", version_code)
+            status = "completed"
+            try:
+                update_track(session, package, edit_id, "internal", status, version_code)
+            except Exception as track_err:
+                if not _is_upgrade_path_precondition_error(track_err):
+                    raise
+                print(
+                    f"::warning::internal live rollout rejected — {track_err}\n"
+                    "Falling back to a draft release for this build; review device targeting "
+                    "and roll out manually in the Play Console.",
+                    file=sys.stderr,
+                )
+                status = "draft"
+                update_track(session, package, edit_id, "internal", status, version_code)
             commit_edit(session, package, edit_id)
-            print(f"  internal    → draft (versionCode {version_code} uploaded; roll out in the Play Console)")
+            note = "live" if status == "completed" else "uploaded; roll out in the Play Console"
+            print(f"  internal    → {status} (versionCode {version_code}) — {note}")
             return version_code
         except Exception as e:
             delete_edit(session, package, edit_id)
@@ -255,14 +282,14 @@ def main() -> int:
     creds = service_account.Credentials.from_service_account_file(args.sa_json, scopes=SCOPES)
     session = AuthorizedSession(creds)
 
-    # Critical path: the bundle must upload + the internal draft must commit,
+    # Critical path: the bundle must upload + the internal release must commit,
     # or the whole thing failed (nothing reached Play).
     try:
         version_code = publish_internal(session, args.package, args.aab)
     except Exception as e:
         # Idempotency: a push that has an open PR fires this workflow twice (push + pull_request
         # events), so two runs build the same commit and compute the same versionCode. The first to
-        # commit the internal draft consumes that code; the second then gets
+        # commit the internal release consumes that code; the second then gets
         # "Version code N has already been used." That means the build is already on Play — treat it
         # as success, not a failure. (Only this exact collision; every other error still fails.)
         if "already been used" in str(e):
