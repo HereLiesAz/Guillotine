@@ -10,7 +10,7 @@
 # 1.12.0-alpha03, which no stable Compose BOM provides, so we pin the Compose UI artifacts to
 # composeUi explicitly instead of using a BOM. material-icons-extended is frozen at 1.7.8
 # (deprecated upstream) and rides along fine on the newer Compose runtime.
-agp = "9.3.0"
+agp = "9.3.1"
 kotlin = "2.4.10"
 coreKtx = "1.19.0"
 lifecycle = "2.11.0"
@@ -40,7 +40,7 @@ mediapipeTasksGenai = "0.10.35"
 # version: tasks-vision's Maven metadata advertises the old 0.20230731 as <release>, and version
 # comparison treats 0.20230731 > 0.10.35, so `0.10.+`/`+` would resolve back to the stale 2023 build.
 mediapipeTasksVision = "0.20230731"
-aznavrail = "11.2"
+aznavrail = "11.4"
 playServicesAds = "25.4.0"
 userMessaging = "4.0.0"
 billing = "9.1.0"
