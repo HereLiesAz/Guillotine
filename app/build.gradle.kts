@@ -7,7 +7,6 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -15,60 +14,16 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// Load version properties
-val versionPropsFile = project.rootProject.file("version.properties")
-val versionProps = Properties().apply {
-    if (versionPropsFile.exists()) {
-        versionPropsFile.inputStream().use { load(it) }
-    }
-}
-
-// Load local properties
-val localProperties = Properties().apply {
-    val localPropertiesFile = project.rootProject.file("local.properties")
-    if (localPropertiesFile.exists()) {
-        localPropertiesFile.inputStream().use { load(it) }
-    }
-}
-
-// Version resolution. On EVERY compile (any build type, any machine, any Gradle task that will
-// actually compile bytecode) both the build number and the patch are incremented:
-//   - versionBuild  -> the Android versionCode. Monotonic; NEVER resets.
-//   - versionPatch  -> the patch segment of the versionName. Increments each compile, but resets to
-//                      0 when versionMinor was bumped since the last build (a new minor starts at .0).
-//                      versionMinorLast tracks the minor we last built so that reset is automatic.
-// True when the requested tasks will trigger real compilation — not a sync, `tasks`, `clean`,
-// a `--dry-run`, or a diagnostic like `buildEnvironment`/`buildHealth`. Build verbs cover every
-// entry point that transitively invokes a KotlinCompile / JavaCompile task on this project: the
-// full android build lifecycle (assemble/bundle/install/package), explicit compile invocations,
-// unit-test / instrumented-test / verification tasks (test/check/lint/verify/connectedTest — all
-// depend on compileDebugKotlin / compileReleaseKotlin), and `run` for library modules. Verbs are
-// matched as a prefix on the leaf task name and the `build` lifecycle task is matched exactly, so
-// diagnostics that merely contain "build" don't trip it.
-val startParameter = gradle.startParameter
-val buildVerbs = listOf(
-    "assemble", "bundle", "install", "package", "compile",
-    "test", "check", "lint", "verify", "connected", "run",
-)
-val isBuilding = !startParameter.isDryRun && startParameter.taskNames.any { taskName ->
-    val task = taskName.substringAfterLast(':').lowercase()
-    task == "build" || buildVerbs.any { task.startsWith(it) }
-}
-
-val verMajor = versionProps.getProperty("versionMajor", "1")
-val verMinor = versionProps.getProperty("versionMinor", "0")
-// Detect a minor bump BEFORE the build-gated block so the reset also applies to CI/override builds
-// (and IDE syncs), where the block is skipped: a new minor always reads as patch 0 even if the file
-// still holds the previous minor's patch (it may not have been rewritten by a local build yet).
-val lastMinor = versionProps.getProperty("versionMinorLast", verMinor)
-val isMinorBumped = verMinor != lastMinor
-
-var currentVersionCode = versionProps.getProperty("versionBuild", "1").toInt()
-var currentPatch = if (isMinorBumped) 0 else versionProps.getProperty("versionPatch", "0").toInt()
-
-
-val versionBuildOverride = project.findProperty("versionBuild")?.toString()?.toIntOrNull()
-val buildNumber = versionBuildOverride ?: (versionProps.getProperty("build", "0").toInt() + 1)
+// ---- Four-part version: Major.Minor.Patch.Build ----
+// Computed centrally in the root build.gradle.kts (single source of truth: version.properties),
+// which auto-increments Patch/Build on EVERY Gradle build of any module and persists them to disk.
+// Here we only READ the already-bumped values — never recompute or rewrite them. (A duplicate local
+// reimplementation lived here for a while, computing versionCode from a "build" property that was
+// never actually written to version.properties — every Play upload silently got versionCode 1,
+// which Play accepts exactly once and then rejects forever after: "Version code 1 has already been
+// used." Restored to reading rootProject.extra, per the root build script's own documented contract.)
+val computedVersionCode = rootProject.extra["versionCode"] as Int
+val computedVersionName = rootProject.extra["versionName"] as String
 
 android {
     namespace = "com.hereliesaz.guillotine"
@@ -78,8 +33,8 @@ android {
         applicationId = "com.hereliesaz.guillotine"
         minSdk = 26
         targetSdk = 37
-        versionCode = buildNumber
-        versionName = "$verMajor.$verMinor.$currentPatch.$buildNumber"
+        versionCode = computedVersionCode
+        versionName = computedVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
