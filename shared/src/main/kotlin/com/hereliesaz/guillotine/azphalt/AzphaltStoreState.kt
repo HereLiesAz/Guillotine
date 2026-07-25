@@ -152,7 +152,13 @@ class AzphaltStoreState(
             if (trust.signerPublicKey != null && pins != null && (pinnedKey == null || allowPublisherChange)) {
                 pins.pin(pkg.id, trust.signerPublicKey)
             }
-            InstallResult.Success(pkg.id, signed = trust.signed, signatureValid = trust.signed)
+            // trust.signed only means "carries a signature.json", not "it was cryptographically verified"
+            // — verifyTrust's Ed25519-unavailable path returns signed=true with the signature genuinely
+            // unverified. signatureStatus().valid is the field that actually means "verified", so re-derive
+            // it here rather than reporting trust.signed as if it were that (a bare re-unzip; these packages
+            // are small and this runs once per install, not a hot path).
+            val signatureValid = AzpPackage.signatureStatus(bytes).valid
+            InstallResult.Success(pkg.id, signed = trust.signed, signatureValid = signatureValid)
         } catch (e: AzphaltRepository.RepoException) {
             InstallResult.Failure(e.message ?: "Download failed.")
         } catch (e: Exception) {
