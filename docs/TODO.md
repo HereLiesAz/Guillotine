@@ -9,21 +9,30 @@ A repo-wide audit (Guillotine `shared/`, `app/`, `desktop/`, tests/CI, plus the 
 this section is newly surfaced. Not yet triaged into "confirmed"/"deferred" — read each item on
 its own merits.
 
-**🔴 `app/` currently does not compile on `main` at all (found while fixing CI, see below).**
-`GuillotineApplication.kt`, `MainActivity.kt`, `CrashReporter.kt`, and `Sheets.kt` all reference
-`BuildConfig.ADS_ENABLED`, `BuildConfig.UPDATER_ENABLED`, and `BuildConfig.DEFAULT_CRASH_RELAY_URL`,
-none of which are defined anywhere — `app/build.gradle.kts` has no `buildConfigField` for any of
-them (only `GH_TOKEN`). `git log -S` traces this to `be9f7a6` ("Refactor build.gradle.kts for
-versioning and dependencies"): it removed the `productFlavors`/`flavorDimensions` block (and the
-per-flavor `buildConfigField`s that lived inside it) but left `app/src/github/` (a flavor source
-set — `AndroidManifest.xml`, `update_file_paths.xml`) orphaned with no `sourceSets` wiring to pick
-it up, and left every `BuildConfig.*_ENABLED` reference in source dangling. This means the
-ad-free-on-GitHub / ad-supported-on-Play split and the self-updater gating described in README.md
-are currently **entirely broken** — every `:app:compileDebugKotlin` on `main` fails. This wasn't
-caught by CI because the `unit-tests` job's task-name bug (see Bugs, below) meant CI had been
-failing before ever reaching Kotlin compilation, since `#211` merged. Needs a product decision
-(restore flavors, or move these to a single-variant default + some other distribution-time switch)
-— not fixed here; flagged instead of guessed at.
+~~**🔴 `app/` currently does not compile on `main` at all.**~~ **Fixed.** `GuillotineApplication.kt`,
+`MainActivity.kt`, `CrashReporter.kt`, and `Sheets.kt` all reference `BuildConfig.ADS_ENABLED`,
+`BuildConfig.UPDATER_ENABLED`, and `BuildConfig.DEFAULT_CRASH_RELAY_URL`, none of which were defined
+anywhere — `app/build.gradle.kts` had no `buildConfigField` for any of them (only `GH_TOKEN`).
+`git log -S` traced this to `be9f7a6` ("Refactor build.gradle.kts for versioning and dependencies"):
+it removed the `productFlavors`/`flavorDimensions` block (and the per-flavor `buildConfigField`s
+that lived inside it, plus the top-level `DEFAULT_CRASH_RELAY_URL` field) while leaving
+`app/src/github/` (the flavor source set — `AndroidManifest.xml`, `update_file_paths.xml`) still on
+disk and every `BuildConfig.*` reference in source dangling. The `be9f7a6` diff also carries other
+tells of a copy-paste from a different project of the author's (a `GraffitiXR` app): a stray
+`HereLiesAz/GraffitiXR` repo name in a security comment (also fixed) and `:core:nativebridge`/
+`libgraffitixr.so` references in the (harmless — no matching top-level `externalNativeBuild.cmake`
+declaration, so it's inert) NDK config comments, left as-is since untangling unrelated dead config
+isn't this fix's job. Restored the `productFlavors` block (`play` — ads on, no updater, default;
+`github` — ads off, updater on) and the `DEFAULT_CRASH_RELAY_URL` field verbatim from before
+`be9f7a6`, which also makes `app/src/github/` a live source set again (AGP auto-discovers
+`src/<flavorName>`) and restores the ad-free-on-GitHub / ad-supported-on-Play split and self-updater
+gating that README.md describes. The `unit-tests` CI job's task name (see Bugs, below — it was
+"fixed" to `testDebugUnitTest` right before this was found) is reverted back to
+`testGithubDebugUnitTest`, since the flavor now legitimately exists again; `release-apk.yml`
+(`assembleGithubRelease`), `release-aab.yml` (`bundlePlayRelease`), and `merged-build.yml`'s
+`assembleGithubDebug` were already assuming the flavors existed the whole time, so this also
+unblocks them. `:shared:test` passes; `:app:compileGithubDebugKotlin` couldn't be verified locally
+(no Android SDK in this environment) — confirm on CI.
 
 **Security**
 - **Azphalt Store install path skips trust verification for non-model packages.**
@@ -47,11 +56,14 @@ failing before ever reaching Kotlin compilation, since `#211` merged. Needs a pr
   events — unused attack surface.
 
 **Bugs**
-- ~~**CI's `unit-tests` job was broken on `main`, not just here.**~~ **Fixed in this PR.**
-  `merged-build.yml` ran `testGithubDebugUnitTest`, a task name from a product-flavor split
-  (`github`/`play`) that was later removed from `app/build.gradle.kts` (only `debug`/`release`
-  build types remain) — the task never existed post-removal, so every CI run on `main` since has
-  failed red. Corrected to `testDebugUnitTest`.
+- ~~**CI's `unit-tests` job was broken on `main`, not just here.**~~ **Fixed.**
+  `merged-build.yml` ran `testGithubDebugUnitTest`, referencing the `github`/`play` product-flavor
+  split that `be9f7a6` had (accidentally, see above) stripped from `app/build.gradle.kts` — so the
+  task didn't exist and every CI run since `#211` failed red before ever reaching compilation. The
+  flavor split itself turned out to be the real bug (`release-apk.yml`/`release-aab.yml`/
+  `merged-build.yml`'s release job all still assumed it existed); restoring it made
+  `testGithubDebugUnitTest` valid again, so that's what the task name reverted to — a same-named
+  task, just a real one this time instead of a stale reference.
 - **Cancelling a background operation leaves the UI stuck.** `OperationController.kt:119-131`:
   the `CancellationException` catch block is empty and never calls `onComplete()`/`onError()`, but
   every caller only clears its "busy" flag inside those callbacks. Cancelling analysis
