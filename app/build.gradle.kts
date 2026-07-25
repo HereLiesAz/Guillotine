@@ -106,13 +106,25 @@ android {
         //
         // SECURITY: a non-empty token here is embedded in the shipped APK's BuildConfig and CAN be
         // extracted by anyone who decompiles the app. Use a FINE-GRAINED token scoped to ONLY
-        // "Issues: write" on this single repo (HereLiesAz/GraffitiXR) — never a broad/classic PAT —
+        // "Issues: write" on this single repo (HereLiesAz/Guillotine) — never a broad/classic PAT —
         // so that a leaked token can, at worst, open issues on this one repo.
         // GitHub tokens are [A-Za-z0-9_] only (ghp_* / github_pat_*), so no string escaping is needed.
         val crashReportToken = System.getenv("GH_TOKEN")
             ?: (project.findProperty("GH_TOKEN") as String?)
             ?: ""
         buildConfigField("String", "GH_TOKEN", "\"$crashReportToken\"")
+
+        // Default relay endpoint for the Report button — a Cloudflare Worker holding a
+        // GitHub PAT that files issues on our behalf. Set via a gradle property so end users
+        // don't need a GH account (or any config) to file a bug from the app. Empty in
+        // source, set at build time via `guillotine.crashRelayUrl=https://...` in
+        // ~/.gradle/gradle.properties or as a CI secret. Runtime override still lives in
+        // Settings → Crash reporting for anyone who wants their own relay.
+        buildConfigField(
+            "String",
+            "DEFAULT_CRASH_RELAY_URL",
+            "\"${project.findProperty("guillotine.crashRelayUrl") ?: ""}\"",
+        )
     }
 
     // Release signing is a property of the project, not of each CI invocation. The keystore and
@@ -168,6 +180,28 @@ android {
         }
     }
 
+    // Two distributions of the SAME app (same applicationId + signing key, so either can update the
+    // other in place): `play` ships to Google Play with AdMob; `github` is the direct-download build
+    // — no ads, and it self-updates from GitHub Releases (Play forbids self-updating APKs, so that
+    // path is github-only). The distinction is a build-time BuildConfig flag; the ad and updater code
+    // paths are gated on it. CI builds the AAB from `play` (bundlePlayRelease) and the APK from
+    // `github` (assembleGithubRelease). The `github` flavor's manifest additions (self-update install
+    // permission + FileProvider paths) live in app/src/github/.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            isDefault = true
+            buildConfigField("boolean", "ADS_ENABLED", "true")
+            buildConfigField("boolean", "UPDATER_ENABLED", "false")
+        }
+        create("github") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ADS_ENABLED", "false")
+            buildConfigField("boolean", "UPDATER_ENABLED", "true")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
@@ -184,8 +218,18 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        // TensorFlow-Lite and MediaPipe can each ship a TFLite native lib; keep the first so the
+        // build doesn't fail on a duplicate .so.
         jniLibs {
             pickFirsts += "**/libc++_shared.so"
+            pickFirsts += "**/libtensorflowlite_jni.so"
+            pickFirsts += "**/libtensorflowlite_gpu_jni.so"
+            // onnxruntime-android AND the sherpa-onnx AAR each bundle libonnxruntime.so (+ its JNI
+            // shim). Keep the first — onnxruntime-android is declared before sherpa in `dependencies`
+            // so its newer runtime wins (sherpa's ORT 1.17.1 can't load the Spleeter models' newer IR).
+            // The two libs are a matched pair, so both come from onnxruntime-android.
+            pickFirsts += "**/libonnxruntime.so"
+            pickFirsts += "**/libonnxruntime4j_jni.so"
         }
     }
 
