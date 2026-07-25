@@ -218,8 +218,18 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        // TensorFlow-Lite and MediaPipe can each ship a TFLite native lib; keep the first so the
+        // build doesn't fail on a duplicate .so.
         jniLibs {
             pickFirsts += "**/libc++_shared.so"
+            pickFirsts += "**/libtensorflowlite_jni.so"
+            pickFirsts += "**/libtensorflowlite_gpu_jni.so"
+            // onnxruntime-android AND the sherpa-onnx AAR each bundle libonnxruntime.so (+ its JNI
+            // shim). Keep the first — onnxruntime-android is declared before sherpa in `dependencies`
+            // so its newer runtime wins (sherpa's ORT 1.17.1 can't load the Spleeter models' newer IR).
+            // The two libs are a matched pair, so both come from onnxruntime-android.
+            pickFirsts += "**/libonnxruntime.so"
+            pickFirsts += "**/libonnxruntime4j_jni.so"
         }
     }
 

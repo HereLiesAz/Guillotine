@@ -32,7 +32,12 @@ gating that README.md describes. The `unit-tests` CI job's task name (see Bugs, 
 (`assembleGithubRelease`), `release-aab.yml` (`bundlePlayRelease`), and `merged-build.yml`'s
 `assembleGithubDebug` were already assuming the flavors existed the whole time, so this also
 unblocks them. `:shared:test` passes; `:app:compileGithubDebugKotlin` couldn't be verified locally
-(no Android SDK in this environment) — confirm on CI.
+(no Android SDK in this environment) — confirmed on CI, which surfaced a second `be9f7a6` casualty:
+`packaging.jniLibs.pickFirsts` had also been trimmed down to just `libc++_shared.so`, dropping the
+rules for `libtensorflowlite_jni.so`/`libtensorflowlite_gpu_jni.so` and
+`libonnxruntime.so`/`libonnxruntime4j_jni.so` (onnxruntime-android and the sherpa-onnx AAR both
+bundle the latter pair) — `:app:mergeGithubDebugNativeLibs` failed with a duplicate-file error for
+`libonnxruntime.so` until those were restored too. Both are now back verbatim from before `be9f7a6`.
 
 **Security**
 - **Azphalt Store install path skips trust verification for non-model packages.**
