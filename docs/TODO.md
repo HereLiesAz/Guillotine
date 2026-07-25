@@ -40,14 +40,18 @@ bundle the latter pair) — `:app:mergeGithubDebugNativeLibs` failed with a dupl
 `libonnxruntime.so` until those were restored too. Both are now back verbatim from before `be9f7a6`.
 
 **Security**
-- **Azphalt Store install path skips trust verification for non-model packages.**
-  `AzphaltStoreState.install()` (`shared/.../azphalt/AzphaltStoreState.kt:112-136`, used by
-  `AzphaltStoreScreen.kt` for shaders/LUTs/UI-schema/`code` packages) only calls `AzpPackage.load`
-  (integrity) — it never calls `AzpPackage.verifyTrust` or consults `AzpPublisherPins`, unlike
-  `AzpModelInstall.install()` which does full trust-store + trust-on-first-use publisher pinning.
-  A compromised registry (or MITM) could push an update signed by a different key than the one the
-  user originally trusted, and it installs with only a soft snackbar note — exactly the hijack
-  `AzpPublisherPins` exists to stop, but only wired for the model-install path.
+- ~~**Azphalt Store install path skips trust verification for non-model packages.**~~ **Fixed.**
+  `AzphaltStoreState.install()` now calls `AzpPackage.verifyTrust` (integrity + signature + trust
+  store) instead of the old integrity-only `AzpPackage.load`, and accepts an `AzpPublisherPins`
+  instance for trust-on-first-use publisher pinning — the exact protection `AzpModelInstall.install()`
+  already had, now shared by both install paths (a package id is trusted/pinned the same way whether
+  it arrived via the model-install flow or the general store). Two new `InstallResult` variants,
+  `Untrusted` and `PublisherChanged`, replace the old silent-install-if-integrity-passes behavior;
+  `AzphaltStoreScreen.kt` surfaces both as confirmation dialogs (mirroring `Sheets.kt`'s existing
+  untrusted/publisher-change UX for AI-model installs) rather than a soft snackbar note. Both flows
+  share one pins file (`azp-publishers.json`) since a package id's trust is one continuity, not two.
+  Covered by `AzphaltStoreStateTest.kt` (trusted-signer success, unsigned/untrusted-signer requiring
+  explicit approval, tampered-package rejection, and publisher-change detection + re-pin-on-approval).
 - **Desktop self-updater has no integrity check before running the downloaded installer.**
   `UpdateChecker.download()` (`shared/.../update/UpdateChecker.kt:128-154`) and
   `DesktopUpdater.launchInstaller()` (`desktop/.../platform/DesktopUpdater.kt:73-80`) stream the
