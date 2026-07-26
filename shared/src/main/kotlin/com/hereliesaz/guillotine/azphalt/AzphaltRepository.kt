@@ -30,8 +30,21 @@ class AzphaltRepository(
     private val baseUrl: String = DEFAULT_BASE_URL,
 ) {
     companion object {
-        /** The flagship registry's API root. A user/host may point at any conforming repository. */
-        const val DEFAULT_BASE_URL = "https://www.azphalt.store/api"
+        /**
+         * The flagship registry's API root. A user/host may point at any conforming repository.
+         *
+         * Deliberately **not** `https://www.azphalt.store/api` — that's the Next.js storefront's own
+         * internal route namespace, where only `/api/packages` happens to exist (the storefront's own
+         * catalog fetch). It's a trap: browsing looks like it works, since that one path resolves, but
+         * `/api/packages/{id}/versions/{version}/download` and `/api/.well-known/...` fall through the
+         * SPA catch-all and return the storefront's `index.html` (HTTP 200, so it isn't even caught as
+         * an HTTP error) — which `AzpPackage` then correctly, but confusingly, rejects as "manifest.json
+         * is missing" rather than the real problem being "wrong base URL entirely". The real Repository
+         * API root has no `/api` prefix: verified live — `GET /packages` there returns the spec's
+         * `{ "packages": [...] }` envelope, and `/packages/{id}/versions/{version}/download` returns a
+         * real `.azp`. Do not re-add `/api` here.
+         */
+        const val DEFAULT_BASE_URL = "https://www.azphalt.store"
 
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 30_000
@@ -106,11 +119,35 @@ class AzphaltRepository(
 
     /**
      * Download a package's `.azp` bytes from `GET /packages/{id}/versions/{version}/download`. The
-     * bytes are returned **unverified** — the caller MUST pass them through [AzpPackage] before
-     * installing, so an HTML error page or a truncated body fails verification rather than installing.
+     * bytes are returned **unverified** — the caller MUST still pass them through [AzpPackage] before
+     * installing (integrity/signature/trust are its job, not this one). This only rejects the shape
+     * a wrong base URL produces: an HTTP-200 body that isn't a ZIP at all (e.g. an SPA's `index.html`
+     * served from a catch-all route) — that used to reach [AzpPackage] and fail as a confusing
+     * "manifest.json is missing" with no hint the real problem was upstream of the package entirely.
      */
-    fun download(id: String, version: String): ByteArray =
-        getBytes(endpoint("/packages/${enc(id)}/versions/${enc(version)}/download"), MAX_AZP_BYTES)
+    fun download(id: String, version: String): ByteArray {
+        val bytes = getBytes(endpoint("/packages/${enc(id)}/versions/${enc(version)}/download"), MAX_AZP_BYTES)
+        // Every ZIP - empty or not - starts with a "PK" local-file-header or end-of-central-directory
+        // signature; anything else (HTML, JSON, plain text) could not possibly be a valid .azp.
+        if (bytes.size < 2 || bytes[0] != 'P'.code.toByte() || bytes[1] != 'K'.code.toByte()) {
+            throw RepoException(
+                "registry: download did not return a package (got ${sniff(bytes)} instead) — " +
+                    "check the registry base URL",
+            )
+        }
+        return bytes
+    }
+
+    /** A short, safe-to-log description of non-package bytes, for [download]'s error message. */
+    private fun sniff(bytes: ByteArray): String {
+        val text = bytes.take(64).toByteArray().toString(Charsets.UTF_8)
+        return when {
+            text.trimStart().startsWith("<!DOCTYPE", ignoreCase = true) || text.trimStart().startsWith("<html", ignoreCase = true) -> "an HTML page"
+            text.trimStart().startsWith("{") || text.trimStart().startsWith("[") -> "a JSON response"
+            bytes.isEmpty() -> "an empty response"
+            else -> "an unrecognized response"
+        }
+    }
 
     // ---- parsing ----
 

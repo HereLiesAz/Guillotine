@@ -7,10 +7,12 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 /**
- * Parsing/scoping tests for the [AzphaltRepository] client. The JSON samples mirror the *live*
- * `GET https://www.azphalt.store/api/packages` response shape (a bare array of summaries) as well as
- * the spec's `{ "packages": [...] }` envelope, so the client tolerates both. Network calls aren't
- * exercised here — only the pure parse + host-scoping logic.
+ * Parsing/scoping tests for the [AzphaltRepository] client. The JSON samples mirror the response
+ * shape `GET https://www.azphalt.store/api/packages` happens to return (a bare array of summaries —
+ * that's the Next.js storefront's own internal catalog fetch, NOT the Repository API) as well as the
+ * spec's `{ "packages": [...] }` envelope the real (no-`/api`) root returns, so the client tolerates
+ * both regardless of which one a given base URL serves. Network calls aren't exercised here — only
+ * the pure parse + host-scoping logic; see [AzphaltRepositoryDownloadTest] for the download guard.
  */
 class AzphaltRepositoryTest {
 
@@ -93,6 +95,9 @@ class AzphaltRepositoryTest {
     }
 
     @Test fun defaultBaseUrlIsFlagshipRegistry() {
-        assertEquals("https://www.azphalt.store/api", AzphaltRepository.DEFAULT_BASE_URL)
+        // No `/api` — that's the storefront's own internal namespace, not the Repository API root.
+        // Verified live: with `/api`, download()/`.well-known` fall through the SPA and return
+        // index.html; without it, they return the real package bytes / registry document.
+        assertEquals("https://www.azphalt.store", AzphaltRepository.DEFAULT_BASE_URL)
     }
 }
