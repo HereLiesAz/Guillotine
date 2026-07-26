@@ -2,6 +2,29 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Azphalt Store install failed for every real package: wrong registry base URL (2026-07-26)
+
+Reported on a real device: every install ("Film Emulation LUTs", "Selfie Segmentation", confirmed
+live for others too) failed with `"invalid package: azp: manifest.json is missing"`. Root cause:
+`AzphaltRepository.DEFAULT_BASE_URL` was `https://www.azphalt.store/api` — the Next.js storefront's
+own **internal** route namespace, where only `/api/packages` happens to exist (the storefront's own
+catalog fetch). That's the trap: browsing worked, so the URL looked right, while
+`/api/packages/{id}/versions/{version}/download` and `/api/.well-known/...` fell through the SPA
+catch-all and returned the storefront's `index.html` — HTTP 200, so not even caught as a transport
+error — which `AzpPackage` then unzipped to nothing and correctly, but confusingly, rejected as a
+missing manifest. Verified live against the real registry: the actual Repository API root has **no**
+`/api` prefix — `GET /packages` there returns the spec's `{ "packages": [...] }` envelope, and
+`GET /packages/{id}/versions/{version}/download` returns a real `.azp`. Fixed by dropping `/api`
+from `DEFAULT_BASE_URL`. Also hardened `AzphaltRepository.download()` to reject a non-ZIP HTTP-200
+body itself (checking for the `PK` signature) with an error naming the actual problem — "did not
+return a package (got an HTML page instead) — check the registry base URL" — instead of letting a
+routing bug like this one surface as a confusing package-integrity error three layers downstream.
+
+This was found *after* the two fixes below (installs merely appeared to fail differently
+depending on where a user hit the bug — this one blocks it earlier, at download, for every
+package) — so with this fixed, the full loop (browse → install → apply) should now work end to end
+for the current live catalog.
+
 ## Azphalt Store install was a no-op past the download (2026-07-25)
 
 Follow-up to the 2026-07-24 audit's Azphalt Store trust-verification fix: install itself worked
