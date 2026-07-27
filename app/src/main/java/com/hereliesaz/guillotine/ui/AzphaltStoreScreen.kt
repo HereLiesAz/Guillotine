@@ -95,11 +95,6 @@ private data class AzphaltCategoryInfo(
 
 private val AZPHALT_CATEGORIES = listOf(
     AzphaltCategoryInfo(
-        "vegas-inspired", "Vegas FX",
-        "Layer-blend and transition effects in the style of classic NLE compositing tools.",
-        "\"add a vegas-style crossfade to this cut\"",
-    ),
-    AzphaltCategoryInfo(
         "layer-effects", "Layer FX",
         "Color grades (LUTs), shaders, and filters that apply to a single clip or layer.",
         "\"give this clip a teal and orange grade\"",
@@ -380,7 +375,7 @@ fun AzphaltStoreScreen(
 
 /**
  * A one-time (then help-icon-reachable) tour of what the store carries, so a first-time visitor
- * doesn't have to guess what "Vegas FX" or "MCP" mean from the category chip alone. Content comes
+ * doesn't have to guess what "Layer FX" or "MCP" mean from the category chip alone. Content comes
  * from [AZPHALT_CATEGORIES] — the same list that drives the chip labels — so this can't drift.
  */
 @Composable

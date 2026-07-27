@@ -49,7 +49,7 @@ class AzphaltStoreState(
     private val _selectedCategory = MutableStateFlow("All")
     val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
 
-    val categories = listOf("All", "vegas-inspired", "layer-effects", "layer-effects-scenery", "kinetic-typography", "kinetic-typography-smart", "companion-apps", "mcp-servers")
+    val categories = listOf("All", "layer-effects", "layer-effects-scenery", "kinetic-typography", "kinetic-typography-smart", "companion-apps", "mcp-servers")
 
     fun setCategory(category: String) {
         _selectedCategory.value = category
@@ -95,7 +95,6 @@ class AzphaltStoreState(
     private fun categoryFor(pkg: AzphaltRepository.RepoPackage): String = when {
         pkg.kind == "app" -> "companion-apps"
         pkg.kind == "mcp" -> "mcp-servers"
-        pkg.id.contains("vegas") -> "vegas-inspired"
         pkg.id.contains("scenery") -> "layer-effects-scenery"
         pkg.id.contains("smart") -> "kinetic-typography-smart"
         pkg.id.contains("typography") || pkg.id.contains("type") ||

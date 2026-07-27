@@ -10,7 +10,7 @@ No footage yet? Choose **Generate image** to make one with AI: free **Pollinatio
 
 ## 2. Learn the timeline
 
-The timeline is multi-track and Vegas-style: video tracks stack into layers, audio sits below. Tap anywhere to move the playhead (the red line). **Pinch** to zoom — horizontally changes width (time), vertically changes track height. Scroll to move through tracks. Clips show on-device thumbnails (video/image) and waveforms (audio).
+The timeline is multi-track: video tracks stack into layers, audio sits below. Tap anywhere to move the playhead (the red line). **Pinch** to zoom — horizontally changes width (time), vertically changes track height. Scroll to move through tracks. Clips show on-device thumbnails (video/image) and waveforms (audio).
 
 ## 3. Arrange and trim clips
 

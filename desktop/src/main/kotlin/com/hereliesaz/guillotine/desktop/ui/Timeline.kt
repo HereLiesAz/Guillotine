@@ -769,7 +769,7 @@ private fun ClipView(
                     )
                 }
             }
-            // Long-press near an edge, then drag, to trim that in/out point (Vegas-style). A previously
+            // Long-press near an edge, then drag, to trim that in/out point . A previously
             // split/trimmed clip re-extends by dragging its edge outward — trimClipStart/trimClipEnd
             // bound it to the source media. The grabbed edge previews live and commits on release.
             .pointerInput(clip.id, pps, state.tool) {
@@ -990,7 +990,7 @@ private fun gridIncrementMs(pps: Float, fps: Int = 30): Long {
 }
 
 /**
- * Vegas-style snap for a moving clip/group: try to land ANY moving edge (every group member's start
+  * Edge snap for a moving clip/group: try to land ANY moving edge (every group member's start
  * AND end) on a magnet — timeline start (0), the playhead, or ANY non-moving clip's start/end (any
  * track) — within the strong radius; else snap a moving edge to the timeline grid within the weaker
  * radius; else free. Returns the (floor-clamped) delta to apply to the whole group. Soft: dragging
