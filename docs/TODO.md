@@ -4,8 +4,8 @@ Deferred work, newest at the top. Pick up when prioritized.
 
 ## Beat-sync tools already implement the trending "auto beat zoom" effect — now has real test coverage
 
-Checked whether the "beat-synced auto zoom" effect real editors ask for (CapCut's "Beat Zoom": zooms
-that hit exactly on drops/kicks/snares) needed building from scratch. It doesn't —
+Checked whether the "beat-synced auto zoom" effect real editors ask for (zooms that hit exactly on
+drops/kicks/snares) needed building from scratch. It doesn't —
 `McpTools.applyOnBeat()` (`apply_on_beat` tool) already does exactly this: keyframes a video clip's
 `SCALE` 1.0 → 1.12 → 1.0 around every beat/downbeat/onset of a chosen audio clip, on-device, via
 `BeatAnalyzer`'s real spectral-flux onset detection + autocorrelation tempo estimation. `flash`

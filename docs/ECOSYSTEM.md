@@ -1,9 +1,9 @@
 # Guillotine Extensibility & Ecosystem
 
 Guillotine is built to take **standard, already-existing formats** for presets, filters, effects, and
-plugins — not a bespoke Guillotine-only format nobody else supports. If you've made a LUT for DaVinci
-Resolve, a transition for [gl-transitions](https://gl-transitions.com/), or an MCP tool for Claude,
-the goal is that it drops straight into Guillotine.
+plugins — not a bespoke Guillotine-only format nobody else supports. If you've already made a LUT in a
+colour-grading tool, a transition for [gl-transitions](https://gl-transitions.com/), or an MCP tool
+for Claude, the goal is that it drops straight into Guillotine.
 
 The invariant holds throughout: **your video and audio never leave the device.** Extensions run
 on-device (GL shaders, LUTs, native filters) or, for the MCP plugin protocol, exchange only *text*
@@ -19,8 +19,8 @@ and the MCP tools that apply them (`apply_lut`, `apply_shader` / `list_shader_pa
 
 ## 1. LUTs — `.cube` 3D color grades ✅
 
-The universal color-grade interchange format, exported by DaVinci Resolve, Photoshop/Camera Raw, and
-shared in countless free LUT packs.
+The universal color-grade interchange format, exported by every major colour-grading and raw photo
+editor and shared in countless free LUT packs.
 
 - **Drop-in:** clip → **Filters → LUT → Pick .cube**. Any standard 3D `.cube` (sizes 2–129,
   `DOMAIN_MIN/MAX` respected) grades the clip in **both live preview and export** — WYSIWYG.

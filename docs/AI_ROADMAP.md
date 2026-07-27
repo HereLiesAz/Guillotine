@@ -143,8 +143,8 @@ model-id and are the recommended path for Kling/Pika/Hailuo/Wan/Seedance and Mus
 
 ## 3. Music-driven ("edit to the beat") editing — the pipeline
 
-Standard pipeline used across beat-sync tools (CapCut/Filmora beat-sync,
-BeatSync-Engine, librosa/madmom scripts):
+Standard pipeline used across beat-sync tools (the beat-sync features in mainstream consumer
+editors, BeatSync-Engine, librosa/madmom scripts):
 
 1. **Beat / onset / tempo analysis** → a beat grid (BPM, beats, downbeats, onsets).
 2. **Structural analysis** (optional, what makes it feel *musical*) → sections,

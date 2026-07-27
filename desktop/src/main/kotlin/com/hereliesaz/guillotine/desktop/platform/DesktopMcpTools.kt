@@ -245,7 +245,7 @@ class DesktopMcpTools(
         put(toolDefinition(
             "apply_lut",
             "Apply a `.cube` 3D LUT color grade to a clip ON-DEVICE — the standard color-grade format " +
-                "exported by DaVinci Resolve / Photoshop and shared in free LUT packs. It grades in both " +
+                "exported by colour-grading and photo-editing tools and shared in free LUT packs. It grades in both " +
                 "preview and export. Use for \"apply this LUT\", \"grade with a .cube\", \"give it a " +
                 "cinematic/teal-orange look via a LUT\". `path` is a filesystem path to a .cube file " +
                 "(usually one the user picked). clear_lut removes it.",
