@@ -70,6 +70,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.hereliesaz.guillotine.ai.ApiKeyStore
 import com.hereliesaz.guillotine.azphalt.AzphaltPlugin
+import com.hereliesaz.guillotine.azphalt.AzphaltRepository
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreState
 import com.hereliesaz.guillotine.azphalt.AzpPublisherPins
 import com.hereliesaz.guillotine.editor.EditorViewModel
@@ -185,6 +186,7 @@ fun AzphaltStoreScreen(
             val result = withContext(Dispatchers.IO) {
                 storeState.install(
                     plugin, extensionsDir,
+                    trustedKeys = setOf(AzphaltRepository.FLAGSHIP_SIGNING_KEY),
                     pins = publisherPins,
                     allowUntrusted = allowUntrusted,
                     allowPublisherChange = allowPublisherChange,
