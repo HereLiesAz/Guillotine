@@ -2,6 +2,26 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Azphalt Store showed "Free" for paid packages, and generic descriptions (2026-07-27)
+
+Follow-up to the 2026-07-26 registry-base-URL fix. Once the store started hitting the *real*
+Repository API root, two client-side gaps in `AzphaltRepository.RepoPackage` surfaced (the previous,
+broken endpoint happened to serve a richer legacy shape that masked both):
+
+- The real registry sends pricing as a bare `priceStatus: "free"|"paid"` string with **no** dollar
+  amount at the browse-list level (per `spec/repository-api.md`) — never the `price: {amountCents,
+  currency}` object `RepoPackage` was built around. Since `isFree` only ever checked `price`, a
+  `priceStatus: "paid"` package with no `price` object read as free — the Store displayed "Free" on
+  a package the registry explicitly marked paid. Fixed: `isFree`/`priceLabel` now check `priceStatus`
+  first, falling back to the legacy `price` shape when present; a paid package with no known amount
+  now shows "Paid" rather than a wrong "Free" or a dollar figure it doesn't have.
+- Every catalog card also showed the generic "An azphalt plugin." placeholder instead of a real
+  description — this one was a genuine bug in the **registry itself**
+  (`HereLiesAz/azphalt#138`, drafted): `GET /packages`'s summary response was missing the flat
+  `description` field (present on detail, and required "always present" by spec) — a one-line
+  omission in `toSdkSummary()`, not anything wrong on Guillotine's side. No client-side change
+  needed here once that PR lands.
+
 ## Azphalt Store install failed for every real package: wrong registry base URL (2026-07-26)
 
 Reported on a real device: every install ("Film Emulation LUTs", "Selfie Segmentation", confirmed

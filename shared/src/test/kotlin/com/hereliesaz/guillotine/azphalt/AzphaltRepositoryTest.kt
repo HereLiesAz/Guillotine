@@ -58,6 +58,21 @@ class AzphaltRepositoryTest {
         assertEquals(listOf("com.hereliesaz.graffitixr"), app.targetApps)
     }
 
+    @Test fun `priceStatus paid without an amount is not free`() {
+        // The conformant registry's real shape: no `price` object at all, just `priceStatus`, and
+        // (per spec) never a dollar amount at the browse-list level. Must not read as "Free" just
+        // because there's no amountCents to show.
+        val pkg = repo.parseCatalog(
+            """[{"id":"com.studioaz.cinelut","priceStatus":"paid"}]""",
+        ).single()
+        assertFalse("registry said paid — no amount doesn't mean free", pkg.isFree)
+    }
+
+    @Test fun `priceStatus free with no price object is free`() {
+        val pkg = repo.parseCatalog("""[{"id":"com.azphalt.model.sherpa-onnx","priceStatus":"free"}]""").single()
+        assertTrue(pkg.isFree)
+    }
+
     @Test fun parsesSpecEnvelope() {
         val envelope = """{"packages":$liveArray,"total":3,"page":1,"pages":1}"""
         assertEquals(3, repo.parseCatalog(envelope).size)
