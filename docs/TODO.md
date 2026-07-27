@@ -2,6 +2,47 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Beat-sync tools already implement the trending "auto beat zoom" effect — now has real test coverage
+
+Checked whether the "beat-synced auto zoom" effect real editors ask for (CapCut's "Beat Zoom": zooms
+that hit exactly on drops/kicks/snares) needed building from scratch. It doesn't —
+`McpTools.applyOnBeat()` (`apply_on_beat` tool) already does exactly this: keyframes a video clip's
+`SCALE` 1.0 → 1.12 → 1.0 around every beat/downbeat/onset of a chosen audio clip, on-device, via
+`BeatAnalyzer`'s real spectral-flux onset detection + autocorrelation tempo estimation. `flash`
+(brightness pulse) and `shake` (offset jitter) variants exist too — covering three of the most
+commonly requested "impact" edit effects already. Reachable today via the AI assistant (e.g. "add a
+beat zoom to this clip").
+
+The actual gap was **zero test coverage anywhere** for this: `BeatAnalyzer` (real DSP — FFT, spectral
+flux, autocorrelation tempo, phase-aligned beat grid, downbeat anchoring) had never been run against
+anything but real device audio. Added `BeatAnalyzerTest.kt`: builds a synthetic click track at a known
+BPM and confirms the analyzer recovers that tempo, finds the right beat count, spaces beats evenly at
+the beat period, and groups downbeats correctly — all pass, confirming the implementation is
+genuinely correct, not just plausible-looking.
+
+Not pursued: a true audio-reactive **shader** (as opposed to this existing keyframe-based approach)
+isn't possible in the current asset pipeline — ISF/GLSL shaders explicitly reject audio inputs
+(`GlslShader.kt`), so "beat-synced" effects have to stay in the keyframe/MCP-tool layer, which is
+exactly where this already lives.
+
+## Music licensing search (asked, not built): can't integrate TikTok/Instagram/YouTube "approved
+## music" catalogs the way a user might expect
+
+Researched whether Guillotine could let a user search and pull in "platform-approved" music (the
+kind TikTok/Instagram/YouTube let creators add in-app) for use in an edited/exported video. Verified:
+- TikTok's Commercial Music Library has a real developer API, but its own terms restrict Commercial
+  Sounds to use **within TikTok**, shared via TikTok's own sharing features — use outside TikTok needs
+  separate licensing directly from the rights holder.
+- Instagram's Audio API lets an app search Meta's catalog and attach an `audio_id` to a Reel, but only
+  as part of **publishing that Reel through Meta's own Content Publishing API** — it doesn't hand over
+  a usable audio file for an independently exported video.
+- YouTube Audio Library has genuinely free-to-use tracks but no official API — only unofficial
+  scrapers, fragile and against YouTube's ToS.
+- The one credible path for "licensed music baked into a video exported anywhere" is a real stock-music
+  API with an all-inclusive global license — Epidemic Sound's Partner API is the standout real example
+  — but it requires a partner relationship + API key on the user's end, not something buildable without
+  that access. Deferred pending a decision on whether to pursue that partnership.
+
 ## Azphalt catalog sync check (2026-07-27, second pass) — the whole registry went from unsigned to uniformly signed
 
 The `HereLiesAz/azphalt` repo had a large burst of activity (catalog jumped ~10 → 133 packages, moved
