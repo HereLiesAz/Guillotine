@@ -2,6 +2,43 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Azphalt catalog sync check (2026-07-27, second pass) — the whole registry went from unsigned to uniformly signed
+
+The `HereLiesAz/azphalt` repo had a large burst of activity (catalog jumped ~10 → 133 packages, moved
+to serving content from a git-committed build instead of a runtime database). Checked whether
+Guillotine's client still holds up against the new state:
+
+- **Fixed: every install started requiring an "Install anyway" confirmation again.** The entire
+  flagship catalog is now signed with one Ed25519 key (verified independently: downloaded and
+  unzipped several live packages via `curl`, all carry the same `signature.json` `publicKey`).
+  `trustedKeys` was empty at all three production install call sites (`AzphaltStoreScreen.kt`,
+  `app`+`desktop` `Sheets.kt`'s model-install flow) — so the earlier "unsigned installs skip the
+  confirmation" fix (2026-07-24 audit) no longer helped, since nothing is unsigned anymore. Pinned the
+  key as `AzphaltRepository.FLAGSHIP_SIGNING_KEY` and wired it into all three call sites. The *proper*
+  channel for this is the registry's `/.well-known/azphalt-repository.json` `signingKeys` (the spec's
+  trust-bootstrap mechanism) — not currently populated with this key upstream (it's wired to a
+  different, entitlement-token key instead) — so this is pinned out-of-band until that's fixed; noted
+  in the constant's doc comment so it's easy to remove once discovery works.
+- **Not acted on — informational only:**
+  - The old teal-orange/cool-noir/Fold-Lab LUT submissions (merged into `azphalt` earlier this
+    session, `submissions/` → `publish-submissions.ts` pipeline) are **gone** from the new 133-package
+    catalog — the git-catalog migration replaced the old runtime-published content wholesale. If that
+    content should still be live, it needs re-submitting under whatever the new `registry/sources.json`
+    / `registry/local` pipeline is now, not the old `/api/publish` flow.
+  - New `kind: "pack"` (22 entries, e.g. `com.hereliesaz.azphalt.pack.3d-environment`) has no dedicated
+    Store category — falls through `AzphaltStoreState.categoryFor()`'s id-substring checks into the
+    generic `"layer-effects"` bucket. A "pack" carries no assets/types of its own (`types: []`,
+    `mediaDomains: []`) — it reads like a themed collection/description, not a standalone installable
+    effect, so `AzpPluginApplier` correctly reports it "not wired to a clip yet" rather than falsely
+    succeeding, but whether it deserves its own category chip or a different browse treatment
+    (curated collections?) is a product call, not a bug fix.
+  - New `maturity` field ("general"/"mature") on every summary — Guillotine doesn't read it at all.
+    Every live package is currently `"general"`, so no urgency, but there's no age-gate if that changes.
+  - Paid-package downloads now require a `Bearer` token per the spec (enforced live), and Guillotine's
+    `AzphaltRepository` sends no `Authorization` header at all. Zero packages are currently `paid`, so
+    this isn't live yet — but the day a real paid/private listing appears, its downloads will 401/402
+    until Bearer-token support is added.
+
 ## Azphalt Store showed "Free" for paid packages, and generic descriptions (2026-07-27)
 
 Follow-up to the 2026-07-26 registry-base-URL fix. Once the store started hitting the *real*

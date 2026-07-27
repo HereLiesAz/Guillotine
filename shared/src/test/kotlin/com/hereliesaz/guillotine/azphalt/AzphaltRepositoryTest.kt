@@ -115,4 +115,15 @@ class AzphaltRepositoryTest {
         // index.html; without it, they return the real package bytes / registry document.
         assertEquals("https://www.azphalt.store", AzphaltRepository.DEFAULT_BASE_URL)
     }
+
+    @Test fun flagshipSigningKeyIsPinned() {
+        // Pins the exact key so an accidental edit (or a future key rotation upstream) fails loudly
+        // here instead of silently regressing every install back to an untrusted-publisher prompt.
+        // Verified live against multiple independently-downloaded packages via curl + unzip; every
+        // package in the flagship catalog is signed with this one key.
+        assertEquals(
+            "MCowBQYDK2VwAyEAzmko3VFIYjx0fhXcGUQVmTpBQc33OlfRdJZ03MirPjU=",
+            AzphaltRepository.FLAGSHIP_SIGNING_KEY,
+        )
+    }
 }
