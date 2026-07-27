@@ -1396,7 +1396,6 @@ class DesktopMcpTools(
                     val tagsList = manifest.assets.firstOrNull()?.tags ?: emptyList()
                     val tags = JSONArray().also { arr -> tagsList.forEach { arr.put(it) } }
                     val cat = when {
-                        id.contains("vegas") -> "vegas-inspired"
                         id.contains("scenery") -> "layer-effects-scenery"
                         id.contains("smart") -> "kinetic-typography-smart"
                         id.contains("typography") || id.contains("type") || tagsList.contains("text") -> "kinetic-typography"

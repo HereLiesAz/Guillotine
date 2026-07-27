@@ -3123,8 +3123,7 @@ class McpTools(
                 tagsList.forEach { tags.put(it) }
                 
                 var cat = "layer-effects"
-                if (id.contains("vegas")) cat = "vegas-inspired"
-                else if (id.contains("scenery")) cat = "layer-effects-scenery"
+                if (id.contains("scenery")) cat = "layer-effects-scenery"
                 else if (id.contains("smart")) cat = "kinetic-typography-smart"
                 else if (id.contains("typography") || id.contains("type") || tagsList.contains("text")) cat = "kinetic-typography"
                 

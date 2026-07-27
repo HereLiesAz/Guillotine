@@ -1186,7 +1186,7 @@ private fun EditorToolStrip(
             ToolGroupSeparator()
 
             // ---- Actions (do something immediately; no mode) ----
-            // Scissors splits at the playhead immediately (Vegas-style) — the selected clip/group, or
+            // Scissors splits at the playhead immediately — the selected clip/group, or
             // every clip on every track when nothing is selected.
             IconToolButton(Icons.Filled.ContentCut, "Split at playhead") {
                 vm.splitAtPlayhead()
