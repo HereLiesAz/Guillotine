@@ -82,12 +82,20 @@ class AzphaltRepository(
         val rating: Double? = null,
         val ratingCount: Long = 0,
         val updatedAt: String? = null,
-        /** Absent/`null` ⇒ free (open lane); present ⇒ a paid package. */
+        /**
+         * A legacy shape some deployments still send: `{ "amountCents", "currency" }`, absent/`null` ⇒
+         * free. The conformant `spec/repository-api.md` summary instead sends [priceStatus] — a bare
+         * `"free"`/`"paid"` string with **no** amount at the list level (the amount, if ever surfaced,
+         * is a purchase/entitlement-flow concern, not a browse-list one). Both are parsed so either
+         * registry shape resolves correctly; prefer [priceStatus] when present (see [isFree]).
+         */
         val price: RepoPrice? = null,
+        val priceStatus: String? = null,
         /** Store-card preview (`image`/`clip`), each an `https:` URL or in-package path. */
         val preview: AzpPreview? = null,
     ) {
-        val isFree: Boolean get() = price == null || price.amountCents <= 0
+        val isFree: Boolean
+            get() = priceStatus?.let { it != "paid" } ?: (price == null || price.amountCents <= 0)
 
         /** Whether this package is offered to host [hostId] (global, or [hostId] in [targetApps]). */
         fun targetsApp(hostId: String): Boolean = targetApps.isEmpty() || targetApps.contains(hostId)

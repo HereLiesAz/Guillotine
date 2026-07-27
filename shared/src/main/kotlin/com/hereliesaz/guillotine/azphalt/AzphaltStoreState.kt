@@ -86,7 +86,7 @@ class AzphaltStoreState(
         kind = kind,
         category = categoryFor(this),
         tags = tags,
-        priceLabel = priceLabel(price),
+        priceLabel = priceLabel(this),
         rating = rating,
         downloads = downloads,
         previewImageUrl = preview?.image?.takeIf { it.startsWith("http") },
@@ -181,8 +181,16 @@ class AzphaltStoreState(
         data class PublisherChanged(val packageId: String, val pinnedKey: String, val newSignerKey: String?) : InstallResult()
     }
 
-    private fun priceLabel(price: AzphaltRepository.RepoPrice?): String {
-        if (price == null || price.amountCents <= 0) return "Free"
+    /**
+     * "Free", a formatted amount like "$6.00" when [AzphaltRepository.RepoPackage.price] carries one
+     * (the legacy shape), or a plain "Paid" when the conformant registry says `priceStatus: "paid"`
+     * but — correctly, per spec — sends no amount at the browse-list level. Never claims "Free" for a
+     * package the registry marked paid just because no dollar figure happens to be attached.
+     */
+    private fun priceLabel(pkg: AzphaltRepository.RepoPackage): String {
+        if (pkg.isFree) return "Free"
+        val price = pkg.price ?: return "Paid"
+        if (price.amountCents <= 0) return "Paid"
         val whole = price.amountCents / 100
         val cents = price.amountCents % 100
         val amount = "$whole.${cents.toString().padStart(2, '0')}"
