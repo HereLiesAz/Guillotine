@@ -1,9 +1,10 @@
 package com.hereliesaz.guillotine.media
 
 /**
- * Pure-Kotlin parser for Adobe/Resolve **`.cube` 3D LUT** files — the de-facto interchange format for
- * color grades, exported by DaVinci Resolve, Photoshop, and the huge free LUT libraries online. Kept
- * platform-free (no Android types) so both `:app` (Media3 `SingleColorLut`) and `:desktop` can use it.
+ * Pure-Kotlin parser for **`.cube` 3D LUT** files — the de-facto interchange format for color grades,
+ * exported by every major colour-grading and photo-editing tool and shared in the huge free LUT
+ * libraries online. Kept platform-free (no Android types) so both `:app` (Media3 `SingleColorLut`)
+ * and `:desktop` can use it.
  *
  * Guillotine's LUT ecosystem entry point: drop any standard `.cube` file onto a clip and it grades in
  * preview and export. Everything stays on-device.

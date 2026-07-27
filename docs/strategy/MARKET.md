@@ -99,7 +99,7 @@ months.
 
 ## Where Guillotine does NOT appeal to the mainstream (honest)
 
-- **Framed as a power/pro NLE** ("Sony Vegas style") — the casual creator's loop is *open → drop clips →
+- **Framed as a power/pro NLE** — the casual creator's loop is *open → drop clips →
   auto-caption → trending template → one transition → publish*, and a pro NLE optimizes the wrong verbs.
 - **Missing the adoption drivers:** no templates/trends engine, no licensed music library + beat-sync
   surfaced as a first-class flow, no stickers, no one-tap social publish.

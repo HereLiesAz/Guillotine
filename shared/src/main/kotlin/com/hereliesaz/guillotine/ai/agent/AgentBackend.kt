@@ -249,7 +249,7 @@ val AGENT_SYSTEM_PROMPT = """
 
     LUT COLOR GRADES (on-device, .cube):
     - "apply this LUT", "grade with a .cube", "give it a teal-orange/cinematic look via a LUT" →
-      apply_lut(clip_id, path) with the path to a standard `.cube` 3D LUT (Resolve/Adobe format). It
+      apply_lut(clip_id, path) with the path to a standard `.cube` 3D LUT. It
       grades in preview and export. clear_lut removes it. LUTs are usually picked by the user (clip
       Filters → LUT); apply_lut is for when a path is known.
 
