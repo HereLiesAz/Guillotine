@@ -130,15 +130,15 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   models the latest `spec/extension-manifest.md`: the `app` (companion-app) and `mcp` (MCP-server)
   package kinds alongside `asset`/`code`/`mixed`, plus `targetApps` (host scoping) and a `preview`
   store-card still/clip.
-- ✅ **Browses the hosted storefront over the Repository API.** The **Azphalt Store** is a client of a
-  conforming registry (azphalt `spec/repository-api.md`), defaulting to the flagship at
-  [azphalt.store](https://azphalt.store) — the catalog lives at the registry, not embedded in the app.
-  [`AzphaltRepository`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzphaltRepository.kt)
-  fetches `GET /packages` (scoped to this host by `targetApps`), and installing a chosen package
-  downloads its `.azp` from `/packages/{id}/versions/{version}/download`, **verifies it on-device**
-  through [`AzpPackage`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpPackage.kt), and
-  only then writes it into the app's extensions dir. Discovery is remote; trust + install stay
-  on-device.
+- ✅ **Delegates browsing to the Azphalt Store app (delegated acquisition).** Guillotine doesn't build or
+  maintain its own storefront UI — [`AzphaltStoreScreen`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzphaltStoreScreen.kt)
+  launches whichever Azphalt Store app is installed over the `store.azphalt.action.BROWSE` handoff
+  (azphalt `spec/store-app.md`) and gets back a package the store app already fetched and checked. A
+  store app is a convenience, never a trust anchor, so Guillotine re-verifies every byte itself through
+  [`AzpHandoffInstaller`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpHandoffInstaller.kt)
+  (integrity, signature, and publisher continuity, exactly as if it had downloaded the bytes itself)
+  before writing it into the app's extensions dir. No Azphalt Store app installed degrades to pointing
+  the user at [azphalt.store](https://azphalt.store) instead of falling back to an in-app catalog.
 - ✅ **UI schema → native Compose (job #6).** An extension's declarative control panel
   (azphalt `spec/ui-schema.md`, `{ "controls": […] }` referenced by an asset's `ui`) is parsed by
   [`AzpUiSchema`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt) and rendered
