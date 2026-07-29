@@ -66,7 +66,7 @@ import com.hereliesaz.guillotine.desktop.ui.theme.White
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.GlobalSettings
 import com.hereliesaz.guillotine.model.Quality
-import com.hereliesaz.guillotine.azphalt.AzphaltRepository
+import com.hereliesaz.guillotine.azphalt.AzphaltTrust
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
 import com.hereliesaz.guillotine.desktop.platform.DesktopStorage
@@ -142,7 +142,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                 val dir = java.io.File(DesktopStorage.dataDir, "azp-models")
                 val result = withContext(Dispatchers.IO) {
                     AzpModelInstall.install(
-                        bytes, setOf(AzphaltRepository.FLAGSHIP_SIGNING_KEY), dir, allowUntrusted,
+                        bytes, setOf(AzphaltTrust.FLAGSHIP_SIGNING_KEY), dir, allowUntrusted,
                         pins = publisherPins, allowPublisherChange = allowPublisherChange,
                     ) { p ->
                         val pct = p.bytesTotal?.takeIf { it > 0 }?.let { p.bytesDone * 100 / it }

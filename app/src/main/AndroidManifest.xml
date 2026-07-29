@@ -24,6 +24,18 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.freeform_window_management" android:required="false" />
 
+    <!-- Package-visibility (Android 11+) declaration so PackageManager.resolveActivity can see whatever
+         Azphalt Store app is installed (azphalt spec/store-app.md's delegated-acquisition handoff) —
+         without this, the custom action is invisible to us even when a store app implements it. -->
+    <queries>
+        <intent>
+            <action android:name="store.azphalt.action.BROWSE" />
+        </intent>
+        <!-- The Play Store app itself, so the "get the Azphalt Store app" fallback's market:// intent
+             resolves reliably instead of silently behaving as if Play isn't installed. -->
+        <package android:name="com.android.vending" />
+    </queries>
+
     <application
         android:name=".GuillotineApplication"
         android:allowBackup="true"

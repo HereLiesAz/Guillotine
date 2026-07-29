@@ -2,6 +2,28 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Azphalt Store: delegated acquisition replaces Guillotine's own storefront UI (2026-07-28)
+
+Guillotine used to build and maintain its own browse-grid UI (`AzphaltStoreScreen`'s category chips,
+`PluginCard`s, "what's in the store" guide) on top of `AzphaltRepository` talking to the Repository API
+directly. That's the ecosystem's `spec/store-app.md` "delegated acquisition" contract's whole reason to
+exist: a host that doesn't want to build a storefront shouldn't have to, and azphalt already ships one —
+`apps/storefront-cmp` in the `HereLiesAz/azphalt` repo, the reference Azphalt Store app
+(`store.azphalt.storefront`), which implements exactly this handoff (`store.azphalt.action.BROWSE`).
+
+Rebuilt `AzphaltStoreScreen` to launch that intent for result instead of rendering a catalog: whichever
+Azphalt Store app is installed does the browsing, downloading, and its own check, then hands back a
+verified package as a content URI. Guillotine still re-verifies from scratch (`AzpHandoffInstaller`,
+replacing `AzphaltStoreState`) — the spec is explicit that a store app is a convenience, not a trust
+anchor, so integrity/signature/publisher-continuity checks all run again on the actual bytes received,
+same as before. No Azphalt Store app installed degrades to a prompt to get it (Play listing) or open
+the web storefront directly — never a fallback to Guillotine fetching and rendering its own catalog.
+
+Removed as dead weight once nothing else called them: `AzphaltRepository`'s catalog/download HTTP
+client (`fetchCatalog`, `download`, `RepoPackage` parsing) — only the pinned flagship signing key and
+web-store URL survive, moved to `AzphaltTrust`. The AI-model install flow (`AzpModelInstall`, `Sheets.kt`
+on both platforms) was already independent of this and is unaffected.
+
 ## Beat-sync tools already implement the trending "auto beat zoom" effect — now has real test coverage
 
 Checked whether the "beat-synced auto zoom" effect real editors ask for (zooms that hit exactly on

@@ -71,7 +71,7 @@ import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_FACE_MODELS
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
 import com.hereliesaz.guillotine.ai.ModelImport
-import com.hereliesaz.guillotine.azphalt.AzphaltRepository
+import com.hereliesaz.guillotine.azphalt.AzphaltTrust
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_RECOGNITION_MODELS
@@ -223,7 +223,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                 val dir = java.io.File(context.filesDir, "azp-models")
                 val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     AzpModelInstall.install(
-                        bytes, setOf(AzphaltRepository.FLAGSHIP_SIGNING_KEY), dir, allowUntrusted,
+                        bytes, setOf(AzphaltTrust.FLAGSHIP_SIGNING_KEY), dir, allowUntrusted,
                         pins = publisherPins, allowPublisherChange = allowPublisherChange,
                     ) { p ->
                         val pct = p.bytesTotal?.takeIf { it > 0 }?.let { (p.bytesDone * 100 / it) }
