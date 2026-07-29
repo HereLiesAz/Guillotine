@@ -39,7 +39,7 @@ mediapipeTasksGenai = "0.10.35"
 # Pin EXACTLY to match tasks-genai (aligns MPImage/vision-modality + native libs). Do NOT use a dynamic
 # version: tasks-vision's Maven metadata advertises the old 0.20230731 as <release>, and version
 # comparison treats 0.20230731 > 0.10.35, so `0.10.+`/`+` would resolve back to the stale 2023 build.
-mediapipeTasksVision = "0.20230731"
+mediapipeTasksVision = "1.0.0"
 aznavrail = "11.4"
 playServicesAds = "25.4.0"
 userMessaging = "4.0.0"
