@@ -17,8 +17,8 @@ buildscript {
         resolutionStrategy {
             force("org.jdom:jdom2:2.0.6.1")
             force("org.apache.httpcomponents:httpclient:4.5.14")
-            force("com.google.protobuf:protobuf-javalite:4.28.3")
-            force("com.google.protobuf:protobuf-java:4.28.3")
+            force("com.google.protobuf:protobuf-javalite:4.35.1")
+            force("com.google.protobuf:protobuf-java:4.35.1")
             force("io.netty:netty-codec-http2:4.2.16.Final")
             force("io.netty:netty-handler:4.2.16.Final")
             force("io.netty:netty-codec-http:4.2.16.Final")
