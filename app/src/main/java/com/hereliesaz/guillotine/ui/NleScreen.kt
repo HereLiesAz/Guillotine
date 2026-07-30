@@ -39,7 +39,6 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.HelpOutline
-import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Mic
@@ -492,6 +491,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
             onSettings = { showSettings = true },
+            onOpenStore = { showAzphaltStore = true },
             onAiComparison = { showAiComparison = true },
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
@@ -627,7 +627,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 .weight(timelineWeight)
                 .fillMaxWidth()
         ) {
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, onOpenStore = { showAzphaltStore = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath"))
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath"))
             
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack, 
@@ -866,6 +866,7 @@ private fun TopBar(
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
     onSettings: () -> Unit,
+    onOpenStore: () -> Unit,
     onAiComparison: () -> Unit,
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
@@ -899,6 +900,7 @@ private fun TopBar(
                 azDivider()
                 azItem("Project") { onProjectSettings() }
                 azItem("Settings") { onSettings() }
+                azItem("Azphalt Store") { onOpenStore() }
                 azItem("Compare AI") { onAiComparison() }
                 azItem("Tutorial") { onTutorial() }
                 azItem("FAQ") { onFaq() }
@@ -1045,7 +1047,6 @@ private fun EditorToolStrip(
     onAgentRun: (String) -> Unit,
     onImport: () -> Unit,
     onHelp: () -> Unit,
-    onOpenStore: () -> Unit,
     /** Offline ASR model dir for voice-command dictation; blank hides the mic button. */
     asrModelPath: String = "",
 ) {
@@ -1160,14 +1161,6 @@ private fun EditorToolStrip(
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Azphalt Store button
-            androidx.compose.material3.IconButton(
-                onClick = { onOpenStore() },
-                modifier = Modifier.padding(end = 4.dp)
-            ) {
-                Icon(Icons.Default.Storefront, contentDescription = "Azphalt Store", tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
-            }
-
             // ---- Modes (toggle a tool on/off; active one is highlighted) ----
             IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
                 vm.setTool(EditorTool.SELECT)
