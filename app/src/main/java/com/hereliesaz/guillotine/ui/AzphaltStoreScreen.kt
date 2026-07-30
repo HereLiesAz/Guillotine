@@ -17,6 +17,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +28,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hereliesaz.guillotine.azphalt.AzpHandoffInstaller
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreHandoff
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
@@ -61,7 +65,11 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     var pendingBytes by remember { mutableStateOf<ByteArray?>(null) }
     var pendingUntrusted by remember { mutableStateOf<String?>(null) }
     var pendingPublisherChange by remember { mutableStateOf<AzpHandoffInstaller.InstallResult.PublisherChanged?>(null) }
+    // Sequential, not parallel: send the user to Play first; only if they come back without having
+    // installed it do we offer the PWA. awaitingPlayReturn tracks the round-trip across onResume.
     var showUnavailable by remember { mutableStateOf(false) }
+    var awaitingPlayReturn by remember { mutableStateOf(false) }
+    var showPwaOffer by remember { mutableStateOf(false) }
 
     fun finish(message: String? = null) {
         message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
@@ -138,6 +146,26 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
         }
     }
 
+    // After sending the user to Play, re-check on return: if the store app is now installed, go
+    // straight into it; if not, this is the moment to offer the PWA fallback — not upfront, and not
+    // as a second button alongside "Get the app", since most people who tap that come straight back
+    // with it installed and never need the fallback at all.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && awaitingPlayReturn) {
+                awaitingPlayReturn = false
+                if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
+                    launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
+                } else {
+                    showPwaOffer = true
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     if (showUnavailable) {
         AlertDialog(
             onDismissRequest = onDismiss,
@@ -145,21 +173,38 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
             text = {
                 Text(
                     "Extensions — shaders, LUTs, caption styles, companion apps — come from the Azphalt " +
-                        "Store app. Install it to browse and add them, or open the web store instead.",
+                        "Store app. Install it to browse and add them.",
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
+                    showUnavailable = false
+                    awaitingPlayReturn = true
                     openStoreAppListing(context)
-                    onDismiss()
                 }) { Text("Get the app") }
             },
-            dismissButton = {
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        )
+    }
+
+    if (showPwaOffer) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Still don't have it?") },
+            text = {
+                Text(
+                    "The Azphalt Store is also a web app at azphalt.store — if you'd rather not install " +
+                        "it from Play, you can browse and add extensions there instead.",
+                )
+            },
+            confirmButton = {
                 TextButton(onClick = {
+                    showPwaOffer = false
                     openWebStore(context)
                     onDismiss()
-                }) { Text("Open web store") }
+                }) { Text("Continue in the web app") }
             },
+            dismissButton = { TextButton(onClick = { showPwaOffer = false; onDismiss() }) { Text("Cancel") } },
         )
     }
 
@@ -232,6 +277,15 @@ private fun openStoreAppListing(context: Context) {
     }
 }
 
+/**
+ * Opens the azphalt.store web storefront — itself an installable PWA. If the user already added it
+ * to their home screen (a Chrome WebAPK), this launches that standalone app directly instead of a
+ * plain browser tab; otherwise it opens normally, and the browser's own install prompt (from the
+ * site's manifest + service worker) is how a first-time visitor gets that same shortcut.
+ */
 private fun openWebStore(context: Context) {
-    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AzphaltTrust.STORE_WEB_URL)))
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AzphaltTrust.STORE_WEB_URL))
+    AzphaltStoreHandoff.installedWebApkPackage(context.packageManager, AzphaltTrust.STORE_WEB_URL)
+        ?.let { intent.setPackage(it) }
+    context.startActivity(intent)
 }
