@@ -900,7 +900,7 @@ private fun TopBar(
                 azDivider()
                 azItem("Project") { onProjectSettings() }
                 azItem("Settings") { onSettings() }
-                azItem("Azphalt Store") { onOpenStore() }
+                azItem("Store") { onOpenStore() }
                 azItem("Compare AI") { onAiComparison() }
                 azItem("Tutorial") { onTutorial() }
                 azItem("FAQ") { onFaq() }

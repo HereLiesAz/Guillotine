@@ -8,6 +8,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -65,11 +66,12 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     var pendingBytes by remember { mutableStateOf<ByteArray?>(null) }
     var pendingUntrusted by remember { mutableStateOf<String?>(null) }
     var pendingPublisherChange by remember { mutableStateOf<AzpHandoffInstaller.InstallResult.PublisherChanged?>(null) }
-    // Sequential, not parallel: send the user to Play first; only if they come back without having
-    // installed it do we offer the PWA. awaitingPlayReturn tracks the round-trip across onResume.
+    // One dialog, every way out of it — the Play listing, the web storefront, and cancel — rather than
+    // a chain that only reveals the web option after a wasted round-trip to Play. awaitingPlayReturn
+    // tracks that round-trip across onResume so returning *with* the app installed goes straight into
+    // browsing instead of re-asking.
     var showUnavailable by remember { mutableStateOf(false) }
     var awaitingPlayReturn by remember { mutableStateOf(false) }
-    var showPwaOffer by remember { mutableStateOf(false) }
 
     fun finish(message: String? = null) {
         message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
@@ -147,9 +149,8 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     }
 
     // After sending the user to Play, re-check on return: if the store app is now installed, go
-    // straight into it; if not, this is the moment to offer the PWA fallback — not upfront, and not
-    // as a second button alongside "Get the app", since most people who tap that come straight back
-    // with it installed and never need the fallback at all.
+    // straight into browsing; if not, put the same dialog back up — the web-store option was already
+    // on it, so there's nothing new to reveal and no second prompt to sit through.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -158,7 +159,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
                 if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
                     launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
                 } else {
-                    showPwaOffer = true
+                    showUnavailable = true
                 }
             }
         }
@@ -169,42 +170,30 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     if (showUnavailable) {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("Azphalt Store isn't installed") },
+            title = { Text("Store isn't installed") },
             text = {
                 Text(
                     "Extensions — shaders, LUTs, caption styles, companion apps — come from the Azphalt " +
-                        "Store app. Install it to browse and add them.",
+                        "Store. Install the app to browse and add them, or open the web store instead.",
                 )
             },
+            // Three actions, so they stack: Material's dialog button row only lays out two side by side
+            // before it starts wrapping mid-label.
             confirmButton = {
-                TextButton(onClick = {
-                    showUnavailable = false
-                    awaitingPlayReturn = true
-                    openStoreAppListing(context)
-                }) { Text("Get the app") }
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = {
+                        showUnavailable = false
+                        awaitingPlayReturn = true
+                        openStoreAppListing(context)
+                    }) { Text("Get the app") }
+                    TextButton(onClick = {
+                        showUnavailable = false
+                        openWebStore(context)
+                        onDismiss()
+                    }) { Text("Use the web store") }
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                }
             },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        )
-    }
-
-    if (showPwaOffer) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Still don't have it?") },
-            text = {
-                Text(
-                    "The Azphalt Store is also a web app at azphalt.store — if you'd rather not install " +
-                        "it from Play, you can browse and add extensions there instead.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showPwaOffer = false
-                    openWebStore(context)
-                    onDismiss()
-                }) { Text("Continue in the web app") }
-            },
-            dismissButton = { TextButton(onClick = { showPwaOffer = false; onDismiss() }) { Text("Cancel") } },
         )
     }
 

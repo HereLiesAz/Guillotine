@@ -137,8 +137,9 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   store app is a convenience, never a trust anchor, so Guillotine re-verifies every byte itself through
   [`AzpHandoffInstaller`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpHandoffInstaller.kt)
   (integrity, signature, and publisher continuity, exactly as if it had downloaded the bytes itself)
-  before writing it into the app's extensions dir. No Azphalt Store app installed degrades to pointing
-  the user at [azphalt.store](https://azphalt.store) instead of falling back to an in-app catalog.
+  before writing it into the app's extensions dir. No Azphalt Store app installed degrades to a single
+  prompt offering both ways out — the Play listing, or [azphalt.store](https://azphalt.store) in the
+  browser — instead of falling back to an in-app catalog.
 - ✅ **UI schema → native Compose (job #6).** An extension's declarative control panel
   (azphalt `spec/ui-schema.md`, `{ "controls": […] }` referenced by an asset's `ui`) is parsed by
   [`AzpUiSchema`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt) and rendered
