@@ -8,6 +8,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -51,9 +52,16 @@ import java.io.File
  * explicit that a store app is a convenience, never a trust anchor ("a lying store app gains nothing")
  * — and still owns applying an installed package to the timeline, the one part no store app can do on
  * its behalf.
+ *
+ * [incomingPackage] is the other way in: a `.azp` handed to Guillotine from outside the app — the web
+ * storefront's download opened from the browser, a file manager, a share sheet — routed here by
+ * [com.hereliesaz.guillotine.azphalt.AzpExternalOpen]. `spec/store-app.md` only specifies the Android
+ * app-to-app handoff and explicitly leaves the web case unspecified, so this is the host half of it:
+ * accept the bytes from wherever they came, then run the exact same verification and apply path. When
+ * it's non-null there is nothing to browse, so the store app is never launched.
  */
 @Composable
-fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
+fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val extensionsDir = remember { File(context.filesDir, "extensions").absolutePath }
@@ -65,11 +73,11 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     var pendingBytes by remember { mutableStateOf<ByteArray?>(null) }
     var pendingUntrusted by remember { mutableStateOf<String?>(null) }
     var pendingPublisherChange by remember { mutableStateOf<AzpHandoffInstaller.InstallResult.PublisherChanged?>(null) }
-    // Sequential, not parallel: send the user to Play first; only if they come back without having
-    // installed it do we offer the PWA. awaitingPlayReturn tracks the round-trip across onResume.
+    // One dialog, every route out of it: get the app, use the web store, or back out. Splitting these
+    // across two sequential dialogs made the web store look like a consolation prize you could only
+    // reach by first bouncing off Play. awaitingPlayReturn tracks the Play round-trip across onResume.
     var showUnavailable by remember { mutableStateOf(false) }
     var awaitingPlayReturn by remember { mutableStateOf(false) }
-    var showPwaOffer by remember { mutableStateOf(false) }
 
     fun finish(message: String? = null) {
         message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
@@ -135,11 +143,18 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
         }
     }
 
-    // Launch straight into the store app the moment this screen opens — there is no Guillotine-owned
-    // browsing UI to show first. If none is installed, offer to get one instead of falling back to a
+    // Two entry points, one install path. A package handed in from outside (browser download, file
+    // manager, share sheet) is already the thing we'd have gone browsing for, so read it and verify;
+    // otherwise launch straight into the store app, since there is no Guillotine-owned browsing UI to
+    // show first. No store app installed offers the ways to get one rather than falling back to a
     // catalog Guillotine fetches and renders itself.
-    LaunchedEffect(Unit) {
-        if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
+    LaunchedEffect(incomingPackage) {
+        if (incomingPackage != null) {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching { context.contentResolver.openInputStream(incomingPackage)?.use { it.readBytes() } }.getOrNull()
+            }
+            if (bytes == null) finish("Could not read that .azp package.") else runInstall(bytes)
+        } else if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
             launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
         } else {
             showUnavailable = true
@@ -147,9 +162,8 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     }
 
     // After sending the user to Play, re-check on return: if the store app is now installed, go
-    // straight into it; if not, this is the moment to offer the PWA fallback — not upfront, and not
-    // as a second button alongside "Get the app", since most people who tap that come straight back
-    // with it installed and never need the fallback at all.
+    // straight into it. If not, put the same dialog back up — they still have the web store and
+    // Cancel in front of them, rather than a second dialog that re-asks the question differently.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -158,7 +172,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
                 if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
                     launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
                 } else {
-                    showPwaOffer = true
+                    showUnavailable = true
                 }
             }
         }
@@ -169,42 +183,31 @@ fun AzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     if (showUnavailable) {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("Azphalt Store isn't installed") },
+            title = { Text("Store isn't installed") },
             text = {
                 Text(
                     "Extensions — shaders, LUTs, caption styles, companion apps — come from the Azphalt " +
-                        "Store app. Install it to browse and add them.",
+                        "Store. Install the app to browse and add them, or use the web store at " +
+                        "azphalt.store instead.",
                 )
             },
+            // All three routes in one dialog, stacked: the labels are far too wide to sit in a row on
+            // a phone, and M3's button flow-row would wrap them into an order nobody chose.
             confirmButton = {
-                TextButton(onClick = {
-                    showUnavailable = false
-                    awaitingPlayReturn = true
-                    openStoreAppListing(context)
-                }) { Text("Get the app") }
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = {
+                        showUnavailable = false
+                        awaitingPlayReturn = true
+                        openStoreAppListing(context)
+                    }) { Text("Get the app") }
+                    TextButton(onClick = {
+                        showUnavailable = false
+                        openWebStore(context)
+                        onDismiss()
+                    }) { Text("Use the web store") }
+                    TextButton(onClick = { showUnavailable = false; onDismiss() }) { Text("Cancel") }
+                }
             },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        )
-    }
-
-    if (showPwaOffer) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Still don't have it?") },
-            text = {
-                Text(
-                    "The Azphalt Store is also a web app at azphalt.store — if you'd rather not install " +
-                        "it from Play, you can browse and add extensions there instead.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showPwaOffer = false
-                    openWebStore(context)
-                    onDismiss()
-                }) { Text("Continue in the web app") }
-            },
-            dismissButton = { TextButton(onClick = { showPwaOffer = false; onDismiss() }) { Text("Cancel") } },
         )
     }
 
