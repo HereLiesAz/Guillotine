@@ -811,6 +811,16 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onDismiss = { showAzphaltStore = false }
         )
     }
+    // A .azp opened into Guillotine from outside (web-store download, file manager, share sheet) —
+    // same verify-and-apply flow, just skipping the browse step since the package is already in hand.
+    val incomingAzp by com.hereliesaz.guillotine.azphalt.AzpExternalOpen.pending.collectAsState()
+    incomingAzp?.let { uri ->
+        AzphaltStoreScreen(
+            vm = vm,
+            incomingPackage = uri,
+            onDismiss = { com.hereliesaz.guillotine.azphalt.AzpExternalOpen.consume() },
+        )
+    }
     if (showOnboarding) {
         OnboardingDialog(
             onComplete = { selectedModelPath ->

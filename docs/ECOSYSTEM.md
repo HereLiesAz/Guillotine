@@ -137,9 +137,18 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   store app is a convenience, never a trust anchor, so Guillotine re-verifies every byte itself through
   [`AzpHandoffInstaller`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpHandoffInstaller.kt)
   (integrity, signature, and publisher continuity, exactly as if it had downloaded the bytes itself)
-  before writing it into the app's extensions dir. No Azphalt Store app installed degrades to a single
-  prompt offering both ways out — the Play listing, or [azphalt.store](https://azphalt.store) in the
-  browser — instead of falling back to an in-app catalog.
+  before writing it into the app's extensions dir. No Azphalt Store app installed degrades to pointing
+  the user at [azphalt.store](https://azphalt.store) instead of falling back to an in-app catalog.
+- ✅ **Opens a `.azp` handed in from outside the app.** `spec/store-app.md` specifies only the Android
+  app-to-app handoff and says outright that the web case is left unspecified — so the web storefront can
+  tell a visitor to install a package "from any Azphalt-conforming host" but has no way to hand it to
+  one. Guillotine closes the host half: it registers as an opener for `.azp` packages (VIEW on
+  `application/vnd.azphalt.package`, plus `.azp`-suffixed octet-stream/zip downloads, and a SEND
+  share-sheet route), so a package downloaded from azphalt.store in the browser, sitting in a file
+  manager, or shared from another app opens straight into the editor.
+  [`AzpExternalOpen`](../app/src/main/java/com/hereliesaz/guillotine/azphalt/AzpExternalOpen.kt) carries
+  the URI from `MainActivity` to `AzphaltStoreScreen`, which runs the identical `AzpHandoffInstaller`
+  verification — bytes arriving with no trust anchor at all is precisely the case it was written for.
 - ✅ **UI schema → native Compose (job #6).** An extension's declarative control panel
   (azphalt `spec/ui-schema.md`, `{ "controls": […] }` referenced by an asset's `ui`) is parsed by
   [`AzpUiSchema`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt) and rendered

@@ -2,6 +2,47 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Store: one dialog instead of two, and a way in for the web storefront (2026-07-31)
+
+Three things, from a walkthrough of the no-store-app path.
+
+The overflow menu item read "Azphalt Store" where every neighbour is one word ("Project", "Settings",
+"Render"). Now just **Store**.
+
+The no-store-app case asked twice. First dialog: "Azphalt Store isn't installed" → *Get the app* /
+*Cancel*. Only if you took *Get the app*, bounced off Play without installing, and came back did a
+second dialog appear offering the web store. Two dialogs to surface three choices, with the web store
+reachable only by failing at Play first. Collapsed into one dialog carrying all three routes — *Get the
+app*, *Use the web store*, *Cancel* — stacked, since those labels won't sit in a row on a phone. The
+Play round-trip still re-checks on resume and dives straight into the store app if it's now installed;
+if it isn't, the same dialog comes back rather than a differently-worded second one.
+
+Third, and the real gap: taking the web store got you to azphalt.store, where **Install** says the
+package "is free — install it from any Azphalt-conforming host." A dead end that points back at the app
+you just left. That's not a Guillotine bug so much as a hole in the ecosystem —
+`spec/store-app.md` specifies the Android `store.azphalt.action.BROWSE` handoff and states plainly that
+the web equivalent is *deliberately unspecified* ("browser install semantics differ enough that it
+should be specified separately rather than assumed"). Nothing exists for the web store to call.
+
+Guillotine can only close the host half, and now does: it declares itself an opener for `.azp` packages
+(`AndroidManifest.xml` — VIEW on `application/vnd.azphalt.package`, plus `.azp`-suffixed
+octet-stream/zip so ordinary browser downloads match, plus a SEND share-sheet route), `MainActivity`
+routes the URI through the new `AzpExternalOpen`, and `AzphaltStoreScreen` installs it down the exact
+same `AzpHandoffInstaller` path a store app's handoff takes. So: download from azphalt.store, tap the
+download, it lands in Guillotine. `singleTask` is what makes an open that arrives mid-session install
+into the project already on screen instead of a fresh instance.
+
+**Still open, and belongs to `HereLiesAz/azphalt`, not here:**
+
+- The storefront's **Install** button has nothing to offer a native host. Simplest fix needing no spec
+  change: make it download the `.azp` — a plain download reaches the host through the filters above.
+  Serving it as `application/vnd.azphalt.package` would make the chooser exact rather than
+  extension-matched.
+- Better, and the actual missing piece: **specify the web→host handoff** in `spec/store-app.md`. A
+  claimable `https://azphalt.store/install/<pkg>` App Link, or an `azphalt://install?...` scheme, would
+  let the storefront name and launch a conforming host instead of describing one. That is the spec work
+  its own text defers.
+
 ## Azphalt Store: delegated acquisition replaces Guillotine's own storefront UI (2026-07-28)
 
 Guillotine used to build and maintain its own browse-grid UI (`AzphaltStoreScreen`'s category chips,
