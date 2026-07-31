@@ -16,6 +16,7 @@ import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.hereliesaz.guillotine.ads.ConsentManager
 import com.hereliesaz.guillotine.azphalt.AzpExternalOpen
+import com.hereliesaz.guillotine.azphalt.AzpInstallLink
 import com.hereliesaz.guillotine.editor.AndroidEditorViewModel
 import com.hereliesaz.guillotine.ui.NleScreen
 import com.hereliesaz.guillotine.ui.theme.GuillotineTheme
@@ -70,22 +71,37 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * A `.azp` opened into Guillotine from outside — the azphalt.store web storefront's download tapped
-     * in the browser, a file manager, another app's share sheet. The manifest's VIEW/SEND filters are
-     * what make Guillotine offerable as the "Azphalt-conforming host" the web store can only ask the
-     * user to find; this hands the URI to the editor's install flow, which verifies it exactly as it
-     * verifies a package the store app hands over. Anything else (the launcher intent) is ignored.
+     * A package handed to Guillotine from outside, by either of the two routes the manifest advertises.
+     *
+     * A `.azp` **file** — the azphalt.store download tapped in the browser, a file manager, another app's
+     * share sheet — arrives as a VIEW/SEND URI whose bytes are already on the device.
+     *
+     * An **`azphalt://install?id=…&version=…` deep link** arrives from a web page that has no way to push
+     * bytes anywhere, so it names a package instead and leaves the fetching to whichever conforming host
+     * claims the scheme. Guillotine parses and validates the link here ([AzpInstallLink] refuses anything
+     * malformed) and lets the editor's install flow do the downloading; a link that doesn't parse is
+     * dropped rather than acted on. Together these are what make Guillotine offerable as the
+     * "Azphalt-conforming host" the web store can currently only ask the user to go and find.
+     *
+     * Either way the editor verifies what it ends up with exactly as it verifies a package the store app
+     * hands over — a link names a package, it does not vouch for one. Anything else (the launcher intent)
+     * is ignored.
      *
      * `singleTask` means an open that arrives while the editor is already running lands in *this*
      * instance via [onNewIntent], so the package installs into the project on screen.
      */
     private fun routeAzpOpen(intent: Intent?) {
-        val uri: Uri? = when (intent?.action) {
+        val uri: Uri = when (intent?.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
             else -> null
+        } ?: return
+
+        if (uri.scheme.equals(AzpInstallLink.SCHEME, ignoreCase = true)) {
+            AzpInstallLink.parse(uri.toString())?.let { AzpExternalOpen.offer(it) }
+        } else {
+            AzpExternalOpen.offer(uri)
         }
-        uri?.let { AzpExternalOpen.offer(it) }
     }
 
     override fun onNewIntent(intent: Intent) {

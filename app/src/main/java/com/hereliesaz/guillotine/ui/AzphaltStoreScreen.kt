@@ -32,7 +32,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.hereliesaz.guillotine.azphalt.AzpExternalOpen
 import com.hereliesaz.guillotine.azphalt.AzpHandoffInstaller
+import com.hereliesaz.guillotine.azphalt.AzpInstallLink
+import com.hereliesaz.guillotine.azphalt.AzphaltRegistry
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreHandoff
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
 import com.hereliesaz.guillotine.azphalt.AzpPublisherPins
@@ -53,15 +56,17 @@ import java.io.File
  * — and still owns applying an installed package to the timeline, the one part no store app can do on
  * its behalf.
  *
- * [incomingPackage] is the other way in: a `.azp` handed to Guillotine from outside the app — the web
- * storefront's download opened from the browser, a file manager, a share sheet — routed here by
- * [com.hereliesaz.guillotine.azphalt.AzpExternalOpen]. `spec/store-app.md` only specifies the Android
- * app-to-app handoff and explicitly leaves the web case unspecified, so this is the host half of it:
- * accept the bytes from wherever they came, then run the exact same verification and apply path. When
- * it's non-null there is nothing to browse, so the store app is never launched.
+ * [incoming] is the other way in: a package handed to Guillotine from outside the app and routed here by
+ * [AzpExternalOpen]. `spec/store-app.md` only specifies the Android app-to-app handoff and explicitly
+ * leaves the web case unspecified, so this is the host half of it, in two forms —
+ * [AzpExternalOpen.Incoming.File] for bytes already on the device (a browser download, a file manager, a
+ * share sheet) and [AzpExternalOpen.Incoming.Link] for an `azphalt://install` deep link naming a package
+ * for Guillotine to fetch from the registry itself. Both converge on the same [runInstall]; a link is
+ * untrusted input like everything else here, so nothing skips verification because a web page vouched for
+ * it. When [incoming] is non-null there is nothing to browse, so the store app is never launched.
  */
 @Composable
-fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDismiss: () -> Unit) {
+fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? = null, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val extensionsDir = remember { File(context.filesDir, "extensions").absolutePath }
@@ -69,7 +74,11 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDism
     // id, so both install paths enforcing the same publisher continuity is the point, not a collision.
     val publisherPins = remember { AzpPublisherPins(File(context.filesDir, "azp-publishers.json")) }
 
-    var verifying by remember { mutableStateOf(false) }
+    // Null when idle; otherwise the line shown in the blocking progress dialog. One piece of state for
+    // both slow steps, since a deep link downloads *then* verifies and the user should see which is which.
+    var busy by remember { mutableStateOf<String?>(null) }
+    // A deep link that hasn't been confirmed yet. An unsolicited link shouldn't silently pull bytes.
+    var pendingLink by remember { mutableStateOf<AzpInstallLink?>(null) }
     var pendingBytes by remember { mutableStateOf<ByteArray?>(null) }
     var pendingUntrusted by remember { mutableStateOf<String?>(null) }
     var pendingPublisherChange by remember { mutableStateOf<AzpHandoffInstaller.InstallResult.PublisherChanged?>(null) }
@@ -85,7 +94,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDism
     }
 
     fun runInstall(bytes: ByteArray, allowUntrusted: Boolean = false, allowPublisherChange: Boolean = false) {
-        verifying = true
+        busy = "Verifying…"
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 AzpHandoffInstaller.install(
@@ -96,7 +105,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDism
                     allowPublisherChange = allowPublisherChange,
                 )
             }
-            verifying = false
+            busy = null
             when (result) {
                 is AzpHandoffInstaller.InstallResult.Success -> {
                     val note = if (!result.signed) " (unsigned — integrity verified, provenance not)" else ""
@@ -125,6 +134,23 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDism
         }
     }
 
+    /**
+     * The deep-link route: resolve the named package against the flagship registry, then hand the bytes
+     * to the same [runInstall] every other route uses. A failure here is shown as itself — "paid package",
+     * "no such version", "couldn't reach azphalt.store" — rather than the dialog just vanishing.
+     */
+    fun downloadAndInstall(link: AzpInstallLink) {
+        busy = "Downloading…"
+        scope.launch {
+            val bytes = withContext(Dispatchers.IO) { runCatching { AzphaltRegistry.download(link) } }
+            busy = null
+            bytes.fold(
+                onSuccess = { runInstall(it) },
+                onFailure = { finish(it.message ?: "Could not download that package from azphalt.store.") },
+            )
+        }
+    }
+
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
@@ -143,17 +169,19 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDism
         }
     }
 
-    // Two entry points, one install path. A package handed in from outside (browser download, file
-    // manager, share sheet) is already the thing we'd have gone browsing for, so read it and verify;
-    // otherwise launch straight into the store app, since there is no Guillotine-owned browsing UI to
-    // show first. No store app installed offers the ways to get one rather than falling back to a
+    // Three entry points, one install path. A package handed in from outside is already the thing we'd
+    // have gone browsing for: a file is read straight off the device, a deep link asks first and then
+    // downloads. With neither, launch into the store app, since there is no Guillotine-owned browsing UI
+    // to show first — and no store app installed offers the ways to get one rather than falling back to a
     // catalog Guillotine fetches and renders itself.
-    LaunchedEffect(incomingPackage) {
-        if (incomingPackage != null) {
+    LaunchedEffect(incoming) {
+        if (incoming is AzpExternalOpen.Incoming.File) {
             val bytes = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openInputStream(incomingPackage)?.use { it.readBytes() } }.getOrNull()
+                runCatching { context.contentResolver.openInputStream(incoming.uri)?.use { it.readBytes() } }.getOrNull()
             }
             if (bytes == null) finish("Could not read that .azp package.") else runInstall(bytes)
+        } else if (incoming is AzpExternalOpen.Incoming.Link) {
+            pendingLink = incoming.link
         } else if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
             launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
         } else {
@@ -211,7 +239,32 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDism
         )
     }
 
-    if (verifying) {
+    // A link arrived from a web page nobody asked this app to trust, so it gets a confirmation before any
+    // bytes move. The package id is shown verbatim: it's the only thing identifying what's about to be
+    // downloaded, and the name inside the package can't be read until after the download.
+    pendingLink?.let { link ->
+        AlertDialog(
+            onDismissRequest = { pendingLink = null; onDismiss() },
+            title = { Text("Install from azphalt.store?") },
+            text = {
+                Text(
+                    "A link asked Guillotine to install “${link.id}” " +
+                        (link.version?.let { "version $it" } ?: "(latest version)") +
+                        " from azphalt.store. It will be downloaded and verified before anything is " +
+                        "installed — the link names the package, it doesn't vouch for it.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingLink = null
+                    downloadAndInstall(link)
+                }) { Text("Download") }
+            },
+            dismissButton = { TextButton(onClick = { pendingLink = null; onDismiss() }) { Text("Cancel") } },
+        )
+    }
+
+    busy?.let { message ->
         AlertDialog(
             onDismissRequest = {},
             confirmButton = {},
@@ -219,7 +272,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incomingPackage: Uri? = null, onDism
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text("Verifying…")
+                    Text(message)
                 }
             },
         )

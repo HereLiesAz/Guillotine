@@ -139,16 +139,29 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   (integrity, signature, and publisher continuity, exactly as if it had downloaded the bytes itself)
   before writing it into the app's extensions dir. No Azphalt Store app installed degrades to pointing
   the user at [azphalt.store](https://azphalt.store) instead of falling back to an in-app catalog.
+  **The web storefront now has a way in too:** Guillotine claims the `azphalt://install?id=…&version=…`
+  deep link, so the store page's **Install** button can hand a package *name* to whatever conforming host
+  is on the device (the scheme is host-agnostic by design — no package name is baked in, and Android shows
+  a chooser when several hosts are installed). [`AzpInstallLink`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpInstallLink.kt)
+  parses and *validates* the link — a web page must not be able to steer a URL path — and
+  [`AzphaltRegistry`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzphaltRegistry.kt)
+  fetches the named `.azp` from the flagship registry (download only; browsing stays delegated, and v1
+  deliberately ignores any caller-supplied repository URL). The user confirms before anything downloads,
+  and the bytes then run the same `AzpHandoffInstaller` gauntlet as every other route: a link names a
+  package, it does not vouch for one.
 - ✅ **Opens a `.azp` handed in from outside the app.** `spec/store-app.md` specifies only the Android
   app-to-app handoff and says outright that the web case is left unspecified — so the web storefront can
   tell a visitor to install a package "from any Azphalt-conforming host" but has no way to hand it to
   one. Guillotine closes the host half: it registers as an opener for `.azp` packages (VIEW on
-  `application/vnd.azphalt.package`, plus `.azp`-suffixed octet-stream/zip downloads, and a SEND
-  share-sheet route), so a package downloaded from azphalt.store in the browser, sitting in a file
-  manager, or shared from another app opens straight into the editor.
+  `application/vnd.azphalt.package` **and `application/x-azphalt`** — the type the registry actually
+  serves, verified live, and the one `spec/repository-api.md` § Download Package documents — plus
+  `.azp`-suffixed octet-stream/zip downloads, and a SEND share-sheet route), so a package downloaded from
+  azphalt.store in the browser, sitting in a file manager, or shared from another app opens straight into
+  the editor.
   [`AzpExternalOpen`](../app/src/main/java/com/hereliesaz/guillotine/azphalt/AzpExternalOpen.kt) carries
-  the URI from `MainActivity` to `AzphaltStoreScreen`, which runs the identical `AzpHandoffInstaller`
-  verification — bytes arriving with no trust anchor at all is precisely the case it was written for.
+  it — a file URI or an install link, one sealed `Incoming` rather than two parallel flows — from
+  `MainActivity` to `AzphaltStoreScreen`, which runs the identical `AzpHandoffInstaller` verification:
+  bytes arriving with no trust anchor at all is precisely the case it was written for.
 - ✅ **UI schema → native Compose (job #6).** An extension's declarative control panel
   (azphalt `spec/ui-schema.md`, `{ "controls": […] }` referenced by an asset's `ui`) is parsed by
   [`AzpUiSchema`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt) and rendered

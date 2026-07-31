@@ -2,6 +2,48 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Store: the `azphalt://install` deep link, and a MIME type that was simply wrong (2026-07-31)
+
+The entry below closed the *file* half of the web-storefront gap: a `.azp` downloaded from azphalt.store
+opens into Guillotine. It left the harder half open — the storefront's **Install · Free** button, which
+still dead-ends at "install it from any Azphalt-conforming host". A web page can't push bytes into an
+Android app, so it has to hand over a *name* and let the host fetch. That's now built, to this contract:
+
+    azphalt://install?id=<packageId>&version=<version>
+
+`version` optional (absent ⇒ resolve `latest` from `GET /packages/{id}`). Host-agnostic on purpose: any
+conforming host claims `azphalt://`, Android shows a chooser if several are installed, and no package
+name appears anywhere in the scheme. `AzpInstallLink` (`:shared`, pure JVM, unit-tested) parses and
+*validates* it — `id` and `version` go into a URL path, and a link arrives from a web page, so both are
+pattern-checked and `..` refused rather than merely escaped. `AzphaltRegistry` is the download half only;
+browsing stays delegated to the store app, per the 2026-07-28 entry below. `AzpExternalOpen` grew a sealed
+`Incoming` (file URI *or* link) rather than a second parallel flow, and both still converge on the one
+`AzpHandoffInstaller` path — a link names a package, it doesn't vouch for one. The user confirms before
+anything downloads.
+
+Also fixed a real bug found while in here: the manifest registered Guillotine as an opener for
+`application/vnd.azphalt.package`, but the registry serves **`application/x-azphalt`** (verified with
+`curl`; `spec/repository-api.md` § Download Package documents that type too). So a browser download never
+matched the explicit-type filter at all — it only ever matched via the `*.azp` octet-stream/zip fallback,
+and only when the browser happened to label it that way. Both types are now declared on the VIEW and SEND
+filters.
+
+**Still open, and still `HereLiesAz/azphalt`'s, not ours:**
+
+- **The storefront has to emit the link.** Nothing on azphalt.store produces an `azphalt://install` URL
+  yet, so this route is unreachable from the web until it does. A parallel session is speccing that side
+  against the same contract.
+- **Paid packages stop at the download.** The registry answers 401/402 for a paid package and Guillotine
+  says so honestly ("acquire it in the Store app") rather than pretending the network failed. Implementing
+  azphalt's entitlement tokens is deliberately out of scope here.
+- **v1 downloads from the flagship registry only.** A caller-supplied repository URL is ignored on
+  purpose — a deep link from a web page must not be able to point a host at an arbitrary download host.
+  Removable once the spec says how a host decides some *other* repository is trustworthy; the
+  `/.well-known/azphalt-repository.json` trust bootstrap is the obvious hook, but its `signingKeys` field
+  still isn't populated (see `AzphaltTrust.FLAGSHIP_SIGNING_KEY`).
+- **Untested on a device.** The parse and download halves are unit-tested and the app compiles, but no
+  device or emulator was available to follow a real link end to end.
+
 ## Store: one dialog instead of two, and a way in for the web storefront (2026-07-31)
 
 Three things, from a walkthrough of the no-store-app path.
@@ -41,7 +83,7 @@ into the project already on screen instead of a fresh instance.
 - Better, and the actual missing piece: **specify the web→host handoff** in `spec/store-app.md`. A
   claimable `https://azphalt.store/install/<pkg>` App Link, or an `azphalt://install?...` scheme, would
   let the storefront name and launch a conforming host instead of describing one. That is the spec work
-  its own text defers.
+  its own text defers. *(Host half built — see the entry above; the storefront still has to emit it.)*
 
 ## Azphalt Store: delegated acquisition replaces Guillotine's own storefront UI (2026-07-28)
 
