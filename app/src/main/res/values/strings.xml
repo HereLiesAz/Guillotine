@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Guillotine</string>
+    <!-- Shown as Guillotine's label in the "Open with" chooser for a .azp extension package. -->
+    <string name="azp_open_label">Install extension in Guillotine</string>
 </resources>
