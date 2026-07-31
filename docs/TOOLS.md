@@ -512,8 +512,8 @@ look, so two shots cut together consistently.
 | `target_clip_id` | string | required | — | The clip to adjust. |
 
 ### `apply_lut`
-Apply a `.cube` 3D LUT color grade to a clip **on-device** — the standard format exported by DaVinci
-Resolve / Photoshop. Grades in both preview and export.
+Apply a `.cube` 3D LUT color grade to a clip **on-device** — the standard format exported by
+colour-grading and photo-editing tools. Grades in both preview and export.
 
 | Argument | Type | Req. | Default | Meaning |
 | --- | --- | --- | --- | --- |

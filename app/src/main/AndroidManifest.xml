@@ -24,6 +24,18 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.freeform_window_management" android:required="false" />
 
+    <!-- Package-visibility (Android 11+) declaration so PackageManager.resolveActivity can see whatever
+         Azphalt Store app is installed (azphalt spec/store-app.md's delegated-acquisition handoff) —
+         without this, the custom action is invisible to us even when a store app implements it. -->
+    <queries>
+        <intent>
+            <action android:name="store.azphalt.action.BROWSE" />
+        </intent>
+        <!-- The Play Store app itself, so the "get the Azphalt Store app" fallback's market:// intent
+             resolves reliably instead of silently behaving as if Play isn't installed. -->
+        <package android:name="com.android.vending" />
+    </queries>
+
     <application
         android:name=".GuillotineApplication"
         android:allowBackup="true"
@@ -54,11 +66,59 @@
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|density"
+            android:launchMode="singleTask"
             android:resizeableActivity="true"
             android:theme="@style/Theme.Guillotine.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Opening a .azp extension package into Guillotine from outside the app. azphalt's
+                 spec/store-app.md specifies only the app-to-app BROWSE handoff and states outright that
+                 the web storefront case is left unspecified — so azphalt.store can tell a visitor to
+                 install a package "from any Azphalt-conforming host" but cannot hand it to one. These
+                 filters are the host half of that gap: a .azp downloaded in the browser, sitting in a
+                 file manager, or shared from another app can be opened straight into the editor, which
+                 re-verifies it (AzpHandoffInstaller) exactly as it does a store app's handoff.
+
+                 Declared on MainActivity rather than a trampoline because the install applies to the
+                 project currently on screen; singleTask above routes the open into the running editor. -->
+            <intent-filter android:label="@string/azp_open_label">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/vnd.azphalt.package" />
+            </intent-filter>
+
+            <!-- The type the spec says a package SHOULD carry is a hint, not a guarantee, and browser
+                 downloads routinely land as octet-stream (or zip — a .azp is a zip container). Match
+                 those only when the name actually ends in .azp, so Guillotine doesn't offer itself as an
+                 opener for every untyped download. pathPattern is only consulted when a host is present,
+                 hence the wildcard. -->
+            <intent-filter android:label="@string/azp_open_label">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/zip" />
+                <data android:pathPattern=".*\\.azp" />
+                <data android:pathPattern=".*\\..*\\.azp" />
+                <data android:pathPattern=".*\\..*\\..*\\.azp" />
+            </intent-filter>
+
+            <!-- Share-sheet route: "share this .azp with Guillotine" from a browser or files app. Only
+                 the explicit azphalt type here — an octet-stream SEND filter would put Guillotine in the
+                 share sheet for arbitrary files it can't do anything with. -->
+            <intent-filter android:label="@string/azp_open_label">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.azphalt.package" />
             </intent-filter>
         </activity>
     </application>

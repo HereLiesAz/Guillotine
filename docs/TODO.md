@@ -2,6 +2,190 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Store: one dialog instead of two, and a way in for the web storefront (2026-07-31)
+
+Three things, from a walkthrough of the no-store-app path.
+
+The overflow menu item read "Azphalt Store" where every neighbour is one word ("Project", "Settings",
+"Render"). Now just **Store**.
+
+The no-store-app case asked twice. First dialog: "Azphalt Store isn't installed" → *Get the app* /
+*Cancel*. Only if you took *Get the app*, bounced off Play without installing, and came back did a
+second dialog appear offering the web store. Two dialogs to surface three choices, with the web store
+reachable only by failing at Play first. Collapsed into one dialog carrying all three routes — *Get the
+app*, *Use the web store*, *Cancel* — stacked, since those labels won't sit in a row on a phone. The
+Play round-trip still re-checks on resume and dives straight into the store app if it's now installed;
+if it isn't, the same dialog comes back rather than a differently-worded second one.
+
+Third, and the real gap: taking the web store got you to azphalt.store, where **Install** says the
+package "is free — install it from any Azphalt-conforming host." A dead end that points back at the app
+you just left. That's not a Guillotine bug so much as a hole in the ecosystem —
+`spec/store-app.md` specifies the Android `store.azphalt.action.BROWSE` handoff and states plainly that
+the web equivalent is *deliberately unspecified* ("browser install semantics differ enough that it
+should be specified separately rather than assumed"). Nothing exists for the web store to call.
+
+Guillotine can only close the host half, and now does: it declares itself an opener for `.azp` packages
+(`AndroidManifest.xml` — VIEW on `application/vnd.azphalt.package`, plus `.azp`-suffixed
+octet-stream/zip so ordinary browser downloads match, plus a SEND share-sheet route), `MainActivity`
+routes the URI through the new `AzpExternalOpen`, and `AzphaltStoreScreen` installs it down the exact
+same `AzpHandoffInstaller` path a store app's handoff takes. So: download from azphalt.store, tap the
+download, it lands in Guillotine. `singleTask` is what makes an open that arrives mid-session install
+into the project already on screen instead of a fresh instance.
+
+**Still open, and belongs to `HereLiesAz/azphalt`, not here:**
+
+- The storefront's **Install** button has nothing to offer a native host. Simplest fix needing no spec
+  change: make it download the `.azp` — a plain download reaches the host through the filters above.
+  Serving it as `application/vnd.azphalt.package` would make the chooser exact rather than
+  extension-matched.
+- Better, and the actual missing piece: **specify the web→host handoff** in `spec/store-app.md`. A
+  claimable `https://azphalt.store/install/<pkg>` App Link, or an `azphalt://install?...` scheme, would
+  let the storefront name and launch a conforming host instead of describing one. That is the spec work
+  its own text defers.
+
+## Azphalt Store: delegated acquisition replaces Guillotine's own storefront UI (2026-07-28)
+
+Guillotine used to build and maintain its own browse-grid UI (`AzphaltStoreScreen`'s category chips,
+`PluginCard`s, "what's in the store" guide) on top of `AzphaltRepository` talking to the Repository API
+directly. That's the ecosystem's `spec/store-app.md` "delegated acquisition" contract's whole reason to
+exist: a host that doesn't want to build a storefront shouldn't have to, and azphalt already ships one —
+`apps/storefront-cmp` in the `HereLiesAz/azphalt` repo, the reference Azphalt Store app
+(`store.azphalt.storefront`), which implements exactly this handoff (`store.azphalt.action.BROWSE`).
+
+Rebuilt `AzphaltStoreScreen` to launch that intent for result instead of rendering a catalog: whichever
+Azphalt Store app is installed does the browsing, downloading, and its own check, then hands back a
+verified package as a content URI. Guillotine still re-verifies from scratch (`AzpHandoffInstaller`,
+replacing `AzphaltStoreState`) — the spec is explicit that a store app is a convenience, not a trust
+anchor, so integrity/signature/publisher-continuity checks all run again on the actual bytes received,
+same as before. No Azphalt Store app installed degrades to a prompt to get it (Play listing) or open
+the web storefront directly — never a fallback to Guillotine fetching and rendering its own catalog.
+
+Removed as dead weight once nothing else called them: `AzphaltRepository`'s catalog/download HTTP
+client (`fetchCatalog`, `download`, `RepoPackage` parsing) — only the pinned flagship signing key and
+web-store URL survive, moved to `AzphaltTrust`. The AI-model install flow (`AzpModelInstall`, `Sheets.kt`
+on both platforms) was already independent of this and is unaffected.
+
+## Beat-sync tools already implement the trending "auto beat zoom" effect — now has real test coverage
+
+Checked whether the "beat-synced auto zoom" effect real editors ask for (zooms that hit exactly on
+drops/kicks/snares) needed building from scratch. It doesn't —
+`McpTools.applyOnBeat()` (`apply_on_beat` tool) already does exactly this: keyframes a video clip's
+`SCALE` 1.0 → 1.12 → 1.0 around every beat/downbeat/onset of a chosen audio clip, on-device, via
+`BeatAnalyzer`'s real spectral-flux onset detection + autocorrelation tempo estimation. `flash`
+(brightness pulse) and `shake` (offset jitter) variants exist too — covering three of the most
+commonly requested "impact" edit effects already. Reachable today via the AI assistant (e.g. "add a
+beat zoom to this clip").
+
+The actual gap was **zero test coverage anywhere** for this: `BeatAnalyzer` (real DSP — FFT, spectral
+flux, autocorrelation tempo, phase-aligned beat grid, downbeat anchoring) had never been run against
+anything but real device audio. Added `BeatAnalyzerTest.kt`: builds a synthetic click track at a known
+BPM and confirms the analyzer recovers that tempo, finds the right beat count, spaces beats evenly at
+the beat period, and groups downbeats correctly — all pass, confirming the implementation is
+genuinely correct, not just plausible-looking.
+
+Not pursued: a true audio-reactive **shader** (as opposed to this existing keyframe-based approach)
+isn't possible in the current asset pipeline — ISF/GLSL shaders explicitly reject audio inputs
+(`GlslShader.kt`), so "beat-synced" effects have to stay in the keyframe/MCP-tool layer, which is
+exactly where this already lives.
+
+## Music licensing search (asked, not built): can't integrate TikTok/Instagram/YouTube "approved
+## music" catalogs the way a user might expect
+
+Researched whether Guillotine could let a user search and pull in "platform-approved" music (the
+kind TikTok/Instagram/YouTube let creators add in-app) for use in an edited/exported video. Verified:
+- TikTok's Commercial Music Library has a real developer API, but its own terms restrict Commercial
+  Sounds to use **within TikTok**, shared via TikTok's own sharing features — use outside TikTok needs
+  separate licensing directly from the rights holder.
+- Instagram's Audio API lets an app search Meta's catalog and attach an `audio_id` to a Reel, but only
+  as part of **publishing that Reel through Meta's own Content Publishing API** — it doesn't hand over
+  a usable audio file for an independently exported video.
+- YouTube Audio Library has genuinely free-to-use tracks but no official API — only unofficial
+  scrapers, fragile and against YouTube's ToS.
+- The one credible path for "licensed music baked into a video exported anywhere" is a real stock-music
+  API with an all-inclusive global license — Epidemic Sound's Partner API is the standout real example
+  — but it requires a partner relationship + API key on the user's end, not something buildable without
+  that access. Deferred pending a decision on whether to pursue that partnership.
+
+## Azphalt catalog sync check (2026-07-27, second pass) — the whole registry went from unsigned to uniformly signed
+
+The `HereLiesAz/azphalt` repo had a large burst of activity (catalog jumped ~10 → 133 packages, moved
+to serving content from a git-committed build instead of a runtime database). Checked whether
+Guillotine's client still holds up against the new state:
+
+- **Fixed: every install started requiring an "Install anyway" confirmation again.** The entire
+  flagship catalog is now signed with one Ed25519 key (verified independently: downloaded and
+  unzipped several live packages via `curl`, all carry the same `signature.json` `publicKey`).
+  `trustedKeys` was empty at all three production install call sites (`AzphaltStoreScreen.kt`,
+  `app`+`desktop` `Sheets.kt`'s model-install flow) — so the earlier "unsigned installs skip the
+  confirmation" fix (2026-07-24 audit) no longer helped, since nothing is unsigned anymore. Pinned the
+  key as `AzphaltRepository.FLAGSHIP_SIGNING_KEY` and wired it into all three call sites. The *proper*
+  channel for this is the registry's `/.well-known/azphalt-repository.json` `signingKeys` (the spec's
+  trust-bootstrap mechanism) — not currently populated with this key upstream (it's wired to a
+  different, entitlement-token key instead) — so this is pinned out-of-band until that's fixed; noted
+  in the constant's doc comment so it's easy to remove once discovery works.
+- **Not acted on — informational only:**
+  - The old teal-orange/cool-noir/Fold-Lab LUT submissions (merged into `azphalt` earlier this
+    session, `submissions/` → `publish-submissions.ts` pipeline) are **gone** from the new 133-package
+    catalog — the git-catalog migration replaced the old runtime-published content wholesale. If that
+    content should still be live, it needs re-submitting under whatever the new `registry/sources.json`
+    / `registry/local` pipeline is now, not the old `/api/publish` flow.
+  - New `kind: "pack"` (22 entries, e.g. `com.hereliesaz.azphalt.pack.3d-environment`) has no dedicated
+    Store category — falls through `AzphaltStoreState.categoryFor()`'s id-substring checks into the
+    generic `"layer-effects"` bucket. A "pack" carries no assets/types of its own (`types: []`,
+    `mediaDomains: []`) — it reads like a themed collection/description, not a standalone installable
+    effect, so `AzpPluginApplier` correctly reports it "not wired to a clip yet" rather than falsely
+    succeeding, but whether it deserves its own category chip or a different browse treatment
+    (curated collections?) is a product call, not a bug fix.
+  - New `maturity` field ("general"/"mature") on every summary — Guillotine doesn't read it at all.
+    Every live package is currently `"general"`, so no urgency, but there's no age-gate if that changes.
+  - Paid-package downloads now require a `Bearer` token per the spec (enforced live), and Guillotine's
+    `AzphaltRepository` sends no `Authorization` header at all. Zero packages are currently `paid`, so
+    this isn't live yet — but the day a real paid/private listing appears, its downloads will 401/402
+    until Bearer-token support is added.
+
+## Azphalt Store showed "Free" for paid packages, and generic descriptions (2026-07-27)
+
+Follow-up to the 2026-07-26 registry-base-URL fix. Once the store started hitting the *real*
+Repository API root, two client-side gaps in `AzphaltRepository.RepoPackage` surfaced (the previous,
+broken endpoint happened to serve a richer legacy shape that masked both):
+
+- The real registry sends pricing as a bare `priceStatus: "free"|"paid"` string with **no** dollar
+  amount at the browse-list level (per `spec/repository-api.md`) — never the `price: {amountCents,
+  currency}` object `RepoPackage` was built around. Since `isFree` only ever checked `price`, a
+  `priceStatus: "paid"` package with no `price` object read as free — the Store displayed "Free" on
+  a package the registry explicitly marked paid. Fixed: `isFree`/`priceLabel` now check `priceStatus`
+  first, falling back to the legacy `price` shape when present; a paid package with no known amount
+  now shows "Paid" rather than a wrong "Free" or a dollar figure it doesn't have.
+- Every catalog card also showed the generic "An azphalt plugin." placeholder instead of a real
+  description — this one was a genuine bug in the **registry itself**
+  (`HereLiesAz/azphalt#138`, drafted): `GET /packages`'s summary response was missing the flat
+  `description` field (present on detail, and required "always present" by spec) — a one-line
+  omission in `toSdkSummary()`, not anything wrong on Guillotine's side. No client-side change
+  needed here once that PR lands.
+
+## Azphalt Store install failed for every real package: wrong registry base URL (2026-07-26)
+
+Reported on a real device: every install ("Film Emulation LUTs", "Selfie Segmentation", confirmed
+live for others too) failed with `"invalid package: azp: manifest.json is missing"`. Root cause:
+`AzphaltRepository.DEFAULT_BASE_URL` was `https://www.azphalt.store/api` — the Next.js storefront's
+own **internal** route namespace, where only `/api/packages` happens to exist (the storefront's own
+catalog fetch). That's the trap: browsing worked, so the URL looked right, while
+`/api/packages/{id}/versions/{version}/download` and `/api/.well-known/...` fell through the SPA
+catch-all and returned the storefront's `index.html` — HTTP 200, so not even caught as a transport
+error — which `AzpPackage` then unzipped to nothing and correctly, but confusingly, rejected as a
+missing manifest. Verified live against the real registry: the actual Repository API root has **no**
+`/api` prefix — `GET /packages` there returns the spec's `{ "packages": [...] }` envelope, and
+`GET /packages/{id}/versions/{version}/download` returns a real `.azp`. Fixed by dropping `/api`
+from `DEFAULT_BASE_URL`. Also hardened `AzphaltRepository.download()` to reject a non-ZIP HTTP-200
+body itself (checking for the `PK` signature) with an error naming the actual problem — "did not
+return a package (got an HTML page instead) — check the registry base URL" — instead of letting a
+routing bug like this one surface as a confusing package-integrity error three layers downstream.
+
+This was found *after* the two fixes below (installs merely appeared to fail differently
+depending on where a user hit the bug — this one blocks it earlier, at download, for every
+package) — so with this fixed, the full loop (browse → install → apply) should now work end to end
+for the current live catalog.
+
 ## Azphalt Store install was a no-op past the download (2026-07-25)
 
 Follow-up to the 2026-07-24 audit's Azphalt Store trust-verification fix: install itself worked

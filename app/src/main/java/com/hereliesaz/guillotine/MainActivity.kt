@@ -1,7 +1,9 @@
 package com.hereliesaz.guillotine
 
 import android.content.Context
+import android.content.Intent
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -10,8 +12,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
+import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.hereliesaz.guillotine.ads.ConsentManager
+import com.hereliesaz.guillotine.azphalt.AzpExternalOpen
 import com.hereliesaz.guillotine.editor.AndroidEditorViewModel
 import com.hereliesaz.guillotine.ui.NleScreen
 import com.hereliesaz.guillotine.ui.theme.GuillotineTheme
@@ -65,11 +69,40 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /**
+     * A `.azp` opened into Guillotine from outside — the azphalt.store web storefront's download tapped
+     * in the browser, a file manager, another app's share sheet. The manifest's VIEW/SEND filters are
+     * what make Guillotine offerable as the "Azphalt-conforming host" the web store can only ask the
+     * user to find; this hands the URI to the editor's install flow, which verifies it exactly as it
+     * verifies a package the store app hands over. Anything else (the launcher intent) is ignored.
+     *
+     * `singleTask` means an open that arrives while the editor is already running lands in *this*
+     * instance via [onNewIntent], so the package installs into the project on screen.
+     */
+    private fun routeAzpOpen(intent: Intent?) {
+        val uri: Uri? = when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            else -> null
+        }
+        uri?.let { AzpExternalOpen.offer(it) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        routeAzpOpen(intent)
+    }
+
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // Only on a cold/new start — a configuration change re-delivers the same intent, and
+        // re-offering it would re-run an install the user already dealt with.
+        if (savedInstanceState == null) routeAzpOpen(intent)
 
         // Ads exist only in the Play distribution. Gather UMP consent (AdMob Privacy & messaging),
         // then start ads once allowed. The github build skips all of this (BuildConfig.ADS_ENABLED).

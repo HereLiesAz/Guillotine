@@ -38,7 +38,7 @@ GitHub Releases and offer to download and run the newer installer for your OS.
 
 ## Features
 
-- **Multi-track timeline (Vegas-style layers):** import video/audio/images (SAF); split, drag
+- **Multi-track timeline with compositing layers:** import video/audio/images (SAF); split, drag
   across tracks; group/ungroup (grouped clips drag together). **Long-press a clip edge, then drag,
   to trim its in/out point** — a split clip re-extends back into its source the same way; its linked
   audio trims with it. Edge + grid snapping when placing clips, overlapping into a crossfade. Pinch

@@ -432,7 +432,7 @@ open class EditorViewModel {
     }
 
     /**
-     * Scissors / blade — split at the playhead, Sony-Vegas style, in one undo step:
+     * Scissors / blade — split at the playhead in one undo step:
      *  - With a selection, split the selected clip(s). If a selected clip is **grouped**, split every
      *    member of its group and divide the group in two — the left pieces keep the group, the right
      *    pieces become a new group.
@@ -931,7 +931,7 @@ open class EditorViewModel {
         val selected = document.clips.filter { it.startTimeMs < hi && it.endTimeMs > lo && it.trackId in trackIds }
         _uiState.update { st ->
             // Selecting a range of clips also defines the playback / loop region over the selected
-            // clips' extent (Vegas-style), so the user can immediately loop just that region.
+            // clips' extent, so the user can immediately loop just that region.
             val region = if (selected.isNotEmpty()) {
                 selected.minOf { it.startTimeMs }..selected.maxOf { it.endTimeMs }
             } else {

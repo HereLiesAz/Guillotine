@@ -109,5 +109,4 @@ class AzpManifestSpecTest {
         assertTrue(mcpM.isMcp)
         assertTrue(mcpM.mcp != null)
     }
-    // Store-level host scoping (over the remote catalog) is covered in AzphaltRepositoryTest.
 }

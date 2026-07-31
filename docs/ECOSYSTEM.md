@@ -1,9 +1,9 @@
 # Guillotine Extensibility & Ecosystem
 
 Guillotine is built to take **standard, already-existing formats** for presets, filters, effects, and
-plugins — not a bespoke Guillotine-only format nobody else supports. If you've made a LUT for DaVinci
-Resolve, a transition for [gl-transitions](https://gl-transitions.com/), or an MCP tool for Claude,
-the goal is that it drops straight into Guillotine.
+plugins — not a bespoke Guillotine-only format nobody else supports. If you've already made a LUT in a
+colour-grading tool, a transition for [gl-transitions](https://gl-transitions.com/), or an MCP tool
+for Claude, the goal is that it drops straight into Guillotine.
 
 The invariant holds throughout: **your video and audio never leave the device.** Extensions run
 on-device (GL shaders, LUTs, native filters) or, for the MCP plugin protocol, exchange only *text*
@@ -19,8 +19,8 @@ and the MCP tools that apply them (`apply_lut`, `apply_shader` / `list_shader_pa
 
 ## 1. LUTs — `.cube` 3D color grades ✅
 
-The universal color-grade interchange format, exported by DaVinci Resolve, Photoshop/Camera Raw, and
-shared in countless free LUT packs.
+The universal color-grade interchange format, exported by every major colour-grading and raw photo
+editor and shared in countless free LUT packs.
 
 - **Drop-in:** clip → **Filters → LUT → Pick .cube**. Any standard 3D `.cube` (sizes 2–129,
   `DOMAIN_MIN/MAX` respected) grades the clip in **both live preview and export** — WYSIWYG.
@@ -130,15 +130,25 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   models the latest `spec/extension-manifest.md`: the `app` (companion-app) and `mcp` (MCP-server)
   package kinds alongside `asset`/`code`/`mixed`, plus `targetApps` (host scoping) and a `preview`
   store-card still/clip.
-- ✅ **Browses the hosted storefront over the Repository API.** The **Azphalt Store** is a client of a
-  conforming registry (azphalt `spec/repository-api.md`), defaulting to the flagship at
-  [azphalt.store](https://azphalt.store) — the catalog lives at the registry, not embedded in the app.
-  [`AzphaltRepository`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzphaltRepository.kt)
-  fetches `GET /packages` (scoped to this host by `targetApps`), and installing a chosen package
-  downloads its `.azp` from `/packages/{id}/versions/{version}/download`, **verifies it on-device**
-  through [`AzpPackage`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpPackage.kt), and
-  only then writes it into the app's extensions dir. Discovery is remote; trust + install stay
-  on-device.
+- ✅ **Delegates browsing to the Azphalt Store app (delegated acquisition).** Guillotine doesn't build or
+  maintain its own storefront UI — [`AzphaltStoreScreen`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzphaltStoreScreen.kt)
+  launches whichever Azphalt Store app is installed over the `store.azphalt.action.BROWSE` handoff
+  (azphalt `spec/store-app.md`) and gets back a package the store app already fetched and checked. A
+  store app is a convenience, never a trust anchor, so Guillotine re-verifies every byte itself through
+  [`AzpHandoffInstaller`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpHandoffInstaller.kt)
+  (integrity, signature, and publisher continuity, exactly as if it had downloaded the bytes itself)
+  before writing it into the app's extensions dir. No Azphalt Store app installed degrades to pointing
+  the user at [azphalt.store](https://azphalt.store) instead of falling back to an in-app catalog.
+- ✅ **Opens a `.azp` handed in from outside the app.** `spec/store-app.md` specifies only the Android
+  app-to-app handoff and says outright that the web case is left unspecified — so the web storefront can
+  tell a visitor to install a package "from any Azphalt-conforming host" but has no way to hand it to
+  one. Guillotine closes the host half: it registers as an opener for `.azp` packages (VIEW on
+  `application/vnd.azphalt.package`, plus `.azp`-suffixed octet-stream/zip downloads, and a SEND
+  share-sheet route), so a package downloaded from azphalt.store in the browser, sitting in a file
+  manager, or shared from another app opens straight into the editor.
+  [`AzpExternalOpen`](../app/src/main/java/com/hereliesaz/guillotine/azphalt/AzpExternalOpen.kt) carries
+  the URI from `MainActivity` to `AzphaltStoreScreen`, which runs the identical `AzpHandoffInstaller`
+  verification — bytes arriving with no trust anchor at all is precisely the case it was written for.
 - ✅ **UI schema → native Compose (job #6).** An extension's declarative control panel
   (azphalt `spec/ui-schema.md`, `{ "controls": […] }` referenced by an asset's `ui`) is parsed by
   [`AzpUiSchema`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt) and rendered

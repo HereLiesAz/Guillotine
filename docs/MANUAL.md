@@ -142,7 +142,7 @@ you **size and place text/caption clips**.
 
 ## 4. The timeline
 
-The timeline is multi-track and Vegas-style: video tracks stack into compositing layers
+The timeline is multi-track: video tracks stack into compositing layers
 (higher track = on top), audio tracks sit below. Text and image clips live on video tracks as
 overlays. Clips render **on-device previews** — thumbnails for video/image, stereo waveforms
 for audio.
@@ -333,13 +333,13 @@ rearrange them by hand.
 ## 6. Advanced looks
 
 Guillotine takes **standard, already-existing formats** for grades, effects, and filters —
-not a bespoke format. A LUT you made for DaVinci Resolve or an ISF shader from your VJ kit
-drops straight in. All of these run **on-device** in both preview and export. This section
+not a bespoke format. A LUT you already made for a colour-grading tool, or an ISF shader from
+your VJ kit, drops straight in. All of these run **on-device** in both preview and export. This section
 summarizes them; the [Ecosystem guide](ECOSYSTEM.md) is the deep dive.
 
 | Look | How to apply | Notes |
 |------|--------------|-------|
-| **LUT** (`.cube` 3D grade) | Filters popup → **LUT → Pick .cube** | Any standard 3D `.cube` (Resolve/Adobe and free packs). WYSIWYG in preview and export; 1D LUTs are rejected. |
+| **LUT** (`.cube` 3D grade) | Filters popup → **LUT → Pick .cube** | Any standard 3D `.cube` (grading-tool exports and free packs). WYSIWYG in preview and export; 1D LUTs are rejected. |
 | **GLSL / ISF shader** | Filters popup → **Shader → Pick .isf/.fs** | Single-input ISF filters or a raw `.fs`/`.glsl` fragment, run on every frame. A shader's FLOAT inputs become **adjustable sliders** right in the popup. |
 | **FFmpeg / Frei0r filters** | Via the AI assistant (`apply_ffmpeg_filter`) | Bakes a standard `-vf` filtergraph (e.g. `hue=s=0, gblur=sigma=2`, or `frei0r=cartoon`) onto the clip. Advanced: requires you to supply an `ffmpeg` binary; bakes to a new clip. |
 | **Clip-to-clip transitions** | Overlap two clips, or the AI assistant (`apply_transition`) | Overlapping clips crossfade; the assistant can bake ~50 `xfade`-style transitions (fade, wipes, slides, circle open/close, dissolve, pixelize, radial, and more). |
