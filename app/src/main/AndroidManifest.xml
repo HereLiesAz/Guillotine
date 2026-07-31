@@ -91,6 +91,29 @@
                 <data android:scheme="content" />
                 <data android:scheme="file" />
                 <data android:mimeType="application/vnd.azphalt.package" />
+                <!-- What the flagship registry actually serves: a live download from azphalt.store comes
+                     back as application/x-azphalt (verified with curl), and spec/repository-api.md
+                     § Download Package documents that type too. Without it a browser download only
+                     matched via the octet-stream/zip + *.azp fallback below, and only if the browser
+                     happened to label it that way. Both types are declared because which one is
+                     normative is still an open question upstream; matching either is harmless. -->
+                <data android:mimeType="application/x-azphalt" />
+            </intent-filter>
+
+            <!-- The other half of the web-storefront gap: an azphalt://install?id=…&version=… deep link.
+                 A web page cannot push a .azp into an Android app, so it names the package instead and
+                 leaves the fetching to whichever conforming host claims the scheme — MainActivity parses
+                 the link and AzphaltStoreScreen downloads it from the registry, then runs the identical
+                 verification path a file open or a store-app handoff runs.
+
+                 BROWSABLE because the link is followed from a browser. No package name appears anywhere
+                 in the scheme by design: the contract is host-agnostic, so if several conforming hosts
+                 are installed Android shows a chooser rather than one of them owning azphalt://. -->
+            <intent-filter android:label="@string/azp_open_label">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="azphalt" android:host="install" />
             </intent-filter>
 
             <!-- The type the spec says a package SHOULD carry is a hint, not a guarantee, and browser
@@ -114,11 +137,13 @@
 
             <!-- Share-sheet route: "share this .azp with Guillotine" from a browser or files app. Only
                  the explicit azphalt type here — an octet-stream SEND filter would put Guillotine in the
-                 share sheet for arbitrary files it can't do anything with. -->
+                 share sheet for arbitrary files it can't do anything with. Both azphalt types, for the
+                 same reason as the VIEW filter above: the registry serves application/x-azphalt. -->
             <intent-filter android:label="@string/azp_open_label">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/vnd.azphalt.package" />
+                <data android:mimeType="application/x-azphalt" />
             </intent-filter>
         </activity>
     </application>

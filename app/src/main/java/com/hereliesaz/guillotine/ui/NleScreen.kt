@@ -811,13 +811,14 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onDismiss = { showAzphaltStore = false }
         )
     }
-    // A .azp opened into Guillotine from outside (web-store download, file manager, share sheet) —
-    // same verify-and-apply flow, just skipping the browse step since the package is already in hand.
+    // A package handed to Guillotine from outside — a .azp opened from a web-store download, a file
+    // manager or a share sheet, or an azphalt://install deep link naming one to fetch. Same
+    // verify-and-apply flow either way, just skipping the browse step since the package is already named.
     val incomingAzp by com.hereliesaz.guillotine.azphalt.AzpExternalOpen.pending.collectAsState()
-    incomingAzp?.let { uri ->
+    incomingAzp?.let { pending ->
         AzphaltStoreScreen(
             vm = vm,
-            incomingPackage = uri,
+            incoming = pending,
             onDismiss = { com.hereliesaz.guillotine.azphalt.AzpExternalOpen.consume() },
         )
     }
