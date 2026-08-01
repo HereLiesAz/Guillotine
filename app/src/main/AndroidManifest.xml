@@ -94,10 +94,11 @@
                 <!-- application/x-azphalt is now settled upstream as a DEPRECATED ALIAS
                      (spec/package-format.md § Media type): vnd.azphalt.package above is the only
                      normative type, a server MUST NOT send x-azphalt, but a client SHOULD accept it
-                     because servers predating that section emit it — the flagship registry still does,
-                     verified with curl. So this stays: dropping it would break every download from a
-                     registry that hasn't caught up, and matching it costs nothing. Not a validation
-                     signal either way — the spec is explicit that a receiver MUST NOT validate on the
+                     because servers predating that section emit it. The flagship registry has since
+                     switched — a download from azphalt.store now returns vnd.azphalt.package (checked
+                     2026-08-01) — but this filter stays, because "servers that haven't caught up" is
+                     precisely who the alias is for, and matching it costs nothing. Not a validation
+                     signal either way: the spec is explicit that a receiver MUST NOT validate on the
                      media type; that's what the manifest digests and the signature are for. -->
                 <data android:mimeType="application/x-azphalt" />
             </intent-filter>

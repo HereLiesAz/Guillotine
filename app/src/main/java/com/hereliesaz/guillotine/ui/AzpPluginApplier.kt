@@ -1,6 +1,7 @@
 package com.hereliesaz.guillotine.ui
 
 import android.content.Context
+import com.hereliesaz.guillotine.azphalt.AzpInstallSurfaces
 import com.hereliesaz.guillotine.azphalt.AzpInstalledUi
 import com.hereliesaz.guillotine.azphalt.AzpPackage
 import com.hereliesaz.guillotine.editor.EditorViewModel
@@ -20,7 +21,8 @@ import java.io.File
 object AzpPluginApplier {
 
     sealed class Outcome {
-        object Applied : Outcome()
+        /** [surface] is where the applied thing now lives, so a caller can say so without re-deriving it. */
+        data class Applied(val surface: AzpInstallSurfaces.Surface) : Outcome()
         /** Verified and installed, but this package's content has no apply path for this clip (yet). */
         data class Unsupported(val message: String) : Outcome()
         /** [pluginId] isn't installed, the clip doesn't exist, or applying it failed outright. */
@@ -37,7 +39,7 @@ object AzpPluginApplier {
             val motion = KineticTypographyPicker.listInstalled(extensionsDir).find { it.packageId == pluginId }
             if (motion != null) {
                 KineticTypographyPicker.apply(vm, motion, clipId)
-                return Outcome.Applied
+                return Outcome.Applied(AzpInstallSurfaces.Surface.CAPTION_MOTION)
             }
         }
 
@@ -45,7 +47,7 @@ object AzpPluginApplier {
         val panel = AzpInstalledUi.list(extensionsDir, context.packageName).find { it.packageId == pluginId }
         if (panel != null) {
             return when (val r = AzpAssetApplier.apply(context, vm, clipId, panel)) {
-                is AzpAssetApplier.Result.Applied -> Outcome.Applied
+                is AzpAssetApplier.Result.Applied -> Outcome.Applied(AzpInstallSurfaces.Surface.CLIP_EXTENSIONS)
                 is AzpAssetApplier.Result.Unsupported -> Outcome.Unsupported(r.message)
                 is AzpAssetApplier.Result.Failure -> Outcome.Failure(r.message)
             }

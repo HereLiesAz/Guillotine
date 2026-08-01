@@ -149,11 +149,13 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   confirms before anything downloads, and the bytes then run the same `AzpHandoffInstaller` gauntlet as
   every other route: a link names a package, it does not vouch for one.
   This route was built against a contract that has since been **published as `spec/web-handoff.md`**
-  (status: Proposed), and Guillotine meets its host obligations: parse defensively, verify integrity and
-  signature, enforce publisher continuity, **refuse a package whose non-empty `targetApps` excludes this
-  host**, and ask before installing. The spec's optional `repo` parameter is ignored — explicitly
-  conforming behaviour, since a host MUST NOT fetch from a repository it doesn't already trust and how a
-  host *starts* trusting one is still an open question.
+  (status: Proposed). Guillotine meets its host obligations with one gap: it parses defensively, verifies
+  integrity and signature, enforces publisher continuity, **refuses a package whose non-empty `targetApps`
+  excludes this host**, and asks before installing — but obligation 5 also covers `compat`, and
+  Guillotine parses that field without evaluating it, so a package declaring a host API version this build
+  doesn't satisfy still installs. The spec's optional `repo` parameter is ignored, which *is* explicitly
+  conforming: a host MUST NOT fetch from a repository it doesn't already trust, and how a host *starts*
+  trusting one is still an open question upstream.
 - ✅ **Opens a `.azp` handed in from outside the app.** `spec/store-app.md` specifies only the Android
   app-to-app handoff and says outright that the web case is left unspecified — so the web storefront can
   tell a visitor to install a package "from any Azphalt-conforming host" but has no way to hand it to
@@ -170,15 +172,16 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   bytes arriving with no trust anchor at all is precisely the case it was written for.
 - ✅ **Says what was installed, and where to find it.** An install that succeeds and then can't be located
   is, from the user's side, indistinguishable from one that failed — and the destination is *different per
-  package*: a shader lands in the clip tools panel's **Extensions** section, a caption animation under
+  package*: a shader gets its own section in the **Clip Properties** panel (named after the package — note
+  `AzpAssetContribution`'s "Extensions" `title` is never rendered), a caption animation appears under
   **Kinetic type**, an on-device model needs Settings → Advanced → Install AI model to actually be wired
   in, and a `code`/`app`/`mcp` package has no surface in this build at all. So the answer is derived from
   the package rather than asserted: [`AzpInstallSurfaces`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpInstallSurfaces.kt)
   maps a manifest's payload to the surfaces it actually reaches, and the post-install dialog names them
-  (replacing a Toast that vanished before it could be read). azphalt's `spec/web-handoff.md` § Open
-  questions flags this as unsolved ecosystem-side — "state reporting covers the statistic but not *show
-  the user what they just installed*" — and it's a host's job, since nothing outside the app knows what
-  its panels are called.
+  (replacing a Toast that vanished before it could be read). Nothing in the ecosystem can answer this for
+  a host — `spec/web-handoff.md` § Open questions is about the *storefront* having no return path, and
+  observes in passing that state reporting "covers the statistic but not *show the user what they just
+  installed*" — because only the app knows what its own panels are called.
 - ✅ **UI schema → native Compose (job #6).** An extension's declarative control panel
   (azphalt `spec/ui-schema.md`, `{ "controls": […] }` referenced by an asset's `ui`) is parsed by
   [`AzpUiSchema`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt) and rendered

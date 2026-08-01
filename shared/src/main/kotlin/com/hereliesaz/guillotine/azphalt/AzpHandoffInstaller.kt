@@ -38,8 +38,14 @@ object AzpHandoffInstaller {
         /**
          * The package declares a non-empty `targetApps` that doesn't include this host — it was built for
          * a different editor. Refused outright: azphalt `spec/web-handoff.md` § Host obligations (5) makes
-         * this a MUST, and there is no "install anyway" because the package would be inert here anyway
-         * ([AzpInstalledUi.list] scopes by the same field, so it would install and then be invisible).
+         * this a MUST, and there is deliberately no "install anyway" override.
+         *
+         * Note this is a real behaviour change, not just a tightening of something already inert. Asset
+         * packages were already invisible when scoped elsewhere ([AzpInstalledUi.list] filters on the same
+         * field), but **motion packages were not**: [com.hereliesaz.guillotine.ui.KineticTypographyPicker]
+         * enumerates every `.azp` on disk with no host filter, so a wrong-host caption animation used to
+         * install and work. It no longer installs. That's what the spec asks for — a package that names
+         * other hosts is not offering itself to this one — but it does take away something that worked.
          */
         data class WrongHost(val packageId: String, val name: String, val targetApps: List<String>) : InstallResult()
     }
@@ -51,7 +57,9 @@ object AzpHandoffInstaller {
      * in the package. Blocks on disk IO — call off the main thread.
      *
      * [hostAppId] is this host's own id, checked against the package's `targetApps` (see
-     * [InstallResult.WrongHost]). Blank skips the check, for callers that genuinely have no host identity.
+     * [InstallResult.WrongHost]). It has **no default**: the check it drives is a spec MUST, and a
+     * defaulted parameter is a check a future caller skips by saying nothing. Passing blank still means
+     * "no host identity, don't scope", but that has to be chosen out loud.
      */
     fun install(
         bytes: ByteArray,
@@ -60,7 +68,7 @@ object AzpHandoffInstaller {
         pins: AzpPublisherPins? = null,
         allowUntrusted: Boolean = false,
         allowPublisherChange: Boolean = false,
-        hostAppId: String = "",
+        hostAppId: String,
     ): InstallResult {
         val trust = AzpPackage.verifyTrust(bytes, trustedKeys)
         if (!trust.ok) {

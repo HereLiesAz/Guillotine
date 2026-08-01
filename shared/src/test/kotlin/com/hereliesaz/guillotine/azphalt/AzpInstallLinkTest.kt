@@ -110,11 +110,13 @@ class AzpInstallLinkTest {
         assertNull(AzpInstallLink.parse("azphalt://install?id=_under"))
     }
 
-    @Test fun repoParameterIsIgnoredNotHonoured() {
-        // spec/web-handoff.md § Which repository: a host MUST NOT fetch from a repo it doesn't already
-        // trust, and "ignoring `repo` entirely is conforming". So a link carrying one still parses — the
-        // package is named, the link is valid — and the repo simply isn't part of what comes back, leaving
-        // AzphaltRegistry to resolve against the configured registry.
+    @Test fun linkCarryingRepoStillParsesAndDropsIt() {
+        // Named for what it can actually observe: AzpInstallLink has no `repo` field, so "honoured" isn't
+        // a state this could catch — honouring it would be a compile change, not a failing assertion.
+        // What this pins is that a link carrying the spec's optional `repo` is still a *valid* link and
+        // the parameter falls away, which is what "ignoring `repo` entirely is conforming"
+        // (spec/web-handoff.md § Which repository) requires of us. The host MUST NOT fetch from an
+        // untrusted repository, and AzphaltRegistry's single hardcoded base URL is what enforces that.
         assertEquals(
             AzpInstallLink("com.example.pkg", "1.0.0"),
             AzpInstallLink.parse("azphalt://install?id=com.example.pkg&version=1.0.0&repo=https%3A%2F%2Fevil.example"),
