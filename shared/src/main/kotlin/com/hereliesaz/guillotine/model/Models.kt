@@ -93,7 +93,25 @@ enum class EditAction { KEEP, REMOVE }
 enum class AspectRatio { RATIO_16_9, RATIO_9_16, RATIO_1_1, ORIGINAL }
 
 @Serializable
-enum class Quality { ORIGINAL, UHD_4K, FHD_1080P, HD_720P }
+enum class Quality {
+    ORIGINAL, UHD_4K, FHD_1080P, HD_720P;
+
+    /**
+     * Output height in pixels, or null for [ORIGINAL] (keep the source's own size).
+     *
+     * This existed as a setting the user could change and the exporter never read — `Transformer` was
+     * built with a video MIME type and nothing else, so picking 720p produced a full-resolution file.
+     * Width is deliberately not fixed: the export applies this through a height-only presentation so the
+     * frame's aspect ratio (already letterboxed by [GlobalSettings.aspectRatio]) is preserved.
+     */
+    val targetHeight: Int?
+        get() = when (this) {
+            ORIGINAL -> null
+            UHD_4K -> 2160
+            FHD_1080P -> 1080
+            HD_720P -> 720
+        }
+}
 
 /** Imported source media. [durationMs] is probed on import (5s default for images). */
 @Serializable

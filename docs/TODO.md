@@ -527,9 +527,14 @@ all 12 keyframe properties, background removal, audio effects, multi-track compo
 crossfade are at full parity. The following gaps remain:
 - **Caption text size differs:** preview uses `14.sp`; export uses `AbsoluteSizeSpan(64)`. The
   relative proportions won't match unless compensated.
-- **Quality/FPS settings not wired into export:** `GlobalSettings.quality` and `.fps` exist in the
-  model but `Transformer.Builder` never calls `setVideoFrameRate()` or any resolution/bitrate
-  configuration — they have no effect on the output.
+- ~~**Quality/FPS settings not wired into export**~~ — **Done (2026-08-01):** both are applied in
+  `VideoEffects.geometry()`, which is where the other project-level settings (crop, aspect ratio) already
+  land. `quality` becomes `Presentation.createForHeight(Quality.targetHeight)`, applied *after* the
+  aspect-ratio presentation so it resizes the letterboxed frame and the ratio survives; `fps` becomes a
+  `FrameDropEffect`. **Caveat worth keeping:** frame drop can only *cap* the rate — Media3 discards
+  frames and cannot synthesise them — so selecting 60 fps on 30 fps source is a no-op, not interpolation.
+  Bitrate is still unconfigured (`DefaultEncoderFactory` defaults apply); that would need
+  `VideoEncoderSettings` and a target worth defending, so it is deliberately not guessed at here.
 - **AI edit segments play through in preview:** removed ranges are correctly cut from the export
   (via `TimelineMath.keptRanges`) but play normally in preview (`syncPosition` does a simple linear
   seek). May be deliberate (show full source with proposed cuts highlighted).
