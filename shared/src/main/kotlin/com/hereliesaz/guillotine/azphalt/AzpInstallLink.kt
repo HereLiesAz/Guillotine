@@ -19,6 +19,13 @@ import java.net.URI
  * strength of one still goes through [AzpHandoffInstaller]'s integrity, signature and publisher-continuity
  * checks, exactly as the spec's "a lying store app gains nothing" requires of the app-to-app route.
  *
+ * The spec's optional **`repo`** parameter is deliberately **not** parsed. `web-handoff.md` § Which
+ * repository is explicit that a host MUST NOT fetch from a repository it does not already trust and that
+ * "ignoring `repo` entirely is conforming" — so it falls through the same path as any unknown parameter
+ * ("Unknown parameters MUST be ignored") and [AzphaltRegistry] resolves against the configured registry.
+ * Honouring it needs a way for a host to decide to *start* trusting a repository, which the spec lists as
+ * an open question; until that exists, a `repo` a web page chose is exactly the input not to follow.
+ *
  * Pure JVM ([java.net.URI], never `android.net.Uri`) so `:shared` stays platform-agnostic and this parses
  * under a plain JVM unit test.
  */

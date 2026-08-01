@@ -2,6 +2,53 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Store: conform to the published web-handoff spec, and say where an install went (2026-08-01)
+
+Two things, from catching up with azphalt upstream.
+
+**The deep link's contract is now a real spec.** `spec/web-handoff.md` landed (status: Proposed) and the
+`azphalt://install?id=&version=` shape Guillotine already implements matches it. Three deltas needed
+closing:
+
+- **`targetApps` is now enforced.** § Host obligations (5) makes it a MUST: a host absent from a
+  *non-empty* `targetApps` must refuse and say so. Guillotine parsed the field but never checked it at
+  install — which barely mattered while the store app was the only route, since it filters on the `app`
+  browse extra, but a deep link names a package with nothing in between. `AzpHandoffInstaller` now returns
+  `WrongHost` (naming the hosts it *is* for), and refuses **before** the trust prompt, so the user is
+  never asked to vouch for a publisher on something that was never going to run here. Note the old
+  behaviour wasn't merely lax: the package installed and then vanished, because `AzpInstalledUi.list`
+  scopes by the same field.
+- **`repo` stays ignored, now on purpose.** § Which repository says a host MUST NOT fetch from a
+  repository it doesn't already trust and that ignoring the parameter entirely is conforming. Documented
+  and tested as a deliberate choice rather than an omission.
+- **The media type is settled.** `spec/package-format.md` § Media type now makes
+  `application/vnd.azphalt.package` the only normative type and `application/x-azphalt` a *deprecated
+  alias* — a server MUST NOT send it, a client SHOULD accept it. The flagship registry still sends it, so
+  both filters stay; the manifest comment no longer claims this is an open question.
+
+**And the thing the spec explicitly doesn't cover: telling the user what they just got.** § Open questions
+records it — state reporting "covers the statistic but not *show the user what they just installed*". It
+can't be solved anywhere but a host, since nothing outside the app knows what its panels are called.
+
+Guillotine used to answer with a Toast that said "select a clip, then reopen the store", which was both
+fleeting and *wrong for most package kinds*. The destination depends entirely on the payload: a shader or
+LUT appears under **Extensions** in the clip tools panel; a `motion` package under **Kinetic type** on a
+selected caption; an on-device model isn't wired in by this path at all and needs Settings → Advanced →
+Install AI model; an unrecognised asset type is listed but has no render path; and a `code`/`app`/`mcp`/
+`pack` package has no surface in this build. `AzpInstallSurfaces` (`:shared`, unit-tested) derives that
+from the manifest, and a persistent dialog states what happened, where it lives, and whether its signature
+actually verified.
+
+**Still open:**
+
+- **State reporting isn't implemented.** `spec/state-reporting.md` (on-device per-item states to a store
+  app, aggregate counts to a repository) has no client here yet. `AzpInstallSurfaces` answers the UI half
+  of the same question but reports nothing to anyone.
+- **The AI-model path still doesn't converge.** A model `.azp` installed through the store screen lands on
+  disk without being routed to a settings slot; the dialog says so honestly rather than papering over it,
+  but the two install paths should probably become one.
+- **Still no device test of the deep link**, and azphalt.store still doesn't emit `azphalt://install`.
+
 ## Store: the `azphalt://install` deep link, and a MIME type that was simply wrong (2026-07-31)
 
 The entry below closed the *file* half of the web-storefront gap: a `.azp` downloaded from azphalt.store

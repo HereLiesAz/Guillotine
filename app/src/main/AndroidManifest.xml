@@ -91,12 +91,14 @@
                 <data android:scheme="content" />
                 <data android:scheme="file" />
                 <data android:mimeType="application/vnd.azphalt.package" />
-                <!-- What the flagship registry actually serves: a live download from azphalt.store comes
-                     back as application/x-azphalt (verified with curl), and spec/repository-api.md
-                     § Download Package documents that type too. Without it a browser download only
-                     matched via the octet-stream/zip + *.azp fallback below, and only if the browser
-                     happened to label it that way. Both types are declared because which one is
-                     normative is still an open question upstream; matching either is harmless. -->
+                <!-- application/x-azphalt is now settled upstream as a DEPRECATED ALIAS
+                     (spec/package-format.md § Media type): vnd.azphalt.package above is the only
+                     normative type, a server MUST NOT send x-azphalt, but a client SHOULD accept it
+                     because servers predating that section emit it — the flagship registry still does,
+                     verified with curl. So this stays: dropping it would break every download from a
+                     registry that hasn't caught up, and matching it costs nothing. Not a validation
+                     signal either way — the spec is explicit that a receiver MUST NOT validate on the
+                     media type; that's what the manifest digests and the signature are for. -->
                 <data android:mimeType="application/x-azphalt" />
             </intent-filter>
 
@@ -138,7 +140,8 @@
             <!-- Share-sheet route: "share this .azp with Guillotine" from a browser or files app. Only
                  the explicit azphalt type here — an octet-stream SEND filter would put Guillotine in the
                  share sheet for arbitrary files it can't do anything with. Both azphalt types, for the
-                 same reason as the VIEW filter above: the registry serves application/x-azphalt. -->
+                 same reason as the VIEW filter above: x-azphalt is a deprecated alias that servers
+                 predating spec/package-format.md § Media type still emit. -->
             <intent-filter android:label="@string/azp_open_label">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

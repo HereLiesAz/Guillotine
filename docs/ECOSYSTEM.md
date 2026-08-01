@@ -145,23 +145,40 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   a chooser when several hosts are installed). [`AzpInstallLink`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpInstallLink.kt)
   parses and *validates* the link — a web page must not be able to steer a URL path — and
   [`AzphaltRegistry`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzphaltRegistry.kt)
-  fetches the named `.azp` from the flagship registry (download only; browsing stays delegated, and v1
-  deliberately ignores any caller-supplied repository URL). The user confirms before anything downloads,
-  and the bytes then run the same `AzpHandoffInstaller` gauntlet as every other route: a link names a
-  package, it does not vouch for one.
+  fetches the named `.azp` from the flagship registry (download only; browsing stays delegated). The user
+  confirms before anything downloads, and the bytes then run the same `AzpHandoffInstaller` gauntlet as
+  every other route: a link names a package, it does not vouch for one.
+  This route was built against a contract that has since been **published as `spec/web-handoff.md`**
+  (status: Proposed), and Guillotine meets its host obligations: parse defensively, verify integrity and
+  signature, enforce publisher continuity, **refuse a package whose non-empty `targetApps` excludes this
+  host**, and ask before installing. The spec's optional `repo` parameter is ignored — explicitly
+  conforming behaviour, since a host MUST NOT fetch from a repository it doesn't already trust and how a
+  host *starts* trusting one is still an open question.
 - ✅ **Opens a `.azp` handed in from outside the app.** `spec/store-app.md` specifies only the Android
   app-to-app handoff and says outright that the web case is left unspecified — so the web storefront can
   tell a visitor to install a package "from any Azphalt-conforming host" but has no way to hand it to
   one. Guillotine closes the host half: it registers as an opener for `.azp` packages (VIEW on
-  `application/vnd.azphalt.package` **and `application/x-azphalt`** — the type the registry actually
-  serves, verified live, and the one `spec/repository-api.md` § Download Package documents — plus
-  `.azp`-suffixed octet-stream/zip downloads, and a SEND share-sheet route), so a package downloaded from
-  azphalt.store in the browser, sitting in a file manager, or shared from another app opens straight into
-  the editor.
+  `application/vnd.azphalt.package` **and `application/x-azphalt`** — the latter now settled upstream as a
+  *deprecated alias* (`spec/package-format.md` § Media type): a server must not send it, a client should
+  still accept it, and the flagship registry still serves it — plus `.azp`-suffixed octet-stream/zip
+  downloads, and a SEND share-sheet route), so a package downloaded from azphalt.store in the browser,
+  sitting in a file manager, or shared from another app opens straight into the editor. The type is a
+  routing hint only; nothing is ever trusted because of it.
   [`AzpExternalOpen`](../app/src/main/java/com/hereliesaz/guillotine/azphalt/AzpExternalOpen.kt) carries
   it — a file URI or an install link, one sealed `Incoming` rather than two parallel flows — from
   `MainActivity` to `AzphaltStoreScreen`, which runs the identical `AzpHandoffInstaller` verification:
   bytes arriving with no trust anchor at all is precisely the case it was written for.
+- ✅ **Says what was installed, and where to find it.** An install that succeeds and then can't be located
+  is, from the user's side, indistinguishable from one that failed — and the destination is *different per
+  package*: a shader lands in the clip tools panel's **Extensions** section, a caption animation under
+  **Kinetic type**, an on-device model needs Settings → Advanced → Install AI model to actually be wired
+  in, and a `code`/`app`/`mcp` package has no surface in this build at all. So the answer is derived from
+  the package rather than asserted: [`AzpInstallSurfaces`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpInstallSurfaces.kt)
+  maps a manifest's payload to the surfaces it actually reaches, and the post-install dialog names them
+  (replacing a Toast that vanished before it could be read). azphalt's `spec/web-handoff.md` § Open
+  questions flags this as unsolved ecosystem-side — "state reporting covers the statistic but not *show
+  the user what they just installed*" — and it's a host's job, since nothing outside the app knows what
+  its panels are called.
 - ✅ **UI schema → native Compose (job #6).** An extension's declarative control panel
   (azphalt `spec/ui-schema.md`, `{ "controls": […] }` referenced by an asset's `ui`) is parsed by
   [`AzpUiSchema`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpUiSchema.kt) and rendered
