@@ -92,8 +92,12 @@ browsing stays delegated to the store app, per the 2026-07-28 entry below. `AzpE
 anything downloads.
 
 Also fixed a real bug found while in here: the manifest registered Guillotine as an opener for
-`application/vnd.azphalt.package`, but the registry serves **`application/x-azphalt`** (verified with
-`curl`; `spec/repository-api.md` § Download Package documents that type too). So a browser download never
+`application/vnd.azphalt.package`, but the registry served **`application/x-azphalt`**.
+**Correction (2026-08-01, see the entry at the top of this file):** both halves of that parenthetical
+have since stopped being true — azphalt.store now returns the normative `vnd.azphalt.package`, and
+`spec/repository-api.md` § Download Package now cross-references `package-format.md` § Media type instead
+of naming `x-azphalt`. The extra filter is kept because the spec asks clients to accept the deprecated
+alias, not because this registry sends it. So a browser download never
 matched the explicit-type filter at all — it only ever matched via the `*.azp` octet-stream/zip fallback,
 and only when the browser happened to label it that way. Both types are now declared on the VIEW and SEND
 filters.

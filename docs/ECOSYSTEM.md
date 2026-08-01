@@ -151,9 +151,10 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   This route was built against a contract that has since been **published as `spec/web-handoff.md`**
   (status: Proposed). Guillotine meets its host obligations with one gap: it parses defensively, verifies
   integrity and signature, enforces publisher continuity, **refuses a package whose non-empty `targetApps`
-  excludes this host**, and asks before installing — but obligation 5 also covers `compat`, and
-  Guillotine parses that field without evaluating it, so a package declaring a host API version this build
-  doesn't satisfy still installs. The spec's optional `repo` parameter is ignored, which *is* explicitly
+  excludes this host**, and asks before installing. Obligation 5 is only partly met, though: besides
+  `targetApps` it names `kind`, `compat` and `mediaDomains`, and none of those three is gated at install —
+  `compat` is parsed and never evaluated, `kind` is never checked, and `mediaDomains` isn't a manifest
+  field at all (it's a repository-summary field, so a host verifying raw bytes has nothing to read). The spec's optional `repo` parameter is ignored, which *is* explicitly
   conforming: a host MUST NOT fetch from a repository it doesn't already trust, and how a host *starts*
   trusting one is still an open question upstream.
 - ✅ **Opens a `.azp` handed in from outside the app.** `spec/store-app.md` specifies only the Android
@@ -162,7 +163,8 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   one. Guillotine closes the host half: it registers as an opener for `.azp` packages (VIEW on
   `application/vnd.azphalt.package` **and `application/x-azphalt`** — the latter now settled upstream as a
   *deprecated alias* (`spec/package-format.md` § Media type): a server must not send it, a client should
-  still accept it, and the flagship registry still serves it — plus `.azp`-suffixed octet-stream/zip
+  still accept it. Guillotine accepts it for servers that haven't caught up — azphalt.store itself has,
+  and returns the normative type as of 2026-08-01 — plus `.azp`-suffixed octet-stream/zip
   downloads, and a SEND share-sheet route), so a package downloaded from azphalt.store in the browser,
   sitting in a file manager, or shared from another app opens straight into the editor. The type is a
   routing hint only; nothing is ever trusted because of it.
@@ -172,10 +174,11 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   bytes arriving with no trust anchor at all is precisely the case it was written for.
 - ✅ **Says what was installed, and where to find it.** An install that succeeds and then can't be located
   is, from the user's side, indistinguishable from one that failed — and the destination is *different per
-  package*: a shader gets its own section in the **Clip Properties** panel (named after the package — note
-  `AzpAssetContribution`'s "Extensions" `title` is never rendered), a caption animation appears under
-  **Kinetic type**, an on-device model needs Settings → Advanced → Install AI model to actually be wired
-  in, and a `code`/`app`/`mcp` package has no surface in this build at all. So the answer is derived from
+  package*: a shader gets its own section in the clip panel, named after the package (note
+  `AzpAssetContribution`'s "Extensions" `title` is never rendered, and the panel's own heading depends on
+  the active tool), a caption animation appears under **Kinetic type**, an on-device model needs
+  Settings → Advanced → Install AI model to actually be wired in, and a `code`/`app`/`mcp` package has no
+  surface in this build at all. So the answer is derived from
   the package rather than asserted: [`AzpInstallSurfaces`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpInstallSurfaces.kt)
   maps a manifest's payload to the surfaces it actually reaches, and the post-install dialog names them
   (replacing a Toast that vanished before it could be read). Nothing in the ecosystem can answer this for

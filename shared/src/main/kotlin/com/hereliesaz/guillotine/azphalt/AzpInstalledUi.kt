@@ -46,13 +46,29 @@ object AzpInstalledUi {
     }
 
     /**
+     * Asset types this panel must **not** claim, because another part of the app owns them and actually
+     * applies them. A `motion` asset is the kinetic-typography picker's
+     * ([com.hereliesaz.guillotine.ui.KineticTypographyPicker]); a model payload belongs to the
+     * AI-model install flow ([AzpModelInstall]).
+     *
+     * Without this they still landed here as [RenderKind.OTHER] and the clip panel drew a second section
+     * for them reading "Applying to media arrives with the extension runtime" — flatly false for motion,
+     * whose runtime is shipped and works, and which is the bulk of the live catalog. The result was a
+     * caption animation that had just been applied sitting next to a note saying it couldn't be.
+     */
+    private val OWNED_ELSEWHERE: Set<String> = AzpMotionInstaller.MOTION_TYPES + AzpModelInstaller.MODEL_TYPES
+
+    /**
      * Enumerate the panels of installed asset packages in [extensionsDir], scoped to [hostAppId]
      * (packages targeting other hosts are skipped). Blocking I/O — call off the main thread. Invalid
-     * packages are skipped; a package's asset that ships **no** `ui` schema still gets a panel (an empty
-     * one, no controls) rather than being dropped — a static LUT or fixed-look shader has nothing to
-     * adjust, and requiring a schema anyway would make every ui-less asset silently unappliable (this
-     * is, in practice, every current real catalog package — none of them ship a `ui` file). The result
-     * is package-name-sorted for a stable UI.
+     * packages are skipped, as are assets [OWNED_ELSEWHERE].
+     *
+     * A package's asset that ships **no** `ui` schema still gets a panel (an empty one, no controls)
+     * rather than being dropped — a static LUT or fixed-look shader has nothing to adjust, and requiring
+     * a schema anyway would make every ui-less asset silently unappliable. (An earlier version of this
+     * comment claimed no real catalog package ships a `ui` file. That is false — every shader package in
+     * the flagship catalog ships `ui/panel.json`; it's the LUT and motion packages that don't. The
+     * fallback is still needed, just not for the reason given.) Package-name-sorted for a stable UI.
      */
     fun list(extensionsDir: File, hostAppId: String): List<Panel> {
         val files = extensionsDir.listFiles { _, name -> name.endsWith(".azp") } ?: return emptyList()
@@ -62,6 +78,7 @@ object AzpInstalledUi {
                 val loaded = AzpPackage.read(f.readBytes())
                 if (!loaded.manifest.targetsApp(hostAppId)) return@runCatching
                 for (asset in loaded.manifest.assets) {
+                    if (asset.type.trim().lowercase() in OWNED_ELSEWHERE) continue
                     val schema = asset.ui
                         ?.let { loaded.payload[it] }
                         ?.let { AzpUiSchema.parse(it.decodeToString()) }

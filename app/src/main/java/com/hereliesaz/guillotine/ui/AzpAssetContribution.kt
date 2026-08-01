@@ -115,9 +115,13 @@ class AzpAssetContribution : ClipPanelContribution {
                     }
                     status?.let { Text(it, color = Neutral500, fontSize = 10.sp) }
                 }
+                // Only genuinely unrecognised asset types reach here now — motion and model assets are
+                // filtered out by AzpInstalledUi.list, because they have working owners elsewhere and this
+                // line used to tell their users the opposite.
                 AzpInstalledUi.RenderKind.OTHER ->
                     Text(
-                        "Saved as this extension's settings. Applying to media arrives with the extension runtime.",
+                        "Saved as this extension's settings. Guillotine has no renderer for “${panel.assetType}” " +
+                            "assets, so there's nothing to apply to a clip.",
                         color = Neutral500, fontSize = 10.sp,
                     )
             }
