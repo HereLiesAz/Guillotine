@@ -14,6 +14,10 @@ dependencies {
     implementation(libs.nanohttpd)
     implementation(libs.okhttp)
     implementation(libs.json)
+    // Ed25519 verification that does not rely on the platform provider (AzpCrypto). Named explicitly as
+    // a provider *instance* rather than installed globally, so it can never shadow Android's own
+    // stripped-down org.bouncycastle classes by name.
+    implementation(libs.bouncycastle)
 
     // ONNX Runtime — API only, compile-time. The `ai.onnxruntime` Java API is identical across the
     // `onnxruntime` (JVM) and `onnxruntime-android` artifacts, so shared on-device ML (Spleeter) can

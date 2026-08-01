@@ -79,4 +79,25 @@ class AzpCryptoTest {
         assertEquals(AzpCrypto.Verification.INVALID, AzpCrypto.verifyEd25519(spki, ByteArray(0), sig))
         assertEquals(44, spki.size) // 12-byte SPKI AlgorithmIdentifier prefix + 32-byte key
     }
+
+    @Test fun bouncyCastleCanVerifyWhereThePlatformMightNot() {
+        // The fallback has to actually work, or bundling it is decoration. This runs the same RFC 8032
+        // known-answer test through an explicit BouncyCastleProvider instance — the way the reference
+        // Azphalt Store app does it, and the reason it could verify a package on a device where
+        // Guillotine's platform-provider call could not.
+        val spkiPrefix = "302a300506032b6570032100"
+        val pub = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+        val sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155" +
+            "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+        fun hex(h: String) = ByteArray(h.length / 2) {
+            ((Character.digit(h[it * 2], 16) shl 4) + Character.digit(h[it * 2 + 1], 16)).toByte()
+        }
+        val bc = org.bouncycastle.jce.provider.BouncyCastleProvider()
+        val key = java.security.KeyFactory.getInstance("Ed25519", bc)
+            .generatePublic(java.security.spec.X509EncodedKeySpec(hex(spkiPrefix + pub)))
+        val ok = java.security.Signature.getInstance("Ed25519", bc).run {
+            initVerify(key); update(ByteArray(0)); verify(hex(sig))
+        }
+        assertTrue("BouncyCastle could not verify the RFC 8032 vector", ok)
+    }
 }
