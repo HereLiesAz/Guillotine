@@ -150,6 +150,30 @@ object TimelineMath {
      * The 'keep' ranges of a clip in source-media ms. If the clip has no edits,
      * the whole trimmed range is kept. Used to build export cut lists.
      */
+    /**
+     * The source time the **preview** should show for [clip] at [timelineMs] — [sourceTimeMs], advanced
+     * past any AI-edit REMOVE it lands in.
+     *
+     * Export cuts those ranges ([keptRanges]) and preview used to play straight through them, so the
+     * preview showed footage the rendered file would not contain. A preview that doesn't show what will
+     * be rendered isn't a preview, so playback now skips a removed range the way the export drops it.
+     *
+     * Returns the raw source time when the clip has no removes, so the common case is untouched.
+     */
+    fun previewSourceTimeMs(clip: TimelineClip, timelineMs: Long): Long {
+        val raw = sourceTimeMs(clip, timelineMs)
+        if (clip.edits.none { it.action == EditAction.REMOVE }) return raw
+        val kept = keptRanges(clip)
+        if (kept.isEmpty()) return raw
+        // The first kept range that still lies at or ahead of `raw`: inside it, keep `raw`; before it,
+        // jump to where the kept footage resumes.
+        for (r in kept) {
+            if (raw <= r.last) return maxOf(raw, r.first)
+        }
+        // Past every kept range — hold at the end of the last one rather than showing removed tail.
+        return kept.last().last
+    }
+
     fun keptRanges(clip: TimelineClip): List<LongRange> {
         val clipStart = clip.trimStartMs
         val clipEnd = clip.trimStartMs + clip.durationMs

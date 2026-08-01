@@ -297,4 +297,55 @@ class TimelineMathTest {
         assertEquals(1, rAfter.size)
         assertEquals(0L until 3000L, rAfter[0])
     }
+
+    // ---- previewSourceTimeMs: preview must show what will be rendered ----
+
+    @Test fun previewSourceTime_matches_sourceTime_when_no_edits() {
+        val c = clip(0, 200, 1000)
+        for (t in listOf(0L, 100L, 500L, 999L)) {
+            assertEquals(TimelineMath.sourceTimeMs(c, t), TimelineMath.previewSourceTimeMs(c, t))
+        }
+    }
+
+    @Test fun previewSourceTime_skips_a_removed_range() {
+        // Source 200..1200, with 400..600 removed. Export drops it, so preview must not play it.
+        val c = clip(0, 200, 1000, edits = listOf(EditSegment(400, 600, EditAction.REMOVE)))
+        // Before the cut: untouched.
+        assertEquals(300L, TimelineMath.previewSourceTimeMs(c, 100))
+        // Inside the cut: jump to where kept footage resumes, rather than showing removed frames.
+        assertEquals(600L, TimelineMath.previewSourceTimeMs(c, 250))
+        assertEquals(600L, TimelineMath.previewSourceTimeMs(c, 399))
+        // After the cut: untouched again.
+        assertEquals(800L, TimelineMath.previewSourceTimeMs(c, 600))
+    }
+
+    @Test fun previewSourceTime_skips_each_of_several_removes() {
+        val c = clip(
+            0, 0, 1000,
+            edits = listOf(
+                EditSegment(100, 200, EditAction.REMOVE),
+                EditSegment(500, 700, EditAction.REMOVE),
+            ),
+        )
+        assertEquals(50L, TimelineMath.previewSourceTimeMs(c, 50))
+        assertEquals(200L, TimelineMath.previewSourceTimeMs(c, 150))
+        assertEquals(300L, TimelineMath.previewSourceTimeMs(c, 300))
+        assertEquals(700L, TimelineMath.previewSourceTimeMs(c, 600))
+        assertEquals(800L, TimelineMath.previewSourceTimeMs(c, 800))
+    }
+
+    @Test fun previewSourceTime_holds_at_the_last_kept_frame_past_a_trailing_remove() {
+        val c = clip(0, 0, 1000, edits = listOf(EditSegment(800, 1000, EditAction.REMOVE)))
+        // Past every kept range: hold the last kept frame rather than showing the removed tail.
+        // 799, not 800 — keptRanges builds half-open ranges (`cursor until r.first`), so the last frame
+        // that survives is the one before the cut starts.
+        assertEquals(799L, TimelineMath.previewSourceTimeMs(c, 900))
+    }
+
+    @Test fun previewSourceTime_tolerates_a_fully_removed_clip() {
+        // Nothing survives; must not throw or return something wild.
+        val c = clip(0, 0, 1000, edits = listOf(EditSegment(0, 1000, EditAction.REMOVE)))
+        val v = TimelineMath.previewSourceTimeMs(c, 500)
+        assertTrue("expected a source time within the clip, got $v", v in 0..1000)
+    }
 }

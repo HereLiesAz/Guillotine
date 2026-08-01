@@ -67,6 +67,7 @@ import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineClip
+import com.hereliesaz.guillotine.model.PreviewGeometry
 import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral950
@@ -199,6 +200,29 @@ fun PreviewPlayer(
         if (!anyActiveVideo) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
         }
+        // Project-level crop, applied to the video layers only — the same order export uses, where
+        // geometry() is a per-clip video effect and captions are overlays composited onto the result.
+        // Without this the editor showed the whole source while the file came out cropped.
+        // Suppressed in crop mode, where the user is dragging the crop itself and needs to see what
+        // they are cutting away.
+        val projectCrop = if (cropMode) null else PreviewGeometry.forCrop(state.document.settings.crop)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (projectCrop == null) {
+                        Modifier
+                    } else {
+                        Modifier.clipToBounds().graphicsLayer {
+                            scaleX = projectCrop.scaleX
+                            scaleY = projectCrop.scaleY
+                            translationX = projectCrop.translationXFraction * size.width
+                            translationY = projectCrop.translationYFraction * size.height
+                        }
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
         // One video layer per video track, stacked bottom-to-top: reverse the track order so
         // videoTracks[0] (top of the panel) is rendered LAST and ends up on top. Each layer owns
         // its own players (released when its track leaves composition), so deleting a track is clean.
@@ -218,6 +242,7 @@ fun PreviewPlayer(
                 )
             }
         }
+        } // end project-crop layer (video only; captions overlay the cropped frame, as in export)
         // One ExoPlayer per audio track so multiple audio tracks (music + voiceover, etc.) mix
         // instead of only playing the topmost one. Each layer releases its player when its track
         // leaves composition, so deleting a track is clean.
@@ -682,7 +707,9 @@ private fun syncPosition(player: ExoPlayer, clip: TimelineClip?, now: Long, isPl
     // Scrub when paused.
     LaunchedEffect(now, isPlaying, clip?.id) {
         if (clip != null && !isPlaying) {
-            val src = TimelineMath.sourceTimeMs(clip, current).coerceAtLeast(0)
+            // previewSourceTimeMs, not sourceTimeMs: an AI-edit REMOVE is cut from the export, so the
+            // preview must skip it too rather than showing footage the rendered file won't contain.
+            val src = TimelineMath.previewSourceTimeMs(clip, current).coerceAtLeast(0)
             if (abs(player.currentPosition - src) > SCRUB_SEEK_TOLERANCE_MS) player.seekTo(src)
         }
     }
@@ -690,9 +717,12 @@ private fun syncPosition(player: ExoPlayer, clip: TimelineClip?, now: Long, isPl
     LaunchedEffect(isPlaying, clip?.id) {
         if (clip != null && isPlaying) {
             while (isActive) {
-                val src = TimelineMath.sourceTimeMs(clip, current).coerceAtLeast(0)
+                val src = TimelineMath.previewSourceTimeMs(clip, current).coerceAtLeast(0)
                 if (abs(player.currentPosition - src) > PLAY_DRIFT_TOLERANCE_MS) player.seekTo(src)
-                delay(400)
+                // 400ms was fine for correcting drift, but a REMOVE has to be left promptly or the
+                // preview plays a chunk of cut footage before catching up. Poll faster when the clip
+                // has edits at all; unedited clips keep the cheaper cadence.
+                delay(if (clip.edits.any { it.action == com.hereliesaz.guillotine.model.EditAction.REMOVE }) 100 else 400)
             }
         }
     }

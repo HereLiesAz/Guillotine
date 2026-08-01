@@ -550,11 +550,18 @@ crossfade are at full parity. The following gaps remain:
   frames and cannot synthesise them — so selecting 60 fps on 30 fps source is a no-op, not interpolation.
   Bitrate is still unconfigured (`DefaultEncoderFactory` defaults apply); that would need
   `VideoEncoderSettings` and a target worth defending, so it is deliberately not guessed at here.
-- **AI edit segments play through in preview:** removed ranges are correctly cut from the export
-  (via `TimelineMath.keptRanges`) but play normally in preview (`syncPosition` does a simple linear
-  seek). May be deliberate (show full source with proposed cuts highlighted).
-- **Project-level crop not shown in preview:** the `Crop` from `GlobalSettings` is applied in export
-  (`VideoEffects.geometry()`) but preview only applies aspect ratio. May be deliberate.
+- ~~**AI edit segments play through in preview**~~ — **Fixed (2026-08-01).** It was not deliberate: a
+  preview that doesn't show what will be rendered isn't a preview. `TimelineMath.previewSourceTimeMs`
+  advances past any REMOVE the playhead lands in, and `syncPosition` uses it for both scrubbing and
+  drift correction. Drift polling tightens from 400 ms to 100 ms on clips that actually have removes,
+  because at 400 ms a cut is visible before the correction lands. Clips without edits are untouched, on
+  both the maths and the polling.
+- ~~**Project-level crop not shown in preview**~~ — **Fixed (2026-08-01).** Also not deliberate.
+  `PreviewGeometry.forCrop` returns the scale-and-translate that makes the cropped region fill the frame,
+  and the preview applies it to the **video layers only** — matching export's order, where `geometry()`
+  is a per-clip video effect and captions are overlays composited onto the result. Suppressed while the
+  crop tool is open, where the user needs to see what they're cutting away. A degenerate crop returns
+  null and draws the frame uncropped rather than blanking the preview.
 
 ## Audit follow-ups (deferred — need a device or a design call)
 Surfaced by a codebase audit. Everything that was a clear, safe bug has been fixed. The rest was
