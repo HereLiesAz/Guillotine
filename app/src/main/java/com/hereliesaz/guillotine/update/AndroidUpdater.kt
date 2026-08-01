@@ -51,8 +51,33 @@ object AndroidUpdater {
             val ok = UpdateChecker.download(a.asset.downloadUrl, dest) { read, total ->
                 if (total > 0) onProgress((read.toFloat() / total).coerceIn(0f, 1f))
             }
-            if (ok) dest else null
+            if (!ok) {
+                null
+            } else {
+                // Same gap the desktop updater had: the APK went straight to the package installer with
+                // nothing checked. A file that fails is deleted, since the next run clears this dir only
+                // *before* downloading and a leftover bad APK is what must never reach the installer.
+                when (val v = UpdateChecker.verify(dest, a.asset)) {
+                    is UpdateVerification.Failed -> {
+                        lastVerification = v
+                        dest.delete()
+                        null
+                    }
+                    else -> {
+                        lastVerification = v
+                        dest
+                    }
+                }
+            }
         }
+
+    /**
+     * How the last [download] verified. `SizeOnly` means the release published no digest to check
+     * against — installable, but not something to call verified.
+     */
+    @Volatile
+    var lastVerification: UpdateVerification? = null
+        private set
 
     /** True if the OS will let us launch a package-install intent without first visiting Settings. */
     fun canInstall(context: Context): Boolean =
