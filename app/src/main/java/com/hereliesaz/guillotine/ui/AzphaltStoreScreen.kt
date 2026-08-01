@@ -143,6 +143,10 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                     )
                 }
                 is AzpHandoffInstaller.InstallResult.WrongHost -> finish(wrongHostMessage(result))
+                is AzpHandoffInstaller.InstallResult.Incompatible -> finish(
+                    "“${result.name}” needs azphalt ${result.required}, and this build of Guillotine " +
+                        "provides ${result.hostVersion}. Nothing was installed.",
+                )
                 is AzpHandoffInstaller.InstallResult.Failure -> finish(result.message)
                 is AzpHandoffInstaller.InstallResult.Untrusted -> {
                     pendingBytes = bytes

@@ -51,6 +51,19 @@ object AzpHandoffInstaller {
          * other hosts is not offering itself to this one — but it does take away something that worked.
          */
         data class WrongHost(val packageId: String, val name: String, val targetApps: List<String>) : InstallResult()
+
+        /**
+         * The package needs a host azphalt-API version this build doesn't provide (`spec/web-handoff.md`
+         * § Host obligations (5), `spec/extension-manifest.md` § `compat`). Refused rather than installed
+         * and left to fail obscurely later. Only a comparator that parsed *and* went unsatisfied lands
+         * here — an unparseable one is not evidence of anything (see [AzpCompat.satisfies]).
+         */
+        data class Incompatible(
+            val packageId: String,
+            val name: String,
+            val required: String,
+            val hostVersion: String,
+        ) : InstallResult()
     }
 
     /**
@@ -88,6 +101,13 @@ object AzpHandoffInstaller {
         // — but a deep link names a package with nothing in between, so the host has to check for itself.
         if (hostAppId.isNotBlank() && !manifest.targetsApp(hostAppId)) {
             return InstallResult.WrongHost(manifest.id, manifest.name, manifest.targetApps)
+        }
+        // The other half of obligation 5: a package that needs a newer host API than this build provides
+        // cannot work, so refusing now beats installing it and letting it fail as something inscrutable.
+        if (AzpCompat.satisfies(manifest.compat) == false) {
+            return InstallResult.Incompatible(
+                manifest.id, manifest.name, manifest.compat.trim(), AzpCompat.HOST_API_VERSION,
+            )
         }
         // Publisher continuity (trust-on-first-use): if this id was installed before, the signer must
         // match the pinned key, or the caller must have already confirmed the change. Checked before
