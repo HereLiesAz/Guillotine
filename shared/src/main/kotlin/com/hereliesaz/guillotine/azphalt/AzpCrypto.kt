@@ -1,6 +1,8 @@
 package com.hereliesaz.guillotine.azphalt
 
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.KeyFactory
+import java.security.Provider
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 
@@ -20,8 +22,19 @@ import java.security.spec.X509EncodedKeySpec
  * [AzpPackage.verifyTrust] turns into `ok = false` — a hard refusal to install. Every package in the
  * flagship catalog verifies correctly on a desktop JVM, so the packages were never the problem.
  *
- * So availability is now proven end to end against a known-good RFC 8032 vector, and verification is
+ * So availability is proven end to end against a known-good RFC 8032 vector, and verification is
  * three-valued: only a verifier that ran and said "no" means the signature is bad.
+ *
+ * And rather than accept a permanently unverifiable platform, the self-test picks a provider that
+ * actually works: the platform's own first (so a JVM, and any Android that is fine, behave exactly as
+ * before), then a bundled BouncyCastle. That last part is not a guess — the reference Azphalt Store app
+ * verifies the *same bytes* on the *same device* by naming `BouncyCastleProvider` explicitly
+ * (`apps/storefront-cmp/azp/.../Azp.kt`), which is why the store could hand over a package that
+ * Guillotine then called forged.
+ *
+ * The provider is passed as an *instance*, never installed globally: Android ships its own stripped
+ * `org.bouncycastle` classes, and registering a second provider under the same name is how that
+ * collision becomes someone else's bug report.
  */
 internal object AzpCrypto {
 
@@ -55,17 +68,39 @@ internal object AzpCrypto {
      * one, not by asking whether the algorithm name is known. A false here means every signature check
      * is a non-answer, and callers must degrade to integrity-only trust rather than call packages forged.
      */
-    val ed25519Available: Boolean by lazy {
-        runCatching {
-            val spki = hex(SPKI_PREFIX_HEX + TEST_PUBLIC_KEY_HEX)
-            val key = KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(spki))
-            Signature.getInstance("Ed25519").run {
-                initVerify(key)
-                update(ByteArray(0))
-                verify(hex(TEST_SIGNATURE_HEX))
-            }
-        }.getOrDefault(false)
+    val ed25519Available: Boolean get() = chosen != null
+
+    /**
+     * The first candidate that passed the self-test, or null if none did. Wrapped rather than held as a
+     * bare `Provider?` because null is itself a meaningful candidate — "the platform default" — and a
+     * bare null could not be told apart from "nothing works".
+     */
+    private class Chosen(val provider: Provider?)
+
+    private val chosen: Chosen? by lazy {
+        val candidates = buildList {
+            add(null) // the platform default, tried first so a working platform behaves exactly as before
+            runCatching { BouncyCastleProvider() }.getOrNull()?.let { add(it) }
+        }
+        candidates.firstNotNullOfOrNull { p -> if (selfTest(p)) Chosen(p) else null }
     }
+
+    /** Run the RFC 8032 known-answer test through [p] (null = platform default). */
+    private fun selfTest(p: Provider?): Boolean = runCatching {
+        val spki = hex(SPKI_PREFIX_HEX + TEST_PUBLIC_KEY_HEX)
+        val key = keyFactory(p).generatePublic(X509EncodedKeySpec(spki))
+        signature(p).run {
+            initVerify(key)
+            update(ByteArray(0))
+            verify(hex(TEST_SIGNATURE_HEX))
+        }
+    }.getOrDefault(false)
+
+    private fun keyFactory(p: Provider?) =
+        if (p == null) KeyFactory.getInstance("Ed25519") else KeyFactory.getInstance("Ed25519", p)
+
+    private fun signature(p: Provider?) =
+        if (p == null) Signature.getInstance("Ed25519") else Signature.getInstance("Ed25519", p)
 
     /**
      * Verify an Ed25519 [signature] over [message] against an SPKI (X.509) DER public key [spkiDer].
@@ -77,8 +112,9 @@ internal object AzpCrypto {
      */
     fun verifyEd25519(spkiDer: ByteArray, message: ByteArray, signature: ByteArray): Verification =
         runCatching {
-            val key = KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(spkiDer))
-            Signature.getInstance("Ed25519").run {
+            val p = chosen?.provider
+            val key = keyFactory(p).generatePublic(X509EncodedKeySpec(spkiDer))
+            signature(p).run {
                 initVerify(key)
                 update(message)
                 verify(signature)
