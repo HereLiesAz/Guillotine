@@ -53,6 +53,15 @@ object AzpPluginApplier {
             }
         }
 
+        // A caption animation on a non-caption clip isn't "unsupported" — it's the wrong clip. Saying
+        // otherwise sent users of most of the catalog looking for a missing feature instead of a caption.
+        val isMotion = KineticTypographyPicker.listInstalled(extensionsDir).any { it.packageId == pluginId }
+        if (isMotion) {
+            return Outcome.Unsupported(
+                "“$pluginId” is a caption animation. Select a caption (a text clip) to apply it.",
+            )
+        }
+
         val installed = extensionsDir.listFiles { _, name -> name.endsWith(".azp") }
             ?.any { f -> runCatching { AzpPackage.load(f.readBytes()).manifest.id == pluginId }.getOrDefault(false) }
             ?: false

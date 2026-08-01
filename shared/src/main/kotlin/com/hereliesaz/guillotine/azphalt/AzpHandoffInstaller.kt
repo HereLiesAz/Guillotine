@@ -27,7 +27,10 @@ object AzpHandoffInstaller {
             val name: String,
             val signed: Boolean,
             val signatureValid: Boolean,
-            val surfaces: List<AzpInstallSurfaces.Surface> = emptyList(),
+            // No default, for the same reason hostAppId has none: an empty list is indistinguishable
+            // from "nothing was derived", and would render a notice dialog with no destination in it —
+            // precisely the failure this field exists to prevent.
+            val surfaces: List<AzpInstallSurfaces.Surface>,
         ) : InstallResult()
         data class Failure(val message: String) : InstallResult()
         /** Integrity-sound, but not from a trusted signer (or unsigned) and not yet approved by the user. */

@@ -18,7 +18,7 @@ object AzpInstallSurfaces {
 
     /** A place in Guillotine where an installed package becomes reachable. */
     enum class Surface {
-        /** A shader or LUT: the **Extensions** section of the clip tools panel, with a clip selected. */
+        /** A shader or LUT: its own section, named after the package, in the clip panel with a clip selected. */
         CLIP_EXTENSIONS,
 
         /** A caption animation: the **Kinetic type** section, with a caption selected. */
@@ -27,13 +27,16 @@ object AzpInstallSurfaces {
         /**
          * An on-device AI model. Models are wired into their settings slots by the separate
          * **Settings → Advanced → Install AI model** flow ([AzpModelInstall]); this install path only
-         * lands the bytes, so the package is on disk but its models are not in use.
+         * lands the bytes, so the package is on disk but its models are not in use. It does not appear in
+         * the clip panel either — [AzpInstalledUi.list] skips model assets, since that panel can't apply
+         * them and used to imply it eventually would.
          */
         AI_MODEL,
 
         /**
-         * An asset of a type Guillotine has no render path for. It is listed under **Extensions** (see
-         * [AzpInstalledUi.list], which lists every asset regardless of type) but cannot be applied.
+         * An asset of a type Guillotine has no renderer for. [AzpInstalledUi.list] still lists it (it
+         * skips only the types other subsystems own), so it appears in the clip panel as a section named
+         * after the package, but nothing can be applied from it.
          */
         LISTED_NOT_APPLICABLE,
 
