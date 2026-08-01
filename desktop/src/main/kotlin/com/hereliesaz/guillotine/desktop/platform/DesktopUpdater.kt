@@ -2,6 +2,7 @@ package com.hereliesaz.guillotine.desktop.platform
 
 import com.hereliesaz.guillotine.update.ReleaseAsset
 import com.hereliesaz.guillotine.update.UpdateChecker
+import com.hereliesaz.guillotine.update.UpdateVerification
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -58,7 +59,13 @@ object DesktopUpdater {
         }
     }
 
-    /** Download the installer into a temp dir (cleared first), reporting progress 0..1. File or null. */
+    /**
+     * Download the installer into a temp dir (cleared first), reporting progress 0..1.
+     *
+     * Returns the file only if it passes [UpdateChecker.verify]. A file that fails is deleted rather
+     * than left in the temp dir, because the next run clears that dir *before* downloading and a
+     * lingering bad installer is exactly the thing this is meant to keep away from the OS.
+     */
     fun download(a: Available, onProgress: (Float) -> Unit): File? {
         val dir = File(System.getProperty("java.io.tmpdir"), "guillotine-update").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
@@ -66,8 +73,27 @@ object DesktopUpdater {
         val ok = UpdateChecker.download(a.asset.downloadUrl, dest) { read, total ->
             if (total > 0) onProgress((read.toFloat() / total).coerceIn(0f, 1f))
         }
-        return if (ok) dest else null
+        if (!ok) return null
+        return when (val v = UpdateChecker.verify(dest, a.asset)) {
+            is UpdateVerification.Failed -> {
+                lastVerification = v
+                dest.delete()
+                null
+            }
+            else -> {
+                lastVerification = v
+                dest
+            }
+        }
     }
+
+    /**
+     * How the last [download] verified, for the UI to report. `SizeOnly` means the release published no
+     * digest — the caller may install, but must not claim the download was verified.
+     */
+    @Volatile
+    var lastVerification: UpdateVerification? = null
+        private set
 
     /** Launch the downloaded installer via the OS file association. Returns true if it launched. */
     fun launchInstaller(file: File): Boolean = runCatching {

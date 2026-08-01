@@ -584,9 +584,16 @@ The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the
 - **AppImage / Flatpak / Snap** — `.deb` covers the mainstream case; broader Linux coverage is
   open.
 - ~~Auto-update framework~~ — **already shipped** (`DesktopUpdater.kt` + `UpdateChecker.kt` check
-  GitHub Releases on launch and offer to download+run the installer). The real remaining gap: no
-  checksum/signature verification of the downloaded installer before launching it — see the
-  Security items in the 2026-07-24 audit section above.
+  GitHub Releases on launch and offer to download+run the installer). ~~The real remaining gap: no
+  checksum/signature verification of the downloaded installer before launching it.~~
+  **Checksum done (2026-08-01):** `UpdateChecker.verify` checks the downloaded file's size always and
+  its SHA-256 when the release publishes a `digest`, and both updaters — desktop *and* Android, which
+  had the identical gap in front of the package installer — refuse and delete a file that fails.
+  `UpdateVerification` distinguishes `Verified` from `SizeOnly` ("no digest published") so the UI can
+  never call an unchecked download verified. **Signature verification is still open** and is a different
+  problem: the digest arrives over the same API connection as the download URL, so it proves the bytes
+  are the ones GitHub meant to serve, not that they are ours. That needs the signing keys the
+  notarization item above is already blocked on.
 - **On-device ML on desktop** — the ONNX-Runtime-for-JVM foundation has landed: stem separation
   (Spleeter), speech captions (Vosk), audio sync, and the color/LUT render all run on-device on
   desktop. The remaining on-device gap is the **vision / face / speech-model tools** (image
