@@ -28,8 +28,14 @@ object AzphaltStoreHandoff {
      * packages meant for other hosts never show. Launch it for result — the store app always finishes
      * with either a verified package or a clean [android.app.Activity.RESULT_CANCELED].
      */
-    fun browseIntent(hostAppId: String): Intent =
-        Intent(ACTION_BROWSE).putExtra(EXTRA_APP, hostAppId)
+    fun browseIntent(hostAppId: String, inventoryJson: String? = null): Intent =
+        Intent(ACTION_BROWSE)
+            .putExtra(EXTRA_APP, hostAppId)
+            // spec/state-reporting.md § 3.1: what this host already holds, so the store's buttons can
+            // read Open/Update instead of Get on everything. Omitted entirely when there is nothing to
+            // say — a host that reports nothing is conforming, and an empty document would spend a
+            // Binder budget to convey that.
+            .apply { inventoryJson?.let { putExtra(AzpStateReport.EXTRA_INVENTORY, it) } }
 
     /** Whether any installed app can handle [browseIntent] — i.e. an Azphalt Store app is present. */
     fun isAvailable(packageManager: PackageManager, hostAppId: String): Boolean =

@@ -75,9 +75,24 @@ Two traps worth recording, both caught in review after the first attempt shipped
   not a manifest field at all, only a repository-summary field, so a host verifying raw bytes has nothing
   to read. Obligation 5 is met for `targetApps` and `compat`, by design for `kind`, and unmeetable for
   `mediaDomains` without a spec change.
-- **State reporting isn't implemented.** `spec/state-reporting.md` (on-device per-item states to a store
-  app, aggregate counts to a repository) has no client here yet. `AzpInstallSurfaces` answers the UI half
-  of the same question but reports nothing to anyone.
+- **State reporting: § 3.1 done, § 3.2 and § 4 deliberately not.** (2026-08-01)
+  - ✅ **§ 3.1, the inventory on a browse request.** `AzpStateReport` builds the spec's
+    `{"entries":[…]}` document from the installed packages and `AzphaltStoreHandoff.browseIntent`
+    attaches it as `azphalt.extra.INVENTORY`, so the store app's buttons can read *Open*/*Update*
+    instead of *Get* on everything. Only the host knows this — acquisition and installation are separate
+    events, and a store app that hands over bytes never learns what became of them. Guillotine reports
+    `active` and only `active`: § 1 distinguishes it from `installed` (present but switched off) and
+    Guillotine has no disabled state to report. The Binder caps (500 entries, 256 KiB) are enforced
+    before the extra is attached, because an oversized extra throws in the *caller*.
+  - ⛔ **§ 3.2, the state `ContentProvider`.** Only helps when the store app is opened standalone, and it
+    costs an exported provider plus a new permission. Worth doing, but it is added attack surface for a
+    secondary case and should be a deliberate decision rather than a side effect of this pass.
+  - ⛔ **§ 4, the aggregate channel.** This one is a *new outbound network call* reporting what the user
+    installed. The spec is careful (opaque single-use report tokens, no identifiers, explicitly optional,
+    and a host that reports nothing is fully conforming) — but Guillotine's stated invariant is that any
+    cloud path is **opt-in**, and defaulting install reporting to on would break that promise to make a
+    publisher's counter nicer. It needs a settings toggle and the store app's
+    `azphalt.extra.REPORT_TOKEN` plumbing, and the toggle is a product decision, not a refactor.
 - ~~**The AI-model path still doesn't converge.**~~ **Done (2026-08-01):** the store/file/deep-link route
   now runs `AzpModelInstall` itself when the package carries model assets, writing into the same
   `filesDir/azp-models` that `ModelResolver` scans — so the model is actually in use instead of sitting
