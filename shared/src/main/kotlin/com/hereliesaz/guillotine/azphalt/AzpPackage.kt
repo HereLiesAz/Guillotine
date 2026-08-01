@@ -50,6 +50,13 @@ object AzpPackage {
         val signerPublicKey: String? = null,
         /** Why the signature is not valid (malformed, failed, or unverifiable on this platform). */
         val error: String? = null,
+        /**
+         * True when no verdict was reached — this platform could not run the check. Distinct from
+         * [valid] being false, which asserts the signature is genuinely bad. Callers MUST NOT treat
+         * this as a failed signature: doing so refused every correctly-signed package on a platform
+         * whose provider resolves `Ed25519` by name but throws when asked to use it.
+         */
+        val unverifiable: Boolean = false,
     )
 
     /** Result of checking a package against a trust store (identity). Mirrors `@azphalt/azp` `TrustResult`. */
@@ -210,7 +217,10 @@ object AzpPackage {
             return SignatureStatus(signed = true, valid = false, signerPublicKey = sig.publicKey, error = "signature.json is malformed")
         }
         if (!AzpCrypto.ed25519Available) {
-            return SignatureStatus(signed = true, valid = false, signerPublicKey = sig.publicKey, error = "Ed25519 verification is unavailable on this platform")
+            return SignatureStatus(
+                signed = true, valid = false, signerPublicKey = sig.publicKey,
+                error = "Ed25519 verification is unavailable on this platform", unverifiable = true,
+            )
         }
         val spki = try {
             Base64.getDecoder().decode(sig.publicKey)
@@ -222,13 +232,20 @@ object AzpPackage {
         } catch (e: Exception) {
             return SignatureStatus(signed = true, valid = false, signerPublicKey = sig.publicKey, error = "signature is not valid base64")
         }
-        val valid = AzpCrypto.verifyEd25519(spki, manifestRaw, signature)
-        return SignatureStatus(
-            signed = true,
-            valid = valid,
-            signerPublicKey = sig.publicKey,
-            error = if (valid) null else "signature verification failed",
-        )
+        // Three-valued on purpose: UNAVAILABLE is "this device couldn't check", which must never be
+        // reported as a failed signature — that reading refused every correctly-signed package outright.
+        return when (AzpCrypto.verifyEd25519(spki, manifestRaw, signature)) {
+            AzpCrypto.Verification.VALID ->
+                SignatureStatus(signed = true, valid = true, signerPublicKey = sig.publicKey)
+            AzpCrypto.Verification.INVALID ->
+                SignatureStatus(signed = true, valid = false, signerPublicKey = sig.publicKey, error = "signature verification failed")
+            AzpCrypto.Verification.UNAVAILABLE ->
+                SignatureStatus(
+                    signed = true, valid = false, signerPublicKey = sig.publicKey,
+                    error = "Ed25519 verification is unavailable on this platform",
+                    unverifiable = true,
+                )
+        }
     }
 
     /**
@@ -250,7 +267,7 @@ object AzpPackage {
         if (!status.signed) {
             return TrustResult(ok = true, signed = false, trusted = false, reason = "unsigned: no signer to trust")
         }
-        if (!AzpCrypto.ed25519Available) {
+        if (!AzpCrypto.ed25519Available || status.unverifiable) {
             return TrustResult(ok = true, signed = true, trusted = false, reason = "signature present but Ed25519 is unavailable on this platform — provenance unverified", signerPublicKey = status.signerPublicKey)
         }
         if (!status.valid) {
@@ -281,7 +298,7 @@ object AzpPackage {
             if (cs.publicKey.isBlank() || cs.signature.isBlank()) {
                 return TrustResult(ok = true, signed = true, trusted = false, reason = "counter-signature is malformed at hop $hop", signerPublicKey = signer)
             }
-            val valid = try {
+            val hopResult = try {
                 AzpCrypto.verifyEd25519(
                     Base64.getDecoder().decode(cs.publicKey),
                     Base64.getDecoder().decode(vouchedKey),
@@ -290,7 +307,11 @@ object AzpPackage {
             } catch (e: Exception) {
                 return TrustResult(ok = true, signed = true, trusted = false, reason = "counter-signature error at hop $hop: ${e.message}", signerPublicKey = signer)
             }
-            if (!valid) {
+            if (hopResult == AzpCrypto.Verification.UNAVAILABLE) {
+                // Can't walk the chain here; that costs trust, never validity.
+                return TrustResult(ok = true, signed = true, trusted = false, reason = "Ed25519 verification is unavailable on this platform", signerPublicKey = signer)
+            }
+            if (hopResult != AzpCrypto.Verification.VALID) {
                 return TrustResult(ok = true, signed = true, trusted = false, reason = "counter-signature invalid at hop $hop", signerPublicKey = signer)
             }
             if (cs.publicKey in trustedKeys) {
