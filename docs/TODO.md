@@ -61,9 +61,20 @@ Two traps worth recording, both caught in review after the first attempt shipped
 
 **Still open:**
 
-- **`compat` is parsed but never evaluated.** Host obligation 5 covers `kind` and `compat` as well as
-  `targetApps`; `AzpManifest.compat` has no evaluation site anywhere, so a package declaring a host API
-  version this build doesn't satisfy installs silently. `targetApps` is the half that was closed.
+- ~~**`compat` is parsed but never evaluated.**~~ **Done (2026-08-01):** `AzpCompat` implements the
+  `0.1` grammar (optional comparator defaulting to `>=`, `MAJOR[.MINOR[.PATCH]]`, omitted parts zero) and
+  `AzpHandoffInstaller` refuses an unsatisfied one as `Incompatible`, before the trust prompt for the same
+  reason `WrongHost` is. A comparator *outside* the grammar (`^`, `~`, ranges, unions, prereleases)
+  returns null rather than false and does **not** refuse: unrecognised syntax is not evidence of
+  incompatibility, and failing closed there would reject packages a later spec legitimises.
+  `AzpCompat.HOST_API_VERSION` is `0.1`, declared for the first time — Guillotine had no host API version
+  constant at all.
+- **`kind` and `mediaDomains` still aren't gated.** `kind` is deliberately surfaced rather than refused
+  (`AzpInstallSurfaces` tells the user when a kind has no consumer here, which beats refusing a package
+  someone installed knowing it awaits a runtime). `mediaDomains` **cannot** be checked at install: it is
+  not a manifest field at all, only a repository-summary field, so a host verifying raw bytes has nothing
+  to read. Obligation 5 is met for `targetApps` and `compat`, by design for `kind`, and unmeetable for
+  `mediaDomains` without a spec change.
 - **State reporting isn't implemented.** `spec/state-reporting.md` (on-device per-item states to a store
   app, aggregate counts to a repository) has no client here yet. `AzpInstallSurfaces` answers the UI half
   of the same question but reports nothing to anyone.

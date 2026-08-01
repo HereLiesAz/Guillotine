@@ -246,4 +246,71 @@ class AzpHandoffInstallerTest {
         )
         assertTrue("expected WrongHost, got $result", result is AzpHandoffInstaller.InstallResult.WrongHost)
     }
+
+    // ---- compat (spec/web-handoff.md § Host obligations 5, extension-manifest.md § compat) ----
+
+    private fun compatPackage(id: String, compat: String): ByteArray {
+        val code = "export function f(){}".encodeToByteArray()
+        val manifestBytes = """
+            {"azphalt":"0.1","id":"$id","name":"Compat","version":"1.0.0","kind":"code","license":"MIT",
+             "compat":"$compat","entry":"code/main.js","runtime":"js","capabilities":["canvas"],
+             "files":{"code/main.js":"${AzpPackage.digest(code)}"}}
+        """.trimIndent().encodeToByteArray()
+        return zip(mapOf("manifest.json" to manifestBytes, "code/main.js" to code))
+    }
+
+    @Test fun aPackageNeedingANewerHostApiIsRefused() {
+        val dir = tmp.newFolder("ext")
+        val result = AzpHandoffInstaller.install(
+            compatPackage("com.example.future", ">=9.0"), dir.absolutePath,
+            allowUntrusted = true, hostAppId = HOST,
+        )
+        val bad = result as? AzpHandoffInstaller.InstallResult.Incompatible
+            ?: error("expected Incompatible, got $result")
+        assertEquals(">=9.0", bad.required)
+        assertEquals(AzpCompat.HOST_API_VERSION, bad.hostVersion)
+        assertEquals(0, dir.listFiles()?.size ?: 0)
+    }
+
+    @Test fun theCatalogsConventionalCompatInstalls() {
+        val dir = tmp.newFolder("ext2")
+        val result = AzpHandoffInstaller.install(
+            compatPackage("com.example.ok", ">=0.1"), dir.absolutePath,
+            allowUntrusted = true, hostAppId = HOST,
+        )
+        assertTrue("expected Success, got $result", result is AzpHandoffInstaller.InstallResult.Success)
+    }
+
+    @Test fun anUnparseableCompatDoesNotRefuseTheInstall() {
+        // A comparator outside the 0.1 grammar says nothing about compatibility. Refusing on unrecognised
+        // syntax would reject packages a later spec legitimises, so it installs.
+        val dir = tmp.newFolder("ext3")
+        val result = AzpHandoffInstaller.install(
+            compatPackage("com.example.caret", "^1.0"), dir.absolutePath,
+            allowUntrusted = true, hostAppId = HOST,
+        )
+        assertTrue("expected Success, got $result", result is AzpHandoffInstaller.InstallResult.Success)
+    }
+
+    @Test fun compatIsCheckedBeforeTheTrustPrompt() {
+        // Same ordering argument as WrongHost: don't ask the user to vouch for a publisher on a package
+        // this build cannot run regardless of who signed it.
+        val stranger = ed25519Key()
+        val code = "export function f(){}".encodeToByteArray()
+        val manifestBytes = """
+            {"azphalt":"0.1","id":"com.example.futuresigned","name":"Future","version":"1.0.0","kind":"code",
+             "license":"MIT","compat":">=9.0","entry":"code/main.js","runtime":"js","capabilities":["canvas"],
+             "files":{"code/main.js":"${AzpPackage.digest(code)}"}}
+        """.trimIndent().encodeToByteArray()
+        val sig = """{"alg":"ed25519","publicKey":"${b64(stranger.public.encoded)}","signature":"${b64(sign(stranger, manifestBytes))}"}"""
+        val bytes = zip(
+            mapOf(
+                "manifest.json" to manifestBytes,
+                "code/main.js" to code,
+                "signature.json" to sig.encodeToByteArray(),
+            ),
+        )
+        val result = AzpHandoffInstaller.install(bytes, tmp.newFolder("ext4").absolutePath, hostAppId = HOST)
+        assertTrue("expected Incompatible, got $result", result is AzpHandoffInstaller.InstallResult.Incompatible)
+    }
 }
