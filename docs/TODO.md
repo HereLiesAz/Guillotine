@@ -15,32 +15,55 @@ closing:
   install — which barely mattered while the store app was the only route, since it filters on the `app`
   browse extra, but a deep link names a package with nothing in between. `AzpHandoffInstaller` now returns
   `WrongHost` (naming the hosts it *is* for), and refuses **before** the trust prompt, so the user is
-  never asked to vouch for a publisher on something that was never going to run here. Note the old
-  behaviour wasn't merely lax: the package installed and then vanished, because `AzpInstalledUi.list`
-  scopes by the same field.
+  never asked to vouch for a publisher on something that was never going to run here. **This takes
+  something away**, and the first draft of this entry got that wrong: asset packages scoped elsewhere were
+  already invisible (`AzpInstalledUi.list` filters on the same field), but *motion* packages were not —
+  `KineticTypographyPicker.listInstalled` walks every `.azp` on disk with no host filter, so a wrong-host
+  caption animation used to install and work fine. It no longer installs. The spec asks for exactly that,
+  but it is a regression for anyone relying on it.
 - **`repo` stays ignored, now on purpose.** § Which repository says a host MUST NOT fetch from a
   repository it doesn't already trust and that ignoring the parameter entirely is conforming. Documented
   and tested as a deliberate choice rather than an omission.
 - **The media type is settled.** `spec/package-format.md` § Media type now makes
   `application/vnd.azphalt.package` the only normative type and `application/x-azphalt` a *deprecated
-  alias* — a server MUST NOT send it, a client SHOULD accept it. The flagship registry still sends it, so
-  both filters stay; the manifest comment no longer claims this is an open question.
+  alias* — a server MUST NOT send it, a client SHOULD accept it. Both filters stay, since accepting the
+  alias is what the spec asks of a client and it costs nothing. Note the flagship registry has **already
+  switched**: a download from azphalt.store returns `vnd.azphalt.package` as of 2026-08-01. An earlier
+  draft of this work claimed the opposite and cited a `curl` that had not been re-run — the alias is kept
+  for servers that haven't caught up, not because this one hasn't.
 
-**And the thing the spec explicitly doesn't cover: telling the user what they just got.** § Open questions
-records it — state reporting "covers the statistic but not *show the user what they just installed*". It
-can't be solved anywhere but a host, since nothing outside the app knows what its panels are called.
+**And the thing nothing outside a host can answer: telling the user what they just got.** The spec touches
+this only obliquely — § Open questions' **Return path** bullet is about the *storefront* never learning
+whether an install happened, and notes in passing that state reporting "covers the statistic but not *show
+the user what they just installed*". The in-app half is ours alone, because only the app knows what its
+own panels are called.
 
-Guillotine used to answer with a Toast that said "select a clip, then reopen the store", which was both
-fleeting and *wrong for most package kinds*. The destination depends entirely on the payload: a shader or
-LUT appears under **Extensions** in the clip tools panel; a `motion` package under **Kinetic type** on a
+Guillotine used to answer with a Toast that said "select a clip, then reopen the store" — fleeting, and
+*wrong for most package kinds*. The destination depends entirely on the payload: a shader or LUT gets its
+own section in the **Clip Properties** panel; a `motion` package appears under **Kinetic type** on a
 selected caption; an on-device model isn't wired in by this path at all and needs Settings → Advanced →
-Install AI model; an unrecognised asset type is listed but has no render path; and a `code`/`app`/`mcp`/
-`pack` package has no surface in this build. `AzpInstallSurfaces` (`:shared`, unit-tested) derives that
-from the manifest, and a persistent dialog states what happened, where it lives, and whether its signature
-actually verified.
+Install AI model (which picks the `.azp` file, so a link-installed model has no file to point it at); an
+unrecognised asset type is listed but has no render path; and a `code`/`app`/`mcp`/`pack` package has no
+surface in this build. `AzpInstallSurfaces` (`:shared`, unit-tested) derives that from the manifest, and a
+persistent dialog states what happened, where it lives, and whether the signature actually verified.
+
+Two traps worth recording, both caught in review after the first attempt shipped them:
+
+- **Do not tell a user to look for "Extensions".** `AzpAssetContribution` declares
+  `override val title = "Extensions"`, but `ClipPanelHost` never reads `title` — it calls `Content`
+  directly, and each section is drawn by `ClipPanelSection(panel.packageName)`. The string is never
+  rendered anywhere. "Kinetic type" *is* real (`ClipTools.kt` passes it to `ClipPanelSection`), which is
+  what made the wrong one look plausible. Either delete the dead `title` or make the host render it.
+- **`AzpAssetApplier`'s "needs the extension runtime" message is misleading for motion.** A `motion`
+  package applied while a *video* clip is selected falls through to the asset path, lands on
+  `RenderKind.OTHER`, and gets told the runtime isn't wired — when the motion runtime is shipped and
+  working; the user simply had the wrong clip selected. The dialog no longer repeats that message.
 
 **Still open:**
 
+- **`compat` is parsed but never evaluated.** Host obligation 5 covers `kind` and `compat` as well as
+  `targetApps`; `AzpManifest.compat` has no evaluation site anywhere, so a package declaring a host API
+  version this build doesn't satisfy installs silently. `targetApps` is the half that was closed.
 - **State reporting isn't implemented.** `spec/state-reporting.md` (on-device per-item states to a store
   app, aggregate counts to a repository) has no client here yet. `AzpInstallSurfaces` answers the UI half
   of the same question but reports nothing to anyone.

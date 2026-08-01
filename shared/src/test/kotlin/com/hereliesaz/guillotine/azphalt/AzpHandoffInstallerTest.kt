@@ -23,6 +23,9 @@ class AzpHandoffInstallerTest {
 
     @get:Rule val tmp = TemporaryFolder()
 
+    /** This host's id, as AzphaltStoreScreen passes it (context.packageName). */
+    private val HOST = "com.hereliesaz.guillotine"
+
     private fun zip(entries: Map<String, ByteArray>): ByteArray {
         val bos = ByteArrayOutputStream()
         ZipOutputStream(bos).use { zout ->
@@ -76,6 +79,7 @@ class AzpHandoffInstallerTest {
         val bytes = signedPackage(id, author)
         val result = AzpHandoffInstaller.install(
             bytes, tmp.newFolder("ext").absolutePath, trustedKeys = setOf(b64(author.public.encoded)),
+            hostAppId = HOST,
         )
         val ok = result as? AzpHandoffInstaller.InstallResult.Success ?: error("expected Success, got $result")
         assertEquals(id, ok.id)
@@ -90,7 +94,7 @@ class AzpHandoffInstallerTest {
         val bytes = unsignedPackage(id)
         val dir = tmp.newFolder("ext").absolutePath
 
-        val result = AzpHandoffInstaller.install(bytes, dir)
+        val result = AzpHandoffInstaller.install(bytes, dir, hostAppId = HOST)
         val ok = result as? AzpHandoffInstaller.InstallResult.Success ?: error("expected Success, got $result")
         assertEquals(false, ok.signed)
     }
@@ -103,10 +107,10 @@ class AzpHandoffInstallerTest {
 
         // trustedKeys deliberately empty: a valid signature from an unrecognized publisher still needs
         // an explicit "install anyway".
-        val first = AzpHandoffInstaller.install(bytes, dir)
+        val first = AzpHandoffInstaller.install(bytes, dir, hostAppId = HOST)
         assertTrue(first is AzpHandoffInstaller.InstallResult.Untrusted)
 
-        val second = AzpHandoffInstaller.install(bytes, dir, allowUntrusted = true)
+        val second = AzpHandoffInstaller.install(bytes, dir, allowUntrusted = true, hostAppId = HOST)
         assertTrue(second is AzpHandoffInstaller.InstallResult.Success)
     }
 
@@ -115,7 +119,7 @@ class AzpHandoffInstallerTest {
         val code = "x".encodeToByteArray()
         val wrongDigest = AzpPackage.digest("different".encodeToByteArray())
         val bytes = zip(mapOf("manifest.json" to manifest(id, mapOf("code/main.js" to wrongDigest)), "code/main.js" to code))
-        val result = AzpHandoffInstaller.install(bytes, tmp.newFolder("ext").absolutePath, allowUntrusted = true)
+        val result = AzpHandoffInstaller.install(bytes, tmp.newFolder("ext").absolutePath, allowUntrusted = true, hostAppId = HOST)
         assertTrue(result is AzpHandoffInstaller.InstallResult.Failure)
     }
 
@@ -127,7 +131,7 @@ class AzpHandoffInstallerTest {
         val dir = tmp.newFolder("ext").absolutePath
 
         val installed = AzpHandoffInstaller.install(
-            signedPackage(id, original), dir, trustedKeys = setOf(b64(original.public.encoded)), pins = pins,
+            signedPackage(id, original), dir, trustedKeys = setOf(b64(original.public.encoded)), pins = pins, hostAppId = HOST,
         )
         assertTrue(installed is AzpHandoffInstaller.InstallResult.Success)
         assertEquals(b64(original.public.encoded), pins.keyFor(id))
@@ -135,7 +139,7 @@ class AzpHandoffInstallerTest {
         // A later "update" signed by a different key — same publisher pinning protection the
         // model-install path already had, now also covering the handoff install path.
         val hijacked = AzpHandoffInstaller.install(
-            signedPackage(id, hijacker), dir, trustedKeys = setOf(b64(hijacker.public.encoded)), pins = pins,
+            signedPackage(id, hijacker), dir, trustedKeys = setOf(b64(hijacker.public.encoded)), pins = pins, hostAppId = HOST,
         )
         val changed = hijacked as? AzpHandoffInstaller.InstallResult.PublisherChanged
             ?: error("expected PublisherChanged, got $hijacked")
@@ -148,7 +152,7 @@ class AzpHandoffInstallerTest {
         // Explicit approval lets the rotation through and re-pins.
         val approved = AzpHandoffInstaller.install(
             signedPackage(id, hijacker), dir, trustedKeys = setOf(b64(hijacker.public.encoded)),
-            pins = pins, allowPublisherChange = true,
+            pins = pins, allowPublisherChange = true, hostAppId = HOST,
         )
         assertTrue(approved is AzpHandoffInstaller.InstallResult.Success)
         assertEquals(b64(hijacker.public.encoded), pins.keyFor(id))
@@ -177,7 +181,7 @@ class AzpHandoffInstallerTest {
             scopedPackage("com.example.other", listOf("com.example.othereditor")),
             dir.absolutePath,
             allowUntrusted = true,
-            hostAppId = "com.hereliesaz.guillotine",
+            hostAppId = HOST,
         )
         val wrong = result as? AzpHandoffInstaller.InstallResult.WrongHost
             ?: error("expected WrongHost, got $result")
@@ -193,7 +197,7 @@ class AzpHandoffInstallerTest {
             scopedPackage("com.example.scoped", listOf("com.other.editor", "com.hereliesaz.guillotine")),
             dir.absolutePath,
             allowUntrusted = true,
-            hostAppId = "com.hereliesaz.guillotine",
+            hostAppId = HOST,
         )
         assertTrue("expected Success, got $result", result is AzpHandoffInstaller.InstallResult.Success)
     }
@@ -202,17 +206,18 @@ class AzpHandoffInstallerTest {
         val dir = tmp.newFolder("ext")
         val result = AzpHandoffInstaller.install(
             unsignedPackage("com.example.global"), dir.absolutePath,
-            allowUntrusted = true, hostAppId = "com.hereliesaz.guillotine",
+            allowUntrusted = true, hostAppId = HOST,
         )
         assertTrue("expected Success, got $result", result is AzpHandoffInstaller.InstallResult.Success)
     }
 
     @Test fun blankHostIdSkipsScoping() {
-        // Callers with no host identity (tests, tooling) must not be silently refused everything.
+        // Blank is the explicit "I have no host identity" opt-out. It is not a default any more — the
+        // parameter is required — so skipping the check can only happen by asking for it in so many words.
         val dir = tmp.newFolder("ext")
         val result = AzpHandoffInstaller.install(
             scopedPackage("com.example.other2", listOf("com.example.othereditor")),
-            dir.absolutePath, allowUntrusted = true,
+            dir.absolutePath, allowUntrusted = true, hostAppId = "",
         )
         assertTrue("expected Success, got $result", result is AzpHandoffInstaller.InstallResult.Success)
     }
@@ -237,7 +242,7 @@ class AzpHandoffInstallerTest {
             ),
         )
         val result = AzpHandoffInstaller.install(
-            bytes, tmp.newFolder("ext").absolutePath, hostAppId = "com.hereliesaz.guillotine",
+            bytes, tmp.newFolder("ext").absolutePath, hostAppId = HOST,
         )
         assertTrue("expected WrongHost, got $result", result is AzpHandoffInstaller.InstallResult.WrongHost)
     }

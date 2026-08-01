@@ -118,7 +118,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                 is AzpHandoffInstaller.InstallResult.Success -> {
                     val clipId = vm.uiState.value.selectedClipIds.firstOrNull()
                     if (clipId == null) {
-                        notice = InstalledNotice(result.name, result.signed, result.signatureValid, InstallOutcome.NotApplied, result.surfaces)
+                        notice = InstalledNotice(result.name, result.signed, result.signatureValid, InstallOutcome.NothingSelected, result.surfaces)
                         return@launch
                     }
                     // Actually apply it — installing alone doesn't render anything for most package kinds.
@@ -126,11 +126,12 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                     notice = InstalledNotice(
                         result.name, result.signed, result.signatureValid,
                         when (outcome) {
-                            is AzpPluginApplier.Outcome.Applied -> InstallOutcome.Applied
-                            is AzpPluginApplier.Outcome.Unsupported -> InstallOutcome.NotApplicable(outcome.message)
+                            is AzpPluginApplier.Outcome.Applied -> InstallOutcome.Applied(outcome.surface)
+                            is AzpPluginApplier.Outcome.Unsupported -> InstallOutcome.NotApplied
                             // The package landed on disk either way, so this is still an install the user
-                            // should be told about — just one where applying it went wrong.
-                            is AzpPluginApplier.Outcome.Failure -> InstallOutcome.NotApplicable(outcome.message)
+                            // should be told about — just one where applying it went wrong. A genuine
+                            // failure keeps its message; "unsupported" does not (see NotApplied).
+                            is AzpPluginApplier.Outcome.Failure -> InstallOutcome.Failed(outcome.message)
                         },
                         result.surfaces,
                     )
@@ -345,14 +346,22 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
 
 /** What happened to a freshly installed package beyond landing on disk. */
 private sealed interface InstallOutcome {
-    /** Installed and applied to the clip that was selected. */
-    object Applied : InstallOutcome
+    /** Installed and applied to the clip that was selected, at [surface]. */
+    data class Applied(val surface: AzpInstallSurfaces.Surface) : InstallOutcome
 
     /** Installed, but nothing was selected to apply it to. */
-    object NotApplied : InstallOutcome
+    object NothingSelected : InstallOutcome
 
-    /** Installed, but this package's content has no apply path here (yet) — [reason] says why. */
-    data class NotApplicable(val reason: String) : InstallOutcome
+    /** Installed, but applying it to the selected clip failed outright — [reason] is a real error. */
+    data class Failed(val reason: String) : InstallOutcome
+
+    /**
+     * Installed, but not applied to what was selected. Deliberately carries no message from the applier:
+     * its "needs the extension runtime" text is about the *asset* path and is flatly wrong for a motion
+     * package that simply had a video clip selected instead of a caption. Where the package DOES work is
+     * already answered, per surface, by [whereToFind].
+     */
+    object NotApplied : InstallOutcome
 }
 
 /** A completed install, and everything the user needs told about it. */
@@ -366,34 +375,40 @@ private data class InstalledNotice(
 )
 
 /**
- * Where to find [surface], in the user's words. One sentence each, naming the real section headings
- * ("Extensions" is [AzpAssetContribution]'s title, "Kinetic type" is [KineticTypographyContribution]'s)
- * so the instruction survives someone actually following it.
+ * Where to find [surface], in the user's words, and whether *this* surface is the one that got applied.
+ *
+ * Every place named here was checked against what the app actually renders. In particular the asset
+ * panel is **not** called "Extensions" on screen: [AzpAssetContribution] declares that as its `title`,
+ * but [ClipPanelHost] never reads `title` — it calls `Content` directly, and the section is drawn by
+ * [ClipPanelSection] with the *package's own name*. Sending a user to look for "Extensions" would send
+ * them looking for a string the UI never draws. "Clip Properties" is [AdvancedToolView]'s heading for
+ * the Select tool's panel, and "Kinetic type" really is the section heading the motion picker draws.
  */
-private fun whereToFind(surface: AzpInstallSurfaces.Surface, applied: Boolean): String = when (surface) {
+private fun whereToFind(surface: AzpInstallSurfaces.Surface, appliedHere: Boolean): String = when (surface) {
     AzpInstallSurfaces.Surface.CLIP_EXTENSIONS ->
-        if (applied) {
-            "With that clip selected, its controls are under “Extensions” in the clip tools panel, where " +
-                "you can adjust or remove it."
+        if (appliedHere) {
+            "With that clip selected, the Clip Properties panel now has a section named after it, where " +
+                "you can adjust its controls or remove it."
         } else {
-            "Select a clip: it's listed under “Extensions” in the clip tools panel, with a button to " +
-                "apply it, and its own controls once applied."
+            "Select a clip: the Clip Properties panel gets a section named after it, with a button to " +
+                "apply it to that clip."
         }
     AzpInstallSurfaces.Surface.CAPTION_MOTION ->
-        if (applied) {
-            "With that caption selected, it's under “Kinetic type” in the clip tools panel, where you " +
-                "can switch or clear the animation."
+        if (appliedHere) {
+            "With that caption selected, it's under “Kinetic type” in the Clip Properties panel, where " +
+                "you can switch or clear the animation."
         } else {
-            "Select a caption: it's listed under “Kinetic type” in the clip tools panel, and tapping it " +
-                "animates that caption."
+            "Select a caption — a text clip, not a video one — and it's listed under “Kinetic type” in " +
+                "the Clip Properties panel. Tapping it animates that caption."
         }
     AzpInstallSurfaces.Surface.AI_MODEL ->
-        "This package carries an on-device AI model. Models are wired into their settings slots by " +
-            "Settings → Advanced → Install AI model — installing it here only saved the package, so run " +
-            "that to actually put the model to use."
+        "This package carries an on-device AI model, and installing it here only saved the package — it " +
+            "does not put the model to use. That's a separate flow, Settings → Advanced → Install AI " +
+            "model, and it picks the `.azp` file itself, so you'll need the file: if it came from a " +
+            "link rather than a download, download it from azphalt.store first."
     AzpInstallSurfaces.Surface.LISTED_NOT_APPLICABLE ->
-        "It's listed under “Extensions” in the clip tools panel when a clip is selected, but Guillotine " +
-            "has no render path for this asset type, so it can't be applied to a clip."
+        "Select a clip and the Clip Properties panel lists it in a section named after it — but " +
+            "Guillotine has no render path for this asset type, so there's nothing to apply to a clip."
     AzpInstallSurfaces.Surface.NONE ->
         "Nothing in this build surfaces it yet: code extensions need the WASM sandbox (not shipped), and " +
             "companion-app, MCP and pack packages have no consumer here. It's saved, and it'll be picked " +
@@ -423,16 +438,19 @@ private fun InstalledNoticeDialog(notice: InstalledNotice, onDismiss: () -> Unit
     // What happened to *this* install, then where the package lives. The second half is per-package: a
     // shader, a caption animation and a model all install the same way and then appear in three unrelated
     // places, so the surfaces come from the manifest rather than one sentence covering everything.
-    val what = when (notice.outcome) {
+    val what = when (val outcome = notice.outcome) {
         is InstallOutcome.Applied -> "It's applied to the selected clip."
-        is InstallOutcome.NotApplied -> "Nothing was selected, so it isn't applied to anything yet."
-        is InstallOutcome.NotApplicable -> notice.outcome.reason
+        is InstallOutcome.NothingSelected -> "Nothing was selected, so it isn't applied to anything yet."
+        is InstallOutcome.NotApplied -> "It isn't applied to the clip you had selected."
+        is InstallOutcome.Failed -> outcome.reason
     }
-    val applied = notice.outcome is InstallOutcome.Applied
-    val where = notice.surfaces.joinToString("\n\n") { whereToFind(it, applied) }
+    // Per surface, not per install: a mixed package can reach two surfaces while only one of them was
+    // applied, and saying "its controls are on the selected clip" about the other one would be a lie.
+    val appliedSurface = (notice.outcome as? InstallOutcome.Applied)?.surface
+    val where = notice.surfaces.joinToString("\n\n") { whereToFind(it, appliedHere = it == appliedSurface) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (applied) "Applied “${notice.name}”" else "Installed “${notice.name}”") },
+        title = { Text(if (appliedSurface != null) "Applied “${notice.name}”" else "Installed “${notice.name}”") },
         // Scrollable: a mixed package reaches more than one surface, and this is the one dialog whose
         // text must not be cut off on a short screen — it's the only place the destination is stated.
         text = {
