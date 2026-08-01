@@ -93,6 +93,12 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
     // across two sequential dialogs made the web store look like a consolation prize you could only
     // reach by first bouncing off Play. awaitingPlayReturn tracks the Play round-trip across onResume.
     var showUnavailable by remember { mutableStateOf(false) }
+    // Which way to acquire. Previously this screen jumped straight into the store app whenever one was
+    // installed, so the marketplace at azphalt.store was only ever offered to people who had NO store app
+    // — and what the store app shows a delegating host is HandoffPicker, a bare list built for the
+    // handoff, not its browse UI. Both routes are real now that a downloaded .azp opens straight into the
+    // editor (and azphalt://install is claimed), so both get offered.
+    var showRoutes by remember { mutableStateOf(false) }
     var awaitingPlayReturn by remember { mutableStateOf(false) }
 
     fun finish(message: String? = null) {
@@ -199,7 +205,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
         } else if (incoming is AzpExternalOpen.Incoming.Link) {
             pendingLink = incoming.link
         } else if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
-            launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
+            showRoutes = true
         } else {
             showUnavailable = true
         }
@@ -222,6 +228,34 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    if (showRoutes) {
+        AlertDialog(
+            onDismissRequest = { showRoutes = false; onDismiss() },
+            title = { Text("Add an extension") },
+            text = {
+                Text(
+                    "The web store at azphalt.store is the full marketplace — search, categories, " +
+                        "previews. Downloading a package there opens it straight back into Guillotine. " +
+                        "The Store app is quicker but hands over a plain list.",
+                )
+            },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = {
+                        showRoutes = false
+                        openWebStore(context)
+                        onDismiss()
+                    }) { Text("Browse the web store") }
+                    TextButton(onClick = {
+                        showRoutes = false
+                        launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
+                    }) { Text("Use the Store app") }
+                    TextButton(onClick = { showRoutes = false; onDismiss() }) { Text("Cancel") }
+                }
+            },
+        )
     }
 
     if (showUnavailable) {
