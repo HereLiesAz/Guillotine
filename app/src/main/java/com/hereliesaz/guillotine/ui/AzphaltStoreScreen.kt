@@ -39,6 +39,7 @@ import com.hereliesaz.guillotine.azphalt.AzpHandoffInstaller
 import com.hereliesaz.guillotine.azphalt.AzpInstallLink
 import com.hereliesaz.guillotine.azphalt.AzpInstallSurfaces
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
+import com.hereliesaz.guillotine.azphalt.AzpStateReport
 import com.hereliesaz.guillotine.azphalt.AzphaltRegistry
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreHandoff
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
@@ -104,6 +105,10 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
     // editor (and azphalt://install is claimed), so both get offered.
     var showRoutes by remember { mutableStateOf(false) }
     var awaitingPlayReturn by remember { mutableStateOf(false) }
+    // Built off the main thread when this screen opens: reading and parsing every installed .azp is
+    // blocking I/O. Null until ready (and when nothing is installed), which is a conforming thing to
+    // send — so a browse that happens before it resolves simply carries no inventory.
+    var inventory by remember { mutableStateOf<String?>(null) }
 
     fun finish(message: String? = null) {
         message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
@@ -242,6 +247,12 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
     // downloads. With neither, launch into the store app, since there is no Guillotine-owned browsing UI
     // to show first — and no store app installed offers the ways to get one rather than falling back to a
     // catalog Guillotine fetches and renders itself.
+    LaunchedEffect(Unit) {
+        inventory = withContext(Dispatchers.IO) {
+            runCatching { AzpStateReport.inventoryJson(File(extensionsDir), context.packageName) }.getOrNull()
+        }
+    }
+
     LaunchedEffect(incoming) {
         if (incoming is AzpExternalOpen.Incoming.File) {
             val bytes = withContext(Dispatchers.IO) {
@@ -266,7 +277,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
             if (event == Lifecycle.Event.ON_RESUME && awaitingPlayReturn) {
                 awaitingPlayReturn = false
                 if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
-                    launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
+                    launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName, inventory))
                 } else {
                     showUnavailable = true
                 }
@@ -296,7 +307,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                     }) { Text("Browse the web store") }
                     TextButton(onClick = {
                         showRoutes = false
-                        launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName))
+                        launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName, inventory))
                     }) { Text("Use the Store app") }
                     TextButton(onClick = { showRoutes = false; onDismiss() }) { Text("Cancel") }
                 }
