@@ -78,9 +78,14 @@ Two traps worth recording, both caught in review after the first attempt shipped
 - **State reporting isn't implemented.** `spec/state-reporting.md` (on-device per-item states to a store
   app, aggregate counts to a repository) has no client here yet. `AzpInstallSurfaces` answers the UI half
   of the same question but reports nothing to anyone.
-- **The AI-model path still doesn't converge.** A model `.azp` installed through the store screen lands on
-  disk without being routed to a settings slot; the dialog says so honestly rather than papering over it,
-  but the two install paths should probably become one.
+- ~~**The AI-model path still doesn't converge.**~~ **Done (2026-08-01):** the store/file/deep-link route
+  now runs `AzpModelInstall` itself when the package carries model assets, writing into the same
+  `filesDir/azp-models` that `ModelResolver` scans — so the model is actually in use instead of sitting
+  inert in the extensions dir. Trust is not re-prompted: the gate already ran on those exact bytes moments
+  earlier and the user answered it, and there is no dialog in flight to answer a second one with. Download
+  progress for `remoteUrl` weights shows in the same busy dialog Settings uses. The notice now reports how
+  many models installed and how many matched a settings slot, instead of telling the user to re-install
+  from a file a deep-link install never gave them.
 - **Still no device test of the deep link**, and azphalt.store still doesn't emit `azphalt://install`.
 
 ## Store: the `azphalt://install` deep link, and a MIME type that was simply wrong (2026-07-31)

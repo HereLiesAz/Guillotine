@@ -38,6 +38,7 @@ import com.hereliesaz.guillotine.azphalt.AzpExternalOpen
 import com.hereliesaz.guillotine.azphalt.AzpHandoffInstaller
 import com.hereliesaz.guillotine.azphalt.AzpInstallLink
 import com.hereliesaz.guillotine.azphalt.AzpInstallSurfaces
+import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzphaltRegistry
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreHandoff
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
@@ -73,6 +74,9 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val extensionsDir = remember { File(context.filesDir, "extensions").absolutePath }
+    // The same directory Settings → Advanced → Install AI model writes to, and the only one
+    // ModelResolver scans. Landing models anywhere else is landing them nowhere.
+    val modelsDir = remember { File(context.filesDir, "azp-models") }
     // Shared with the AI-model install flow (Sheets.kt) — trust-on-first-use pins are keyed by package
     // id, so both install paths enforcing the same publisher continuity is the point, not a collision.
     val publisherPins = remember { AzpPublisherPins(File(context.filesDir, "azp-publishers.json")) }
@@ -122,9 +126,46 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
             busy = null
             when (result) {
                 is AzpHandoffInstaller.InstallResult.Success -> {
+                    // A model package needs a second step the extensions dir can't do for it: the model
+                    // files have to be extracted (or fetched, for remoteUrl weights) into azp-models,
+                    // which is the only place ModelResolver looks. Without this the package installed and
+                    // the model stayed inert, and the notice had to admit as much.
+                    val models = if (AzpInstallSurfaces.Surface.AI_MODEL in result.surfaces) {
+                        busy = "Installing model…"
+                        val outcome = withContext(Dispatchers.IO) {
+                            runCatching {
+                                AzpModelInstall.install(
+                                    bytes,
+                                    trustedKeys = setOf(AzphaltTrust.FLAGSHIP_SIGNING_KEY),
+                                    modelsDir = modelsDir,
+                                    // The trust gate already ran on these exact bytes moments ago, and the
+                                    // user answered it. Re-prompting from here would ask the same question
+                                    // twice, and there is no dialog in flight to answer it with.
+                                    allowUntrusted = true,
+                                    pins = publisherPins,
+                                    allowPublisherChange = true,
+                                ) { p ->
+                                    val pct = p.bytesTotal?.takeIf { it > 0 }?.let { p.bytesDone * 100 / it }
+                                    busy = when (p.phase) {
+                                        AzpModelInstall.Phase.DOWNLOADING ->
+                                            "Downloading ${p.model.filename}${pct?.let { " — $it%" } ?: ""}…"
+                                        AzpModelInstall.Phase.VERIFYING -> "Verifying ${p.model.filename}…"
+                                        AzpModelInstall.Phase.WRITING -> "Writing ${p.model.filename}…"
+                                    }
+                                }
+                            }
+                        }
+                        busy = null
+                        outcome.fold(
+                            onSuccess = { r -> ModelOutcome.Installed(r.installed.size, r.installed.count { it.slot != null }) },
+                            onFailure = { ModelOutcome.Failed(it.message ?: "the model could not be installed") },
+                        )
+                    } else {
+                        null
+                    }
                     val clipId = vm.uiState.value.selectedClipIds.firstOrNull()
                     if (clipId == null) {
-                        notice = InstalledNotice(result.name, result.signed, result.signatureValid, InstallOutcome.NothingSelected, result.surfaces)
+                        notice = InstalledNotice(result.name, result.signed, result.signatureValid, InstallOutcome.NothingSelected, result.surfaces, models)
                         return@launch
                     }
                     // Actually apply it — installing alone doesn't render anything for most package kinds.
@@ -140,6 +181,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                             is AzpPluginApplier.Outcome.Failure -> InstallOutcome.Failed(outcome.message)
                         },
                         result.surfaces,
+                        models,
                     )
                 }
                 is AzpHandoffInstaller.InstallResult.WrongHost -> finish(wrongHostMessage(result))
@@ -402,6 +444,15 @@ private sealed interface InstallOutcome {
     data class NotApplied(val reason: String) : InstallOutcome
 }
 
+/** What became of a model package's actual model files, beyond the `.azp` landing on disk. */
+private sealed interface ModelOutcome {
+    /** [count] models extracted into the models dir; [routed] of them matched a settings slot. */
+    data class Installed(val count: Int, val routed: Int) : ModelOutcome
+
+    /** The package installed but its models did not — [reason] is the real error, not a shrug. */
+    data class Failed(val reason: String) : ModelOutcome
+}
+
 /** A completed install, and everything the user needs told about it. */
 private data class InstalledNotice(
     val name: String,
@@ -410,6 +461,8 @@ private data class InstalledNotice(
     val outcome: InstallOutcome,
     /** Where this particular package turns up — derived from its payload, not assumed. */
     val surfaces: List<AzpInstallSurfaces.Surface>,
+    /** Non-null only for a package carrying models: what happened to them. */
+    val models: ModelOutcome? = null,
 )
 
 /**
@@ -431,7 +484,11 @@ private data class InstalledNotice(
  * Controls are not promised either: a package with no `ui` schema renders an empty control area, so the
  * shader/LUT text mentions sliders as conditional rather than as something to go looking for.
  */
-private fun whereToFind(surface: AzpInstallSurfaces.Surface, appliedHere: Boolean): String = when (surface) {
+private fun whereToFind(
+    surface: AzpInstallSurfaces.Surface,
+    appliedHere: Boolean,
+    models: ModelOutcome? = null,
+): String = when (surface) {
     AzpInstallSurfaces.Surface.CLIP_EXTENSIONS ->
         if (appliedHere) {
             "With that clip selected, the clip panel now has a section named after it, with a Remove " +
@@ -449,11 +506,31 @@ private fun whereToFind(surface: AzpInstallSurfaces.Surface, appliedHere: Boolea
             "Select a caption — a text clip, not a video one — and it's listed under “Kinetic type” in " +
                 "the clip panel. Tapping it animates that caption."
         }
-    AzpInstallSurfaces.Surface.AI_MODEL ->
-        "This package carries an on-device AI model, and installing it here only saved the package — it " +
-            "does not put the model to use. That's a separate flow, Settings → Advanced → Install AI " +
-            "model, and it picks the `.azp` file itself, so you'll need the file: if it came from a " +
-            "link rather than a download, download it from azphalt.store first."
+    // This route used to stop at the .azp and tell the user to go and re-install it from Settings with a
+    // file they might not even have. It now runs the same model install Settings does, so this says what
+    // actually happened rather than handing over a chore.
+    AzpInstallSurfaces.Surface.AI_MODEL -> when (models) {
+        is ModelOutcome.Installed -> {
+            val n = models.count
+            val unrouted = n - models.routed
+            "It carries ${if (n == 1) "an on-device AI model" else "$n on-device AI models"}, and " +
+                (if (n == 1) "it's" else "they're") + " installed and ready — the editor picks " +
+                (if (n == 1) "it" else "them") + " up automatically. " +
+                if (unrouted > 0) {
+                    "$unrouted of them didn't match a known settings slot, so you may need to point at " +
+                        "${if (unrouted == 1) "it" else "them"} under Settings → Advanced."
+                } else {
+                    "You can see the slots under Settings → Advanced."
+                }
+        }
+        is ModelOutcome.Failed ->
+            "It carries an on-device AI model, but installing the model itself failed: ${models.reason}. " +
+                "The package is saved; Settings → Advanced → Install AI model can retry it from the " +
+                "original `.azp` file."
+        null ->
+            "It carries an on-device AI model. Settings → Advanced → Install AI model installs models " +
+                "from a `.azp` file."
+    }
     AzpInstallSurfaces.Surface.LISTED_NOT_APPLICABLE ->
         "It's listed in the clip panel, in a section named after it, whenever a clip is selected — but " +
             "Guillotine has no renderer for this asset type, so there's nothing to apply to a clip."
@@ -495,7 +572,7 @@ private fun InstalledNoticeDialog(notice: InstalledNotice, onDismiss: () -> Unit
     // Per surface, not per install: a mixed package can reach two surfaces while only one of them was
     // applied, and saying "its controls are on the selected clip" about the other one would be a lie.
     val appliedSurface = (notice.outcome as? InstallOutcome.Applied)?.surface
-    val where = notice.surfaces.joinToString("\n\n") { whereToFind(it, appliedHere = it == appliedSurface) }
+    val where = notice.surfaces.joinToString("\n\n") { whereToFind(it, it == appliedSurface, notice.models) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (appliedSurface != null) "Applied “${notice.name}”" else "Installed “${notice.name}”") },

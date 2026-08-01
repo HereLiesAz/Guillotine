@@ -25,11 +25,14 @@ object AzpInstallSurfaces {
         CAPTION_MOTION,
 
         /**
-         * An on-device AI model. Models are wired into their settings slots by the separate
-         * **Settings → Advanced → Install AI model** flow ([AzpModelInstall]); this install path only
-         * lands the bytes, so the package is on disk but its models are not in use. It does not appear in
-         * the clip panel either — [AzpInstalledUi.list] skips model assets, since that panel can't apply
-         * them and used to imply it eventually would.
+         * An on-device AI model, extracted into the models directory by [AzpModelInstall] and picked up
+         * from there by the host's model resolver.
+         *
+         * The store install path used to stop at the `.azp` and leave the models inert, telling the user
+         * to go and re-run **Settings → Advanced → Install AI model** with a file a deep-link install
+         * never gave them. Both routes now run the same model install, so this surface means the model is
+         * actually in use. It still does not appear in the clip panel — [AzpInstalledUi.list] skips model
+         * assets, since that panel can't apply them and used to imply it eventually would.
          */
         AI_MODEL,
 
