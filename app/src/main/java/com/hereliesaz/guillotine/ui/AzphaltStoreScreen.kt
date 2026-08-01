@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -35,6 +37,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hereliesaz.guillotine.azphalt.AzpExternalOpen
 import com.hereliesaz.guillotine.azphalt.AzpHandoffInstaller
 import com.hereliesaz.guillotine.azphalt.AzpInstallLink
+import com.hereliesaz.guillotine.azphalt.AzpInstallSurfaces
 import com.hereliesaz.guillotine.azphalt.AzphaltRegistry
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreHandoff
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
@@ -77,6 +80,10 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
     // Null when idle; otherwise the line shown in the blocking progress dialog. One piece of state for
     // both slow steps, since a deep link downloads *then* verifies and the user should see which is which.
     var busy by remember { mutableStateOf<String?>(null) }
+    // The "here's what you just got, here's where it lives" dialog. A Toast used to carry this, which is
+    // the wrong surface for it: it vanishes on its own schedule, and the one thing a user needs after an
+    // install — where the thing they installed actually turns up — is exactly what they'd miss.
+    var notice by remember { mutableStateOf<InstalledNotice?>(null) }
     // A deep link that hasn't been confirmed yet. An unsolicited link shouldn't silently pull bytes.
     var pendingLink by remember { mutableStateOf<AzpInstallLink?>(null) }
     var pendingBytes by remember { mutableStateOf<ByteArray?>(null) }
@@ -103,24 +110,32 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                     pins = publisherPins,
                     allowUntrusted = allowUntrusted,
                     allowPublisherChange = allowPublisherChange,
+                    hostAppId = context.packageName,
                 )
             }
             busy = null
             when (result) {
                 is AzpHandoffInstaller.InstallResult.Success -> {
-                    val note = if (!result.signed) " (unsigned — integrity verified, provenance not)" else ""
                     val clipId = vm.uiState.value.selectedClipIds.firstOrNull()
                     if (clipId == null) {
-                        finish("Installed “${result.name}”$note. Select a clip, then reopen the store to apply it.")
+                        notice = InstalledNotice(result.name, result.signed, result.signatureValid, InstallOutcome.NotApplied, result.surfaces)
                         return@launch
                     }
                     // Actually apply it — installing alone doesn't render anything for most package kinds.
-                    when (val outcome = withContext(Dispatchers.IO) { AzpPluginApplier.apply(context, vm, clipId, result.id) }) {
-                        is AzpPluginApplier.Outcome.Applied -> finish("Applied “${result.name}”$note to the selected clip.")
-                        is AzpPluginApplier.Outcome.Unsupported -> finish(outcome.message)
-                        is AzpPluginApplier.Outcome.Failure -> finish(outcome.message)
-                    }
+                    val outcome = withContext(Dispatchers.IO) { AzpPluginApplier.apply(context, vm, clipId, result.id) }
+                    notice = InstalledNotice(
+                        result.name, result.signed, result.signatureValid,
+                        when (outcome) {
+                            is AzpPluginApplier.Outcome.Applied -> InstallOutcome.Applied
+                            is AzpPluginApplier.Outcome.Unsupported -> InstallOutcome.NotApplicable(outcome.message)
+                            // The package landed on disk either way, so this is still an install the user
+                            // should be told about — just one where applying it went wrong.
+                            is AzpPluginApplier.Outcome.Failure -> InstallOutcome.NotApplicable(outcome.message)
+                        },
+                        result.surfaces,
+                    )
                 }
+                is AzpHandoffInstaller.InstallResult.WrongHost -> finish(wrongHostMessage(result))
                 is AzpHandoffInstaller.InstallResult.Failure -> finish(result.message)
                 is AzpHandoffInstaller.InstallResult.Untrusted -> {
                     pendingBytes = bytes
@@ -264,6 +279,12 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
         )
     }
 
+    // Shown after the install lands, and it owns the dismissal: the flow stays on screen until the user
+    // has actually read where their extension went, rather than closing out from under the news.
+    notice?.let { n ->
+        InstalledNoticeDialog(n) { notice = null; onDismiss() }
+    }
+
     busy?.let { message ->
         AlertDialog(
             onDismissRequest = {},
@@ -321,6 +342,116 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
         )
     }
 }
+
+/** What happened to a freshly installed package beyond landing on disk. */
+private sealed interface InstallOutcome {
+    /** Installed and applied to the clip that was selected. */
+    object Applied : InstallOutcome
+
+    /** Installed, but nothing was selected to apply it to. */
+    object NotApplied : InstallOutcome
+
+    /** Installed, but this package's content has no apply path here (yet) — [reason] says why. */
+    data class NotApplicable(val reason: String) : InstallOutcome
+}
+
+/** A completed install, and everything the user needs told about it. */
+private data class InstalledNotice(
+    val name: String,
+    val signed: Boolean,
+    val signatureValid: Boolean,
+    val outcome: InstallOutcome,
+    /** Where this particular package turns up — derived from its payload, not assumed. */
+    val surfaces: List<AzpInstallSurfaces.Surface>,
+)
+
+/**
+ * Where to find [surface], in the user's words. One sentence each, naming the real section headings
+ * ("Extensions" is [AzpAssetContribution]'s title, "Kinetic type" is [KineticTypographyContribution]'s)
+ * so the instruction survives someone actually following it.
+ */
+private fun whereToFind(surface: AzpInstallSurfaces.Surface, applied: Boolean): String = when (surface) {
+    AzpInstallSurfaces.Surface.CLIP_EXTENSIONS ->
+        if (applied) {
+            "With that clip selected, its controls are under “Extensions” in the clip tools panel, where " +
+                "you can adjust or remove it."
+        } else {
+            "Select a clip: it's listed under “Extensions” in the clip tools panel, with a button to " +
+                "apply it, and its own controls once applied."
+        }
+    AzpInstallSurfaces.Surface.CAPTION_MOTION ->
+        if (applied) {
+            "With that caption selected, it's under “Kinetic type” in the clip tools panel, where you " +
+                "can switch or clear the animation."
+        } else {
+            "Select a caption: it's listed under “Kinetic type” in the clip tools panel, and tapping it " +
+                "animates that caption."
+        }
+    AzpInstallSurfaces.Surface.AI_MODEL ->
+        "This package carries an on-device AI model. Models are wired into their settings slots by " +
+            "Settings → Advanced → Install AI model — installing it here only saved the package, so run " +
+            "that to actually put the model to use."
+    AzpInstallSurfaces.Surface.LISTED_NOT_APPLICABLE ->
+        "It's listed under “Extensions” in the clip tools panel when a clip is selected, but Guillotine " +
+            "has no render path for this asset type, so it can't be applied to a clip."
+    AzpInstallSurfaces.Surface.NONE ->
+        "Nothing in this build surfaces it yet: code extensions need the WASM sandbox (not shipped), and " +
+            "companion-app, MCP and pack packages have no consumer here. It's saved, and it'll be picked " +
+            "up when that lands."
+}
+
+/**
+ * The post-install disclosure: **what** was installed, **whether it's applied**, and — the part that was
+ * missing entirely — **where to find it**. An extension that installs successfully and then can't be
+ * located is indistinguishable, from the user's side, from one that didn't install.
+ *
+ * azphalt's `spec/web-handoff.md` § Open questions names this gap from the ecosystem side: state
+ * reporting "covers the statistic but not *show the user what they just installed*". That's a host's job
+ * — no store app or registry can point at a surface inside this editor — so it's answered here.
+ *
+ * Provenance is restated rather than assumed: [InstalledNotice.signatureValid] means the Ed25519
+ * signature actually verified, [InstalledNotice.signed] only means the package carried one. Saying
+ * "signed" for the second would claim a check that didn't happen.
+ */
+@Composable
+private fun InstalledNoticeDialog(notice: InstalledNotice, onDismiss: () -> Unit) {
+    val provenance = when {
+        notice.signatureValid -> "Signature verified."
+        notice.signed -> "It carries a signature this device couldn't verify — integrity is confirmed, provenance isn't."
+        else -> "It's unsigned: integrity is confirmed, provenance isn't."
+    }
+    // What happened to *this* install, then where the package lives. The second half is per-package: a
+    // shader, a caption animation and a model all install the same way and then appear in three unrelated
+    // places, so the surfaces come from the manifest rather than one sentence covering everything.
+    val what = when (notice.outcome) {
+        is InstallOutcome.Applied -> "It's applied to the selected clip."
+        is InstallOutcome.NotApplied -> "Nothing was selected, so it isn't applied to anything yet."
+        is InstallOutcome.NotApplicable -> notice.outcome.reason
+    }
+    val applied = notice.outcome is InstallOutcome.Applied
+    val where = notice.surfaces.joinToString("\n\n") { whereToFind(it, applied) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (applied) "Applied “${notice.name}”" else "Installed “${notice.name}”") },
+        // Scrollable: a mixed package reaches more than one surface, and this is the one dialog whose
+        // text must not be cut off on a short screen — it's the only place the destination is stated.
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(listOf(what, where, provenance).filter { it.isNotBlank() }.joinToString("\n\n"))
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Got it") } },
+    )
+}
+
+/**
+ * A package built for a different host, refused per azphalt `spec/web-handoff.md` § Host obligations (5):
+ * a host absent from a non-empty `targetApps` MUST refuse and say so. Naming the hosts it *is* for turns
+ * a dead end into something the user can act on.
+ */
+private fun wrongHostMessage(result: AzpHandoffInstaller.InstallResult.WrongHost): String =
+    "“${result.name}” isn't built for Guillotine — it targets ${result.targetApps.joinToString(", ")}. " +
+        "Nothing was installed."
 
 /** Play Store listing for the reference Azphalt Store app, falling back to its web page if the Play Store app itself isn't present. */
 private fun openStoreAppListing(context: Context) {

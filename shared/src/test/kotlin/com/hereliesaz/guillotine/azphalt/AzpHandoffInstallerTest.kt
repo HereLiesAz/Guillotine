@@ -153,4 +153,92 @@ class AzpHandoffInstallerTest {
         assertTrue(approved is AzpHandoffInstaller.InstallResult.Success)
         assertEquals(b64(hijacker.public.encoded), pins.keyFor(id))
     }
+
+    // ---- host scoping (azphalt spec/web-handoff.md § Host obligations, 5) ----
+
+    /** As [manifest], but declaring `targetApps`. */
+    private fun scopedPackage(id: String, targetApps: List<String>): ByteArray {
+        val code = "export function f(){}".encodeToByteArray()
+        val apps = targetApps.joinToString(",") { "\"$it\"" }
+        val manifestBytes = """
+            {"azphalt":"0.1","id":"$id","name":"Scoped","version":"1.0.0","kind":"code","license":"MIT",
+             "compat":">=0.1","entry":"code/main.js","runtime":"js","capabilities":["canvas"],
+             "targetApps":[$apps],
+             "files":{"code/main.js":"${AzpPackage.digest(code)}"}}
+        """.trimIndent().encodeToByteArray()
+        return zip(mapOf("manifest.json" to manifestBytes, "code/main.js" to code))
+    }
+
+    @Test fun packageScopedToAnotherHostIsRefused() {
+        // A deep link names a package with nothing in between — no store app filtering on the `app` browse
+        // extra — so the host has to enforce targetApps itself. The spec makes refusing a MUST.
+        val dir = tmp.newFolder("ext")
+        val result = AzpHandoffInstaller.install(
+            scopedPackage("com.example.other", listOf("com.example.othereditor")),
+            dir.absolutePath,
+            allowUntrusted = true,
+            hostAppId = "com.hereliesaz.guillotine",
+        )
+        val wrong = result as? AzpHandoffInstaller.InstallResult.WrongHost
+            ?: error("expected WrongHost, got $result")
+        assertEquals("com.example.other", wrong.packageId)
+        assertEquals(listOf("com.example.othereditor"), wrong.targetApps)
+        // Refused means nothing on disk — not "installed but hidden".
+        assertEquals(0, dir.listFiles()?.size ?: 0)
+    }
+
+    @Test fun packageListingThisHostIsInstalled() {
+        val dir = tmp.newFolder("ext")
+        val result = AzpHandoffInstaller.install(
+            scopedPackage("com.example.scoped", listOf("com.other.editor", "com.hereliesaz.guillotine")),
+            dir.absolutePath,
+            allowUntrusted = true,
+            hostAppId = "com.hereliesaz.guillotine",
+        )
+        assertTrue("expected Success, got $result", result is AzpHandoffInstaller.InstallResult.Success)
+    }
+
+    @Test fun emptyTargetAppsIsGlobal() {
+        val dir = tmp.newFolder("ext")
+        val result = AzpHandoffInstaller.install(
+            unsignedPackage("com.example.global"), dir.absolutePath,
+            allowUntrusted = true, hostAppId = "com.hereliesaz.guillotine",
+        )
+        assertTrue("expected Success, got $result", result is AzpHandoffInstaller.InstallResult.Success)
+    }
+
+    @Test fun blankHostIdSkipsScoping() {
+        // Callers with no host identity (tests, tooling) must not be silently refused everything.
+        val dir = tmp.newFolder("ext")
+        val result = AzpHandoffInstaller.install(
+            scopedPackage("com.example.other2", listOf("com.example.othereditor")),
+            dir.absolutePath, allowUntrusted = true,
+        )
+        assertTrue("expected Success, got $result", result is AzpHandoffInstaller.InstallResult.Success)
+    }
+
+    @Test fun wrongHostIsRefusedBeforeAnyTrustPrompt() {
+        // Ordering matters: a package that will never run here must not first ask the user to vouch for
+        // its publisher. Signed by an untrusted key AND scoped elsewhere -> WrongHost, not Untrusted.
+        val stranger = ed25519Key()
+        val code = "export function f(){}".encodeToByteArray()
+        val manifestBytes = """
+            {"azphalt":"0.1","id":"com.example.both","name":"Both","version":"1.0.0","kind":"code",
+             "license":"MIT","compat":">=0.1","entry":"code/main.js","runtime":"js","capabilities":["canvas"],
+             "targetApps":["com.example.othereditor"],
+             "files":{"code/main.js":"${AzpPackage.digest(code)}"}}
+        """.trimIndent().encodeToByteArray()
+        val sig = """{"alg":"ed25519","publicKey":"${b64(stranger.public.encoded)}","signature":"${b64(sign(stranger, manifestBytes))}"}"""
+        val bytes = zip(
+            mapOf(
+                "manifest.json" to manifestBytes,
+                "code/main.js" to code,
+                "signature.json" to sig.encodeToByteArray(),
+            ),
+        )
+        val result = AzpHandoffInstaller.install(
+            bytes, tmp.newFolder("ext").absolutePath, hostAppId = "com.hereliesaz.guillotine",
+        )
+        assertTrue("expected WrongHost, got $result", result is AzpHandoffInstaller.InstallResult.WrongHost)
+    }
 }

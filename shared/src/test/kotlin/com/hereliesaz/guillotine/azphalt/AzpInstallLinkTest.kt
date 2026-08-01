@@ -110,6 +110,17 @@ class AzpInstallLinkTest {
         assertNull(AzpInstallLink.parse("azphalt://install?id=_under"))
     }
 
+    @Test fun repoParameterIsIgnoredNotHonoured() {
+        // spec/web-handoff.md § Which repository: a host MUST NOT fetch from a repo it doesn't already
+        // trust, and "ignoring `repo` entirely is conforming". So a link carrying one still parses — the
+        // package is named, the link is valid — and the repo simply isn't part of what comes back, leaving
+        // AzphaltRegistry to resolve against the configured registry.
+        assertEquals(
+            AzpInstallLink("com.example.pkg", "1.0.0"),
+            AzpInstallLink.parse("azphalt://install?id=com.example.pkg&version=1.0.0&repo=https%3A%2F%2Fevil.example"),
+        )
+    }
+
     @Test fun firstIdWins() {
         // A duplicated param must not let a later copy override the one a reader would call authoritative.
         assertEquals(AzpInstallLink("com.example.first", null), AzpInstallLink.parse("azphalt://install?id=com.example.first&id=com.example.second"))

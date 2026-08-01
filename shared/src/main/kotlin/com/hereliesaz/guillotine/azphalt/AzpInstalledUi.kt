@@ -38,7 +38,8 @@ object AzpInstalledUi {
             packageId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(120) + extension
     }
 
-    private fun renderKindOf(assetType: String): RenderKind = when (assetType.trim().lowercase()) {
+    /** How Guillotine renders [assetType], or [RenderKind.OTHER] when it has no native render path. */
+    fun renderKindOf(assetType: String): RenderKind = when (assetType.trim().lowercase()) {
         "shader", "isf", "glsl" -> RenderKind.SHADER
         "lut", "cube" -> RenderKind.LUT
         else -> RenderKind.OTHER

@@ -17,13 +17,31 @@ import java.io.File
 object AzpHandoffInstaller {
 
     sealed class InstallResult {
-        /** The `.azp` verified and was written. [signed]/[signatureValid] surface provenance for the UI. */
-        data class Success(val id: String, val name: String, val signed: Boolean, val signatureValid: Boolean) : InstallResult()
+        /**
+         * The `.azp` verified and was written. [signed]/[signatureValid] surface provenance for the UI,
+         * and [surfaces] says where in Guillotine the package actually turns up, so the caller can tell
+         * the user rather than guessing (see [AzpInstallSurfaces]).
+         */
+        data class Success(
+            val id: String,
+            val name: String,
+            val signed: Boolean,
+            val signatureValid: Boolean,
+            val surfaces: List<AzpInstallSurfaces.Surface> = emptyList(),
+        ) : InstallResult()
         data class Failure(val message: String) : InstallResult()
         /** Integrity-sound, but not from a trusted signer (or unsigned) and not yet approved by the user. */
         data class Untrusted(val reason: String) : InstallResult()
         /** [packageId] was previously installed from a different publisher key than this update carries. */
         data class PublisherChanged(val packageId: String, val pinnedKey: String, val newSignerKey: String?) : InstallResult()
+
+        /**
+         * The package declares a non-empty `targetApps` that doesn't include this host — it was built for
+         * a different editor. Refused outright: azphalt `spec/web-handoff.md` § Host obligations (5) makes
+         * this a MUST, and there is no "install anyway" because the package would be inert here anyway
+         * ([AzpInstalledUi.list] scopes by the same field, so it would install and then be invisible).
+         */
+        data class WrongHost(val packageId: String, val name: String, val targetApps: List<String>) : InstallResult()
     }
 
     /**
@@ -31,6 +49,9 @@ object AzpHandoffInstaller {
      * editor reads installed extensions from. The package id/name/version come from the manifest
      * inside [bytes], never from a caller-supplied label — trust decisions are keyed to what's actually
      * in the package. Blocks on disk IO — call off the main thread.
+     *
+     * [hostAppId] is this host's own id, checked against the package's `targetApps` (see
+     * [InstallResult.WrongHost]). Blank skips the check, for callers that genuinely have no host identity.
      */
     fun install(
         bytes: ByteArray,
@@ -39,6 +60,7 @@ object AzpHandoffInstaller {
         pins: AzpPublisherPins? = null,
         allowUntrusted: Boolean = false,
         allowPublisherChange: Boolean = false,
+        hostAppId: String = "",
     ): InstallResult {
         val trust = AzpPackage.verifyTrust(bytes, trustedKeys)
         if (!trust.ok) {
@@ -48,6 +70,13 @@ object AzpHandoffInstaller {
             AzpPackage.read(bytes).manifest
         } catch (e: Exception) {
             return InstallResult.Failure("Install failed: ${e.message}")
+        }
+        // Host scoping, before any trust prompt: a package scoped to other hosts is refused outright, so
+        // the user is never asked to vouch for a publisher on something that was never going to run here.
+        // This mattered less when the store app was the only route — it filters on the `app` browse extra
+        // — but a deep link names a package with nothing in between, so the host has to check for itself.
+        if (hostAppId.isNotBlank() && !manifest.targetsApp(hostAppId)) {
+            return InstallResult.WrongHost(manifest.id, manifest.name, manifest.targetApps)
         }
         // Publisher continuity (trust-on-first-use): if this id was installed before, the signer must
         // match the pinned key, or the caller must have already confirmed the change. Checked before
@@ -77,6 +106,12 @@ object AzpHandoffInstaller {
         // unverified. signatureStatus().valid is the field that actually means "verified", so re-derive
         // it here rather than reporting trust.signed as if it were that.
         val signatureValid = AzpPackage.signatureStatus(bytes).valid
-        return InstallResult.Success(manifest.id, manifest.name, signed = trust.signed, signatureValid = signatureValid)
+        return InstallResult.Success(
+            manifest.id,
+            manifest.name,
+            signed = trust.signed,
+            signatureValid = signatureValid,
+            surfaces = AzpInstallSurfaces.of(manifest),
+        )
     }
 }
