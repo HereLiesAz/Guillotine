@@ -411,6 +411,19 @@ object VideoEffects {
         if (ratio != null) {
             effects += Presentation.createForAspectRatio(ratio, Presentation.LAYOUT_SCALE_TO_FIT)
         }
+
+        // Output resolution. Applied AFTER the aspect-ratio presentation so it resizes the letterboxed
+        // frame rather than the raw source, and height-only so the ratio just established survives.
+        // Until this existed, GlobalSettings.quality was a control that changed nothing: Transformer was
+        // built with a MIME type and no resolution configuration at all.
+        settings.quality.targetHeight?.let { effects += Presentation.createForHeight(it) }
+
+        // Output frame rate. Note this can only ever *cap* the rate — Media3's frame drop discards
+        // frames and cannot synthesise them, so setting 60 on 30 fps source footage is a no-op rather
+        // than an interpolation. Capping is what the setting is for; raising it was never possible.
+        if (settings.fps > 0) {
+            effects += FrameDropEffect.createDefaultFrameDropEffect(settings.fps.toFloat())
+        }
         return effects
     }
 }
