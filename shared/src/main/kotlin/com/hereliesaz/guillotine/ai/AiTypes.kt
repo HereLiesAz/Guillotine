@@ -119,6 +119,38 @@ data class AiSettings(
     val genExtras: Map<GenProviderType, String> = emptyMap(),
     /** Preferred provider per category, remembered across sessions. */
     val genDefaults: Map<GenKind, GenProviderType> = emptyMap(),
+
+    // ---- on-device model paths (Settings → AI Analyzer / Transcription) ----------------------
+    // Each is the resolved path to a downloaded/installed model for that slot; blank falls back to
+    // the bundled default (documented per field) or turns the feature off. Set by a model-path field
+    // typed directly, or a model picker's "✓ Use" (see docs/SETTINGS.md § Reusable controls). These
+    // are what ModelResolver reads FIRST, before falling back to auto-detecting whatever's installed.
+    /** On-device Vosk model folder for the Transcription tab; blank = fall back to cloud OpenAI Whisper. */
+    val speechModelPath: String = "",
+    /** On-device assistant LLM (`.task`/`.litertlm`); blank = fall back to the provider key above. */
+    val agentModelPath: String = "",
+    /** Recognition image embedder (`.tflite`); blank = the bundled MobileNet-V3-small. */
+    val idEmbedModelPath: String = "",
+    /** Face embedder (`.tflite`); blank = fall back to the general recognition model. */
+    val faceEmbedModelPath: String = "",
+    /** Image-effect models keyed `superres`/`style`/`depth`/`lowlight` (`apply_image_effect`/`apply_bokeh`). */
+    val effectModelPaths: Map<String, String> = emptyMap(),
+    /** YAMNet audio-event model (`.tflite`) for highlight detection; blank = feature off. */
+    val audioEventModelPath: String = "",
+    /** sherpa-onnx offline ASR model directory; blank = feature off. */
+    val asrModelPath: String = "",
+    /** sherpa-onnx offline TTS voice directory; blank = feature off. */
+    val ttsModelPath: String = "",
+    /** Multimodal VLM (`.task`) for frame captioning; blank = feature off. */
+    val vlmModelPath: String = "",
+    /** sherpa-onnx pyannote speaker-segmentation directory; needs [diarizeEmbedModelPath] too. */
+    val diarizeSegModelPath: String = "",
+    /** sherpa-onnx speaker-embedding model (`.onnx`); needs [diarizeSegModelPath] too. */
+    val diarizeEmbedModelPath: String = "",
+    /** Spleeter stem-separation model directory (ONNX); blank = feature off. */
+    val stemModelPath: String = "",
+    /** GTCRN speech-denoiser model (`.onnx`); blank = feature off. */
+    val denoiseModelPath: String = "",
 ) {
     fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
     fun modelFor(p: AiProviderType): String =

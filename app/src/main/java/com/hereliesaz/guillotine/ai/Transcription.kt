@@ -11,16 +11,24 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Speech-to-text → timed cues, used to generate grouped text/caption clips. Currently backed
- * by OpenAI Whisper (BYO key) — the same engine the OpenAI analyzer uses for audio. An
- * on-device engine can implement the same [TranscriptCue] output later without touching callers.
+ * Speech-to-text → timed cues, used to generate grouped text/caption clips. Prefers the on-device
+ * Vosk engine ([VoskTranscriber]) when a model directory is set (Settings → Transcription); otherwise
+ * falls back to cloud OpenAI Whisper (BYO key) — the same engine the OpenAI analyzer uses for audio.
+ *
+ * [VoskTranscriber] shipped fully implemented but was never called from here — `transcribe_clip` and
+ * `animated_transcribe_clip` always required an OpenAI key even though their own tool descriptions
+ * (and the Transcription tab's model-path field) advertised "on-device Vosk or cloud Whisper."
  */
 object Transcription {
 
     suspend fun transcribe(context: Context, settings: AiSettings, uri: Uri): List<TranscriptCue> {
+        val voskPath = settings.speechModelPath
+        if (voskPath.isNotBlank()) {
+            return VoskTranscriber.transcribe(context, voskPath, uri.toString())
+        }
         val key = settings.keyFor(AiProviderType.OPENAI)
         require(key.isNotBlank()) {
-            "Transcription needs an OpenAI key."
+            "Transcription needs an on-device Vosk model (Settings → Transcription) or an OpenAI key."
         }
         return whisper(context, key, uri)
     }
