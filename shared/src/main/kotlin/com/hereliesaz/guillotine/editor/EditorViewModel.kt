@@ -1838,11 +1838,24 @@ open class EditorViewModel {
     fun toggleAutoEase() = _uiState.update { it.copy(autoEase = !it.autoEase) }
 
     /**
+     * The clip Crop & Transform edits. Not [EditorUiState.selectedClipId] — that's
+     * `selectedClipIds.singleOrNull()`, which is `null` the moment a selection is more than one
+     * clip, and selecting an imported video's picture clip also selects its linked shadow audio
+     * clip (same `groupId`, expanded by [expandGroups]) — the single most common case in the app.
+     * Crop has nothing to do to an audio clip, so the real target is the first non-audio clip in
+     * the selection, falling back to whatever's selected if it's audio-only.
+     */
+    private fun cropTargetClipId(): String? {
+        val sel = _uiState.value.selectedClips
+        return (sel.firstOrNull { it.type != ClipType.AUDIO } ?: sel.firstOrNull())?.id
+    }
+
+    /**
      * Crop tool: scale/move the selected clip directly on the preview. [zoom] is a pinch
      * factor; [panXFrac]/[panYFrac] are drag deltas as a fraction of the preview size.
      */
     fun transformSelectedClip(zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float = 0f) {
-        val id = _uiState.value.selectedClipId ?: return
+        val id = cropTargetClipId() ?: return
         updateClip(id) {
             it.copy(
                 scale = (it.scale * zoom).coerceIn(0.1f, 6f),
@@ -1864,7 +1877,7 @@ open class EditorViewModel {
      * the same gesture back toward zero.
      */
     fun resetSelectedClipTransform() {
-        val id = _uiState.value.selectedClipId ?: return
+        val id = cropTargetClipId() ?: return
         updateClip(id) { it.copy(scale = 1f, offsetX = 0f, offsetY = 0f, rotation = 0f) }
     }
 

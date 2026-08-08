@@ -75,7 +75,78 @@ whose render pipeline never reads them. Gated to `ClipType.VIDEO`, matching the 
   `android.content.Context` and has no existing test harness (Robolectric isn't set up in this repo);
   `EditorViewModel` likewise has no direct unit tests to extend for `resetSelectedClipTransform`. Both
   were instead verified by full-module compiles (`:shared:compileKotlin`, `:app:compileGithubDebugKotlin`,
-  `:desktop:compileKotlin`) plus the existing `:shared`/`:desktop`/`:app` test suites, all green.
+  `:desktop:compileKotlin`). **Correcting an overstated claim from the first pass of this entry:**
+  "the existing test suites, all green" is true only of `:shared:test` (240 tests, none touching the
+  changed lines). `:desktop` has **no `src/test` directory at all** (`:desktop:test` is `NO-SOURCE`,
+  not a passing empty run), and `:app:testGithubDebugUnitTest` runs exactly one file
+  (`ClipPanelContributionsTest.kt`) whose own KDoc says `appliesTo` is "exercised in the app, not
+  here" — it doesn't touch `AzpAssetContribution`'s changed gate either. None of this PR's new/changed
+  desktop or Android logic has test coverage; only compilation was verified, which is a much weaker
+  claim than "tests pass" and should have been stated as such the first time.
+
+## Glee audit of the userflow-audit PR above (2026-08-08, same day)
+
+An adversarial audit of everything the entry above touched, done immediately after merge rather than
+before — should have been the other way around. Found four real breaks (three of them the *exact*
+defect class the PR claimed to fix, just relocated) and two doc-accuracy problems. All fixed in a
+follow-up commit on the same branch/day; recorded here so the pattern (ship a fix, audit finds the
+fix reproduced its own bug one level over) doesn't repeat silently.
+
+- **Fixed: the new Crop panel's Reset (and the pre-existing drag/pinch/twist gesture underneath it)
+  did nothing for the single most common clip in the app.** `EditorUiState.selectedClipId` is
+  `selectedClipIds.singleOrNull()` — `null` the instant more than one clip is selected — and
+  selecting an imported video's picture clip also selects its linked shadow audio clip
+  (`expandGroups`, same `groupId`), so `selectedClipId` was `null` for exactly the case a user
+  actually hits by tapping a video with sound. `transformSelectedClip`/`resetSelectedClipTransform`
+  both `return` on that `null` with no error, no disabled state, nothing — while the new panel (keyed
+  off a *different* selection rule, `selectedClips.firstOrNull()`) kept rendering a live readout and a
+  Reset button that looked functional and were not. This was already true of the gesture before this
+  PR touched anything; the new panel just made the inconsistency visible instead of merely silent.
+  Fixed with one shared resolution rule (`EditorViewModel.cropTargetClipId()`: first non-`AUDIO` clip
+  in the selection, else whatever's selected) used by the gesture, the reset, and the panel's target
+  alike, so all three agree — and the underlying gesture now actually works on a video-with-audio
+  clip for the first time.
+- **Fixed: desktop's rewritten `apply_azp_plugin` reproduced "reports success, changes nothing" in
+  three places**, the exact defect it was written to close:
+  - The "is this a caption animation?" check only tested whether `AzpMotionInstaller.plan` accepted
+    the bytes (true for *any* valid `.azp`, since `plan` doesn't require a motion asset and returns
+    an empty `motions` list rather than failing) — so a shader/LUT/model package's id matched
+    `isMotion` too, and applying it to a video clip printed "is a caption animation. Select a
+    caption…" instead of ever reaching the real asset branch. Fixed by using the shared
+    `KineticTypographyPicker.listInstalled` (`:shared`, already used elsewhere on both platforms),
+    which correctly requires a resolvable bundled motion.
+  - The asset (shader/LUT) branch had no clip-type gate: applying a shader to a TEXT or AUDIO clip
+    wrote real `shaderPath`/`lutPath` into a clip whose render pipeline never reads them (captions
+    render through a separate overlay; audio has no picture pipeline) and reported "Applied" —
+    changing nothing, the identical user-visible symptom the PR's own commit message described.
+    Gated to `ClipType.VIDEO`, with an honest "select a video clip" message otherwise.
+  - `clear_azp_plugin` only ever called `clearCaptionMotion`, which was harmless while `apply` was
+    fake (nothing real to clear) but became a real regression once `apply` started writing genuine
+    filters: a shader applied via the assistant could no longer be removed via the assistant. Added
+    `DesktopAzpAssetApplier.remove` (mirroring the app's `AzpAssetApplier.remove`, which already
+    existed) and wired it into `clearAzpPlugin`.
+  Noted but **not** fixed here, since it predates this PR and isn't part of what it touched: the
+  app-side `AzpAssetApplier.apply`/`AzpPluginApplier.apply` (Android's own `apply_azp_plugin` path)
+  has the identical missing clip-type gate — applying a shader/LUT to a non-video clip via the
+  assistant on Android silently "succeeds" too. Worth its own fix; deliberately out of scope of an
+  audit of *this* PR's diff.
+- **Fixed: the Image effects section was missing `style` (3 of 4 documented fields, not 4).**
+  SETTINGS.md/MODELS.md both describe a fourth, custom-path-only slot; `apply_image_effect`'s own
+  tool schema advertises `style` as a valid effect. It resolved to nowhere in the UI, so the tool's
+  own error message pointed at a section that didn't have the field it named. Added (no picker,
+  since `STYLE` has no recommended catalog — matches MODELS.md).
+- **Fixed: the Vosk `speechModelPath` field got the "settings-first" treatment without the
+  existence check** the same PR added to `ModelResolver` for every *other* model path — a stale,
+  restored, or externally-cleared path made `transcribe_clip` route into a Vosk `Model()` constructor
+  call that could only fail, with no fallback to a perfectly good configured OpenAI key. Added the
+  same `File(path).exists()` guard.
+- **Fixed: a stale code comment contradicted the line directly under it.** `NleScreen.kt`'s
+  `agentModelPath` comment said "not a settings field" — true before this PR, false as of the same
+  diff that edited the line below it to read `settings.agentModelPath`. Corrected.
+- **Softened: an unverifiable claim in the new `DesktopMcpTools.kt` comment** ("`targetApps` is empty
+  on virtually every real package") — asserted with nothing in this repo (no catalog, no fixture) able
+  to confirm or refute it. Left the constant (there's no better option today) but the comment now says
+  plainly that this is unverified from here rather than presenting it as a measured fact.
 
 ## Store: conform to the published web-handoff spec, and say where an install went (2026-08-01)
 

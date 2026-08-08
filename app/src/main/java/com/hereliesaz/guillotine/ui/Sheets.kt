@@ -533,6 +533,9 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         Triple(ModelCategory.DEPTH, "depth", "Depth model path — depth map (e.g. bokeh)" to "Depth models"),
                         Triple(ModelCategory.SUPERRES, "superres", "Super-resolution model path — upscale a frame" to "Super-resolution models"),
                         Triple(ModelCategory.LOWLIGHT, "lowlight", "Low-light enhance model path — brighten a dark frame" to "Low-light models"),
+                        // STYLE has no recommended catalog (recommendedModelsFor returns emptyList, so
+                        // ModelPicker below just renders nothing for it) — custom path only, per MODELS.md.
+                        Triple(ModelCategory.STYLE, "style", "Style-transfer model path — stylize a frame" to "Style models"),
                     ).forEach { (category, key, hintAndTitle) ->
                         val (hint, pickerTitle) = hintAndTitle
                         val path = effectModelPaths[key].orEmpty()
@@ -544,7 +547,9 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                         }
                     }
                     Text(
-                        "Each is optional. The assistant's \"upscale / depth / brighten this frame\" commands run the matching model.",
+                        "Each is optional. The assistant's \"upscale / stylize / depth / brighten this frame\" " +
+                            "commands run the matching model. Style has no curated download — point it at a " +
+                            "compatible single-image-in/single-image-out .tflite model of your own.",
                         color = Neutral500, fontSize = 10.sp,
                     )
 

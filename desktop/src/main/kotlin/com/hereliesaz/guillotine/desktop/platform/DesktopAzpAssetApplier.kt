@@ -73,6 +73,17 @@ object DesktopAzpAssetApplier {
         }
     }
 
+    /** Remove this package's effect from the clip (shader or LUT), if it's the one applied. */
+    fun remove(vm: EditorViewModel, clipId: String, panel: AzpInstalledUi.Panel, current: com.hereliesaz.guillotine.model.ClipFilters) {
+        when (panel.renderKind) {
+            AzpInstalledUi.RenderKind.SHADER ->
+                if (isApplied(panel, current.shaderPath)) vm.updateClipFilters(clipId) { it.copy(shaderPath = "", shaderParams = emptyMap()) }
+            AzpInstalledUi.RenderKind.LUT ->
+                if (isApplied(panel, current.lutPath)) vm.updateClipFilters(clipId) { it.copy(lutPath = "") }
+            AzpInstalledUi.RenderKind.OTHER -> {}
+        }
+    }
+
     private fun write(subdir: String, name: String, bytes: ByteArray): File? = try {
         val dir = File(DesktopStorage.dataDir, subdir).apply { mkdirs() }
         File(dir, name).apply { writeBytes(bytes) }
