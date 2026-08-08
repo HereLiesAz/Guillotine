@@ -90,18 +90,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          export BUILD_NUMBER=$(git rev-list --count HEAD)
-
+          # Read Patch/Build straight from version.properties — the Gradle build that just ran
+          # (assembleGithubRelease, above) already computed them at configuration time and wrote
+          # the result back to this exact file (see build.gradle.kts's versioning block), and that
+          # write is what's actually baked into the APK's versionCode/versionName. This step used
+          # to re-derive its own PATCH/BUILD_NUMBER independently via `git rev-list`/`git blame` —
+          # a separate, stale approximation that ignored the file Gradle had just written and
+          # didn't match it: BUILD_NUMBER was raw `git rev-list --count HEAD` (a small number),
+          # while the real versionBuild is offset by a monotonic floor (205920500+) and
+          # auto-incremented, so the GitHub Release's title/tag/filename showed a version like
+          # "1.1.5.1502" for an APK whose actual embedded versionCode was ~205921443. Reading the
+          # file directly guarantees the release name matches what's actually inside the APK.
           MAJOR=$(grep 'versionMajor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
           MINOR=$(grep 'versionMinor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
-
-          # Calculate patch from commits since last minor bump
-          MINOR_COMMIT=$(git blame -L '/versionMinor=/',+1 version.properties | awk '{print $1}' | tr -d '^')
-          if [ -n "$MINOR_COMMIT" ]; then
-            PATCH=$(git rev-list --count $MINOR_COMMIT..HEAD)
-          else
-            PATCH=$(grep 'versionPatch=' version.properties | cut -d'=' -f2 | tr -d '\r ')
-          fi
+          PATCH=$(grep 'versionPatch=' version.properties | cut -d'=' -f2 | tr -d '\r ')
+          BUILD_NUMBER=$(grep 'versionBuild=' version.properties | cut -d'=' -f2 | tr -d '\r ')
 
           VERSION_NAME="${MAJOR}.${MINOR}.${PATCH}.${BUILD_NUMBER}"
           TAG_NAME="latest-release-v${MAJOR}.${MINOR}"
