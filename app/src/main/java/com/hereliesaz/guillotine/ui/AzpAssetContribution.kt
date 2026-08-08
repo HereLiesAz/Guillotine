@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.hereliesaz.guillotine.azphalt.AzpInstalledUi
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.White
@@ -43,7 +44,14 @@ class AzpAssetContribution : ClipPanelContribution {
     override val id: String = "com.hereliesaz.guillotine.azphalt-assets"
     override val title: String = "Extensions"
 
-    override fun appliesTo(clip: TimelineClip, state: EditorUiState): Boolean = true
+    // The only render paths this contribution's "Apply to clip" button can drive — a shader/LUT
+    // written into the clip's render filters — take effect for VIDEO clips only (a text caption
+    // renders through a separate overlay path with no shaderPath/lutPath, and audio has no picture
+    // pipeline at all). Unlike the built-in shader/LUT tool (FiltersToolInline, gated the same way),
+    // this section had no such gate, so it rendered on any clip type and "Apply to clip" would write
+    // shaderPath/lutPath into a caption or audio clip's filters and report success while nothing
+    // rendered anywhere.
+    override fun appliesTo(clip: TimelineClip, state: EditorUiState): Boolean = clip.type == ClipType.VIDEO
 
     @Composable
     override fun Content(vm: EditorViewModel, clip: TimelineClip) {

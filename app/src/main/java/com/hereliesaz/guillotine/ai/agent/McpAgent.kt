@@ -58,7 +58,7 @@ object McpAgent {
     }
 
     private fun onDevice(context: Context, settings: AiSettings, frames: FrameProvider?): AgentBackend? =
-        com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "agentModelPath").takeIf { it.isNotBlank() }
+        com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "agentModelPath").takeIf { it.isNotBlank() }
             ?.let { OnDeviceAgentBackend(context, it, frames) }
 
     private const val OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"

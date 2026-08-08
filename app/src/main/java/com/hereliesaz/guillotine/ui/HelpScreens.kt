@@ -278,13 +278,13 @@ private fun getDynamicAiCommands(context: android.content.Context, settings: AiS
     b.appendLine("- \"Auto-duck the music under the voiceover.\"")
     b.appendLine("- \"Find clips containing a dog.\" (On-device object search)")
     
-    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "audioEventModelPath").isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "audioEventModelPath").isNotBlank()) {
         b.appendLine("\n### Audio Highlights")
         b.appendLine("- \"Find the best moments in this video.\"")
         b.appendLine("- \"Where does the crowd cheer?\"")
     }
     
-    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath").isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath").isNotBlank()) {
         b.appendLine("\n### Speech & Transcription")
         b.appendLine("- \"Transcribe this clip accurately.\"")
         b.appendLine("- \"Remove filler words like 'um' and 'uh'.\"")
@@ -293,30 +293,30 @@ private fun getDynamicAiCommands(context: android.content.Context, settings: AiS
         b.appendLine("- \"Add animated captions to this clip.\"")
     }
     
-    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "ttsModelPath").isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "ttsModelPath").isNotBlank()) {
         b.appendLine("\n### Voiceover")
         b.appendLine("- \"Add a voiceover saying 'Welcome to my vlog'.\"")
     }
     
-    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "stemModelPath").isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "stemModelPath").isNotBlank()) {
         b.appendLine("\n### Stem Separation")
         b.appendLine("- \"Isolate the vocals in this clip.\"")
         b.appendLine("- \"Give me the instrumental track.\"")
     }
     
-    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "diarizeSegModelPath").isNotBlank() && com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "diarizeEmbedModelPath").isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "diarizeSegModelPath").isNotBlank() && com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "diarizeEmbedModelPath").isNotBlank()) {
         b.appendLine("\n### Speaker Diarization")
         b.appendLine("- \"Who speaks when in this audio?\"")
         b.appendLine("- \"Split this clip by speaker.\"")
     }
     
-    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "effect_depth").isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "effect_depth").isNotBlank()) {
         b.appendLine("\n### Image Effects")
         b.appendLine("- \"Blur the background of this clip.\"")
         b.appendLine("- \"Apply portrait mode.\"")
     }
     
-    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "vlmModelPath").isNotBlank()) {
+    if (com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "vlmModelPath").isNotBlank()) {
         b.appendLine("\n### Vision Understanding")
         b.appendLine("- \"Describe exactly what is happening in this scene.\"")
     }

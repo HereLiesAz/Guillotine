@@ -121,6 +121,22 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
     var genExtras by remember { mutableStateOf(current.genExtras) }
+
+    // On-device model paths (§1 AI Analyzer model pickers below, §3 Transcription's Vosk field).
+    // Each is set by typing a path directly, or a model picker's "✓ Use" — see docs/SETTINGS.md.
+    var speechModelPath by remember { mutableStateOf(current.speechModelPath) }
+    var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
+    var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
+    var faceEmbedModelPath by remember { mutableStateOf(current.faceEmbedModelPath) }
+    var effectModelPaths by remember { mutableStateOf(current.effectModelPaths) }
+    var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
+    var asrModelPath by remember { mutableStateOf(current.asrModelPath) }
+    var ttsModelPath by remember { mutableStateOf(current.ttsModelPath) }
+    var vlmModelPath by remember { mutableStateOf(current.vlmModelPath) }
+    var diarizeSegModelPath by remember { mutableStateOf(current.diarizeSegModelPath) }
+    var diarizeEmbedModelPath by remember { mutableStateOf(current.diarizeEmbedModelPath) }
+    var stemModelPath by remember { mutableStateOf(current.stemModelPath) }
+    var denoiseModelPath by remember { mutableStateOf(current.denoiseModelPath) }
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     var crashRelayUrl by remember { mutableStateOf(com.hereliesaz.guillotine.crash.CrashConfig.relayUrl(context)) }
@@ -189,6 +205,20 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         genModels = genModels,
         genExtras = genExtras.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
         genDefaults = current.genDefaults,
+
+        speechModelPath = speechModelPath.trim(),
+        agentModelPath = agentModelPath.trim(),
+        idEmbedModelPath = idEmbedModelPath.trim(),
+        faceEmbedModelPath = faceEmbedModelPath.trim(),
+        effectModelPaths = effectModelPaths.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
+        audioEventModelPath = audioEventModelPath.trim(),
+        asrModelPath = asrModelPath.trim(),
+        ttsModelPath = ttsModelPath.trim(),
+        vlmModelPath = vlmModelPath.trim(),
+        diarizeSegModelPath = diarizeSegModelPath.trim(),
+        diarizeEmbedModelPath = diarizeEmbedModelPath.trim(),
+        stemModelPath = stemModelPath.trim(),
+        denoiseModelPath = denoiseModelPath.trim(),
     )
 
     // --- Install an AI model from an azphalt .azp package ---------------------------------------
@@ -276,17 +306,7 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         runCatching {
-            com.hereliesaz.guillotine.data.SettingsBackup.export(
-                context, uri, AiSettings(
-                    provider = provider, keys = keys, models = models,
-
-                    ffmpegPath = ffmpegPath.trim(),
-                    cloudVision = cloudVision,
-                    frameAnalysisCacheSize = frameAnalysisCacheSize,
-                    genKeys = genKeys, genModels = genModels, genExtras = genExtras,
-                    genDefaults = current.genDefaults,
-                ),
-            )
+            com.hereliesaz.guillotine.data.SettingsBackup.export(context, uri, buildSettings())
         }
     }
     val restoreLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -307,6 +327,20 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             genKeys = restored.genKeys
             genModels = restored.genModels
             genExtras = restored.genExtras
+
+            speechModelPath = restored.speechModelPath
+            agentModelPath = restored.agentModelPath
+            idEmbedModelPath = restored.idEmbedModelPath
+            faceEmbedModelPath = restored.faceEmbedModelPath
+            effectModelPaths = restored.effectModelPaths
+            audioEventModelPath = restored.audioEventModelPath
+            asrModelPath = restored.asrModelPath
+            ttsModelPath = restored.ttsModelPath
+            vlmModelPath = restored.vlmModelPath
+            diarizeSegModelPath = restored.diarizeSegModelPath
+            diarizeEmbedModelPath = restored.diarizeEmbedModelPath
+            stemModelPath = restored.stemModelPath
+            denoiseModelPath = restored.denoiseModelPath
         }
     }
 
@@ -466,6 +500,113 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
 
 
 
+                    // On-device model catalogs: a model-path field + a curated download picker per slot
+                    // (see the "Model picker" / "Model-path field" reusable controls in docs/SETTINGS.md).
+                    // Every download here runs and stays fully on-device — only the model *weights*
+                    // themselves are ever fetched over the network.
+                    Text("AI assistant — on-device model (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = agentModelPath, hint = "assistant .task/.litertlm model", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { agentModelPath = it }
+                    ModelPicker(context, "Assistant models", RECOMMENDED_ON_DEVICE_MODELS, agentModelPath) { agentModelPath = it }
+                    Text(
+                        "Run the assistant fully offline with no key. Blank = use the selected provider's key above.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Recognition model — for \"teach a specific thing\" (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = idEmbedModelPath, hint = "recognition .tflite model", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { idEmbedModelPath = it }
+                    ModelPicker(context, "Recognition models", RECOMMENDED_RECOGNITION_MODELS, idEmbedModelPath) { idEmbedModelPath = it }
+                    Text(
+                        "A stronger embedder sharpens \"is this the same thing?\" matching. Blank = the bundled MobileNet-V3-small.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Face model — for identifying a specific person (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = faceEmbedModelPath, hint = "face .tflite model", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { faceEmbedModelPath = it }
+                    ModelPicker(context, "Face models", RECOMMENDED_FACE_MODELS, faceEmbedModelPath) { faceEmbedModelPath = it }
+                    Text(
+                        "When set, teaching a person uses face recognition. Blank = fall back to the general recognition model.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Image effects — on-device TFLite models (optional)", color = Neutral400, fontSize = 12.sp)
+                    listOf(
+                        Triple(ModelCategory.DEPTH, "depth", "Depth model path — depth map (e.g. bokeh)" to "Depth models"),
+                        Triple(ModelCategory.SUPERRES, "superres", "Super-resolution model path — upscale a frame" to "Super-resolution models"),
+                        Triple(ModelCategory.LOWLIGHT, "lowlight", "Low-light enhance model path — brighten a dark frame" to "Low-light models"),
+                    ).forEach { (category, key, hintAndTitle) ->
+                        val (hint, pickerTitle) = hintAndTitle
+                        val path = effectModelPaths[key].orEmpty()
+                        ModelPathField(value = path, hint = hint, isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) {
+                            effectModelPaths = effectModelPaths + (key to it)
+                        }
+                        ModelPicker(context, pickerTitle, recommendedModelsFor(category), path) {
+                            effectModelPaths = effectModelPaths + (key to it)
+                        }
+                    }
+                    Text(
+                        "Each is optional. The assistant's \"upscale / depth / brighten this frame\" commands run the matching model.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Audio highlights — on-device YAMNet (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = audioEventModelPath, hint = "audio-event .tflite model", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { audioEventModelPath = it }
+                    ModelPicker(context, "Audio-event models", com.hereliesaz.guillotine.ai.agent.RECOMMENDED_AUDIO_EVENT_MODELS, audioEventModelPath) { audioEventModelPath = it }
+                    Text(
+                        "Enables \"find the highlights / best moments\". Blank = feature off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Speech (ASR) — offline transcription (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = asrModelPath, hint = "sherpa-onnx ASR model directory", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { asrModelPath = it }
+                    ModelPicker(context, "ASR models", com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ASR_MODELS, asrModelPath) { asrModelPath = it }
+                    Text(
+                        "Enables \"transcribe this accurately\" via offline Whisper. Blank = feature off. " +
+                            "(Distinct from the Transcription tab's Vosk field below.)",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Speech (TTS) — offline voiceover (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = ttsModelPath, hint = "sherpa-onnx TTS voice directory", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { ttsModelPath = it }
+                    ModelPicker(context, "TTS voices", com.hereliesaz.guillotine.ai.agent.RECOMMENDED_TTS_MODELS, ttsModelPath) { ttsModelPath = it }
+                    Text(
+                        "Enables \"add a voiceover saying …\" via offline neural TTS. Blank = feature off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Frame captioning (VLM) — multimodal model (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = vlmModelPath, hint = "multimodal .task model", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { vlmModelPath = it }
+                    ModelPicker(context, "VLM models", com.hereliesaz.guillotine.ai.agent.RECOMMENDED_VLM_MODELS, vlmModelPath) { vlmModelPath = it }
+                    Text(
+                        "Enables \"describe / understand this frame\" in rich language. Blank = feature off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Speaker diarization — who spoke when (optional, needs both models)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = diarizeSegModelPath, hint = "pyannote segmentation model directory", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { diarizeSegModelPath = it }
+                    ModelPicker(context, "Speaker-segmentation models", com.hereliesaz.guillotine.ai.agent.RECOMMENDED_DIARIZE_SEG_MODELS, diarizeSegModelPath) { diarizeSegModelPath = it }
+                    ModelPathField(value = diarizeEmbedModelPath, hint = "speaker-embedding .onnx model", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { diarizeEmbedModelPath = it }
+                    ModelPicker(context, "Speaker-embedding models", com.hereliesaz.guillotine.ai.agent.RECOMMENDED_DIARIZE_EMBED_MODELS, diarizeEmbedModelPath) { diarizeEmbedModelPath = it }
+                    Text(
+                        "Enables \"who speaks when?\". Both default empty; diarization only works when both are set.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Stem separation — vocals / instrumental (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = stemModelPath, hint = "Spleeter model directory (ONNX)", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { stemModelPath = it }
+                    ModelPicker(context, "Stem models", com.hereliesaz.guillotine.ai.agent.RECOMMENDED_STEM_MODELS, stemModelPath) { stemModelPath = it }
+                    Text(
+                        "Enables \"separate the stems / isolate the vocals\". Heavy — best on a capable device. Blank = feature off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    Text("Noise reduction — clean up voice audio (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = denoiseModelPath, hint = "GTCRN denoiser .onnx model", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { denoiseModelPath = it }
+                    ModelPicker(context, "Denoiser models", com.hereliesaz.guillotine.ai.agent.RECOMMENDED_DENOISE_MODELS, denoiseModelPath) { denoiseModelPath = it }
+                    Text(
+                        "Strips hiss, hum and background noise from voice. Blank = feature off.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
                     // FFmpeg / Frei0r filtergraph baking (advanced; desktop-first).
                     Text("FFmpeg / Frei0r filters — bake a -vf graph (advanced)", color = Neutral400, fontSize = 12.sp)
                     ModelPathField(value = ffmpegPath, hint = "ffmpeg executable", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { ffmpegPath = it }
@@ -508,6 +649,14 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
                 }
                 2 -> { // Transcription
                     Text("Transcription is now fully offline or via OpenAI.", color = Neutral400, fontSize = 12.sp)
+                    Text("On-device speech model (Vosk, optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = speechModelPath, hint = "Vosk model folder", isDirectory = true, importing = modelImporting, onBrowse = ::browseModel) { speechModelPath = it }
+                    Text(
+                        "Point at a Vosk model folder to transcribe fully on-device. Blank = fall back to " +
+                            "cloud OpenAI Whisper (needs a key in the AI Analyzer tab). (Distinct from that " +
+                            "tab's Speech (ASR) model, which is the more accurate offline Whisper.)",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 3 -> { // Advanced
                     Text("Crash reporting", color = Neutral400, fontSize = 12.sp)

@@ -63,6 +63,20 @@ class ApiKeyStore(context: Context) {
                 ?.let { runCatching { GenProviderType.valueOf(it) }.getOrNull() }
                 ?.let { k to it }
         }.toMap(),
+        speechModelPath = prefs.getString(KEY_SPEECH_MODEL_PATH, "").orEmpty(),
+        agentModelPath = prefs.getString(KEY_AGENT_MODEL_PATH, "").orEmpty(),
+        idEmbedModelPath = prefs.getString(KEY_ID_EMBED_MODEL_PATH, "").orEmpty(),
+        faceEmbedModelPath = prefs.getString(KEY_FACE_EMBED_MODEL_PATH, "").orEmpty(),
+        effectModelPaths = EFFECT_KEYS.associateWith { prefs.getString(effectPathPref(it), "").orEmpty() }
+            .filterValues { it.isNotEmpty() },
+        audioEventModelPath = prefs.getString(KEY_AUDIO_EVENT_MODEL_PATH, "").orEmpty(),
+        asrModelPath = prefs.getString(KEY_ASR_MODEL_PATH, "").orEmpty(),
+        ttsModelPath = prefs.getString(KEY_TTS_MODEL_PATH, "").orEmpty(),
+        vlmModelPath = prefs.getString(KEY_VLM_MODEL_PATH, "").orEmpty(),
+        diarizeSegModelPath = prefs.getString(KEY_DIARIZE_SEG_MODEL_PATH, "").orEmpty(),
+        diarizeEmbedModelPath = prefs.getString(KEY_DIARIZE_EMBED_MODEL_PATH, "").orEmpty(),
+        stemModelPath = prefs.getString(KEY_STEM_MODEL_PATH, "").orEmpty(),
+        denoiseModelPath = prefs.getString(KEY_DENOISE_MODEL_PATH, "").orEmpty(),
     )
 
     suspend fun save(settings: AiSettings) {
@@ -87,6 +101,19 @@ class ApiKeyStore(context: Context) {
                     val p = settings.genDefaults[k]
                     if (p != null) putString(genDefaultPref(k), p.name) else remove(genDefaultPref(k))
                 }
+                putString(KEY_SPEECH_MODEL_PATH, settings.speechModelPath)
+                putString(KEY_AGENT_MODEL_PATH, settings.agentModelPath)
+                putString(KEY_ID_EMBED_MODEL_PATH, settings.idEmbedModelPath)
+                putString(KEY_FACE_EMBED_MODEL_PATH, settings.faceEmbedModelPath)
+                EFFECT_KEYS.forEach { putString(effectPathPref(it), settings.effectModelPaths[it].orEmpty()) }
+                putString(KEY_AUDIO_EVENT_MODEL_PATH, settings.audioEventModelPath)
+                putString(KEY_ASR_MODEL_PATH, settings.asrModelPath)
+                putString(KEY_TTS_MODEL_PATH, settings.ttsModelPath)
+                putString(KEY_VLM_MODEL_PATH, settings.vlmModelPath)
+                putString(KEY_DIARIZE_SEG_MODEL_PATH, settings.diarizeSegModelPath)
+                putString(KEY_DIARIZE_EMBED_MODEL_PATH, settings.diarizeEmbedModelPath)
+                putString(KEY_STEM_MODEL_PATH, settings.stemModelPath)
+                putString(KEY_DENOISE_MODEL_PATH, settings.denoiseModelPath)
             }.apply()
         }
         _settings.value = settings
@@ -104,11 +131,25 @@ class ApiKeyStore(context: Context) {
         const val KEY_CLOUD_VISION = "cloud_vision_optin"
         const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
+        const val KEY_SPEECH_MODEL_PATH = "speech_model_path"
+        const val KEY_AGENT_MODEL_PATH = "agent_model_path"
+        const val KEY_ID_EMBED_MODEL_PATH = "id_embed_model_path"
+        const val KEY_FACE_EMBED_MODEL_PATH = "face_embed_model_path"
+        const val KEY_AUDIO_EVENT_MODEL_PATH = "audio_event_model_path"
+        const val KEY_ASR_MODEL_PATH = "asr_model_path"
+        const val KEY_TTS_MODEL_PATH = "tts_model_path"
+        const val KEY_VLM_MODEL_PATH = "vlm_model_path"
+        const val KEY_DIARIZE_SEG_MODEL_PATH = "diarize_seg_model_path"
+        const val KEY_DIARIZE_EMBED_MODEL_PATH = "diarize_embed_model_path"
+        const val KEY_STEM_MODEL_PATH = "stem_model_path"
+        const val KEY_DENOISE_MODEL_PATH = "denoise_model_path"
+        val EFFECT_KEYS = listOf("superres", "style", "depth", "lowlight")
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"
         fun genKeyPref(p: GenProviderType) = "gen_key_${p.name}"
         fun genModelPref(p: GenProviderType) = "gen_model_${p.name}"
         fun genExtraPref(p: GenProviderType) = "gen_extra_${p.name}"
         fun genDefaultPref(k: GenKind) = "gen_default_${k.name}"
+        fun effectPathPref(key: String) = "effect_model_path_$key"
     }
 }

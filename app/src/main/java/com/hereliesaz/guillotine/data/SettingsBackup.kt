@@ -24,6 +24,19 @@ data class SettingsBundle(
     val genExtras: Map<String, String> = emptyMap(),
     val genDefaults: Map<String, String> = emptyMap(),
     val userTools: List<UserTool> = emptyList(),
+    val speechModelPath: String = "",
+    val agentModelPath: String = "",
+    val idEmbedModelPath: String = "",
+    val faceEmbedModelPath: String = "",
+    val effectModelPaths: Map<String, String> = emptyMap(),
+    val audioEventModelPath: String = "",
+    val asrModelPath: String = "",
+    val ttsModelPath: String = "",
+    val vlmModelPath: String = "",
+    val diarizeSegModelPath: String = "",
+    val diarizeEmbedModelPath: String = "",
+    val stemModelPath: String = "",
+    val denoiseModelPath: String = "",
 )
 
 object SettingsBackup {
@@ -49,6 +62,19 @@ object SettingsBackup {
             genExtras = settings.genExtras.mapKeys { it.key.name },
             genDefaults = settings.genDefaults.entries.associate { it.key.name to it.value.name },
             userTools = UserToolStore.load(context),
+            speechModelPath = settings.speechModelPath,
+            agentModelPath = settings.agentModelPath,
+            idEmbedModelPath = settings.idEmbedModelPath,
+            faceEmbedModelPath = settings.faceEmbedModelPath,
+            effectModelPaths = settings.effectModelPaths,
+            audioEventModelPath = settings.audioEventModelPath,
+            asrModelPath = settings.asrModelPath,
+            ttsModelPath = settings.ttsModelPath,
+            vlmModelPath = settings.vlmModelPath,
+            diarizeSegModelPath = settings.diarizeSegModelPath,
+            diarizeEmbedModelPath = settings.diarizeEmbedModelPath,
+            stemModelPath = settings.stemModelPath,
+            denoiseModelPath = settings.denoiseModelPath,
         )
         context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
             out.write(json.encodeToString(SettingsBundle.serializer(), bundle).toByteArray())
@@ -86,6 +112,19 @@ object SettingsBackup {
             genDefaults = bundle.genDefaults.mapNotNull { (k, v) ->
                 runCatching { GenKind.valueOf(k) to GenProviderType.valueOf(v) }.getOrNull()
             }.toMap(),
+            speechModelPath = bundle.speechModelPath,
+            agentModelPath = bundle.agentModelPath,
+            idEmbedModelPath = bundle.idEmbedModelPath,
+            faceEmbedModelPath = bundle.faceEmbedModelPath,
+            effectModelPaths = bundle.effectModelPaths,
+            audioEventModelPath = bundle.audioEventModelPath,
+            asrModelPath = bundle.asrModelPath,
+            ttsModelPath = bundle.ttsModelPath,
+            vlmModelPath = bundle.vlmModelPath,
+            diarizeSegModelPath = bundle.diarizeSegModelPath,
+            diarizeEmbedModelPath = bundle.diarizeEmbedModelPath,
+            stemModelPath = bundle.stemModelPath,
+            denoiseModelPath = bundle.denoiseModelPath,
         )
     }
 }

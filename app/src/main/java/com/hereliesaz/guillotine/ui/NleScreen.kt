@@ -191,7 +191,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // onDevice() reads the on-device model path (not a settings field), so it's part of the backend
     // identity — but resolve it inside a remember so it isn't hit on every (per-frame) recomposition.
     val agentModelPath = remember(settings) {
-        com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "agentModelPath")
+        com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "agentModelPath")
     }
     val agentBackend = remember(
         settings.provider,
@@ -627,7 +627,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 .weight(timelineWeight)
                 .fillMaxWidth()
         ) {
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath"))
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
             
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack, 

@@ -1415,33 +1415,78 @@ class DesktopMcpTools(
         }
     }
 
+    // No per-app host scoping exists on desktop yet; `targetApps` is empty on virtually every real
+    // package, so any stable id satisfies AzpManifest.targetsApp's "empty ⇒ targets everyone" check.
+    private val DESKTOP_HOST_APP_ID = "com.hereliesaz.guillotine.desktop"
+
+    /**
+     * Applies an installed `.azp` package to a clip using whichever real apply path its content
+     * supports — kinetic-typography motion (captions only) or a native shader/LUT asset
+     * ([DesktopAzpAssetApplier]) — mirroring the app side's `AzpPluginApplier`.
+     *
+     * Before this, every asset kind except motion fell through to stamping the clip's unread
+     * `azpPluginId` field and returning success: applying a shader or LUT via the assistant reported
+     * "Applied" while nothing changed in preview or export.
+     */
     private fun applyAzpPlugin(clipId: String, pluginId: String): JSONObject {
         val clip = vm.uiState.value.document.clips.find { it.id == clipId }
             ?: throw IllegalArgumentException("Clip $clipId not found.")
         val baseDir = File(DesktopStorage.dataDir, "extensions")
-        // Track whether an installed .azp actually matches pluginId, so applying an unknown plugin fails
-        // loudly instead of silently stamping the clip with an id that resolves to nothing.
-        var pluginExists = false
-        val motionBytes: ByteArray? = baseDir.listFiles { _, name -> name.endsWith(".azp") }
-            ?.firstNotNullOfOrNull { f ->
+        val azpFiles = baseDir.listFiles { _, name -> name.endsWith(".azp") }.orEmpty()
+
+        // Kinetic-typography (motion) packages bake into real caption keyframes — captions only.
+        if (clip.type == com.hereliesaz.guillotine.model.ClipType.TEXT) {
+            val motionBytes: ByteArray? = azpFiles.firstNotNullOfOrNull { f ->
                 runCatching {
                     val bytes = f.readBytes()
                     val plan = com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(bytes, emptySet())
                     if (plan.loaded.manifest.id != pluginId) return@runCatching null
-                    pluginExists = true
                     val motion = plan.motions.firstOrNull() ?: return@runCatching null
                     com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.bundledBytes(plan, motion)
                 }.getOrNull()
             }
-        if (!pluginExists) throw IllegalArgumentException("Plugin $pluginId not found in the extensions directory.")
-        if (motionBytes != null && clip.type == com.hereliesaz.guillotine.model.ClipType.TEXT) {
-            vm.applyCaptionMotion(clipId, motionBytes, pluginId)
-            return ok().apply {
-                put("humanSummary", "Applied kinetic-typography preset $pluginId to caption $clipId (baked keyframes).")
+            if (motionBytes != null) {
+                vm.applyCaptionMotion(clipId, motionBytes, pluginId)
+                return ok().apply {
+                    put("humanSummary", "Applied kinetic-typography preset $pluginId to caption $clipId (baked keyframes).")
+                }
             }
         }
-        vm.updateClip(clipId) { c -> c.copy(azpPluginId = pluginId) }
-        return ok().apply { put("humanSummary", "Applied plugin $pluginId to clip $clipId.") }
+
+        // Otherwise, an asset (shader/LUT) package Guillotine renders natively.
+        val panel = com.hereliesaz.guillotine.azphalt.AzpInstalledUi.list(baseDir, DESKTOP_HOST_APP_ID)
+            .find { it.packageId == pluginId }
+        if (panel != null) {
+            return when (val r = DesktopAzpAssetApplier.apply(vm, clipId, panel)) {
+                is DesktopAzpAssetApplier.Result.Applied ->
+                    ok().apply { put("humanSummary", "Applied $pluginId to clip $clipId.") }
+                is DesktopAzpAssetApplier.Result.Unsupported -> throw IllegalStateException(r.message)
+                is DesktopAzpAssetApplier.Result.Failure -> throw IllegalStateException(r.message)
+            }
+        }
+
+        // A caption animation on a non-caption clip isn't "unsupported" — it's the wrong clip. Saying
+        // otherwise sends users of most of the catalog looking for a missing feature instead of a caption.
+        val isMotion = azpFiles.any { f ->
+            runCatching {
+                com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(f.readBytes(), emptySet())
+                    .loaded.manifest.id == pluginId
+            }.getOrDefault(false)
+        }
+        if (isMotion) {
+            throw IllegalStateException("\"$pluginId\" is a caption animation. Select a caption (a text clip) to apply it.")
+        }
+
+        val installed = azpFiles.any { f ->
+            runCatching { com.hereliesaz.guillotine.azphalt.AzpPackage.load(f.readBytes()).manifest.id == pluginId }
+                .getOrDefault(false)
+        }
+        if (installed) {
+            throw IllegalStateException(
+                "\"$pluginId\" doesn't have a shader, LUT, or caption-motion asset Guillotine can apply to a clip yet.",
+            )
+        }
+        throw IllegalArgumentException("Plugin $pluginId not found in the extensions directory.")
     }
 
     private fun clearAzpPlugin(clipId: String): JSONObject {

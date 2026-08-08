@@ -1133,7 +1133,7 @@ class McpTools(
         val edits = runBlocking {
             MlKitProvider().analyzeWithReference(
                 context, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs, reference,
-                embedModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "idEmbedModelPath"),
+                embedModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "idEmbedModelPath"),
                 onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
             )
         }
@@ -1409,7 +1409,7 @@ class McpTools(
      * the clip at each highlight boundary so every best-moment becomes its own piece the user can keep.
      */
     private fun findHighlights(clipId: String, threshold: Float, split: Boolean): JSONObject {
-        val path = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "audioEventModelPath")
+        val path = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "audioEventModelPath")
         require(path.isNotBlank()) {
             "No audio-event model set. Download YAMNet in Settings → AI Analyzer → Audio highlights."
         }
@@ -1570,7 +1570,7 @@ class McpTools(
 
     /** Transcribe a clip's audio with the offline sherpa-onnx Whisper model; returns the text. */
     private fun transcribePrecise(clipId: String): JSONObject {
-        val dir = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath")
+        val dir = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "asrModelPath")
         require(dir.isNotBlank()) {
             "No ASR model set. Download Whisper in Settings → AI Analyzer → Speech (ASR)."
         }
@@ -1595,7 +1595,7 @@ class McpTools(
     /** Synthesize [text] to speech with the offline sherpa-onnx voice and add it as an audio clip. */
     private fun addVoiceover(text: String, speed: Float): JSONObject {
         require(text.isNotBlank()) { "Give the voiceover some text to speak." }
-        val dir = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "ttsModelPath")
+        val dir = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "ttsModelPath")
         require(dir.isNotBlank()) {
             "No TTS voice set. Download a voice in Settings → AI Analyzer → Speech (TTS)."
         }
@@ -1967,7 +1967,7 @@ class McpTools(
 
     /** Separate a clip's music into vocals + accompaniment via on-device Spleeter (ONNX); add both. */
     private fun separateStems(clipId: String): JSONObject {
-        val dir = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "stemModelPath")
+        val dir = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "stemModelPath")
         require(dir.isNotBlank()) {
             "No stem model set. Download Spleeter in Settings → AI Analyzer → Stem separation."
         }
@@ -1998,7 +1998,7 @@ class McpTools(
 
     /** Denoise a clip's voice audio (GTCRN) and add the cleaned track as a new audio clip. */
     private fun denoiseClip(clipId: String): JSONObject {
-        val model = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "denoiseModelPath")
+        val model = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "denoiseModelPath")
         require(model.isNotBlank()) {
             "No denoiser model set. Download one in Settings → AI Analyzer → Noise reduction."
         }
@@ -2105,8 +2105,8 @@ class McpTools(
     /** Diarize a clip's audio into speaker turns (who spoke when), mapped to timeline ms. */
     private fun diarizeClip(clipId: String, numSpeakers: Int): JSONObject {
         val settings = settingsProvider()
-        val seg = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "diarizeSegModelPath")
-        val embed = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "diarizeEmbedModelPath")
+        val seg = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "diarizeSegModelPath")
+        val embed = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "diarizeEmbedModelPath")
         require(seg.isNotBlank() && embed.isNotBlank()) {
             "Speaker diarization needs both models. Set them in Settings → AI Analyzer → Speaker diarization."
         }
@@ -2152,7 +2152,7 @@ class McpTools(
      * timeline range (latest-first so earlier ranges stay valid). Timings are approximate.
      */
     private fun removeFillers(clipId: String): JSONObject {
-        val dir = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "asrModelPath")
+        val dir = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "asrModelPath")
         require(dir.isNotBlank()) {
             "No ASR model set. Download Whisper in Settings → AI Analyzer → Speech (ASR)."
         }
@@ -2248,7 +2248,7 @@ class McpTools(
 
     /** Describe the current (or [clipId]) frame in natural language with the on-device multimodal VLM. */
     private fun captionFrame(clipId: String, prompt: String): JSONObject {
-        val path = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "vlmModelPath")
+        val path = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "vlmModelPath")
         require(path.isNotBlank()) {
             "No VLM model set. Add a multimodal .task in Settings → AI Analyzer → Frame captioning (VLM)."
         }
@@ -2287,9 +2287,8 @@ class McpTools(
     // ---- on-device image effects (TFLite) ----------------------------------
 
     private fun applyImageEffect(effect: String, clipId: String): JSONObject {
-        val settings = settingsProvider()
         val key = effect.lowercase().trim()
-        val path = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "effect_" + key)
+        val path = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "effect_" + key)
         require(path.isNotBlank()) {
             "No on-device model set for \"$effect\". Add its .tflite path in Settings → AI Analyzer → Image effects."
         }
@@ -2568,8 +2567,7 @@ class McpTools(
 
     /** Depth-of-field bokeh: run the depth model on the current frame, blur the far background, add it. */
     private fun applyBokeh(clipId: String, strength: Float): JSONObject {
-        val settings = settingsProvider()
-        val depthPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "effect_depth")
+        val depthPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "effect_depth")
         require(depthPath.isNotBlank()) {
             "Bokeh needs the depth model. Set it in Settings → AI Analyzer → Image effects (depth)."
         }
@@ -2637,6 +2635,8 @@ class McpTools(
     private fun addReference(name: String, term: String, negative: Boolean): JSONObject {
         require(name.isNotBlank()) { "Give the thing a name, e.g. \"Rex\"." }
         val settings = settingsProvider()
+        val idEmbedPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "idEmbedModelPath")
+        val faceEmbedPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "faceEmbedModelPath")
         val st = vm.uiState.value
         val now = st.currentTimeMs
         val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
@@ -2657,7 +2657,7 @@ class McpTools(
         val concept = try {
             if (negative) {
                 val vecs = prov.captureNegativeEmbeddings(
-                    context, frame, term.ifBlank { null }, isFace, com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "idEmbedModelPath"), com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "faceEmbedModelPath"),
+                    context, frame, term.ifBlank { null }, isFace, idEmbedPath, faceEmbedPath,
                 )
                 if (vecs.isEmpty()) throw IllegalStateException(
                     "Nothing to learn as a non-example here — scrub to a frame that shows a look-alike.",
@@ -2665,7 +2665,7 @@ class McpTools(
                 LearnedConceptStore.addNegatives(context, name, terms, vecs, isFace)
             } else {
                 val vec = prov.captureReferenceEmbedding(
-                    context, frame, term.ifBlank { null }, isFace, com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "idEmbedModelPath"), com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "faceEmbedModelPath"),
+                    context, frame, term.ifBlank { null }, isFace, idEmbedPath, faceEmbedPath,
                 ) ?: throw IllegalStateException(
                     "Couldn't capture a fingerprint here — the on-device embedder is unavailable or there was nothing to capture.",
                 )
@@ -2736,7 +2736,7 @@ class McpTools(
             MlKitProvider().analyzeWithConcept(
                 context, Uri.parse(media.uri), media.kind, clip.durationMs,
                 examples, negatives, concept.terms, concept.isFace, keepMatches = keepOnly,
-                embedModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "idEmbedModelPath"), faceModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "faceEmbedModelPath"),
+                embedModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "idEmbedModelPath"), faceModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "faceEmbedModelPath"),
                 onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
             )
         }

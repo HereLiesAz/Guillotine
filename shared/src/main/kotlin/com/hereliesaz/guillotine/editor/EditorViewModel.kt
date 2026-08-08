@@ -1856,6 +1856,18 @@ open class EditorViewModel {
             )
         }
     }
+
+    /**
+     * Crop tool: snap the selected clip's scale/pan/rotation back to identity. The gesture in
+     * [transformSelectedClip] is imprecise by nature (a pinch/drag/twist on a small preview), and
+     * before this there was no way to undo an over-rotated or panned-off-frame clip except fighting
+     * the same gesture back toward zero.
+     */
+    fun resetSelectedClipTransform() {
+        val id = _uiState.value.selectedClipId ?: return
+        updateClip(id) { it.copy(scale = 1f, offsetX = 0f, offsetY = 0f, rotation = 0f) }
+    }
+
     fun setTool(tool: EditorTool) = _uiState.update { it.copy(tool = tool) }
 
     fun selectClip(id: String?, additive: Boolean = false) {

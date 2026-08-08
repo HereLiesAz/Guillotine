@@ -2,6 +2,81 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Userflow audit: store→extension, model discovery→download→use, and crop-on-preview (2026-08-08)
+
+Audited three end-to-end flows a real user takes, against the actual code rather than the docs'
+description of it. Two were substantially broken; the third (Store install→apply) had a smaller,
+verified gap. Fixed what's below; the rest is recorded as follow-up.
+
+**Fixed: the entire on-device Model Manager was unreachable.** `AiSettings`
+(`shared/.../ai/AiTypes.kt`) had no fields at all for `agentModelPath`/`asrModelPath`/`vlmModelPath`/…
+— every one of the 11+ on-device model slots MODELS.md and SETTINGS.md document in detail. The
+`ModelPicker` composable (curated catalog, Download/Resume/✓ Use/Remove) existed fully built in
+`Sheets.kt` but was **never called** from `SettingsScreen` — there was nowhere in `AiSettings` to
+write a selection into. So `ModelResolver.resolve()` could only ever auto-detect whatever happened to
+be on disk in catalog order, silently ignoring which model the user actually picked or typed
+(with two or more models of a category installed — e.g. both Gemma 3n E2B and E4B — whichever came
+first in `OnDeviceModels.kt` always won, and a hand-typed custom path was completely inert). The
+"AI Analyzer" and "Transcription" settings tabs had no picker UI for any category at all.
+
+Fixed by adding the 11 documented path fields + `effectModelPaths` (Settings §5's own field
+reference) to `AiSettings`, persisting them in `ApiKeyStore` and the backup/restore bundle, wiring a
+`ModelPathField` + `ModelPicker` section for every category into the AI Analyzer tab (and a Vosk
+model-path field into Transcription), and making `ModelResolver.resolve()` check the user's chosen
+path **first**, existence-verified, before falling back to disk auto-detection. Backup/export also now
+reuses `buildSettings()` instead of a second, independently-maintained `AiSettings(...)` literal that
+had silently drifted (it was missing `leonardoKey`/`idEmbedModelPath`/etc. entirely).
+
+**Also fixed while in here: on-device Vosk transcription was fully implemented and never called.**
+`VoskTranscriber` (decode → recognize → word-timed cues) has existed complete, but `Transcription.transcribe`
+— what `transcribe_clip`/`animated_transcribe_clip` actually call — only ever used cloud OpenAI Whisper,
+contradicting its own tool descriptions ("on-device Vosk or cloud Whisper") and the Transcription tab's
+now-real model-path field. It now tries on-device Vosk first when a model directory is set, falling back
+to Whisper otherwise.
+
+**Fixed: Crop & Transform's panel was empty.** The gesture itself worked
+(`PreviewPlayer.kt`'s `cropMode` → pinch/drag/twist → `EditorViewModel.transformSelectedClip`), but
+`InlineClipTools.kt`'s `EditorTool.CROP` branch was a bare comment — opening the tool showed a title
+and nothing else: no instruction that the preview itself is the control surface, no way to see the
+current scale/rotation/offset, and no way back to identity short of fighting the same imprecise
+gesture in reverse. Added an instructional line, a live numeric readout, and a `resetSelectedClipTransform()`
+(new, `EditorViewModel`) button.
+
+**Fixed: azphalt store — desktop's `apply_azp_plugin` silently faked success for shader/LUT
+packages.** Only the kinetic-typography branch was real; every other asset kind fell through to
+stamping the clip's unread `azpPluginId` field and returning `ok()`. New `DesktopAzpAssetApplier`
+(mirroring the app's `AzpAssetApplier`) writes the shader/LUT bytes into the clip's real render
+filters, same as Android.
+
+**Fixed: azphalt store — the "Extensions" clip panel had no clip-type gating.**
+`AzpAssetContribution.appliesTo` always returned `true`, so a shader/LUT section (and its "Apply to
+clip" button) rendered on TEXT/AUDIO clips too, silently writing `shaderPath`/`lutPath` into a clip
+whose render pipeline never reads them. Gated to `ClipType.VIDEO`, matching the built-in
+`FiltersToolInline`'s existing gate.
+
+**Still open:**
+- **Desktop has no direct-preview interaction for Crop & Transform at all** — no mouse-drag/scroll
+  equivalent of the Android pinch/pan/twist gesture, and no numeric fallback either (the desktop
+  "Crop / transform" toolbar button sets `EditorTool.CROP` but nothing on desktop reads that tool
+  state). `scale`/`offsetX`/`offsetY`/`rotation` already render correctly on desktop
+  (`DesktopPreviewPlayer.kt`'s `VideoSlot`) — only the *editing* surface is missing. Needs a product
+  call on the desktop interaction (drag-to-pan + scroll-to-zoom is the obvious mapping; rotate has no
+  obvious mouse-only gesture and may just need a slider).
+- **`.azp`-delivered AI models still don't converge with the model-path fields above.**
+  `AzpModelInstaller.ModelSlot` (7 values: image labeling, face detect/embed, segmentation, image
+  embed, speech-to-text, audio-event) is a disjoint identity scheme from `ModelCategory` (14 values),
+  and `Sheets.kt`'s `applyInstalled()` after a `.azp` model install is still a literal no-op ("Now
+  handled entirely by ModelResolver" — which, now that `ModelResolver` reads real settings fields
+  first, is *more* wrong than before, not less). A `.azp`-installed sherpa ASR bundle also lands as a
+  directory while `ModelSlot`'s only wiring assumption is a flat file. Needs the slot enum reconciled
+  against `ModelCategory` (or dropped in favor of it) before `applyInstalled` can honestly fold a
+  `.azp` model into the settings field the picker above now actually reads.
+- **No automated test coverage added for the model-path resolution fix** — `ModelResolver` needs an
+  `android.content.Context` and has no existing test harness (Robolectric isn't set up in this repo);
+  `EditorViewModel` likewise has no direct unit tests to extend for `resetSelectedClipTransform`. Both
+  were instead verified by full-module compiles (`:shared:compileKotlin`, `:app:compileGithubDebugKotlin`,
+  `:desktop:compileKotlin`) plus the existing `:shared`/`:desktop`/`:app` test suites, all green.
+
 ## Store: conform to the published web-handoff spec, and say where an install went (2026-08-01)
 
 Two things, from catching up with azphalt upstream.
