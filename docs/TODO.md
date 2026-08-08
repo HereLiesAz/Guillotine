@@ -2,6 +2,48 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Release workflows named a GitHub Release after a version that wasn't in the APK (2026-08-08)
+
+Reported as: "versionCode is set at Gradle configuration time, but a later step that increments the
+file runs at execution time — after the versionCode is already frozen." That exact shape doesn't
+exist in `build.gradle.kts` (its versioning `run {}` block computes `verBuild` and writes it to
+`version.properties` in the same configuration-time pass — nothing execution-time reads a stale
+value there). The analogous bug was real, just one layer up: in CI bash, not Gradle.
+
+`release-apk.yml`'s **"Prepare Release"** step and `merged-build.yml`'s **"Prepare Release
+Variables"** step both ran *after* their job's `./gradlew assemble...` step had already computed
+Patch/Build at configuration time and written them to `version.properties` on disk — the values
+actually baked into the APK's `versionCode`/`versionName`. Neither step read that freshly-written
+file back. Both independently **re-derived their own PATCH/BUILD_NUMBER from raw git commands**
+(`git rev-list --count HEAD` for the build number, a `git blame`-anchored recount for patch) —
+a second, different, stale approximation of the same numbers Gradle had just computed differently
+(`versionBuild` is `git rev-list --count HEAD` **plus** a 205920500 floor **plus** an auto-increment
+carried over from `version.properties`; the bash re-derivation had none of that). Net effect: the
+GitHub Release's title/tag/filename showed something like `1.1.5.1502` for an APK whose actual
+embedded `versionCode` was `~205921443` — cosmetically wrong, and actively misleading if anyone
+ever needed to correlate a filed bug report's "app version" against the real installed
+`versionCode`.
+
+Fixed both steps to read `versionPatch`/`versionBuild` straight out of `version.properties` (same
+`grep`/`cut` already used for Major/Minor) instead of recomputing them — the file is guaranteed
+fresh at that point in the job, same working directory, same checkout, no re-clone in between.
+
+**While tracing this, found and corrected two stale/inaccurate comments** describing the versioning
+scheme (in `release-aab.yml` and `merged-build.yml`): one claimed `release-aab` "commits the
+auto-incremented versionCode back" to the repo — no workflow does (`git log`/grep confirms the only
+`git commit` in any workflow is `update-libs.yml`, and that's for `libs/`, unrelated); another
+described versionCode as simply `git rev-list --count HEAD`, which was true before the
+`version.properties`-based scheme existed but isn't the current formula. Comments now describe what
+the code actually does.
+
+**Not fixed, deliberately out of scope of this pass:** since the write to `version.properties`
+never gets committed back, `versionCode` isn't a true monotonic build counter across separate CI
+runs — every fresh checkout of the same commit recomputes the identical number. This is already
+handled gracefully for Play (`publish_play.py` treats "Version code N has already been used" from a
+concurrent/duplicate run as success, with a comment explaining exactly this race), so it's a known,
+accepted tradeoff rather than a silent failure — but it's worth knowing this is *why* that handling
+exists, not just that it does.
+
 ## Userflow audit: store→extension, model discovery→download→use, and crop-on-preview (2026-08-08)
 
 Audited three end-to-end flows a real user takes, against the actual code rather than the docs'

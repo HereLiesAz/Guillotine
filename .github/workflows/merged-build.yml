@@ -3,8 +3,10 @@ name: Merged Build & Release
 on:
   push:
     branches: [ "**" ]
-    # The release-aab workflow commits the auto-incremented versionCode back; that commit
-    # only touches version.properties and shouldn't trigger a full rebuild here.
+    # version.properties is auto-incremented on disk by every Gradle build (see build.gradle.kts),
+    # but nothing in this repo currently commits that bump back — no workflow runs `git commit` on
+    # it (verified: only update-libs.yml commits anything, and that's `libs/`, unrelated). If that
+    # ever changes, a commit touching only this file shouldn't trigger a full rebuild here.
     paths-ignore:
       - version.properties
   pull_request:
@@ -189,19 +191,19 @@ jobs:
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: release_vars
         run: |
-          export BUILD_NUMBER=$(git rev-list --count HEAD)
-
-          # Extract version info from properties file
+          # Read straight from version.properties — the Gradle build above (assembleGithubDebug)
+          # already computed Patch/Build at configuration time and wrote them back to this exact
+          # file, and that write is what's actually baked into the APK's versionCode/versionName.
+          # This used to re-derive its own PATCH/BUILD_NUMBER independently via `git rev-list`/
+          # `git blame` (same bug as release-apk.yml's "Prepare Release" step, fixed alongside
+          # this one) — a stale approximation that ignored the file Gradle had just written:
+          # BUILD_NUMBER was raw `git rev-list --count HEAD`, not the real versionBuild (which is
+          # offset by a monotonic floor and auto-incremented), so the release name never matched
+          # what was actually inside the APK.
           MAJOR=$(grep 'versionMajor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
           MINOR=$(grep 'versionMinor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
-
-          # Calculate Patch version programmatically based on commits since Minor update
-          MINOR_COMMIT=$(git blame -L '/versionMinor=/',+1 version.properties | awk '{print $1}' | tr -d '^')
-          if [ -n "$MINOR_COMMIT" ]; then
-            PATCH=$(git rev-list --count $MINOR_COMMIT..HEAD)
-          else
-            PATCH=$(grep 'versionPatch=' version.properties | cut -d'=' -f2 | tr -d '\r ')
-          fi
+          PATCH=$(grep 'versionPatch=' version.properties | cut -d'=' -f2 | tr -d '\r ')
+          BUILD_NUMBER=$(grep 'versionBuild=' version.properties | cut -d'=' -f2 | tr -d '\r ')
 
           VERSION_NAME="$MAJOR.$MINOR.$PATCH.$BUILD_NUMBER"
 
