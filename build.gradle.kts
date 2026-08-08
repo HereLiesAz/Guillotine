@@ -126,9 +126,25 @@ run {
         runGit("rev-list", "--count", "$sha..HEAD")?.toIntOrNull() ?: 0
     }
 
+    // The Build increment. Plain "+1" was live-broken: the bump below is written to disk, but no
+    // workflow ever commits version.properties back to the repo (verified — see docs/TODO.md), so
+    // every FRESH CI checkout re-reads the same stale committed baseline and recomputes the exact
+    // same "auto-incremented" number, forever — not a rare same-commit race (gitFloor + the
+    // "already used" handling in publish_play.py already cover that), but a PERMANENT collision,
+    // confirmed live: Google Play rejected an upload with "Version code 205921443 has already been
+    // used" on a later, unrelated build, because the committed baseline (205921442) sits ~759
+    // commits ahead of gitFloor and won't be overtaken by it for a very long time.
+    //
+    // GITHUB_RUN_NUMBER fixes this with no repo push needed: GitHub Actions sets it automatically,
+    // it's a per-workflow-file counter, and it strictly increases forever with zero persistence —
+    // so every CI build of a given workflow gets a build number higher than that workflow's last,
+    // permanently, regardless of how stale the committed file is. Local (non-CI) builds have no
+    // such env var, so they keep the original "+1 per invocation" behavior unchanged.
+    val ciBuildIncrement = System.getenv("GITHUB_RUN_NUMBER")?.trim()?.toIntOrNull() ?: 1
+
     // Increment BOTH counters on every configuration. Persisted + monotonic.
     val verPatch = (versionProps.getProperty("versionPatch")?.trim()?.toIntOrNull() ?: patchSeed) + 1
-    val verBuild = maxOf(versionProps.getProperty("versionBuild")?.trim()?.toIntOrNull() ?: 0, gitFloor) + 1
+    val verBuild = maxOf(versionProps.getProperty("versionBuild")?.trim()?.toIntOrNull() ?: 0, gitFloor) + ciBuildIncrement
 
     // Persist the bumped values straight back to disk (keeping the human-edited Major/Minor + header).
     versionPropsFile.writeText(

@@ -2,6 +2,38 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Correction: the versionCode collision below was permanent, not a rare race — fixed (2026-08-08)
+
+The entry directly below this one ("Release workflows named a GitHub Release after a version that
+wasn't in the APK") closed with: "since the write to `version.properties` never gets committed
+back, `versionCode` isn't a true monotonic build counter across separate CI runs... a known,
+accepted tradeoff rather than a silent failure." That was wrong, and live CI logs proved it wrong
+twice: Google Play rejected an upload with `"Version code 205921443 has already been used"` — not
+once, but again on a **later, separate** run, still computing the exact same number. That's not
+`publish_play.py`'s documented same-commit-retry race (which the "already been used → treat as
+success" handling genuinely does cover); it was a **permanent** collision that would recur on
+every single future build forever.
+
+The actual math: `versionBuild` is `maxOf(the committed file's last versionBuild, gitFloor) + 1`,
+where `gitFloor = 205920500 + git rev-list --count HEAD`. At the time of the fix, the repo had 183
+commits (`gitFloor = 205920683`) but the *committed* `versionBuild` was already `205921442` — 759
+higher. Since nothing ever commits the auto-incremented value back to the repo (confirmed — see the
+entry below), every fresh CI checkout of *any* commit re-reads that same frozen `205921442`
+baseline and computes the identical `205921443`, and will keep doing so until roughly 759 more
+commits land and `gitFloor` finally overtakes it. That's not a tradeoff worth accepting; it's a
+future publish blocked indefinitely.
+
+**Fixed** in `build.gradle.kts`: the Build increment is now `GITHUB_RUN_NUMBER` (GitHub Actions'
+own per-workflow-file counter — set automatically, strictly increasing forever, needs no commit-back
+or repo push at all) instead of a flat `+1`, falling back to `+1` when that env var is absent (local,
+non-CI builds — unchanged behavior there). Verified locally: with `GITHUB_RUN_NUMBER=47` simulated,
+the computed `versionBuild` jumped straight to `205921489` — comfortably clear of the already-consumed
+`205921443` — and every subsequent CI run of the same workflow will keep climbing past whatever the
+last one used, permanently. `verPatch` has the same underlying "frozen forever" defect (it also
+anchors to the never-committed file value first) but doesn't cause an external failure the way
+Build's Play-facing collision did, so it's left alone here — a real but non-blocking follow-up, not
+bundled into this fix.
+
 ## Release workflows named a GitHub Release after a version that wasn't in the APK (2026-08-08)
 
 Reported as: "versionCode is set at Gradle configuration time, but a later step that increments the
