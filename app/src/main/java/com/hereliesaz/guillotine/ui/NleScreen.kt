@@ -188,8 +188,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val sharedMcpTools = remember { com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings } }
     // One backend instance reused across turns so the assistant keeps its conversation memory. Rebuilt only
     // when the AI settings change (provider/model/key) — which naturally begins a fresh conversation.
-    // onDevice() reads the on-device model path (not a settings field), so it's part of the backend
-    // identity — but resolve it inside a remember so it isn't hit on every (per-frame) recomposition.
+    // agentModelPath now IS a settings field (AiSettings.agentModelPath), but resolving it also touches
+    // disk (an existence check, and — when the field is blank — an auto-detect scan), so it still gets
+    // its own remember() rather than being read inline on every (per-frame) recomposition.
     val agentModelPath = remember(settings) {
         com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "agentModelPath")
     }

@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.DataOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -23,7 +24,11 @@ object Transcription {
 
     suspend fun transcribe(context: Context, settings: AiSettings, uri: Uri): List<TranscriptCue> {
         val voskPath = settings.speechModelPath
-        if (voskPath.isNotBlank()) {
+        // Existence-checked, not just non-blank: a restored settings backup, a since-cleared import
+        // dir, or app storage wiped externally would otherwise route every transcription into a
+        // Vosk Model() constructor call that can only fail, even for a user with a working OpenAI
+        // key configured and no idea their Vosk path went stale.
+        if (voskPath.isNotBlank() && File(voskPath).exists()) {
             return VoskTranscriber.transcribe(context, voskPath, uri.toString())
         }
         val key = settings.keyFor(AiProviderType.OPENAI)

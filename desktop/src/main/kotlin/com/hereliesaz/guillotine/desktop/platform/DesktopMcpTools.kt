@@ -1415,8 +1415,10 @@ class DesktopMcpTools(
         }
     }
 
-    // No per-app host scoping exists on desktop yet; `targetApps` is empty on virtually every real
-    // package, so any stable id satisfies AzpManifest.targetsApp's "empty ⇒ targets everyone" check.
+    // No per-app host scoping exists on desktop yet. AzpManifest.targetsApp treats an empty
+    // targetApps as "targets everyone", so this id only matters for a package that explicitly
+    // excludes it — unverified from this checkout whether any live package does (no catalog/fixture
+    // here to check against), so treat this constant as a placeholder, not a measured-safe choice.
     private val DESKTOP_HOST_APP_ID = "com.hereliesaz.guillotine.desktop"
 
     /**
@@ -1432,31 +1434,35 @@ class DesktopMcpTools(
         val clip = vm.uiState.value.document.clips.find { it.id == clipId }
             ?: throw IllegalArgumentException("Clip $clipId not found.")
         val baseDir = File(DesktopStorage.dataDir, "extensions")
-        val azpFiles = baseDir.listFiles { _, name -> name.endsWith(".azp") }.orEmpty()
 
         // Kinetic-typography (motion) packages bake into real caption keyframes — captions only.
-        if (clip.type == com.hereliesaz.guillotine.model.ClipType.TEXT) {
-            val motionBytes: ByteArray? = azpFiles.firstNotNullOfOrNull { f ->
-                runCatching {
-                    val bytes = f.readBytes()
-                    val plan = com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(bytes, emptySet())
-                    if (plan.loaded.manifest.id != pluginId) return@runCatching null
-                    val motion = plan.motions.firstOrNull() ?: return@runCatching null
-                    com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.bundledBytes(plan, motion)
-                }.getOrNull()
+        // listInstalled requires an actual bundled motion asset (a motion type AND resolvable bytes) —
+        // an earlier version of this check only compared manifest ids against AzpMotionInstaller.plan,
+        // which succeeds (with an empty `motions` list) for ANY valid .azp, so every shader/LUT/model
+        // package misreported as "a caption animation" and the real branch below was never reached.
+        val motion = com.hereliesaz.guillotine.ui.KineticTypographyPicker.listInstalled(baseDir)
+            .find { it.packageId == pluginId }
+        if (motion != null) {
+            if (clip.type != com.hereliesaz.guillotine.model.ClipType.TEXT) {
+                throw IllegalStateException("\"$pluginId\" is a caption animation. Select a caption (a text clip) to apply it.")
             }
-            if (motionBytes != null) {
-                vm.applyCaptionMotion(clipId, motionBytes, pluginId)
-                return ok().apply {
-                    put("humanSummary", "Applied kinetic-typography preset $pluginId to caption $clipId (baked keyframes).")
-                }
+            com.hereliesaz.guillotine.ui.KineticTypographyPicker.apply(vm, motion, clipId)
+            return ok().apply {
+                put("humanSummary", "Applied kinetic-typography preset $pluginId to caption $clipId (baked keyframes).")
             }
         }
 
-        // Otherwise, an asset (shader/LUT) package Guillotine renders natively.
+        // Otherwise, an asset (shader/LUT) package Guillotine renders natively — VIDEO clips only.
+        // A caption renders through a separate overlay path with no shaderPath/lutPath, and audio has
+        // no picture pipeline at all, so applying to either would report success and change nothing.
         val panel = com.hereliesaz.guillotine.azphalt.AzpInstalledUi.list(baseDir, DESKTOP_HOST_APP_ID)
             .find { it.packageId == pluginId }
         if (panel != null) {
+            if (clip.type != com.hereliesaz.guillotine.model.ClipType.VIDEO) {
+                throw IllegalStateException(
+                    "\"$pluginId\" is a shader/LUT — it renders on video only. Select a video clip to apply it.",
+                )
+            }
             return when (val r = DesktopAzpAssetApplier.apply(vm, clipId, panel)) {
                 is DesktopAzpAssetApplier.Result.Applied ->
                     ok().apply { put("humanSummary", "Applied $pluginId to clip $clipId.") }
@@ -1465,18 +1471,7 @@ class DesktopMcpTools(
             }
         }
 
-        // A caption animation on a non-caption clip isn't "unsupported" — it's the wrong clip. Saying
-        // otherwise sends users of most of the catalog looking for a missing feature instead of a caption.
-        val isMotion = azpFiles.any { f ->
-            runCatching {
-                com.hereliesaz.guillotine.azphalt.AzpMotionInstaller.plan(f.readBytes(), emptySet())
-                    .loaded.manifest.id == pluginId
-            }.getOrDefault(false)
-        }
-        if (isMotion) {
-            throw IllegalStateException("\"$pluginId\" is a caption animation. Select a caption (a text clip) to apply it.")
-        }
-
+        val azpFiles = baseDir.listFiles { _, name -> name.endsWith(".azp") }.orEmpty()
         val installed = azpFiles.any { f ->
             runCatching { com.hereliesaz.guillotine.azphalt.AzpPackage.load(f.readBytes()).manifest.id == pluginId }
                 .getOrDefault(false)
@@ -1490,9 +1485,16 @@ class DesktopMcpTools(
     }
 
     private fun clearAzpPlugin(clipId: String): JSONObject {
-        vm.uiState.value.document.clips.find { it.id == clipId }
+        val clip = vm.uiState.value.document.clips.find { it.id == clipId }
             ?: throw IllegalArgumentException("Clip $clipId not found.")
         vm.clearCaptionMotion(clipId)
+        // applyAzpPlugin's asset branch writes real shaderPath/lutPath now (see DesktopAzpAssetApplier),
+        // not just the caption-motion keyframes clearCaptionMotion strips — clear whichever installed
+        // panel is actually applied to this clip's filters too, or "cleared" would silently not clear it.
+        val baseDir = File(DesktopStorage.dataDir, "extensions")
+        com.hereliesaz.guillotine.azphalt.AzpInstalledUi.list(baseDir, DESKTOP_HOST_APP_ID).forEach { panel ->
+            DesktopAzpAssetApplier.remove(vm, clipId, panel, clip.filters)
+        }
         return ok().apply { put("humanSummary", "Cleared the applied plugin/preset from clip $clipId.") }
     }
 

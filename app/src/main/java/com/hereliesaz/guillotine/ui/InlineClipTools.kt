@@ -43,7 +43,12 @@ fun InlineClipTools(
                 }
             }
             EditorTool.CROP -> {
-                sel.firstOrNull()?.let { CropToolInline(vm, it) }
+                // Must match EditorViewModel.cropTargetClipId's resolution exactly — otherwise the
+                // readout/reset below can show and act on a different clip than the one selecting a
+                // video actually put in EditorUiState.selectedClipId (null the instant a video's
+                // linked audio shadow clip is in the selection too, which selecting a video always
+                // does). Crop has nothing to do to audio, so skip it the same way.
+                (sel.firstOrNull { it.type != ClipType.AUDIO } ?: sel.firstOrNull())?.let { CropToolInline(vm, it) }
             }
             EditorTool.SPLIT -> {
                 // Split tools
