@@ -5,7 +5,6 @@ package com.hereliesaz.guillotine.ui
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -138,9 +137,11 @@ fun PreviewPlayer(
     }
 
     // ---- persistent preview viewport (zoom + pan) ----
-    // Default 1x = fit. A popup slider sets the zoom; a one-finger drag pans while zoomed in. (Two-finger
-    // gestures are reserved for manipulating a selected component.) Loaded from / saved to
-    // PanelLayoutPrefs, so where the user zoomed persists across sessions.
+    // Default 1x = fit. A popup slider sets the zoom. Rotating/moving/resizing the PREVIEW ITSELF via
+    // a gesture on the canvas is deliberately not offered — a gesture there is reserved for the
+    // selected video layer's own crop/transform (cropModifier below), never the viewport's framing, so
+    // the two can't be confused for one another. Loaded from / saved to PanelLayoutPrefs, so where the
+    // user set the zoom persists across sessions.
     val savedView = remember { PanelLayoutPrefs.loadPreview(context) }
     var zoom by remember { mutableStateOf(savedView.zoom) }
     var panX by remember { mutableStateOf(savedView.panX) }
@@ -162,19 +163,7 @@ fun PreviewPlayer(
         PanelLayoutPrefs.savePreview(context, zoom, panX, panY)
     }
 
-    // One-finger drag pans the zoomed preview (no-op at 1x; in crop mode the transform gesture edits the
-    // selected clip instead, so this yields to cropModifier there).
-    val panModifier = Modifier.pointerInput(Unit) {
-        detectDragGestures { change, drag ->
-            if (zoom > 1f) {
-                change.consume()
-                panX += drag.x
-                panY += drag.y
-                clampPan()
-            }
-        }
-    }
-    val gestureModifier = if (cropMode) cropModifier else panModifier
+    val gestureModifier = if (cropMode) cropModifier else Modifier
 
     Box(
         modifier = modifier
@@ -525,6 +514,13 @@ private fun VideoSlot(
 ) {
     if (clip == null) return
     val mod = aspectMod
+        // Clip BEFORE the transform below: a graphicsLayer scale/rotate doesn't clip its own content
+        // by default, so a crop-tool zoom/pan/rotation on this clip could paint past the frame's own
+        // rectangle — into the letterbox, over the zoom-control button, past where the picture is
+        // supposed to end. The frame's bounding box must stay the topmost visual limit for every
+        // layer; clipping at the pre-transform (aspectMod-sized) bounds enforces that regardless of
+        // how far the transform below pushes the content.
+        .clipToBounds()
         .graphicsLayer {
             this.alpha = alpha.coerceIn(0f, 1f)
             // Keyframe-aware crop/placement (absolute; the clip's static value is the default).
