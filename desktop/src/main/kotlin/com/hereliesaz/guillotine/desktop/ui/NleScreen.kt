@@ -23,7 +23,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ClosedCaption
@@ -182,6 +184,10 @@ fun NleScreen(
     var showAiSettings by remember { mutableStateOf(false) }
     var showStore by remember { mutableStateOf(false) }
     var showExtensionsManager by remember { mutableStateOf(false) }
+    // Double-clicking the "X" over two already-overlapping (auto-crossfading) clips on the timeline
+    // opens a transition picker for this pair; null when no picker is showing.
+    var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var transitionSwapBusy by remember { mutableStateOf(false) }
     var showAiComparison by remember { mutableStateOf(false) }
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -284,9 +290,14 @@ fun NleScreen(
     val onTranscribe: (CaptionStyle) -> Unit = onTranscribe@{ style ->
         val clip = vm.uiState.value.selectedClips.singleOrNull() ?: return@onTranscribe
         val media = vm.uiState.value.document.mediaFor(clip) ?: return@onTranscribe
-        val model = System.getProperty("user.home") + "/.azphalt/packages/com.azphalt.model.vosk/assets/vosk-model"
-        if (!java.io.File(model).exists()) {
-            vm.setProcessing(false, "Vosk transcription model missing. Please install it from the AI Storefront.")
+        // Was a hardcoded path assuming one specific azphalt package id (com.azphalt.model.vosk) that
+        // has never existed in the live catalog — a total dead end regardless of what the user actually
+        // configured. ModelResolver.resolve("speechModelPath") is the real, user-settable Vosk path
+        // (Settings → Transcription), the same one DesktopMcpTools.transcribeClip() (the MCP tool this
+        // button duplicates) already correctly uses.
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("speechModelPath")
+        if (model.isBlank() || !java.io.File(model).exists()) {
+            vm.setProcessing(false, "No on-device speech model set. Set a Vosk model folder in Settings → Transcription.")
             return@onTranscribe
         }
         vm.setProcessing(true, null)
@@ -353,7 +364,13 @@ fun NleScreen(
                 .focusable()
                 // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
                 // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
-                .onKeyEvent { handleKey(it, vm) },
+                .onKeyEvent {
+                    // Tracked on every key event, not just the ones handleKey consumes below — a
+                    // mouse-drag on the timeline (ClipView) reads HeldModifiers live to pick which
+                    // Vegas-style edit mode a Ctrl/Alt/Shift-held drag enters.
+                    HeldModifiers.update(it)
+                    handleKey(it, vm)
+                },
         ) {
         TopBar(
             state = state,
@@ -405,7 +422,11 @@ fun NleScreen(
             onImport = { importTargetTrack = null; importLauncher() },
             onHelp = { showHelp = true },
         )
-        TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(1f - previewWeight).fillMaxWidth())
+        TimelinePanel(
+            vm, state, onImportToTrack, onCreateOnTrack,
+            Modifier.weight(1f - previewWeight).fillMaxWidth(),
+            onSwapTransition = { from, to -> pendingTransitionSwap = from to to },
+        )
         } // editor Column
 
         // Integrated activity log (AI chat, running process, progress, errors) -- anchored to
@@ -460,6 +481,50 @@ fun NleScreen(
 
     if (showExtensionsManager) {
         DesktopExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
+    }
+
+    // Swap the free, instant crossfade an overlap already produces for a named FFmpeg xfade
+    // transition — a deliberate, real bake (needs an ffmpeg binary configured, takes real time), not
+    // something that happens automatically just from overlapping two clips.
+    pendingTransitionSwap?.let { (fromId, toId) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { if (!transitionSwapBusy) pendingTransitionSwap = null },
+            title = { androidx.compose.material3.Text(if (transitionSwapBusy) "Building transition…" else "Swap crossfade for…") },
+            text = {
+                if (transitionSwapBusy) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                } else {
+                    Column {
+                        com.hereliesaz.guillotine.model.TransitionCatalog.TYPES.forEach { (type, label) ->
+                            androidx.compose.material3.TextButton(onClick = {
+                                transitionSwapBusy = true
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            mcpTools.call(
+                                                "apply_transition",
+                                                org.json.JSONObject()
+                                                    .put("from_clip_id", fromId)
+                                                    .put("to_clip_id", toId)
+                                                    .put("type", type),
+                                            )
+                                        }
+                                    }
+                                    transitionSwapBusy = false
+                                    pendingTransitionSwap = null
+                                    result.onFailure { vm.setProcessing(false, it.message ?: "Couldn't build the transition.") }
+                                }
+                            }) { androidx.compose.material3.Text(label) }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (!transitionSwapBusy) {
+                    androidx.compose.material3.TextButton(onClick = { pendingTransitionSwap = null }) { androidx.compose.material3.Text("Cancel") }
+                }
+            },
+        )
     }
 
     }
@@ -862,6 +927,15 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
                 vm.rippleCloseGaps()
             }
+            // Auto-Ripple: from here on, deleting a clip closes the gap on its own track automatically
+            // (Vegas's "Affected Tracks" mode) instead of leaving a hole for "Ripple (close gaps)" above
+            // to clean up later.
+            IconToolButton(Icons.Filled.Bolt, "Auto-Ripple: close gaps on delete", active = state.autoRippleEnabled) {
+                vm.toggleAutoRipple()
+            }
+            IconToolButton(Icons.Filled.GridOn, "Snap to edges, playhead, and grid (F8)", active = state.snapEnabled) {
+                vm.toggleSnap()
+            }
             // Group / ungroup -- only meaningful with a multi-clip selection.
             if (selected.size > 1) {
                 val grouped = selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null }
@@ -1035,6 +1109,7 @@ private fun handleKey(e: KeyEvent, vm: EditorViewModel): Boolean {
         ctrl && e.key == Key.C -> { vm.copySelected(); true }
         ctrl && e.key == Key.V -> { vm.pasteClip(); true }
         !ctrl && e.key == Key.S -> { vm.splitAtPlayhead(); true }
+        e.key == Key.F8 -> { vm.toggleSnap(); true }
         else -> false
     }
 }

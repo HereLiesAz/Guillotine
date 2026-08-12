@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -56,6 +57,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -115,9 +117,10 @@ fun TimelinePanel(
     onImportToTrack: (String) -> Unit,
     onCreateOnTrack: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onSwapTransition: (fromClipId: String, toClipId: String) -> Unit = { _, _ -> },
 ) {
     Column(modifier = modifier.background(Neutral900)) {
-        TimelineLanes(vm, state, onImportToTrack, onCreateOnTrack, modifier = Modifier.fillMaxSize())
+        TimelineLanes(vm, state, onImportToTrack, onCreateOnTrack, onSwapTransition, modifier = Modifier.fillMaxSize())
     }
 }
 
@@ -127,6 +130,7 @@ private fun TimelineLanes(
     state: EditorUiState,
     onImportToTrack: (String) -> Unit,
     onCreateOnTrack: (String) -> Unit,
+    onSwapTransition: (fromClipId: String, toClipId: String) -> Unit,
     modifier: Modifier,
 ) {
     val density = LocalDensity.current
@@ -349,10 +353,10 @@ private fun TimelineLanes(
                         },
                 ) {
                     state.document.videoTracks.forEach { trackId ->
-                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
+                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag, { groupDrag = it }, onSwapTransition)
                     }
                     state.document.audioTracks.forEach { trackId ->
-                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
+                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag, { groupDrag = it }, onSwapTransition)
                     }
                 }
             }
@@ -654,6 +658,7 @@ private fun Lane(
     msToDp: (Long) -> androidx.compose.ui.unit.Dp,
     groupDrag: GroupDrag?,
     onGroupDrag: (GroupDrag?) -> Unit,
+    onSwapTransition: (fromClipId: String, toClipId: String) -> Unit,
 ) {
     val clips = state.document.clips.filter { it.trackId == trackId }
     // While a drag is in flight, lift the lane containing the grabbed clip(s) above sibling lanes:
@@ -674,6 +679,55 @@ private fun Lane(
     ) {
         clips.forEach { clip ->
             ClipView(vm, state, clip, pps, msToDp, groupDrag, onGroupDrag)
+        }
+        // Two clips already overlapping on this track are already an automatic crossfade at
+        // playback/export time (PreviewPlayer/Exporter fade the outgoing clip out as the incoming
+        // one fades in, purely from the overlap span) — this is the visual feedback for that, plus a
+        // way to swap the plain crossfade for a named transition. Adjacent-sorted so only genuinely
+        // touching/overlapping pairs get the marker, not every clip against every other.
+        val sorted = clips.sortedBy { it.startTimeMs }
+        for (i in 0 until sorted.size - 1) {
+            val a = sorted[i]
+            val b = sorted[i + 1]
+            if (a.endTimeMs > b.startTimeMs) {
+                CrossfadeOverlapMarker(a, b, pps, msToDp) { onSwapTransition(a.id, b.id) }
+            }
+        }
+    }
+}
+
+/**
+ * The "X" over an already-overlapping clip pair, positioned at the overlap span. Double-tap opens
+ * [onSwapTransition]'s transition picker (see [NleScreen]'s pendingTransitionSwap dialog) — the plain
+ * crossfade this overlap already produces is free and instant; swapping it for a named transition
+ * bakes a new clip via `apply_transition` (FFmpeg `xfade`), which needs an ffmpeg binary configured
+ * and takes real time, so it's a deliberate action, not something that happens just by overlapping.
+ */
+@Composable
+private fun CrossfadeOverlapMarker(
+    a: TimelineClip,
+    b: TimelineClip,
+    pps: Float,
+    msToDp: (Long) -> androidx.compose.ui.unit.Dp,
+    onSwapTransition: () -> Unit,
+) {
+    val density = LocalDensity.current
+    val overlapStartPx = with(density) { msToDp(b.startTimeMs).toPx() }
+    val overlapWidthPx = with(density) { (msToDp(a.endTimeMs).toPx() - overlapStartPx).coerceAtLeast(1f) }
+    Box(
+        Modifier
+            .offset { androidx.compose.ui.unit.IntOffset(overlapStartPx.roundToInt(), 0) }
+            .width(with(density) { overlapWidthPx.toDp() })
+            .fillMaxHeight()
+            .zIndex(2f)
+            .pointerInput(a.id, b.id) {
+                detectTapGestures(onDoubleTap = { onSwapTransition() })
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 2.dp.toPx()
+            drawLine(White.copy(alpha = 0.85f), Offset(0f, 0f), Offset(size.width, size.height), strokeWidth = stroke)
+            drawLine(White.copy(alpha = 0.85f), Offset(size.width, 0f), Offset(0f, size.height), strokeWidth = stroke)
         }
     }
 }
@@ -872,6 +926,41 @@ private fun ClipView(
                     onDragCancel = { trimEdge = 0; trimStartPx = 0f; trimEndPx = 0f },
                 )
             }
+            // Multi-finger drags on the clip body — the touch translation of Vegas's Alt-drag
+            // modifiers, since a touchscreen has no keyboard to hold one on: two fingers = Slip (the
+            // source window slides; the clip's own timeline position/duration never move, so there's
+            // nothing to preview live), three fingers = Slide (moves the clip, trimming whichever
+            // neighbor it would otherwise overlap). Counted from how many pointers are actually down
+            // at any point during the gesture — lifting back to one finger doesn't downgrade the mode
+            // once 2 or 3 fingers have been seen, so a slightly staggered multi-finger touch-down still
+            // registers correctly. Time-stretch (long-press+drag with a haptic) and an L/J-cut isolate
+            // gesture are deliberately NOT mapped here yet: both collide with gestures this clip already
+            // uses (single-finger long-press+drag is already the trim gesture; double-tap already sets
+            // the playback region) and need a resolved disambiguation before landing, not a guess.
+            .pointerInput(clip.id, state.tool, pps) {
+                if (state.tool != EditorTool.SELECT) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var mode = 0 // 0 = undecided (yield to the single-finger detectors above), 2 = slip, 3 = slide
+                    var totalDx = 0f
+                    var down = true
+                    while (down) {
+                        val event = awaitPointerEvent()
+                        val fingers = event.changes.count { it.pressed }
+                        if (fingers >= 3) mode = 3 else if (fingers == 2 && mode != 3) mode = 2
+                        if (mode != 0) {
+                            event.changes.forEach { c ->
+                                if (c.positionChanged()) { c.consume(); totalDx += c.positionChange().x }
+                            }
+                        }
+                        down = event.changes.any { it.pressed }
+                    }
+                    when (mode) {
+                        2 -> vm.slipClip(clip.id, (totalDx / pps * 1000f).toLong())
+                        3 -> vm.slideClip(clip.id, (totalDx / pps * 1000f).toLong())
+                    }
+                }
+            }
             // With a keyframe selected, dragging adjusts its nearest bezier ease handle.
             .pointerInput(clip.id, state.selectedKeyframeId, pps) {
                 val sel = clip.keyframes.firstOrNull { it.id == state.selectedKeyframeId } ?: return@pointerInput
@@ -1069,6 +1158,7 @@ private fun gridIncrementMs(pps: Float, fps: Int = 30): Long {
  * past a magnet keeps going (so you can overlap into a crossfade).
  */
 private fun snappedDeltaMs(state: EditorUiState, clip: TimelineClip, rawDeltaMs: Long, pps: Float): Long {
+    if (!state.snapEnabled) return rawDeltaMs
     val fps = state.document.settings.fps
     val movingIds = groupIdsOf(state, clip)
     val moving = state.document.clips.filter { it.id in movingIds }

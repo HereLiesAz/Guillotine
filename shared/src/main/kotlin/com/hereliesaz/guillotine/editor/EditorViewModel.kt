@@ -1261,17 +1261,37 @@ open class EditorViewModel {
      * plays over the new duration (slower when stretched longer, faster when squeezed shorter), rather
      * than showing more or less of the source the way [trimClipEnd] does. Bounded to
      * [ClipFilters.speed]'s documented 0.1x–10x range.
+     *
+     * [anchorEnd] chooses which edge stays put, matching whichever edge is actually being dragged: false
+     * (default, a right-edge drag) keeps [TimelineClip.startTimeMs] fixed and only [TimelineClip.durationMs]
+     * changes — the same edge [trimClipEnd] anchors. true (a left-edge drag) keeps the clip's END time
+     * fixed instead and moves [TimelineClip.startTimeMs] backward/forward as duration grows/shrinks,
+     * matching the edge [trimClipStart] anchors.
      */
-    fun timeStretchClip(clipId: String, newDurationMs: Long) {
+    fun timeStretchClip(clipId: String, newDurationMs: Long, anchorEnd: Boolean = false) {
         mutateDocument { doc ->
             val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
             val nd = newDurationMs.coerceAtLeast(MIN_CLIP_DURATION_MS)
             if (nd == clip.durationMs) return@mutateDocument doc
             val sourceSpanMs = clip.durationMs.toDouble() * clip.filters.speed
             val newSpeed = (sourceSpanMs / nd).toFloat().coerceIn(0.1f, 10f)
+            // Relative deltas, not [clip]'s absolute new start/duration, applied per affected clip — same
+            // convention as trimClipStart/trimClipEnd, so a shadow clip that isn't perfectly in sync with
+            // its video (e.g. after an independent L/J-cut) keeps whatever offset it already had instead
+            // of being silently snapped back to the primary clip's exact position.
+            val durationDelta = nd - clip.durationMs
+            val startDelta = if (anchorEnd) -durationDelta else 0L
             val affected = setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
             doc.copy(clips = doc.clips.map {
-                if (it.id in affected) it.copy(durationMs = nd, filters = it.filters.copy(speed = newSpeed)) else it
+                if (it.id in affected) {
+                    it.copy(
+                        startTimeMs = (it.startTimeMs + startDelta).coerceAtLeast(0),
+                        durationMs = it.durationMs + durationDelta,
+                        filters = it.filters.copy(speed = newSpeed),
+                    )
+                } else {
+                    it
+                }
             })
         }
         actionRecorder.record(
