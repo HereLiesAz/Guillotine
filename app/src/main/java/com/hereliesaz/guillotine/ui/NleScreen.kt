@@ -31,7 +31,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Send
@@ -1256,6 +1258,15 @@ private fun EditorToolStrip(
             // Ripple: close the gaps among the selected clips (or all clips if none selected).
             IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
                 vm.rippleCloseGaps()
+            }
+            // Auto-Ripple: from here on, deleting a clip closes the gap on its own track automatically
+            // (Vegas's "Affected Tracks" mode) instead of leaving a hole for the button above to clean
+            // up later.
+            IconToolButton(Icons.Filled.Bolt, "Auto-Ripple: close gaps on delete", active = state.autoRippleEnabled) {
+                vm.toggleAutoRipple()
+            }
+            IconToolButton(Icons.Filled.GridOn, "Snap to edges, playhead, and grid", active = state.snapEnabled) {
+                vm.toggleSnap()
             }
             // Zoom is pinch-only (horizontal = width, vertical = track height); no toolbar buttons.
             // Group / ungroup — only meaningful with a multi-clip selection.

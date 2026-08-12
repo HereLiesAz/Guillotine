@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -56,6 +57,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -872,6 +874,41 @@ private fun ClipView(
                     onDragCancel = { trimEdge = 0; trimStartPx = 0f; trimEndPx = 0f },
                 )
             }
+            // Multi-finger drags on the clip body — the touch translation of Vegas's Alt-drag
+            // modifiers, since a touchscreen has no keyboard to hold one on: two fingers = Slip (the
+            // source window slides; the clip's own timeline position/duration never move, so there's
+            // nothing to preview live), three fingers = Slide (moves the clip, trimming whichever
+            // neighbor it would otherwise overlap). Counted from how many pointers are actually down
+            // at any point during the gesture — lifting back to one finger doesn't downgrade the mode
+            // once 2 or 3 fingers have been seen, so a slightly staggered multi-finger touch-down still
+            // registers correctly. Time-stretch (long-press+drag with a haptic) and an L/J-cut isolate
+            // gesture are deliberately NOT mapped here yet: both collide with gestures this clip already
+            // uses (single-finger long-press+drag is already the trim gesture; double-tap already sets
+            // the playback region) and need a resolved disambiguation before landing, not a guess.
+            .pointerInput(clip.id, state.tool, pps) {
+                if (state.tool != EditorTool.SELECT) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var mode = 0 // 0 = undecided (yield to the single-finger detectors above), 2 = slip, 3 = slide
+                    var totalDx = 0f
+                    var down = true
+                    while (down) {
+                        val event = awaitPointerEvent()
+                        val fingers = event.changes.count { it.pressed }
+                        if (fingers >= 3) mode = 3 else if (fingers == 2 && mode != 3) mode = 2
+                        if (mode != 0) {
+                            event.changes.forEach { c ->
+                                if (c.positionChanged()) { c.consume(); totalDx += c.positionChange().x }
+                            }
+                        }
+                        down = event.changes.any { it.pressed }
+                    }
+                    when (mode) {
+                        2 -> vm.slipClip(clip.id, (totalDx / pps * 1000f).toLong())
+                        3 -> vm.slideClip(clip.id, (totalDx / pps * 1000f).toLong())
+                    }
+                }
+            }
             // With a keyframe selected, dragging adjusts its nearest bezier ease handle.
             .pointerInput(clip.id, state.selectedKeyframeId, pps) {
                 val sel = clip.keyframes.firstOrNull { it.id == state.selectedKeyframeId } ?: return@pointerInput
@@ -1069,6 +1106,7 @@ private fun gridIncrementMs(pps: Float, fps: Int = 30): Long {
  * past a magnet keeps going (so you can overlap into a crossfade).
  */
 private fun snappedDeltaMs(state: EditorUiState, clip: TimelineClip, rawDeltaMs: Long, pps: Float): Long {
+    if (!state.snapEnabled) return rawDeltaMs
     val fps = state.document.settings.fps
     val movingIds = groupIdsOf(state, clip)
     val moving = state.document.clips.filter { it.id in movingIds }

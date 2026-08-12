@@ -113,6 +113,16 @@ class TimelineMechanicsTest {
     }
 
     @Test
+    fun `time-stretch anchorEnd keeps the end time fixed and moves the start instead`() {
+        val vm = vmWith(clip("c1", "V1", startMs = 5000, trimStartMs = 0, durationMs = 2000)) // ends at 7000
+        vm.timeStretchClip("c1", 4000, anchorEnd = true)
+        val c = vm.uiState.value.document.clips.single()
+        assertEquals(4000L, c.durationMs)
+        assertEquals(3000L, c.startTimeMs)
+        assertEquals(7000L, c.endTimeMs) // end time unchanged
+    }
+
+    @Test
     fun `time-stretch speed is bounded to the documented 0_1x to 10x range`() {
         val vm = vmWith(clip("c1", "V1", 0, 0, 10_000))
         vm.timeStretchClip("c1", 1) // absurdly short -> speed would blow past 10x

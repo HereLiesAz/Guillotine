@@ -23,7 +23,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ClosedCaption
@@ -353,7 +355,13 @@ fun NleScreen(
                 .focusable()
                 // onKeyEvent (bubble phase), NOT preview: a focused text field gets first crack
                 // at the keys, so typing in the prompt doesn't trigger editor shortcuts.
-                .onKeyEvent { handleKey(it, vm) },
+                .onKeyEvent {
+                    // Tracked on every key event, not just the ones handleKey consumes below — a
+                    // mouse-drag on the timeline (ClipView) reads HeldModifiers live to pick which
+                    // Vegas-style edit mode a Ctrl/Alt/Shift-held drag enters.
+                    HeldModifiers.update(it)
+                    handleKey(it, vm)
+                },
         ) {
         TopBar(
             state = state,
@@ -862,6 +870,15 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
                 vm.rippleCloseGaps()
             }
+            // Auto-Ripple: from here on, deleting a clip closes the gap on its own track automatically
+            // (Vegas's "Affected Tracks" mode) instead of leaving a hole for "Ripple (close gaps)" above
+            // to clean up later.
+            IconToolButton(Icons.Filled.Bolt, "Auto-Ripple: close gaps on delete", active = state.autoRippleEnabled) {
+                vm.toggleAutoRipple()
+            }
+            IconToolButton(Icons.Filled.GridOn, "Snap to edges, playhead, and grid (F8)", active = state.snapEnabled) {
+                vm.toggleSnap()
+            }
             // Group / ungroup -- only meaningful with a multi-clip selection.
             if (selected.size > 1) {
                 val grouped = selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null }
@@ -1035,6 +1052,7 @@ private fun handleKey(e: KeyEvent, vm: EditorViewModel): Boolean {
         ctrl && e.key == Key.C -> { vm.copySelected(); true }
         ctrl && e.key == Key.V -> { vm.pasteClip(); true }
         !ctrl && e.key == Key.S -> { vm.splitAtPlayhead(); true }
+        e.key == Key.F8 -> { vm.toggleSnap(); true }
         else -> false
     }
 }
