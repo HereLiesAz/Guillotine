@@ -413,7 +413,13 @@ fun NleScreen(
             PanelLayoutPrefs.savePreviewWeight(previewWeight)
         }
         Column(Modifier.weight(previewWeight).fillMaxWidth()) {
-            VideoPreview(vm, Modifier.weight(1f).fillMaxWidth(), onToggleFullscreen = { fullscreenPreview = true })
+            VideoPreview(
+                vm,
+                Modifier.weight(1f).fillMaxWidth(),
+                cropMode = state.tool == EditorTool.CROP,
+                onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                onToggleFullscreen = { fullscreenPreview = true },
+            )
             TransportControls(vm, state)
         }
         DraggableSplitDivider(

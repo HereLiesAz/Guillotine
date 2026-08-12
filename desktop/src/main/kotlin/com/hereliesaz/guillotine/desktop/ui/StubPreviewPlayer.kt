@@ -11,8 +11,16 @@ import com.hereliesaz.guillotine.editor.EditorViewModel
 fun VideoPreview(
     editor: EditorViewModel,
     modifier: Modifier = Modifier,
+    cropMode: Boolean = false,
+    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
     onToggleFullscreen: (() -> Unit)? = null,
 ) {
     val state by editor.uiState.collectAsState()
-    DesktopPreviewPlayer(state, modifier, onToggleFullscreen = onToggleFullscreen)
+    DesktopPreviewPlayer(
+        state,
+        modifier,
+        cropMode = cropMode,
+        onCropTransform = onCropTransform,
+        onToggleFullscreen = onToggleFullscreen,
+    )
 }

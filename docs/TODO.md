@@ -2,6 +2,34 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Audio-loop bug fixed; desktop crop tool now actually transforms clips (2026-08-12)
+
+Two bugs reported directly:
+
+- **Audio repeating a small segment while video played through.** Root cause: desktop's
+  `AudioTrackLayer` drift-correction loop (`DesktopPreviewPlayer.kt`) read `now`/`active` directly
+  inside a `LaunchedEffect(isPlaying, active?.id)`. Since those keys don't change while one clip
+  stays active, the coroutine's closure never saw playhead advance past the values captured at
+  launch — every ~poll it recomputed the same stale `sourceTimeMs` and seeked the audio player back
+  to it, so the clip looped a few hundred milliseconds over and over while the video track (which
+  didn't have this bug) played normally. Fixed by wrapping `now`/`active` in `rememberUpdatedState`
+  so the loop reads live values on every poll, matching the pattern the video path and Android's
+  equivalent already used correctly.
+- **Desktop's Crop tool did nothing.** Selecting Crop and dragging on the preview had no effect —
+  unlike Android, which wires `detectTransformGestures` (pinch/drag/rotate) straight into
+  `EditorViewModel.transformSelectedClip`. Desktop had no call site at all: no gesture, no slider,
+  nothing (the only indirect access was the Keyframes popup). Added the mouse equivalent: plain drag
+  pans the clip (no pinch on a mouse, so this replaces Android's single-finger pan), Shift-held drag
+  rotates instead (checked once at drag-start via `HeldModifiers.shift`, same "snapshot the held
+  modifier at gesture-start" pattern the timeline already uses for its own Ctrl/Alt/Shift-gated
+  edits), and the scroll wheel zooms (the same `awaitPointerEventScope`/`PointerEventType.Scroll`
+  idiom `Timeline.kt` already uses for Ctrl+scroll zoom). Wired through `StubPreviewPlayer.kt`'s
+  `VideoPreview` and desktop `NleScreen.kt`'s call site exactly like Android's `cropMode`/
+  `onCropTransform`, calling the same shared `vm.transformSelectedClip(...)` — no new mutation logic,
+  just a new input path into the existing one. Honest scope note: this is a mouse-shaped
+  *translation* of the gesture, not literal parity — there's still no multi-touch pinch on desktop,
+  so zoom is scroll-wheel and rotation is a modifier-gated drag rather than a two-finger twist.
+
 ## Preview hand tool (a real pan gesture, since there wasn't one) + per-track Minimize (2026-08-12)
 
 Requested directly, both on both platforms:
