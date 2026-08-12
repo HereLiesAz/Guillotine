@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.NearMe
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Repeat
@@ -247,6 +249,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
     var showOnboarding by remember { mutableStateOf(!keyStore.onboardingDone) }
     var showSettings by remember { mutableStateOf(false) }
+    var showAiSettings by remember { mutableStateOf(false) }
     // Cloudflare relay config; loaded off the main thread (EncryptedSharedPreferences touches the
     // KeyStore + disk) and re-read whenever Settings closes so changes restart the bridge.
     var relayConfig by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.RelayConfig()) }
@@ -265,6 +268,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showFaq by remember { mutableStateOf(false) }
     var showAdFree by remember { mutableStateOf(false) }
     var showAzphaltStore by remember { mutableStateOf(false) }
+    var showExtensionsManager by remember { mutableStateOf(false) }
     
     // UMP consent form state.
     var canRequestAds by remember { mutableStateOf(false) }  
@@ -492,7 +496,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
             onSettings = { showSettings = true },
+            onOpenAiSettings = { showAiSettings = true },
             onOpenStore = { showAzphaltStore = true },
+            onOpenExtensions = { showExtensionsManager = true },
             onAiComparison = { showAiComparison = true },
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
@@ -680,6 +686,22 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 }
                 showSettings = false
             },
+            // "AI Analyzer"/"Generation"/"Transcription" moved to their own menu entry (see showAiSettings
+            // below) — Settings keeps only "Advanced", which is still a mix of AI (model install) and
+            // non-AI controls (backup/restore, updater, crash relay) — see docs/TODO.md.
+            restrictToTabs = listOf(3),
+        )
+    }
+
+    if (showAiSettings) {
+        SettingsScreen(
+            current = settings,
+            onSave = { newSettings ->
+                scope.launch { keyStore.save(newSettings) }
+                showAiSettings = false
+            },
+            onDismiss = { showAiSettings = false },
+            restrictToTabs = listOf(0, 1, 2),
         )
     }
 
@@ -812,6 +834,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onDismiss = { showAzphaltStore = false }
         )
     }
+    if (showExtensionsManager) {
+        ExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
+    }
     // A package handed to Guillotine from outside — a .azp opened from a web-store download, a file
     // manager or a share sheet, or an azphalt://install deep link naming one to fetch. Same
     // verify-and-apply flow either way, just skipping the browse step since the package is already named.
@@ -878,7 +903,9 @@ private fun TopBar(
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
     onSettings: () -> Unit,
+    onOpenAiSettings: () -> Unit,
     onOpenStore: () -> Unit,
+    onOpenExtensions: () -> Unit,
     onAiComparison: () -> Unit,
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
@@ -912,7 +939,9 @@ private fun TopBar(
                 azDivider()
                 azItem("Project") { onProjectSettings() }
                 azItem("Settings") { onSettings() }
+                azItem("AI") { onOpenAiSettings() }
                 azItem("Store") { onOpenStore() }
+                azItem("Extensions") { onOpenExtensions() }
                 azItem("Compare AI") { onAiComparison() }
                 azItem("Tutorial") { onTutorial() }
                 azItem("FAQ") { onFaq() }
@@ -1186,6 +1215,25 @@ private fun EditorToolStrip(
             }
             IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
                 vm.toggleAutoEase()
+            }
+            // Text is just a clip on a video track — this is the discoverable, toolbar-level way to add
+            // one (the per-track "+" already did this but nothing surfaced it as a general text tool).
+            IconToolButton(Icons.Filled.TextFields, "Add text") {
+                val track = state.document.videoTracks.firstOrNull()
+                if (track == null) {
+                    android.widget.Toast.makeText(voiceCtx, "Import a video first — text is added on top of a video track.", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    vm.selectClip(vm.addEmptyTextClip(track))
+                }
+            }
+            // Transcribe was previously reachable only by selecting a clip and finding it among the
+            // per-clip tool icons. onTranscribe already no-ops unless exactly one clip is selected.
+            IconToolButton(
+                Icons.Filled.ClosedCaption,
+                "Transcribe selected clip",
+                enabled = selected.singleOrNull()?.type == com.hereliesaz.guillotine.model.ClipType.VIDEO,
+            ) {
+                onTranscribe(CaptionStyle.PLAIN)
             }
 
             ToolGroupSeparator()

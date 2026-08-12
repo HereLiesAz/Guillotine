@@ -55,6 +55,99 @@ object AzphaltRegistry {
     /** A transport, HTTP-status, or response-shape failure talking to the registry. */
     class RegistryException(message: String) : Exception(message)
 
+    /** Cap a browse-list page body — 158 packages/page currently runs well under 1 MiB. */
+    private const val MAX_LIST_BYTES = 4L * 1024 * 1024
+
+    /** Hard ceiling on pages walked by [browseAll] — a defensive stop against a hostile/broken `pages`. */
+    private const val MAX_CATALOG_PAGES = 50
+
+    /**
+     * One entry from `GET /packages`'s browse list (verified live against the real registry,
+     * 2026-08-12): `{ "packages": [...], "total", "page", "pages" }`, each package summary carrying
+     * `id`, `name`, `description`, `author`, `kind`, `types` (e.g. `["lut"]`/`["motion"]`/`["shader"]`/
+     * `["onnx"]`), `priceStatus`, `maturity`, `targetApps`, `latest`, and an optional `preview.image`
+     * (a path relative to [BASE_URL]). This is summary data only — installing still downloads and
+     * verifies the actual `.azp` from scratch via [download]; nothing here is trusted.
+     */
+    data class CatalogEntry(
+        val id: String,
+        val name: String,
+        val description: String,
+        val kind: String,
+        val types: List<String>,
+        val priceStatus: String,
+        val maturity: String,
+        val targetApps: List<String>,
+        val latest: String,
+    ) {
+        val isFree: Boolean get() = priceStatus != "paid"
+        /** The most specific category to show a chip for — an asset's own type, else its manifest kind. */
+        val category: String get() = types.firstOrNull() ?: kind
+        fun targetsApp(hostId: String): Boolean = targetApps.isEmpty() || targetApps.contains(hostId)
+    }
+
+    data class CatalogPage(val entries: List<CatalogEntry>, val page: Int, val pages: Int, val total: Int)
+
+    /**
+     * One page of the flagship catalog, optionally filtered by free-text [query] (server-side `q`) or
+     * exact asset [types] (server-side `types` — confirmed live to filter, unlike `type`/`category`/
+     * `kind`, which the registry silently ignores).
+     */
+    fun browse(page: Int = 1, query: String? = null, types: String? = null): CatalogPage {
+        val qs = StringBuilder("?page=").append(page.coerceAtLeast(1))
+        query?.takeIf { it.isNotBlank() }?.let {
+            qs.append("&q=").append(java.net.URLEncoder.encode(it, "UTF-8"))
+        }
+        types?.takeIf { it.isNotBlank() }?.let {
+            qs.append("&types=").append(java.net.URLEncoder.encode(it, "UTF-8"))
+        }
+        val body = String(getBytes("$BASE_URL/packages$qs", MAX_LIST_BYTES), Charsets.UTF_8)
+        val json = try {
+            JSONObject(body)
+        } catch (e: Exception) {
+            throw RegistryException("azphalt.store returned something that isn't a package list.")
+        }
+        val arr = json.optJSONArray("packages") ?: org.json.JSONArray()
+        val entries = (0 until arr.length()).map { parseEntry(arr.getJSONObject(it)) }
+        return CatalogPage(
+            entries = entries,
+            page = json.optInt("page", page),
+            pages = json.optInt("pages", 1).coerceAtLeast(1),
+            total = json.optInt("total", entries.size),
+        )
+    }
+
+    /**
+     * The whole catalog in one call — walks every page of [browse] and concatenates them. 158 live
+     * packages today is small enough to hold in memory and filter/search client-side instantly, which
+     * is simpler and more responsive than re-querying the server on every keystroke or chip tap, and
+     * avoids depending on exactly which fields the server can filter by (only `q` and `types` do
+     * anything server-side; `type`/`category`/`kind` are silently ignored — verified live).
+     * [maxPages] is a defensive ceiling, not a real limit at today's catalog size.
+     */
+    fun browseAll(maxPages: Int = MAX_CATALOG_PAGES): List<CatalogEntry> {
+        val first = browse(page = 1)
+        if (first.pages <= 1) return first.entries
+        val rest = (2..first.pages.coerceAtMost(maxPages)).map { p -> browse(page = p).entries }
+        return first.entries + rest.flatten()
+    }
+
+    private fun parseEntry(o: JSONObject): CatalogEntry {
+        val types = o.optJSONArray("types")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList()
+        val targetApps = o.optJSONArray("targetApps")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList()
+        return CatalogEntry(
+            id = o.getString("id"),
+            name = o.optString("name", o.getString("id")),
+            description = o.optString("description", ""),
+            kind = o.optString("kind", "asset"),
+            types = types,
+            priceStatus = o.optString("priceStatus", "free"),
+            maturity = o.optString("maturity", "general"),
+            targetApps = targetApps,
+            latest = o.optString("latest", o.optString("version", "")),
+        )
+    }
+
     /**
      * Resolves and downloads the `.azp` [link] names, returning its **unverified** bytes.
      *

@@ -1206,11 +1206,13 @@ open class EditorViewModel {
     fun setTrackOpacity(trackId: String, opacity: Float) = updateTrackSettings(trackId) { it.copy(opacity = opacity) }
 
     /** Create an empty caption/text clip on [trackId] at the playhead, ready to edit. */
-    fun addEmptyTextClip(trackId: String) {
+    /** Adds a placeholder TEXT clip on [trackId] at the playhead, returning its id so a caller can select it. */
+    fun addEmptyTextClip(trackId: String): String {
+        val id = newId()
         mutateDocument { doc ->
             doc.copy(
                 clips = doc.clips + TimelineClip(
-                    id = newId(),
+                    id = id,
                     mediaId = "",
                     type = ClipType.TEXT,
                     trackId = trackId,
@@ -1221,6 +1223,7 @@ open class EditorViewModel {
                 ),
             )
         }
+        return id
     }
 
     /**

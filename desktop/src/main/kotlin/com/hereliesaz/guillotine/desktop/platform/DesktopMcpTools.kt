@@ -1415,86 +1415,25 @@ class DesktopMcpTools(
         }
     }
 
-    // No per-app host scoping exists on desktop yet. AzpManifest.targetsApp treats an empty
-    // targetApps as "targets everyone", so this id only matters for a package that explicitly
-    // excludes it — unverified from this checkout whether any live package does (no catalog/fixture
-    // here to check against), so treat this constant as a placeholder, not a measured-safe choice.
-    private val DESKTOP_HOST_APP_ID = "com.hereliesaz.guillotine.desktop"
-
     /**
      * Applies an installed `.azp` package to a clip using whichever real apply path its content
-     * supports — kinetic-typography motion (captions only) or a native shader/LUT asset
-     * ([DesktopAzpAssetApplier]) — mirroring the app side's `AzpPluginApplier`.
-     *
-     * Before this, every asset kind except motion fell through to stamping the clip's unread
-     * `azpPluginId` field and returning success: applying a shader or LUT via the assistant reported
-     * "Applied" while nothing changed in preview or export.
+     * supports — the single implementation [DesktopPluginApplier] this tool and the desktop Store's
+     * install flow both call, mirroring the app side's `AzpPluginApplier`.
      */
     private fun applyAzpPlugin(clipId: String, pluginId: String): JSONObject {
-        val clip = vm.uiState.value.document.clips.find { it.id == clipId }
-            ?: throw IllegalArgumentException("Clip $clipId not found.")
         val baseDir = File(DesktopStorage.dataDir, "extensions")
-
-        // Kinetic-typography (motion) packages bake into real caption keyframes — captions only.
-        // listInstalled requires an actual bundled motion asset (a motion type AND resolvable bytes) —
-        // an earlier version of this check only compared manifest ids against AzpMotionInstaller.plan,
-        // which succeeds (with an empty `motions` list) for ANY valid .azp, so every shader/LUT/model
-        // package misreported as "a caption animation" and the real branch below was never reached.
-        val motion = com.hereliesaz.guillotine.ui.KineticTypographyPicker.listInstalled(baseDir)
-            .find { it.packageId == pluginId }
-        if (motion != null) {
-            if (clip.type != com.hereliesaz.guillotine.model.ClipType.TEXT) {
-                throw IllegalStateException("\"$pluginId\" is a caption animation. Select a caption (a text clip) to apply it.")
-            }
-            com.hereliesaz.guillotine.ui.KineticTypographyPicker.apply(vm, motion, clipId)
-            return ok().apply {
-                put("humanSummary", "Applied kinetic-typography preset $pluginId to caption $clipId (baked keyframes).")
-            }
+        return when (val outcome = DesktopPluginApplier.apply(vm, clipId, pluginId, baseDir)) {
+            is DesktopPluginApplier.Outcome.Applied ->
+                ok().apply { put("humanSummary", "Applied $pluginId to clip $clipId.") }
+            is DesktopPluginApplier.Outcome.Unsupported -> throw IllegalStateException(outcome.message)
+            is DesktopPluginApplier.Outcome.Failure -> throw IllegalArgumentException(outcome.message)
         }
-
-        // Otherwise, an asset (shader/LUT) package Guillotine renders natively — VIDEO clips only.
-        // A caption renders through a separate overlay path with no shaderPath/lutPath, and audio has
-        // no picture pipeline at all, so applying to either would report success and change nothing.
-        val panel = com.hereliesaz.guillotine.azphalt.AzpInstalledUi.list(baseDir, DESKTOP_HOST_APP_ID)
-            .find { it.packageId == pluginId }
-        if (panel != null) {
-            if (clip.type != com.hereliesaz.guillotine.model.ClipType.VIDEO) {
-                throw IllegalStateException(
-                    "\"$pluginId\" is a shader/LUT — it renders on video only. Select a video clip to apply it.",
-                )
-            }
-            return when (val r = DesktopAzpAssetApplier.apply(vm, clipId, panel)) {
-                is DesktopAzpAssetApplier.Result.Applied ->
-                    ok().apply { put("humanSummary", "Applied $pluginId to clip $clipId.") }
-                is DesktopAzpAssetApplier.Result.Unsupported -> throw IllegalStateException(r.message)
-                is DesktopAzpAssetApplier.Result.Failure -> throw IllegalStateException(r.message)
-            }
-        }
-
-        val azpFiles = baseDir.listFiles { _, name -> name.endsWith(".azp") }.orEmpty()
-        val installed = azpFiles.any { f ->
-            runCatching { com.hereliesaz.guillotine.azphalt.AzpPackage.load(f.readBytes()).manifest.id == pluginId }
-                .getOrDefault(false)
-        }
-        if (installed) {
-            throw IllegalStateException(
-                "\"$pluginId\" doesn't have a shader, LUT, or caption-motion asset Guillotine can apply to a clip yet.",
-            )
-        }
-        throw IllegalArgumentException("Plugin $pluginId not found in the extensions directory.")
     }
 
     private fun clearAzpPlugin(clipId: String): JSONObject {
-        val clip = vm.uiState.value.document.clips.find { it.id == clipId }
+        vm.uiState.value.document.clips.find { it.id == clipId }
             ?: throw IllegalArgumentException("Clip $clipId not found.")
-        vm.clearCaptionMotion(clipId)
-        // applyAzpPlugin's asset branch writes real shaderPath/lutPath now (see DesktopAzpAssetApplier),
-        // not just the caption-motion keyframes clearCaptionMotion strips — clear whichever installed
-        // panel is actually applied to this clip's filters too, or "cleared" would silently not clear it.
-        val baseDir = File(DesktopStorage.dataDir, "extensions")
-        com.hereliesaz.guillotine.azphalt.AzpInstalledUi.list(baseDir, DESKTOP_HOST_APP_ID).forEach { panel ->
-            DesktopAzpAssetApplier.remove(vm, clipId, panel, clip.filters)
-        }
+        DesktopPluginApplier.clear(vm, clipId, File(DesktopStorage.dataDir, "extensions"))
         return ok().apply { put("humanSummary", "Cleared the applied plugin/preset from clip $clipId.") }
     }
 

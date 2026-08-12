@@ -334,7 +334,7 @@ private fun TimelineLanes(
                 },
         ) {
             Column(Modifier.fillMaxSize()) {
-                Ruler(vm, totalMs, pps, contentWidth)
+                Ruler(vm, totalMs, pps, contentWidth, state.playbackRegion)
                 Column(
                     Modifier
                         .weight(1f)
@@ -352,6 +352,19 @@ private fun TimelineLanes(
                         Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
                     }
                 }
+            }
+            // Playback / loop region: a translucent full-height band over [start, end]. Visual only
+            // (no pointerInput) so it never intercepts the clip gestures underneath it — mirrors the
+            // app side's identical overlay (`app/.../ui/Timeline.kt`).
+            state.playbackRegion?.let { r ->
+                val x0 = msToDp(r.first)
+                Box(
+                    Modifier
+                        .offset(x = x0)
+                        .width((msToDp(r.last) - x0).coerceAtLeast(0.dp))
+                        .fillMaxHeight()
+                        .background(Red500.copy(alpha = 0.08f)),
+                )
             }
             // Playhead overlay spanning the visible lanes. Drag is captured on the parent
             // surface (see .pointerInput above) so the hit region isn't a covering sibling —
@@ -549,10 +562,15 @@ private fun TrackAction(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Ruler(vm: EditorViewModel, totalMs: Long, pps: Float, contentWidth: androidx.compose.ui.unit.Dp) {
+private fun Ruler(vm: EditorViewModel, totalMs: Long, pps: Float, contentWidth: androidx.compose.ui.unit.Dp, region: LongRange?) {
     val fps = vm.uiState.value.document.settings.fps
     val majorColor = Neutral500
     val minorColor = Neutral700
+    // Loop-region bar: dragging along the ruler strip defines the playback region (replacing whatever
+    // was set before), a plain tap moves the playhead — mirrors the app side's identical `Ruler`
+    // (`app/.../ui/Timeline.kt`). The in-progress drag previews live and commits on release.
+    var dragStartX by remember { mutableStateOf<Float?>(null) }
+    var dragCurX by remember { mutableFloatStateOf(0f) }
     Canvas(
         Modifier
             .width(contentWidth)
@@ -565,16 +583,41 @@ private fun Ruler(vm: EditorViewModel, totalMs: Long, pps: Float, contentWidth: 
             }
             .pointerInput(pps) {
                 detectDragGestures(
-                    onDragStart = { off ->
-                        vm.seekTo((off.x / pps * 1000f).toLong().coerceAtLeast(0))
+                    onDragStart = { off -> dragStartX = off.x; dragCurX = off.x },
+                    onDrag = { change, _ -> change.consume(); dragCurX = change.position.x },
+                    onDragEnd = {
+                        dragStartX?.let { s ->
+                            vm.setPlaybackRegion(
+                                (s / pps * 1000f).toLong(),
+                                (dragCurX / pps * 1000f).toLong(),
+                            )
+                        }
+                        dragStartX = null
                     },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        vm.seekTo((change.position.x / pps * 1000f).toLong().coerceAtLeast(0))
-                    },
+                    onDragCancel = { dragStartX = null },
                 )
             },
     ) {
+        // Committed region band.
+        region?.let { r ->
+            val x0 = r.first / 1000f * pps
+            val x1 = r.last / 1000f * pps
+            drawRect(
+                Red500.copy(alpha = 0.3f),
+                topLeft = Offset(x0, 0f),
+                size = androidx.compose.ui.geometry.Size((x1 - x0).coerceAtLeast(0f), size.height),
+            )
+        }
+        // Live region-drag preview.
+        dragStartX?.let { s ->
+            val a = kotlin.math.min(s, dragCurX)
+            val b = kotlin.math.max(s, dragCurX)
+            drawRect(
+                Red500.copy(alpha = 0.4f),
+                topLeft = Offset(a, 0f),
+                size = androidx.compose.ui.geometry.Size((b - a).coerceAtLeast(0f), size.height),
+            )
+        }
         val endMs = totalMs + 4000L
         val grid = gridIncrementMs(pps, fps)
         val secondMs = 1000L

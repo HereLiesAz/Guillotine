@@ -88,8 +88,53 @@ private fun SheetCard(content: @Composable () -> Unit) {
     )
 }
 
+/** Desktop mirror of the app side's `AiCapabilitySummary` (`app/.../ui/Sheets.kt`) — see its doc. */
 @Composable
-fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: () -> Unit) {
+private fun DesktopAiCapabilitySummary(settings: AiSettings) {
+    val cloudConfigured = settings.provider != AiProviderType.MLKIT && settings.keyFor(settings.provider).isNotBlank()
+    val rows = listOf(
+        "Assistant brain" to (cloudConfigured || settings.agentModelPath.isNotBlank()),
+        "Frame vision (recognition)" to true,
+        "Transcription" to (settings.speechModelPath.isNotBlank() || settings.asrModelPath.isNotBlank() || settings.keyFor(AiProviderType.OPENAI).isNotBlank()),
+        "Text-to-speech" to settings.ttsModelPath.isNotBlank(),
+        "Frame captioning (VLM)" to settings.vlmModelPath.isNotBlank(),
+        "Audio highlight detection" to settings.audioEventModelPath.isNotBlank(),
+        "Speaker diarization" to (settings.diarizeSegModelPath.isNotBlank() && settings.diarizeEmbedModelPath.isNotBlank()),
+        "Stem separation" to settings.stemModelPath.isNotBlank(),
+        "Denoise" to settings.denoiseModelPath.isNotBlank(),
+        "Image/video/music generation" to (settings.genKeys.values.any { it.isNotBlank() } || settings.leonardoKey.isNotBlank()),
+        "Cloud may see the current frame" to settings.cloudVision,
+    )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Neutral800)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("Your setup, at a glance", color = White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        rows.chunked(2).forEach { pair ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                pair.forEach { (label, on) ->
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (on) "✓" else "—", color = if (on) Red500 else Neutral500, fontSize = 12.sp)
+                        Text(label, color = Neutral400, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(
+    current: AiSettings,
+    onSave: (AiSettings) -> Unit,
+    onDismiss: () -> Unit,
+    /** See the app side's identical parameter (`app/.../ui/Sheets.kt`) — null shows all four tabs. */
+    restrictToTabs: List<Int>? = null,
+) {
     var provider by remember { mutableStateOf(current.provider) }
     var keys by remember { mutableStateOf(current.keys) }
     var models by remember { mutableStateOf(current.models) }
@@ -182,8 +227,9 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         }
     }
 
-    var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("AI Analyzer", "Image Gen", "Transcription", "Advanced")
+    val visibleTabs = restrictToTabs ?: tabs.indices.toList()
+    var selectedTab by remember { mutableStateOf(visibleTabs.first()) }
 
     Column(
         Modifier
@@ -206,11 +252,16 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             )
         }
 
+        if (0 in visibleTabs) {
+            DesktopAiCapabilitySummary(buildSettings())
+        }
+
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            tabs.forEachIndexed { index, title ->
+            visibleTabs.forEach { index ->
+                val title = tabs[index]
                 val isSelected = selectedTab == index
                 Text(
                     text = title,

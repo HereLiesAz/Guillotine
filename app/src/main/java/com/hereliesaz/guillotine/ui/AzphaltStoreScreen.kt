@@ -8,15 +8,34 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -38,6 +58,7 @@ import com.hereliesaz.guillotine.azphalt.AzpExternalOpen
 import com.hereliesaz.guillotine.azphalt.AzpHandoffInstaller
 import com.hereliesaz.guillotine.azphalt.AzpInstallLink
 import com.hereliesaz.guillotine.azphalt.AzpInstallSurfaces
+import com.hereliesaz.guillotine.azphalt.AzpInstalledUi
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpStateReport
 import com.hereliesaz.guillotine.azphalt.AzphaltRegistry
@@ -45,21 +66,28 @@ import com.hereliesaz.guillotine.azphalt.AzphaltStoreHandoff
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
 import com.hereliesaz.guillotine.azphalt.AzpPublisherPins
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.ui.theme.Neutral400
+import com.hereliesaz.guillotine.ui.theme.Neutral500
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Extensions come from the **Azphalt Store**, not from a browsing UI Guillotine builds and maintains
- * itself. This delegates browsing and acquiring to whichever Azphalt Store app is installed, over the
- * acquisition handoff azphalt `spec/store-app.md` specifies: launch `store.azphalt.action.BROWSE` for
- * result, and the store app returns a package it has already fetched and checked as a content URI.
+ * Guillotine's own Azphalt Store screen. As of 2026-08-12 (see docs/TODO.md) it builds and maintains
+ * its own catalog browser again ([CatalogBrowser], over [AzphaltRegistry.browseAll]) rather than only
+ * delegating to whichever Azphalt Store app is installed — that delegation-only design (2026-07-28)
+ * turned out to have been the right call too early, not the right call permanently: it was built before
+ * the catalog and its own trust/install machinery were mature enough to justify the maintenance cost,
+ * and both have since grown well past that bar. The external Azphalt Store app and the web storefront
+ * both still work — they're one tap away via the browser's own overflow menu ([showRoutes]) — but
+ * they're a secondary route now, not the only one.
  *
- * Guillotine still re-verifies every byte it gets back through [AzpHandoffInstaller] — the spec is
- * explicit that a store app is a convenience, never a trust anchor ("a lying store app gains nothing")
- * — and still owns applying an installed package to the timeline, the one part no store app can do on
- * its behalf.
+ * Every install, regardless of route, still runs the full [AzpHandoffInstaller] gauntlet (integrity,
+ * signature, trust-on-first-use publisher pinning) on the actual bytes received — browsing your own
+ * catalog earns a package no more trust than a store app's or a random file would. Guillotine still
+ * owns applying an installed package to the timeline either way, since no store app or catalog could do
+ * that on its behalf.
  *
  * [incoming] is the other way in: a package handed to Guillotine from outside the app and routed here by
  * [AzpExternalOpen]. `spec/store-app.md` only specifies the Android app-to-app handoff and explicitly
@@ -68,7 +96,7 @@ import java.io.File
  * share sheet) and [AzpExternalOpen.Incoming.Link] for an `azphalt://install` deep link naming a package
  * for Guillotine to fetch from the registry itself. Both converge on the same [runInstall]; a link is
  * untrusted input like everything else here, so nothing skips verification because a web page vouched for
- * it. When [incoming] is non-null there is nothing to browse, so the store app is never launched.
+ * it. When [incoming] is non-null there is nothing to browse, so the catalog is never shown.
  */
 @Composable
 fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? = null, onDismiss: () -> Unit) {
@@ -109,6 +137,11 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
     // blocking I/O. Null until ready (and when nothing is installed), which is a conforming thing to
     // send — so a browse that happens before it resolves simply carries no inventory.
     var inventory by remember { mutableStateOf<String?>(null) }
+
+    // Own catalog browser, primary again as of 2026-08-12 (see docs/TODO.md) — shown whenever there's
+    // no incoming file/link to install directly. "Use the Store app" / "Browse the web store" survive
+    // as a secondary route inside the browser's own overflow menu (showRoutes below), not the default.
+    var showCatalog by remember { mutableStateOf(false) }
 
     fun finish(message: String? = null) {
         message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
@@ -261,10 +294,8 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
             if (bytes == null) finish("Could not read that .azp package.") else runInstall(bytes)
         } else if (incoming is AzpExternalOpen.Incoming.Link) {
             pendingLink = incoming.link
-        } else if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
-            showRoutes = true
         } else {
-            showUnavailable = true
+            showCatalog = true
         }
     }
 
@@ -289,13 +320,13 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
 
     if (showRoutes) {
         AlertDialog(
-            onDismissRequest = { showRoutes = false; onDismiss() },
-            title = { Text("Add an extension") },
+            onDismissRequest = { showRoutes = false },
+            title = { Text("Other ways to add extensions") },
             text = {
                 Text(
-                    "The web store at azphalt.store is the full marketplace — search, categories, " +
-                        "previews. Downloading a package there opens it straight back into Guillotine. " +
-                        "The Store app is quicker but hands over a plain list.",
+                    "This browser is Guillotine's own catalog. The web store at azphalt.store is the same " +
+                        "catalog with previews; a package downloaded there opens straight back into " +
+                        "Guillotine. An installed Azphalt Store app hands over its own list instead.",
                 )
             },
             confirmButton = {
@@ -303,13 +334,16 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                     TextButton(onClick = {
                         showRoutes = false
                         openWebStore(context)
-                        onDismiss()
                     }) { Text("Browse the web store") }
                     TextButton(onClick = {
                         showRoutes = false
-                        launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName, inventory))
+                        if (AzphaltStoreHandoff.isAvailable(context.packageManager, context.packageName)) {
+                            launcher.launch(AzphaltStoreHandoff.browseIntent(context.packageName, inventory))
+                        } else {
+                            showUnavailable = true
+                        }
                     }) { Text("Use the Store app") }
-                    TextButton(onClick = { showRoutes = false; onDismiss() }) { Text("Cancel") }
+                    TextButton(onClick = { showRoutes = false }) { Text("Cancel") }
                 }
             },
         )
@@ -317,12 +351,12 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
 
     if (showUnavailable) {
         AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Store isn't installed") },
+            onDismissRequest = { showUnavailable = false },
+            title = { Text("Azphalt Store app isn't installed") },
             text = {
                 Text(
-                    "Extensions — shaders, LUTs, caption styles, companion apps — come from the Azphalt " +
-                        "Store. Install the app to browse and add them, or use the web store at " +
+                    "Guillotine's own catalog (the browser behind this) works without it. Only get this " +
+                        "if you'd rather use a separate store app's list, or use the web store at " +
                         "azphalt.store instead.",
                 )
             },
@@ -338,9 +372,8 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                     TextButton(onClick = {
                         showUnavailable = false
                         openWebStore(context)
-                        onDismiss()
                     }) { Text("Use the web store") }
-                    TextButton(onClick = { showUnavailable = false; onDismiss() }) { Text("Cancel") }
+                    TextButton(onClick = { showUnavailable = false }) { Text("Cancel") }
                 }
             },
         )
@@ -432,6 +465,189 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
             },
             dismissButton = { TextButton(onClick = { pendingPublisherChange = null; onDismiss() }) { Text("Cancel") } },
         )
+    }
+
+    if (showCatalog) {
+        CatalogBrowser(
+            hostAppId = context.packageName,
+            extensionsDirPath = extensionsDir,
+            onInstall = { entry ->
+                busy = "Downloading “${entry.name}”…"
+                scope.launch {
+                    val bytes = withContext(Dispatchers.IO) {
+                        runCatching { AzphaltRegistry.download(AzpInstallLink(entry.id, entry.latest)) }
+                    }
+                    busy = null
+                    bytes.fold(
+                        onSuccess = { runInstall(it) },
+                        onFailure = { finish(it.message ?: "Could not download “${entry.name}” from azphalt.store.") },
+                    )
+                }
+            },
+            onOtherRoutes = { showRoutes = true },
+            onDismiss = { showCatalog = false; onDismiss() },
+        )
+    }
+}
+
+/**
+ * Guillotine's own catalog browser — search + category chips over [AzphaltRegistry.browseAll], each
+ * entry a card with an Install button that hands bytes to the caller's [onInstall] (which runs the
+ * exact same [AzpHandoffInstaller] verification every other route here does; browsing never earns a
+ * package any trust). Fetches once per screen-open and filters entirely client-side (158 packages
+ * live today is small enough to hold in memory — see [AzphaltRegistry.browseAll]'s own doc), so
+ * typing in the search field or tapping a chip is instant, no re-query.
+ *
+ * [onOtherRoutes] opens the secondary dialog for the Azphalt Store app / web store — this browser is
+ * the default now, not the fallback (see docs/TODO.md, 2026-08-12).
+ */
+@Composable
+private fun CatalogBrowser(
+    hostAppId: String,
+    extensionsDirPath: String,
+    onInstall: (AzphaltRegistry.CatalogEntry) -> Unit,
+    onOtherRoutes: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var catalog by remember { mutableStateOf<List<AzphaltRegistry.CatalogEntry>?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var installedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var query by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        installedIds = withContext(Dispatchers.IO) {
+            AzpInstalledUi.list(File(extensionsDirPath), hostAppId).map { it.packageId }.toSet()
+        }
+        val result = withContext(Dispatchers.IO) { runCatching { AzphaltRegistry.browseAll() } }
+        result.fold(
+            onSuccess = { catalog = it },
+            onFailure = { loadError = it.message ?: "Couldn't reach azphalt.store." },
+        )
+    }
+
+    val entries = catalog
+    val filtered = remember(entries, query, category, installedIds) {
+        entries?.filter { e ->
+            e.targetsApp(hostAppId) &&
+                (category == null || e.category == category) &&
+                (query.isBlank() || e.name.contains(query, ignoreCase = true) || e.description.contains(query, ignoreCase = true))
+        }?.sortedWith(compareBy({ it.id !in installedIds }, { it.name }))
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(top = 8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Extensions", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onOtherRoutes) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Other ways to add extensions")
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                    }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    placeholder = { Text("Search shaders, LUTs, caption styles…") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    singleLine = true,
+                )
+                Row(
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    CATEGORY_CHIPS.forEach { (label, value) ->
+                        AssistChip(
+                            onClick = { category = if (category == value) null else value },
+                            label = { Text(label) },
+                            colors = if (category == value) {
+                                androidx.compose.material3.AssistChipDefaults.assistChipColors(
+                                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+                                    labelColor = androidx.compose.material3.MaterialTheme.colorScheme.onPrimary,
+                                )
+                            } else {
+                                androidx.compose.material3.AssistChipDefaults.assistChipColors()
+                            },
+                        )
+                    }
+                }
+                when {
+                    loadError != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(loadError ?: "", color = Neutral400)
+                            TextButton(onClick = onOtherRoutes) { Text("Use another way to add extensions") }
+                        }
+                    }
+                    entries == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    filtered.isNullOrEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No extensions match.", color = Neutral400)
+                    }
+                    else -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                        items(filtered, key = { it.id }) { entry ->
+                            CatalogEntryCard(entry, installed = entry.id in installedIds, onInstall = { onInstall(entry) })
+                            Spacer(Modifier.width(0.dp).padding(vertical = 4.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** (label shown, filter value used against [AzphaltRegistry.CatalogEntry.category]; null = All). */
+private val CATEGORY_CHIPS = listOf(
+    "All" to null,
+    "LUTs" to "lut",
+    "Shaders" to "shader",
+    "Kinetic type" to "motion",
+    "AI models" to "onnx",
+    "Apps" to "app",
+    "MCP" to "mcp",
+    "Packs" to "pack",
+    "Skills" to "skill",
+)
+
+@Composable
+private fun CatalogEntryCard(entry: AzphaltRegistry.CatalogEntry, installed: Boolean, onInstall: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(entry.name, fontWeight = FontWeight.Bold)
+                if (entry.description.isNotBlank()) {
+                    Text(entry.description, color = Neutral400, maxLines = 2)
+                }
+                Text(
+                    listOfNotNull(
+                        entry.category.replaceFirstChar { it.uppercase() },
+                        if (entry.isFree) "Free" else "Paid",
+                        entry.maturity.takeIf { it != "general" }?.replaceFirstChar { it.uppercase() },
+                    ).joinToString(" · "),
+                    color = Neutral500,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            if (installed) {
+                Text("Installed", color = Neutral500)
+            } else {
+                Button(onClick = onInstall) { Text(if (entry.isFree) "Install" else "Install (paid)") }
+            }
+        }
     }
 }
 
