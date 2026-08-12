@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -545,10 +546,14 @@ fun ExportSheet(
     progress: Float,
     doneMessage: String?,
     errorMessage: String?,
-    onStart: (String) -> Unit,
+    /** The current playback/loop region, if one is set — offered as "Render Loop Region Only" (Vegas
+     *  J.4) when non-null; the checkbox is hidden entirely when there's no region to offer. */
+    playbackRegion: LongRange? = null,
+    onStart: (String, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember { mutableStateOf("guillotine_export") }
+    var regionOnly by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = { if (!isExporting) onDismiss() }) {
         SheetCard {
             Text("Export", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -575,11 +580,21 @@ fun ExportSheet(
                     )
                     Text("Duration: ${"%.1f".format(totalDurationMs / 1000f)}s", color = Neutral500, fontSize = 11.sp)
                     Text("Output: H.264 + AAC in MP4, 1920x1080 @ 30fps", color = Neutral500, fontSize = 11.sp)
+                    // "Render Loop Region Only" (Vegas J.4) — only offered when a region is actually set.
+                    if (playbackRegion != null) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = regionOnly, onCheckedChange = { regionOnly = it })
+                            Text(
+                                "Render loop region only (${"%.1f".format((playbackRegion.last - playbackRegion.first) / 1000f)}s)",
+                                color = Neutral400, fontSize = 12.sp,
+                            )
+                        }
+                    }
                     errorMessage?.let { Text(it, color = Red500, fontSize = 11.sp) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cancel", color = Neutral400, fontSize = 12.sp, modifier = Modifier.padding(end = 16.dp).clickable(onClick = onDismiss))
                         Button(
-                            onClick = { onStart(name) },
+                            onClick = { onStart(name, regionOnly) },
                             enabled = name.isNotBlank(),
                             colors = ButtonDefaults.buttonColors(containerColor = Red500),
                         ) {

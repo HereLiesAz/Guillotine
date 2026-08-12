@@ -80,6 +80,24 @@ data class EditorUiState(
     val snapEnabled: Boolean = true,
     /** When true, deleting a clip closes the gap it leaves on its own track (ripple delete). */
     val autoRippleEnabled: Boolean = false,
+    /**
+     * Tracks currently soloed for monitoring — additive (several can be soloed at once), preview-only.
+     * Transient view state, not part of the undoable [Document] (never exported); see [toggleTrackSolo].
+     */
+    val soloedTrackIds: Set<String> = emptySet(),
+    /**
+     * On-device rhythm analysis per audio clip, keyed by clip id — a cache of derived data (re-
+     * computable from the clip's audio), not part of the undoable [Document]: analyzing a clip isn't an
+     * edit, so it doesn't belong in export/undo history. Populated by the "Detect beats" action in the
+     * Audio tool; consumed by the timeline's beat-marker overlay. See [BeatMap].
+     */
+    val beatMaps: Map<String, com.hereliesaz.guillotine.model.BeatMap> = emptyMap(),
+    /**
+     * On-device integrated loudness (LUFS) per audio clip, keyed by clip id — the same "derived cache,
+     * not an edit" reasoning as [beatMaps]. Populated by the "Measure loudness" action in the Audio
+     * tool; shown as a readout next to the clip's Normalize toggle.
+     */
+    val lufsByClip: Map<String, Double> = emptyMap(),
 ) {
     val selectedClipId: String? get() = selectedClipIds.singleOrNull()
     val selectedClips: List<TimelineClip>
@@ -88,13 +106,32 @@ data class EditorUiState(
     /** Most recent prompt (the inline hint / empty-submit default). */
     val lastPrompt: String get() = promptHistory.firstOrNull().orEmpty()
 
-    /** Lane height (dp) for [trackId], falling back to the default. */
-    fun trackHeight(trackId: String): Float = trackHeights[trackId] ?: DEFAULT_TRACK_HEIGHT
+    /** Lane height (dp) for [trackId] — collapsed to [MINIMIZED_TRACK_HEIGHT] when the track's
+     *  [com.hereliesaz.guillotine.model.TrackSettings.minimized] is set, else the stored/dragged
+     *  height, falling back to the default. */
+    fun trackHeight(trackId: String): Float =
+        if (document.trackSettingsFor(trackId).minimized) MINIMIZED_TRACK_HEIGHT
+        else trackHeights[trackId] ?: DEFAULT_TRACK_HEIGHT
+
+    /**
+     * [Document.disabledTrackIds] plus, when any track is soloed, every non-soloed track — the
+     * preview-time-only set of tracks to skip. Export always uses [Document.disabledTrackIds] alone;
+     * solo is a monitoring convenience, not a project setting, so it never changes what gets rendered.
+     */
+    val effectivePreviewDisabledTrackIds: Set<String>
+        get() = if (soloedTrackIds.isEmpty()) {
+            document.disabledTrackIds
+        } else {
+            (document.videoTracks + document.audioTracks).filterNot { it in soloedTrackIds }.toSet() + document.disabledTrackIds
+        }
 }
 
 const val DEFAULT_TRACK_HEIGHT = 64f
 const val MIN_TRACK_HEIGHT = 44f
 const val MAX_TRACK_HEIGHT = 240f
+/** Below [MIN_TRACK_HEIGHT] deliberately — a minimized track is a distinct "collapsed to a thin
+ *  strip" state, not just the smallest a user could drag a track to. */
+const val MINIMIZED_TRACK_HEIGHT = 22f
 private const val MAX_PROMPT_HISTORY = 7
 
 /** Animated caption scale range: syllables start at BASE and grow to PEAK when spoken. */
@@ -247,6 +284,69 @@ open class EditorViewModel {
         fitZoomToTimeline()
     }
 
+    // ---- media bin: reuse already-imported media, tag it, or drop unused entries ------------------
+
+    /**
+     * Add a NEW clip referencing an already-imported [mediaId] (from the Media Bin), at the playhead —
+     * the same per-kind clip shape [addMedia] gives a freshly-imported file (a video's own-audio
+     * shadow, an image's default duration), but without appending to [Document.mediaItems] again,
+     * since the media is already in the pool. No-op if [mediaId] isn't a known media item.
+     */
+    fun addClipFromMedia(mediaId: String, targetTrack: String? = null) {
+        val m = document.mediaItems.firstOrNull { it.id == mediaId } ?: return
+        mutateDocument { doc ->
+            val videoTrack = targetTrack?.takeIf { it in doc.videoTracks } ?: "V1"
+            val audioTrack = targetTrack?.takeIf { it in doc.audioTracks } ?: "A1"
+            val cursor = _uiState.value.currentTimeMs
+            val newClips = mutableListOf<TimelineClip>()
+            when (m.kind) {
+                MediaKind.VIDEO -> {
+                    if (m.hasAudio) {
+                        val gid = newId()
+                        val video = videoClip(m, cursor, videoTrack).copy(groupId = gid)
+                        newClips += video
+                        newClips += audioClip(m, cursor, audioTrack).copy(groupId = gid, linkedClipId = video.id)
+                    } else {
+                        newClips += videoClip(m, cursor, videoTrack)
+                    }
+                }
+                MediaKind.AUDIO -> newClips += audioClip(m, cursor, audioTrack)
+                MediaKind.IMAGE -> {
+                    val dur = if (m.durationMs > 0) m.durationMs else IMAGE_DEFAULT_DURATION_MS
+                    newClips += videoClip(m.copy(durationMs = dur), cursor, videoTrack)
+                }
+            }
+            doc.copy(clips = doc.clips + newClips)
+        }
+    }
+
+    /** Add [tag] (trimmed, deduped) to a media item's keyword list. No-op on a blank tag. */
+    fun addMediaTag(mediaId: String, tag: String) {
+        val t = tag.trim()
+        if (t.isEmpty()) return
+        mutateDocument { doc ->
+            doc.copy(mediaItems = doc.mediaItems.map { if (it.id == mediaId && t !in it.tags) it.copy(tags = it.tags + t) else it })
+        }
+    }
+
+    fun removeMediaTag(mediaId: String, tag: String) {
+        mutateDocument { doc ->
+            doc.copy(mediaItems = doc.mediaItems.map { if (it.id == mediaId) it.copy(tags = it.tags - tag) else it })
+        }
+    }
+
+    /**
+     * Drop a media item from the project pool — only when no clip on the timeline still references
+     * it, since removing referenced media would orphan those clips. No-op otherwise (including when
+     * the id doesn't exist).
+     */
+    fun removeUnusedMedia(mediaId: String) {
+        mutateDocument { doc ->
+            if (doc.clips.any { it.mediaId == mediaId }) return@mutateDocument doc
+            doc.copy(mediaItems = doc.mediaItems.filterNot { it.id == mediaId })
+        }
+    }
+
     /**
      * Background replace (matting): turn on subject segmentation for [foregroundClipId] and drop
      * [background] on a NEW track *behind* it, spanning the foreground clip's timeline range, so the
@@ -384,6 +484,45 @@ open class EditorViewModel {
             if (changes.isNotEmpty()) {
                 actionRecorder.record(RecordedAction("update_filters", mapOf("clip_id" to clipId) + changes, "Adjust filters: ${changes.entries.joinToString { "${it.key}=${it.value}" }}"))
             }
+        }
+    }
+
+    /**
+     * Appends [layer] to [clipId]'s FX chain — the "VST-style hosting" apply path: a second shader/LUT
+     * stacks on top of the first instead of replacing it. Reads [ClipFilters.effectiveFxChain] (not
+     * [ClipFilters.fxChain] directly) as the base, so appending to a clip that still only has the
+     * legacy single-slot fields set correctly migrates it to a real chain starting from what it already
+     * had, rather than silently discarding a pre-existing shader/LUT the first time this is called.
+     */
+    fun addFxLayer(clipId: String, layer: com.hereliesaz.guillotine.model.FxLayer) {
+        updateClipFilters(clipId) { it.copy(fxChain = it.effectiveFxChain + layer) }
+    }
+
+    fun removeFxLayer(clipId: String, layerId: String) {
+        updateClipFilters(clipId) { it.copy(fxChain = it.effectiveFxChain.filterNot { l -> l.id == layerId }) }
+    }
+
+    fun setFxLayerEnabled(clipId: String, layerId: String, enabled: Boolean) {
+        updateClipFilters(clipId) {
+            it.copy(fxChain = it.effectiveFxChain.map { l -> if (l.id == layerId) l.copy(enabled = enabled) else l })
+        }
+    }
+
+    fun setFxLayerParams(clipId: String, layerId: String, params: Map<String, Float>) {
+        updateClipFilters(clipId) {
+            it.copy(fxChain = it.effectiveFxChain.map { l -> if (l.id == layerId) l.copy(params = params) else l })
+        }
+    }
+
+    /** Moves the layer at [index] one step toward the start (-1) or end (+1) of the chain. No-op at an edge. */
+    fun moveFxLayer(clipId: String, index: Int, delta: Int) {
+        updateClipFilters(clipId) {
+            val chain = it.effectiveFxChain.toMutableList()
+            val target = index + delta
+            if (index !in chain.indices || target !in chain.indices) return@updateClipFilters it
+            val item = chain.removeAt(index)
+            chain.add(target, item)
+            it.copy(fxChain = chain)
         }
     }
 
@@ -1404,6 +1543,43 @@ open class EditorViewModel {
     fun toggleTrackDisabled(trackId: String) = updateTrackSettings(trackId) { it.copy(disabled = !it.disabled) }
     fun setTrackVolume(trackId: String, volume: Float) = updateTrackSettings(trackId) { it.copy(volume = volume) }
     fun setTrackOpacity(trackId: String, opacity: Float) = updateTrackSettings(trackId) { it.copy(opacity = opacity) }
+    fun setTrackName(trackId: String, name: String) = updateTrackSettings(trackId) { it.copy(name = name) }
+    fun setTrackColor(trackId: String, colorHex: String) = updateTrackSettings(trackId) { it.copy(colorHex = colorHex) }
+
+    /** Collapse/expand a track to a thin strip — vertical space only, never preview/export (see
+     *  [com.hereliesaz.guillotine.model.TrackSettings.minimized]). */
+    fun toggleTrackMinimized(trackId: String) = updateTrackSettings(trackId) { it.copy(minimized = !it.minimized) }
+
+    /**
+     * Solo: isolate one or more tracks for monitoring. Toggling a track in or out of the soloed set is
+     * additive, matching a real mixing console — several tracks can be soloed together. Preview-only
+     * (a monitoring convenience), never exported: [EditorUiState.soloedTrackIds] is transient view
+     * state, not part of the undoable [Document], the same category as [EditorUiState.selectedClipIds].
+     */
+    fun toggleTrackSolo(trackId: String) {
+        _uiState.update { st ->
+            val solo = st.soloedTrackIds
+            st.copy(soloedTrackIds = if (trackId in solo) solo - trackId else solo + trackId)
+        }
+    }
+
+    /**
+     * Cache a clip's on-device rhythm analysis (see [EditorUiState.beatMaps]). The decode + analysis
+     * itself is platform-specific (Android's `PcmDecoder`, desktop's `DesktopMediaDecoder`), so the UI
+     * layer runs it off the main thread and hands the result here — this just stores it, transiently.
+     */
+    fun setBeatMap(clipId: String, beatMap: com.hereliesaz.guillotine.model.BeatMap) {
+        _uiState.update { it.copy(beatMaps = it.beatMaps + (clipId to beatMap)) }
+    }
+
+    fun clearBeatMap(clipId: String) {
+        _uiState.update { it.copy(beatMaps = it.beatMaps - clipId) }
+    }
+
+    /** Cache a clip's measured integrated loudness in LUFS (see [EditorUiState.lufsByClip]). */
+    fun setLufs(clipId: String, lufs: Double) {
+        _uiState.update { it.copy(lufsByClip = it.lufsByClip + (clipId to lufs)) }
+    }
 
     /** Create an empty caption/text clip on [trackId] at the playhead, ready to edit. */
     /** Adds a placeholder TEXT clip on [trackId] at the playhead, returning its id so a caller can select it. */
@@ -1611,6 +1787,39 @@ open class EditorViewModel {
             })
         }
         actionRecorder.record(RecordedAction("add_keyframe", mapOf("clip_id" to clipId, "property" to property.name, "at_rel_ms" to relMs), "Add ${property.name} keyframe at ${relMs}ms"))
+    }
+
+    /**
+     * Freehand envelope drawing (Vegas G.5 "hold Shift and drag across an envelope"; the touch
+     * translation's stylus/finger drawing): replaces any existing [property] keyframes strictly inside
+     * the drawn time span with the sampled (clip-relative-time, value) points from one continuous drag,
+     * in a single undoable step — not one `mutateDocument` per sample, which would flood undo history.
+     * [points] need not be sorted or deduplicated; both are handled here. No-op on fewer than 2 points
+     * (a single sample isn't a drawn curve).
+     */
+    fun drawEnvelope(clipId: String, property: KeyframeProperty, points: List<Pair<Long, Float>>) {
+        if (points.size < 2) return
+        val sorted = points.sortedBy { it.first }
+        val lo = sorted.first().first
+        val hi = sorted.last().first
+        val range = property.uiRange
+        mutateDocument { doc ->
+            doc.copy(clips = doc.clips.map { clip ->
+                if (clip.id != clipId) return@map clip
+                val kept = clip.keyframes.filterNot { it.property == property && it.timeMs in lo..hi }
+                val drawn = sorted.map { (t, v) ->
+                    Keyframe(id = newId(), timeMs = t, value = v.coerceIn(range.start, range.endInclusive), property = property)
+                }
+                clip.copy(keyframes = (kept + drawn).sortedBy { it.timeMs })
+            })
+        }
+        actionRecorder.record(
+            RecordedAction(
+                "draw_envelope",
+                mapOf("clip_id" to clipId, "property" to property.name, "points" to sorted.size.toString()),
+                "Draw ${property.name} envelope (${sorted.size} points)",
+            ),
+        )
     }
 
     private fun easingNow() =

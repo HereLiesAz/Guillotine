@@ -69,14 +69,11 @@ class AzpAssetContribution : ClipPanelContribution {
     private fun PanelSection(vm: EditorViewModel, clip: TimelineClip, panel: AzpInstalledUi.Panel) {
         val context = LocalContext.current
         val filters = clip.filters
-        val renderPath = when (panel.renderKind) {
-            AzpInstalledUi.RenderKind.SHADER -> filters.shaderPath
-            AzpInstalledUi.RenderKind.LUT -> filters.lutPath
-            AzpInstalledUi.RenderKind.OTHER -> ""
-        }
-        val applied = AzpAssetApplier.isApplied(panel, renderPath)
-        // A shader's controls edit the LIVE render params once applied; otherwise they edit stored config.
-        val liveShader = applied && panel.renderKind == AzpInstalledUi.RenderKind.SHADER
+        val layer = AzpAssetApplier.appliedLayer(panel, filters.effectiveFxChain)
+        val applied = layer != null
+        // A shader's controls edit the LIVE render params of its own chain layer once applied; otherwise
+        // they edit stored config.
+        val liveShader = layer != null && panel.renderKind == AzpInstalledUi.RenderKind.SHADER
 
         var storedParams by remember(panel.packageId) { mutableStateOf(AzpParamStore.load(context, panel.packageId)) }
         var status by remember(panel.packageId) { mutableStateOf<String?>(null) }
@@ -85,12 +82,12 @@ class AzpAssetContribution : ClipPanelContribution {
             AzpUiSchemaControls(
                 schema = panel.schema,
                 value = { key ->
-                    if (liveShader) filters.shaderParams[key]?.let { JsonPrimitive(it) } else storedParams[key]
+                    if (liveShader) layer?.params?.get(key)?.let { JsonPrimitive(it) } else storedParams[key]
                 },
                 onValue = { key, v ->
-                    if (liveShader) {
+                    if (liveShader && layer != null) {
                         (v as? JsonPrimitive)?.floatOrNull?.let { f ->
-                            vm.updateClipFilters(clip.id) { it.copy(shaderParams = it.shaderParams + (key to f)) }
+                            vm.setFxLayerParams(clip.id, layer.id, layer.params + (key to f))
                         }
                     } else {
                         storedParams = storedParams + (key to v)

@@ -11,7 +11,8 @@ import com.hereliesaz.guillotine.editor.EditorViewModel
 fun VideoPreview(
     editor: EditorViewModel,
     modifier: Modifier = Modifier,
+    onToggleFullscreen: (() -> Unit)? = null,
 ) {
     val state by editor.uiState.collectAsState()
-    DesktopPreviewPlayer(state, modifier)
+    DesktopPreviewPlayer(state, modifier, onToggleFullscreen = onToggleFullscreen)
 }

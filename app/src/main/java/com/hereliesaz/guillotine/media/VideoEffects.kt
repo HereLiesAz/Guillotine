@@ -78,17 +78,25 @@ object VideoEffects {
             effects += GaussianBlur(filters.blur)
         }
 
-        // 3D LUT color grade (.cube), applied after the adjustments. Null when unset.
-        if (filters.lutPath.isNotBlank()) {
-            LutCube.effectFor(filters.lutPath)?.let { effects += it }
-        }
-
-        // Custom GLSL/ISF shader effect, applied last (over everything, including the LUT). Null when unset.
-        if (filters.shaderPath.isNotBlank()) {
-            ShaderCache.effectFor(filters.shaderPath, filters.shaderParams)?.let { effects += it }
-        }
+        // The clip's FX chain (LUTs/shaders), in order — see ClipFilters.effectiveFxChain for the
+        // legacy single-slot fallback that keeps an already-saved project rendering unchanged.
+        effects += fxChainEffects(filters)
 
         return effects
+    }
+
+    /** Builds the Media3 effects for a clip's [ClipFilters.effectiveFxChain], in chain order, skipping
+     *  disabled layers and any layer whose asset failed to load. */
+    private fun fxChainEffects(filters: ClipFilters): List<Effect> {
+        val out = mutableListOf<Effect>()
+        for (layer in filters.effectiveFxChain) {
+            if (!layer.enabled) continue
+            when (layer.kind) {
+                com.hereliesaz.guillotine.model.FxLayer.KIND_LUT -> LutCube.effectFor(layer.path)?.let { out += it }
+                com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER -> ShaderCache.effectFor(layer.path, layer.params)?.let { out += it }
+            }
+        }
+        return out
     }
 
     /**
@@ -161,14 +169,13 @@ object VideoEffects {
             emptyList()
         }
 
-    /** Filters that can't be keyframed (fixed Media3 config): binary grayscale/invert + Gaussian blur + LUT. */
+    /** Filters that can't be keyframed (fixed Media3 config): binary grayscale/invert + Gaussian blur + the FX chain. */
     private fun nonColorStatic(filters: ClipFilters): List<Effect> {
         val out = mutableListOf<Effect>()
         if (filters.grayscale >= 50f) out += RgbFilter.createGrayscaleFilter()
         if (filters.invert >= 50f) out += RgbFilter.createInvertedFilter()
         if (filters.blur > 0f) out += GaussianBlur(filters.blur)
-        if (filters.lutPath.isNotBlank()) LutCube.effectFor(filters.lutPath)?.let { out += it }
-        if (filters.shaderPath.isNotBlank()) ShaderCache.effectFor(filters.shaderPath, filters.shaderParams)?.let { out += it }
+        out += fxChainEffects(filters)
         return out
     }
 

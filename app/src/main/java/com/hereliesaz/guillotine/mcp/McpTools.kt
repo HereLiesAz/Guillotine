@@ -2397,7 +2397,9 @@ class McpTools(
         }
     }
 
-    /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). */
+    /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). Stacks onto the clip's
+     *  FX chain — see [com.hereliesaz.guillotine.model.FxLayer] — alongside whatever else (an azphalt
+     *  shader/LUT, an earlier applyLut call) is already on the clip. */
     private fun applyLut(clipId: String, path: String): JSONObject {
         require(path.isNotBlank()) { "Provide the path to a .cube LUT file." }
         val file = java.io.File(path)
@@ -2406,7 +2408,7 @@ class McpTools(
         runCatching { com.hereliesaz.guillotine.media.CubeLut.parse(file.readText()) }
             .onFailure { throw IllegalArgumentException("Not a valid 3D .cube LUT: ${it.message}") }
         val clip = resolveClipOrPlayhead(clipId)
-        vm.updateClipFilters(clip.id) { it.copy(lutPath = file.absolutePath) }
+        vm.addFxLayer(clip.id, com.hereliesaz.guillotine.model.FxLayer(kind = com.hereliesaz.guillotine.model.FxLayer.KIND_LUT, path = file.absolutePath))
         return ok().apply { put("humanSummary", "Applied LUT ${file.name} to clip ${clip.id}.") }
     }
 
@@ -2448,14 +2450,15 @@ class McpTools(
         }
     }
 
-    /** Remove a clip's `.cube` LUT grade. */
+    /** Remove all LUT layers from a clip's FX chain. */
     private fun clearLut(clipId: String): JSONObject {
         val clip = resolveClipOrPlayhead(clipId)
-        vm.updateClipFilters(clip.id) { it.copy(lutPath = "") }
-        return ok().apply { put("humanSummary", "Removed the LUT from clip ${clip.id}.") }
+        clip.filters.effectiveFxChain.filter { it.kind == com.hereliesaz.guillotine.model.FxLayer.KIND_LUT }
+            .forEach { vm.removeFxLayer(clip.id, it.id) }
+        return ok().apply { put("humanSummary", "Removed the LUT(s) from clip ${clip.id}.") }
     }
 
-    /** Apply a GLSL/ISF shader effect to a clip, with optional scalar-input overrides. */
+    /** Stacks a GLSL/ISF shader effect onto a clip's FX chain, with optional scalar-input overrides. */
     private fun applyShader(clipId: String, path: String, params: JSONObject?): JSONObject {
         require(path.isNotBlank()) { "Provide the path to an .isf / .fs / .glsl shader file." }
         val file = java.io.File(path)
@@ -2470,22 +2473,23 @@ class McpTools(
             scalar[k]?.let { u -> overrides[k] = params.optDouble(k, u.values[0].toDouble()).toFloat() }
         }
         val clip = resolveClipOrPlayhead(clipId)
-        vm.updateClipFilters(clip.id) { it.copy(shaderPath = file.absolutePath, shaderParams = overrides) }
+        vm.addFxLayer(clip.id, com.hereliesaz.guillotine.model.FxLayer(kind = com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER, path = file.absolutePath, params = overrides))
         return ok().apply {
             put(
                 "humanSummary",
-                "Applied shader ${file.name}" +
+                "Added shader ${file.name}" +
                     (if (overrides.isNotEmpty()) " with ${overrides.size} param(s)" else "") +
-                    " to clip ${clip.id}.",
+                    " to clip ${clip.id}'s FX chain.",
             )
         }
     }
 
-    /** Remove a clip's GLSL/ISF shader effect (and its param overrides). */
+    /** Remove all shader layers from a clip's FX chain (and their param overrides). */
     private fun clearShader(clipId: String): JSONObject {
         val clip = resolveClipOrPlayhead(clipId)
-        vm.updateClipFilters(clip.id) { it.copy(shaderPath = "", shaderParams = emptyMap()) }
-        return ok().apply { put("humanSummary", "Removed the shader from clip ${clip.id}.") }
+        clip.filters.effectiveFxChain.filter { it.kind == com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER }
+            .forEach { vm.removeFxLayer(clip.id, it.id) }
+        return ok().apply { put("humanSummary", "Removed the shader(s) from clip ${clip.id}.") }
     }
 
     /** List a shader's adjustable scalar inputs (name, type, default, min, max). */

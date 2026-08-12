@@ -193,4 +193,134 @@ class TimelineMechanicsTest {
         vm.toggleSnap()
         assertTrue(!vm.uiState.value.snapEnabled)
     }
+
+    // ---- track solo ----
+
+    private fun vmWithTracks(videoTracks: List<String>, vararg clips: TimelineClip): EditorViewModel {
+        val vm = EditorViewModel()
+        vm.loadDocument(Document(mediaItems = listOf(media), clips = clips.toList(), videoTracks = videoTracks, audioTracks = emptyList()))
+        return vm
+    }
+
+    @Test
+    fun `solo hides every other track from preview but export is unaffected`() {
+        val vm = vmWithTracks(
+            listOf("V1", "V2"),
+            clip("v1", "V1", 0, 0, 1000),
+            clip("v2", "V2", 0, 0, 1000),
+        )
+        vm.toggleTrackSolo("V1")
+        val st = vm.uiState.value
+        assertTrue("V1" !in st.effectivePreviewDisabledTrackIds)
+        assertTrue("V2" in st.effectivePreviewDisabledTrackIds)
+        // Export reads Document.disabledTrackIds directly, never the UI-only solo set.
+        assertTrue(st.document.disabledTrackIds.isEmpty())
+    }
+
+    @Test
+    fun `solo is additive and empty when nothing is soloed`() {
+        val vm = vmWithTracks(
+            listOf("V1", "V2"),
+            clip("v1", "V1", 0, 0, 1000),
+            clip("v2", "V2", 0, 0, 1000),
+        )
+        assertTrue(vm.uiState.value.effectivePreviewDisabledTrackIds.isEmpty())
+        vm.toggleTrackSolo("V1")
+        vm.toggleTrackSolo("V2")
+        assertTrue(vm.uiState.value.effectivePreviewDisabledTrackIds.isEmpty()) // both soloed = same as none
+        vm.toggleTrackSolo("V1")
+        assertEquals(setOf("V1"), vm.uiState.value.effectivePreviewDisabledTrackIds) // only V2 left soloed
+    }
+
+    @Test
+    fun `track name and color are independently settable`() {
+        val vm = vmWith(clip("v1", "V1", 0, 0, 1000))
+        vm.setTrackName("V1", "Interview")
+        vm.setTrackColor("V1", "#FF8800")
+        val ts = vm.uiState.value.document.trackSettingsFor("V1")
+        assertEquals("Interview", ts.name)
+        assertEquals("#FF8800", ts.colorHex)
+    }
+
+    // ---- freehand envelope drawing (Vegas G.5 "Shift-drag to generate micro-nodes") ----
+
+    @Test
+    fun `drawEnvelope replaces the drawn span with the sampled points`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        vm.drawEnvelope(
+            "c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY,
+            listOf(0L to 0f, 500L to 0.5f, 1000L to 1f),
+        )
+        val kfs = vm.uiState.value.document.clips.single().keyframes
+        assertEquals(3, kfs.size)
+        assertEquals(listOf(0L, 500L, 1000L), kfs.map { it.timeMs })
+        assertEquals(listOf(0f, 0.5f, 1f), kfs.map { it.value })
+    }
+
+    @Test
+    fun `drawEnvelope only replaces keyframes inside the drawn span, and only for its own property`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        vm.addKeyframe("c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY) // at playhead 0
+        vm.addKeyframe("c1", com.hereliesaz.guillotine.model.KeyframeProperty.VOLUME) // at playhead 0, different property
+        vm.drawEnvelope("c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY, listOf(0L to 0.1f, 100L to 0.2f))
+        val kfs = vm.uiState.value.document.clips.single().keyframes
+        // The pre-existing OPACITY keyframe at t=0 was inside [0,100] and got replaced by the two drawn
+        // points; the VOLUME keyframe at the same time is a different property, so it's untouched.
+        assertEquals(3, kfs.size)
+        assertEquals(2, kfs.count { it.property == com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY })
+        assertEquals(1, kfs.count { it.property == com.hereliesaz.guillotine.model.KeyframeProperty.VOLUME })
+    }
+
+    @Test
+    fun `drawEnvelope is a no-op with fewer than two points`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        vm.drawEnvelope("c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY, listOf(0L to 0.5f))
+        assertTrue(vm.uiState.value.document.clips.single().keyframes.isEmpty())
+    }
+
+    @Test
+    fun `drawEnvelope clamps values to the property's range`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        vm.drawEnvelope("c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY, listOf(0L to -5f, 100L to 5f))
+        val values = vm.uiState.value.document.clips.single().keyframes.map { it.value }
+        assertEquals(listOf(0f, 1f), values) // OPACITY's uiRange is 0f..1f
+    }
+
+    // ---- beat map + loudness caches: derived data, transient, not part of the undoable Document ----
+
+    @Test
+    fun `setBeatMap and clearBeatMap update the transient cache without touching the Document`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        val beforeDoc = vm.uiState.value.document
+        val map = com.hereliesaz.guillotine.model.BeatMap(bpm = 120f, beatsMs = listOf(0L, 500L), downbeatsMs = listOf(0L), onsetsMs = emptyList())
+        vm.setBeatMap("c1", map)
+        assertEquals(map, vm.uiState.value.beatMaps["c1"])
+        assertEquals(beforeDoc, vm.uiState.value.document) // no undo-history mutation
+        vm.clearBeatMap("c1")
+        assertTrue(vm.uiState.value.beatMaps.isEmpty())
+    }
+
+    @Test
+    fun `setLufs caches per clip without touching the Document`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        val beforeDoc = vm.uiState.value.document
+        vm.setLufs("c1", -14.2)
+        assertEquals(-14.2, vm.uiState.value.lufsByClip["c1"]!!, 0.0001)
+        assertEquals(beforeDoc, vm.uiState.value.document)
+    }
+
+    // ---- track minimize: a thin-strip collapse, vertical space only ----
+
+    @Test
+    fun `toggleTrackMinimized collapses the lane height and is independent of other track settings`() {
+        val vm = vmWith(clip("v1", "V1", 0, 0, 1000))
+        assertEquals(com.hereliesaz.guillotine.editor.DEFAULT_TRACK_HEIGHT, vm.uiState.value.trackHeight("V1"), 0f)
+        vm.toggleTrackSolo("V1") // an unrelated per-track setting, should be untouched by minimize
+        vm.toggleTrackMinimized("V1")
+        assertEquals(com.hereliesaz.guillotine.editor.MINIMIZED_TRACK_HEIGHT, vm.uiState.value.trackHeight("V1"), 0f)
+        assertTrue(vm.uiState.value.document.trackSettingsFor("V1").minimized)
+        assertTrue("V1" in vm.uiState.value.soloedTrackIds) // solo untouched
+        vm.toggleTrackMinimized("V1")
+        assertEquals(com.hereliesaz.guillotine.editor.DEFAULT_TRACK_HEIGHT, vm.uiState.value.trackHeight("V1"), 0f)
+    }
 }

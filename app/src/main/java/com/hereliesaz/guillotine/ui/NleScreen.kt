@@ -264,6 +264,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showNewProjectConfirm by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
+    // Full-screen "cinema mode" preview — hides the timeline/side panels behind a full-bleed preview
+    // plus a floating bottom toolbar (see FullscreenPreviewOverlay). Overlays the normal editor
+    // content rather than replacing it, so playback/editor state stays live underneath.
+    var fullscreenPreview by remember { mutableStateOf(false) }
     // Settings & state for non-editor overlays (Help, Faq, Upgrades, Store).
     var showHelp by remember { mutableStateOf(false) }
     var showTutorial by remember { mutableStateOf(false) }
@@ -271,6 +275,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showAdFree by remember { mutableStateOf(false) }
     var showAzphaltStore by remember { mutableStateOf(false) }
     var showExtensionsManager by remember { mutableStateOf(false) }
+    var showMediaBin by remember { mutableStateOf(false) }
     // Double-tapping the "X" over two already-overlapping (auto-crossfading) clips on the timeline
     // opens a transition picker for this pair; null when no picker is showing.
     var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -505,6 +510,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onOpenAiSettings = { showAiSettings = true },
             onOpenStore = { showAzphaltStore = true },
             onOpenExtensions = { showExtensionsManager = true },
+            onOpenMediaBin = { showMediaBin = true },
             onAiComparison = { showAiComparison = true },
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
@@ -514,15 +520,19 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
         // Analysis/export status & errors now stream into the activity-log bottom sheet below,
         // so there's no separate status strip here.
-        var timelineWeight by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.4f) }
-
         // Split between the preview and the clip-properties panel (AdvancedToolView), resizable by a
         // divider in BOTH arrangements: a vertical grip when they sit side-by-side (wide) and a
         // horizontal grip when stacked (tall). Each orientation remembers its own fraction. The
-        // fraction, and any pinned orientation, persist across sessions via PanelLayoutPrefs.
+        // fraction, any pinned orientation, and the timeline's own height all persist across sessions
+        // via PanelLayoutPrefs — this is the "Save/recall panel layout" feature (Vegas A.6/A.7's
+        // Window Layouts): Guillotine has one fixed arrangement rather than Vegas's dockable/floating
+        // multi-window topology, so there's nothing to name/switch between — what persists here is
+        // every degree of freedom this app's layout actually has, restored automatically on next launch
+        // rather than behind a manual "recall" action.
         val savedLayout = androidx.compose.runtime.remember { PanelLayoutPrefs.load(context) }
         var previewWeightWide by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.previewWeightWide) }
         var previewWeightTall by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.previewWeightTall) }
+        var timelineWeight by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.timelineWeight) }
         // Pinned orientation: null = follow the screen shape; true = force side-by-side; false = stacked.
         // Double-tapping the preview/panel grip toggles it.
         var orientationOverride by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.orientationOverride) }
@@ -535,6 +545,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         androidx.compose.runtime.LaunchedEffect(previewWeightTall) {
             kotlinx.coroutines.delay(500)
             PanelLayoutPrefs.saveTall(context, previewWeightTall)
+        }
+        androidx.compose.runtime.LaunchedEffect(timelineWeight) {
+            kotlinx.coroutines.delay(500)
+            PanelLayoutPrefs.saveTimeline(context, timelineWeight)
         }
         androidx.compose.foundation.layout.BoxWithConstraints(
             androidx.compose.ui.Modifier
@@ -568,6 +582,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                             cropMode = state.tool == EditorTool.CROP,
                             showSafeZones = state.tool == EditorTool.CROP,
                             onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                            onToggleFullscreen = { fullscreenPreview = true },
                         )
                         TransportControls(vm, state)
                     }
@@ -602,6 +617,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                             cropMode = state.tool == EditorTool.CROP,
                             showSafeZones = state.tool == EditorTool.CROP,
                             onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                            onToggleFullscreen = { fullscreenPreview = true },
                         )
                         TransportControls(vm, state)
                     }
@@ -712,6 +728,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         )
     }
 
+    // Overlays the whole editor rather than replacing it (no early return), so playback/AI-assistant
+    // state stays live underneath — exiting fullscreen just stops drawing this on top.
+    if (fullscreenPreview) {
+        FullscreenPreviewOverlay(vm, state, onExit = { fullscreenPreview = false })
+    }
+
     }
 
     if (showProjectSettings) {
@@ -785,11 +807,13 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             doneMessage = exportDone,
             onShare = exportedUri?.let { uri -> { shareVideo(context, uri) } },
             errorMessage = exportError,
-            onStart = { name ->
+            playbackRegion = state.playbackRegion,
+            onStart = { name, regionOnly ->
                 // Show the "render" interstitial as the export begins; rendering continues underneath.
                 (context as? android.app.Activity)?.let { act ->
                     (context.applicationContext as? GuillotineApplication)?.interstitialAdManager?.show(act)
                 }
+                val region = if (regionOnly) vm.uiState.value.playbackRegion else null
                 exporting = true; exportError = null; exportProgress = 0f
                 ActivityLog.info("Exporting \"$name\"…")
                 // Export in the background via the foreground service (cancel-only — Media3 can't pause
@@ -814,12 +838,15 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         name,
                         onProgress = { p, ms ->
                             scope.launch { exportProgress = p } // hop to the main thread for Compose state
-                            vm.seekTo(ms)
+                            // ms is relative to the clamped (region) document when regionOnly — offset
+                            // back to the full timeline so the live scrub indicator lands in the right place.
+                            vm.seekTo(ms + (region?.first ?: 0L))
                             sink.report(p, "Exporting…")
                         },
                         onPhase = { phase ->
                             scope.launch { vm.setExportPhase(phase) }
                         },
+                        region = region,
                     )
                     scope.launch { exportedUri = uri } // for the Share action once done
                 }
@@ -843,6 +870,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
     if (showExtensionsManager) {
         ExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
+    }
+    if (showMediaBin) {
+        MediaBinScreen(vm = vm, onDismiss = { showMediaBin = false })
     }
     // Swap the free, instant crossfade an overlap already produces for a named FFmpeg xfade
     // transition — a deliberate, real bake (needs an ffmpeg binary configured, takes real time), not
@@ -958,6 +988,7 @@ private fun TopBar(
     onOpenAiSettings: () -> Unit,
     onOpenStore: () -> Unit,
     onOpenExtensions: () -> Unit,
+    onOpenMediaBin: () -> Unit,
     onAiComparison: () -> Unit,
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
@@ -986,6 +1017,7 @@ private fun TopBar(
                 azItem("Save") { onSaveProject() }
                 azItem("Rename") { onNameProject() }
                 azItem("Import") { onImport() }
+                azItem("Media Bin") { onOpenMediaBin() }
                 azItem("Generate") { onGenerate() }
                 azItem("Render") { onExport() }
                 azDivider()
@@ -1254,7 +1286,7 @@ private fun EditorToolStrip(
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // ---- Modes (toggle a tool on/off; active one is highlighted) ----
+            // ---- Group 1: Modes (toggle a tool on/off; active one is highlighted) ----
             IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
                 vm.setTool(EditorTool.SELECT)
             }
@@ -1265,9 +1297,10 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Crop, "Crop / transform", active = state.tool == EditorTool.CROP) {
                 vm.setTool(EditorTool.CROP)
             }
-            IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
-                vm.toggleAutoEase()
-            }
+
+            ToolGroupSeparator()
+
+            // ---- Group 2: Create (add something new to the timeline) ----
             // Text is just a clip on a video track — this is the discoverable, toolbar-level way to add
             // one (the per-track "+" already did this but nothing surfaced it as a general text tool).
             IconToolButton(Icons.Filled.TextFields, "Add text") {
@@ -1278,19 +1311,12 @@ private fun EditorToolStrip(
                     vm.selectClip(vm.addEmptyTextClip(track))
                 }
             }
-            // Transcribe was previously reachable only by selecting a clip and finding it among the
-            // per-clip tool icons. onTranscribe already no-ops unless exactly one clip is selected.
-            IconToolButton(
-                Icons.Filled.ClosedCaption,
-                "Transcribe selected clip",
-                enabled = selected.singleOrNull()?.type == com.hereliesaz.guillotine.model.ClipType.VIDEO,
-            ) {
-                onTranscribe(CaptionStyle.PLAIN)
-            }
+            // Import media (new tracks come from the track-head popup or dragging a clip past the edge).
+            IconToolButton(Icons.Filled.Add, "Import media", onClick = onImport)
 
             ToolGroupSeparator()
 
-            // ---- Actions (do something immediately; no mode) ----
+            // ---- Group 3: Clip editing actions (act on the current selection) ----
             // Scissors splits at the playhead immediately — the selected clip/group, or
             // every clip on every track when nothing is selected.
             IconToolButton(Icons.Filled.ContentCut, "Split at playhead") {
@@ -1300,25 +1326,18 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Diamond, "Keyframe crop/placement at playhead") {
                 vm.addKeyframeAtPlayhead()
             }
-            // Import media (new tracks come from the track-head popup or dragging a clip past the edge).
-            IconToolButton(Icons.Filled.Add, "Import media", onClick = onImport)
+            // Transcribe was previously reachable only by selecting a clip and finding it among the
+            // per-clip tool icons. onTranscribe already no-ops unless exactly one clip is selected.
+            IconToolButton(
+                Icons.Filled.ClosedCaption,
+                "Transcribe selected clip",
+                enabled = selected.singleOrNull()?.type == com.hereliesaz.guillotine.model.ClipType.VIDEO,
+            ) {
+                onTranscribe(CaptionStyle.PLAIN)
+            }
             IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
                 vm.deleteSelected()
             }
-            // Ripple: close the gaps among the selected clips (or all clips if none selected).
-            IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
-                vm.rippleCloseGaps()
-            }
-            // Auto-Ripple: from here on, deleting a clip closes the gap on its own track automatically
-            // (Vegas's "Affected Tracks" mode) instead of leaving a hole for the button above to clean
-            // up later.
-            IconToolButton(Icons.Filled.Bolt, "Auto-Ripple: close gaps on delete", active = state.autoRippleEnabled) {
-                vm.toggleAutoRipple()
-            }
-            IconToolButton(Icons.Filled.GridOn, "Snap to edges, playhead, and grid", active = state.snapEnabled) {
-                vm.toggleSnap()
-            }
-            // Zoom is pinch-only (horizontal = width, vertical = track height); no toolbar buttons.
             // Group / ungroup — only meaningful with a multi-clip selection.
             if (selected.size > 1) {
                 val grouped = selected.mapTo(HashSet()) { it.groupId }.let { it.size == 1 && it.first() != null }
@@ -1331,8 +1350,25 @@ private fun EditorToolStrip(
 
             ToolGroupSeparator()
 
-            // Help: opens the icon key (what every button does).
-            IconToolButton(Icons.Filled.HelpOutline, "Help / icon key", onClick = onHelp)
+            // ---- Group 4: Timeline behavior toggles (change how OTHER actions behave) ----
+            IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
+                vm.toggleAutoEase()
+            }
+            // Ripple: close the gaps among the selected clips (or all clips if none selected) —
+            // a one-shot action, distinct from the Auto-Ripple toggle right after it.
+            IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
+                vm.rippleCloseGaps()
+            }
+            // Auto-Ripple: from here on, deleting a clip closes the gap on its own track automatically
+            // (Vegas's "Affected Tracks" mode) instead of leaving a hole for the button above to clean
+            // up later.
+            IconToolButton(Icons.Filled.Bolt, "Auto-Ripple: close gaps on delete", active = state.autoRippleEnabled) {
+                vm.toggleAutoRipple()
+            }
+            IconToolButton(Icons.Filled.GridOn, "Snap to edges, playhead, and grid", active = state.snapEnabled) {
+                vm.toggleSnap()
+            }
+            // Zoom is pinch-only (horizontal = width, vertical = track height); no toolbar button.
 
             // Context-sensitive per-clip tools (filters, audio, background, text,
             // keyframes, transcribe, split) — formerly the Inspector panel. Shown for a
@@ -1344,6 +1380,11 @@ private fun EditorToolStrip(
                 ToolGroupSeparator()
                 // Removed inline clip tools because they are now in AdvancedToolView
             }
+
+            ToolGroupSeparator()
+
+            // Help is always last: opens the icon key (what every button does).
+            IconToolButton(Icons.Filled.HelpOutline, "Help / icon key", onClick = onHelp)
         }
         // The agent's running status/output now streams into the activity-log bottom sheet; the
         // spinner on the AI button (below) is the only inline "it's working" cue.

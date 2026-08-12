@@ -5,6 +5,7 @@ package com.hereliesaz.guillotine.ui
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +17,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
@@ -70,6 +75,7 @@ import com.hereliesaz.guillotine.model.PreviewGeometry
 import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.ui.theme.Neutral500
 import com.hereliesaz.guillotine.ui.theme.Neutral950
+import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -102,13 +108,19 @@ fun PreviewPlayer(
     /** Draw platform safe-zone guides (caption/UI areas) over vertical/square projects. */
     showSafeZones: Boolean = false,
     onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
+    /** Whether this instance is currently the full-screen preview — swaps the corner button's icon
+     *  between "enter" and "exit" fullscreen. The caller owns the fullscreen layout/state entirely;
+     *  this composable only exposes the toggle affordance. Null hides the button (e.g. inside the
+     *  full-screen overlay itself, which has its own dedicated exit control in its floating toolbar). */
+    isFullscreen: Boolean = false,
+    onToggleFullscreen: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
 
     val now = state.currentTimeMs
     // Disabled/hidden tracks drop out entirely.
-    val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
+    val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
 
     // Audio wiring is per-track (see AudioTrackLayer): each audio track owns its own ExoPlayer
     // and the tracks mix through Android's audio layer, so parallel audio (music + voiceover, etc.)
@@ -151,16 +163,17 @@ fun PreviewPlayer(
     }
 
     // ---- persistent preview viewport (zoom + pan) ----
-    // Default 1x = fit. A popup slider sets the zoom. Rotating/moving/resizing the PREVIEW ITSELF via
-    // a gesture on the canvas is deliberately not offered — a gesture there is reserved for the
-    // selected video layer's own crop/transform (cropModifier below), never the viewport's framing, so
-    // the two can't be confused for one another. Loaded from / saved to PanelLayoutPrefs, so where the
-    // user set the zoom persists across sessions.
+    // Default 1x = fit. A popup slider (or the +/- buttons) sets the zoom. Loaded from / saved to
+    // PanelLayoutPrefs, so where the user left the zoom/pan persists across sessions.
     val savedView = remember { PanelLayoutPrefs.loadPreview(context) }
     var zoom by remember { mutableStateOf(savedView.zoom) }
     var panX by remember { mutableStateOf(savedView.panX) }
     var panY by remember { mutableStateOf(savedView.panY) }
     var showZoom by remember { mutableStateOf(false) }
+    // Hand tool: drag to pan the zoomed-in viewport. Off by default so a plain drag on the preview
+    // never fights the selected video layer's own crop/transform gesture (cropModifier below) or gets
+    // misread as an editing action — panning only happens while this is explicitly toggled on.
+    var panMode by remember { mutableStateOf(false) }
 
     // Keep pan within bounds: a frame scaled by `zoom` can slide at most half its overflow each way, so
     // at 1x (fit) the pan is pinned to centre. Runs after any zoom or size change.
@@ -177,7 +190,19 @@ fun PreviewPlayer(
         PanelLayoutPrefs.savePreview(context, zoom, panX, panY)
     }
 
-    val gestureModifier = if (cropMode) cropModifier else Modifier
+    val panModifier = if (panMode && !cropMode) {
+        Modifier.pointerInput(Unit) {
+            detectDragGestures { change, drag ->
+                change.consume()
+                panX += drag.x
+                panY += drag.y
+                clampPan()
+            }
+        }
+    } else {
+        Modifier
+    }
+    val gestureModifier = if (cropMode) cropModifier else panModifier
 
     Box(
         modifier = modifier
@@ -325,17 +350,47 @@ fun PreviewPlayer(
         }
       } // end inner zoomed frame
 
-        // Zoom control — fixed size, OUTSIDE the zoomed layer so it never scales with the preview.
-        PreviewZoomControl(
-            zoom = zoom,
-            expanded = showZoom,
-            onExpandedChange = { showZoom = it },
-            onZoomChange = { z ->
+        // Zoom + fullscreen controls — fixed size, OUTSIDE the zoomed layer so they never scale with
+        // the preview.
+        Row(
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            fun setZoom(z: Float) {
                 zoom = z.coerceIn(1f, PanelLayoutPrefs.MAX_ZOOM)
                 if (zoom <= 1f) { panX = 0f; panY = 0f } else clampPan()
-            },
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-        )
+            }
+            IconButton(onClick = { setZoom(zoom - PanelLayoutPrefs.ZOOM_STEP) }, enabled = zoom > 1f) {
+                Icon(Icons.Filled.ZoomOut, contentDescription = "Zoom out", tint = if (zoom > 1f) White else Neutral500)
+            }
+            IconButton(onClick = { setZoom(zoom + PanelLayoutPrefs.ZOOM_STEP) }, enabled = zoom < PanelLayoutPrefs.MAX_ZOOM) {
+                Icon(Icons.Filled.ZoomIn, contentDescription = "Zoom in", tint = if (zoom < PanelLayoutPrefs.MAX_ZOOM) White else Neutral500)
+            }
+            // Hand tool: drag the zoomed-in preview to pan it. Disabled while crop mode owns the drag
+            // gesture instead (dragging there moves the clip's own crop/transform).
+            IconButton(onClick = { panMode = !panMode }, enabled = !cropMode) {
+                Icon(
+                    Icons.Filled.PanTool,
+                    contentDescription = if (panMode) "Hand tool (on)" else "Hand tool",
+                    tint = if (panMode) Red500 else if (cropMode) Neutral500.copy(alpha = 0.3f) else Neutral500,
+                )
+            }
+            PreviewZoomControl(
+                zoom = zoom,
+                expanded = showZoom,
+                onExpandedChange = { showZoom = it },
+                onZoomChange = ::setZoom,
+            )
+            if (onToggleFullscreen != null) {
+                IconButton(onClick = onToggleFullscreen) {
+                    Icon(
+                        if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        contentDescription = if (isFullscreen) "Exit full screen" else "Full screen",
+                        tint = White,
+                    )
+                }
+            }
+        }
     }
 }
 

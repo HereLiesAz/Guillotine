@@ -123,6 +123,10 @@ data class MediaItem(
     val durationMs: Long,
     /** True if a VIDEO file also carries an audio stream (→ auto-add a paired audio clip). */
     val hasAudio: Boolean = false,
+    /** User-defined keywords (e.g. "b-roll", "interview") — the Media Bin's search matches these
+     *  alongside [name], and its category chips filter by them, so tagging one clip "b-roll" makes
+     *  every future search for that tag find it automatically (Vegas B.6's "Smart Bin"). */
+    val tags: List<String> = emptyList(),
 )
 
 /** Cubic-bezier easing control points (P1, P2); endpoints are fixed at (0,0)/(1,1). */
@@ -142,6 +146,13 @@ data class Keyframe(
     val value: Float,
     val property: KeyframeProperty,
     val easing: CubicBezier = CubicBezier(),
+    /**
+     * True to hold this keyframe's [value] constant (no interpolation) across the segment to the next
+     * keyframe, then jump — Vegas Pro's envelope "Hold" curve, the one interpolation shape a cubic
+     * bezier can't express (every bezier still eases smoothly from A to B; a hold stays flat at A's
+     * value until the instant B's time arrives). [easing] is ignored on a held segment.
+     */
+    val hold: Boolean = false,
     /**
      * True when this keyframe was baked by a kinetic-typography motion preset (see [AzpMotionInterpreter])
      * rather than authored by the user. Lets the editor strip/replace exactly the preset's curve when the
@@ -190,13 +201,70 @@ data class ClipFilters(
     val blurFaces: Boolean = false,
     /** On-device subject segmentation: keep the subject sharp and blur the background (portrait bokeh). */
     val bokeh: Boolean = false,
-    /** Path to a `.cube` 3D LUT applied as a color grade (blank = none). Any standard `.cube` LUT. */
+    /**
+     * Deprecated single-slot LUT path — kept ONLY so a project saved before [fxChain] existed still
+     * loads and renders identically. New code should never write these three legacy fields; write
+     * [fxChain] instead and read effects via [ClipFilters.effectiveFxChain]. Superseded (2026-08-12) by
+     * an ordered, stackable chain — see [FxLayer]'s doc for why one shader/LUT slot each stopped being
+     * enough.
+     */
     val lutPath: String = "",
-    /** Path to a GLSL shader effect (`.isf`/`.fs`/`.glsl`, single-input) applied last (blank = none). */
+    /** See [lutPath]'s deprecation note. */
     val shaderPath: String = "",
-    /** Per-clip overrides for the shader's scalar uniforms (name → value); absent = the shader's default. */
+    /** See [lutPath]'s deprecation note. */
     val shaderParams: Map<String, Float> = emptyMap(),
-)
+    /**
+     * Ordered stack of shader/LUT layers applied to this clip, each rendered in list order (index 0
+     * first) — the "VST-style hosting" azphalt asset packages now get: applying a second shader/LUT no
+     * longer silently replaces the first, it stacks on top of it, and the stack can be reordered or have
+     * any single layer removed independently. Empty on a fresh clip; [effectiveFxChain] falls back to
+     * the legacy [lutPath]/[shaderPath] pair for a project saved before this field existed.
+     */
+    val fxChain: List<FxLayer> = emptyList(),
+) {
+    /**
+     * The chain actually rendered: [fxChain] verbatim once anything has ever been written to it,
+     * otherwise synthesized from the legacy single-slot fields (LUT before shader, matching the old
+     * fixed render order) so an already-saved project renders pixel-identical to before this field
+     * existed. A project is never silently migrated on disk by this — it's a read-time fallback only,
+     * recomputed from whichever fields are actually populated.
+     */
+    val effectiveFxChain: List<FxLayer>
+        get() = if (fxChain.isNotEmpty()) {
+            fxChain
+        } else {
+            buildList {
+                if (lutPath.isNotBlank()) add(FxLayer(kind = FxLayer.KIND_LUT, path = lutPath))
+                if (shaderPath.isNotBlank()) add(FxLayer(kind = FxLayer.KIND_SHADER, path = shaderPath, params = shaderParams))
+            }
+        }
+}
+
+/**
+ * One layer in a [ClipFilters.fxChain] — either a `.cube` LUT or a GLSL/ISF shader, azphalt's two
+ * natively-rendered asset kinds (see `AzpAssetApplier`). Before this existed a clip had exactly one
+ * shader slot and one LUT slot ([ClipFilters.shaderPath]/[ClipFilters.lutPath]); applying a second
+ * shader or LUT silently overwrote the first, which is the opposite of how a real plugin chain (VST,
+ * OFX) behaves — stacking, reordering, and removing one layer without disturbing the others.
+ */
+@kotlinx.serialization.Serializable
+data class FxLayer(
+    /** Stable per-layer id (independent of [path], so two layers can share the same asset file). */
+    val id: String = newId(),
+    /** [KIND_LUT] or [KIND_SHADER] — which renderer applies [path]. */
+    val kind: String,
+    /** Path to the `.cube` LUT or shader (`.isf`/`.fs`/`.glsl`) file on disk. */
+    val path: String,
+    /** Shader-only: per-layer overrides for its scalar uniforms; ignored for a LUT layer. */
+    val params: Map<String, Float> = emptyMap(),
+    /** Off without removing the layer — keeps its position/params for a quick A/B toggle. */
+    val enabled: Boolean = true,
+) {
+    companion object {
+        const val KIND_LUT = "lut"
+        const val KIND_SHADER = "shader"
+    }
+}
 
 @Serializable
 data class TimelineClip(
@@ -254,6 +322,14 @@ data class TrackSettings(
     val opacity: Float = 1f,     // video/text
     val muted: Boolean = false,  // audio/video
     val disabled: Boolean = false, // hide/disable the whole track
+    /** Display name shown instead of the raw track id ("V1"/"A1") once set; blank = show the id. */
+    val name: String = "",
+    /** Header/clip accent color as "#RRGGBB"; blank = the default neutral color. */
+    val colorHex: String = "",
+    /** Collapsed to a thin strip in the timeline (a visual/vertical-space toggle only — clips, edits,
+     *  and every other setting on this track are completely unaffected; unlike [disabled] this never
+     *  touches preview or export). */
+    val minimized: Boolean = false,
 )
 
 @Serializable
@@ -301,4 +377,41 @@ data class Document(
 
     /** Track ids whose whole track is disabled/hidden. */
     val disabledTrackIds: Set<String> get() = trackSettings.filterValues { it.disabled }.keys
+
+    /**
+     * A copy of this document restricted to the `[startMs, endMs)` timeline window — the "Render Loop
+     * Region Only" export option (Vegas J.4). Clips entirely outside the window are dropped; a clip that
+     * only partially overlaps is trimmed to the window, exactly like a manual edge trim
+     * ([com.hereliesaz.guillotine.editor.EditorViewModel.trimClipStart]/`trimClipEnd`): trimming the left
+     * edge advances [TimelineClip.trimStartMs] and shifts keyframes back by the same delta (dropping any
+     * that land before the new start); trimming the right edge shortens [TimelineClip.durationMs] and
+     * drops keyframes past it. Every surviving clip is then shifted so [startMs] becomes the new timeline
+     * zero. The exporters run entirely unchanged against the result — this is a pre-processing step, not
+     * a change to either render pipeline.
+     */
+    fun clampedToRegion(startMs: Long, endMs: Long): Document {
+        require(endMs > startMs) { "endMs ($endMs) must be after startMs ($startMs)" }
+        val newClips = clips.mapNotNull { clip ->
+            if (clip.endTimeMs <= startMs || clip.startTimeMs >= endMs) return@mapNotNull null
+            var c = clip
+            if (c.startTimeMs < startMs) {
+                val d = startMs - c.startTimeMs
+                c = c.copy(
+                    startTimeMs = 0L,
+                    trimStartMs = c.trimStartMs + d,
+                    durationMs = c.durationMs - d,
+                    keyframes = c.keyframes.map { k -> k.copy(timeMs = k.timeMs - d) }.filter { k -> k.timeMs >= 0 },
+                )
+            } else {
+                c = c.copy(startTimeMs = c.startTimeMs - startMs)
+            }
+            val windowMs = endMs - startMs
+            if (c.endTimeMs > windowMs) {
+                val nd = windowMs - c.startTimeMs
+                c = c.copy(durationMs = nd, keyframes = c.keyframes.filter { k -> k.timeMs <= nd })
+            }
+            c
+        }
+        return copy(clips = newClips)
+    }
 }

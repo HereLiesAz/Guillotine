@@ -198,7 +198,7 @@ private fun buildRows(extensionsDir: File, hostAppId: String, clips: List<com.he
     val motions = KineticTypographyPicker.listInstalled(extensionsDir)
     val assetRows = assetPanels.map { panel ->
         val applied = clips.filter { it.type == ClipType.VIDEO }
-            .filter { AzpAssetApplier.isApplied(panel, it.filters.shaderPath) || AzpAssetApplier.isApplied(panel, it.filters.lutPath) }
+            .filter { AzpAssetApplier.isApplied(panel, it.filters.effectiveFxChain) }
             .map { it.id }
         ExtensionRow(
             id = "${panel.packageId}/${panel.assetType}",

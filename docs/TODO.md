@@ -2,6 +2,244 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Preview hand tool (a real pan gesture, since there wasn't one) + per-track Minimize (2026-08-12)
+
+Requested directly, both on both platforms:
+
+- **Hand tool for the preview.** Auditing the existing zoom/pan viewport (`panX`/`panY`, persisted,
+  clamped, applied to the frame's `graphicsLayer`) found the "pan" half was dead: the state existed and
+  round-tripped to disk, but nothing anywhere ever *wrote* a nonzero value — no drag gesture was wired
+  to it at all. Added a Hand-tool toggle button next to the zoom controls; while it's on, dragging the
+  preview pans the zoomed frame (`detectDragGestures` → `panX`/`panY`, reusing the existing clamp/
+  persist logic verbatim). Off by default and mutually exclusive with Android's crop-transform gesture
+  (`cropMode`), so a plain drag on the preview is never ambiguous between "pan the viewport" and "move
+  the clip's crop."
+- **Per-track Minimize**, alongside Solo/Mute/Hide in the track header's dropdown (`TrackSettings.
+  minimized`, additive field). Collapses that track's lane to a fixed thin strip
+  (`MINIMIZED_TRACK_HEIGHT`, deliberately below the existing user-draggable `MIN_TRACK_HEIGHT` — a
+  distinct "collapsed" state, not just the smallest a manual resize could reach) via
+  `EditorUiState.trackHeight`, and shows a status glyph next to the soloed/muted/hidden icons already
+  in the header. Purely a vertical-space toggle: doesn't touch `disabled`/`muted`/volume/opacity or
+  anything preview/export reads — a minimized track still plays and exports exactly as before.
+
+Covered by a new `TimelineMechanicsTest` case: minimizing collapses `trackHeight` to
+`MINIMIZED_TRACK_HEIGHT` and back to `DEFAULT_TRACK_HEIGHT`, independent of an unrelated per-track
+setting (solo) toggled alongside it.
+
+## A real Media Bin — Guillotine had none — plus panel layout persistence for desktop (2026-08-12)
+
+Research before building found the "media bin" wasn't a feature to extend — **it didn't exist**: import
+lands a file straight onto the timeline with no separate pool/browse step, so anything removed from the
+timeline (or just not reused yet) was permanently unreachable even though `Document.mediaItems` still
+held it. This is that panel, built from scratch, on both platforms (`MediaBinScreen.kt` /
+`DesktopMediaBinScreen.kt`), reached from the project menu ("Media Bin", next to "Import"):
+
+- Every item in `Document.mediaItems`, with a thumbnail, name, duration, and whether it's currently
+  on the timeline.
+- **Search** (name or tag substring) + **kind chips** (All/Video/Audio/Image) + **tag chips** built
+  from every keyword already in use — clicking one filters to just that tag. This is Vegas B.6's
+  "Smart Bin": there's no saved query object, the filter runs live over editor state, so tagging one
+  more clip "b-roll" makes it show up under an existing "b-roll" search/chip immediately — it "auto-
+  updates" by construction, not by a background job.
+- **Add** drops a fresh clip from an already-imported item at the playhead (`EditorViewModel.
+  addClipFromMedia`) — no file re-pick, no re-decode, and it does not duplicate the `mediaItems` entry.
+- **Tag** / untag inline (`addMediaTag`/`removeMediaTag` — new `MediaItem.tags: List<String>` field,
+  additive so already-saved projects decode it as `emptyList()`, no migration).
+- **Remove from project** only when nothing on the timeline still references the item — deleting
+  referenced media would orphan clips, so that's refused rather than silently breaking something.
+
+**Deliberately not built:** literal drag-and-drop from the bin onto the timeline — the bin is a Dialog
+overlay and the timeline is a separate composable underneath it; wiring a cross-window Compose drag
+target is real work with its own failure modes, and "tap Add, it lands at the playhead" is a complete,
+honest substitute for the same outcome (get this media onto the timeline), not a stand-in for it.
+
+**Panel layout save/recall** (Vegas A.6/A.7 "Window Layouts"): Guillotine has one fixed arrangement,
+not Vegas's dockable/floating multi-window topology, so there's no set of named layouts to switch
+between — what "save/recall" means here is persisting every resizable split this app's layout actually
+has, restored automatically on next launch instead of behind a manual recall action:
+- Android's `PanelLayoutPrefs` already covered the preview/tools split + orientation + preview zoom/pan;
+  added the one thing it was missing, the timeline's own height (`timelineWeight` was `remember`-only
+  before this).
+- **Desktop had zero persisted UI-layout state of any kind** — confirmed by the research pass, and
+  called out as a known gap in this same day's earlier preview-zoom entry below. Built a small
+  `.properties`-file-backed `PanelLayoutPrefs` (`desktop/.../ui/PanelLayoutPrefs.kt`) covering desktop's
+  one real split (preview vs. timeline height) *and* closing that exact preview zoom/pan gap — it no
+  longer resets on every relaunch.
+
+Covered by new `MediaBinTest.kt` (`addClipFromMedia` reuse/no-duplicate/image-default-duration/unknown-
+id no-op, tag add/dedupe/trim/blank-ignored/remove, `removeUnusedMedia` refuses when referenced).
+
+## Explicit preview zoom in/out buttons + a full-screen "cinema mode" (2026-08-12)
+
+Requested directly (not from `docs/UX_ACTION_TREE.md`): the preview's zoom was previously reachable
+only via a magnifier button that opened a popup slider (drag-to-approximate, no discrete steps) or a
+pinch gesture in crop mode. Added:
+
+- **Zoom In/Out buttons** next to the existing zoom popup, on both platforms — discrete ±0.25x steps
+  (`PanelLayoutPrefs.ZOOM_STEP` on Android; a local `ZOOM_STEP` const on desktop, which has no
+  small-key-value prefs store yet so its zoom/pan don't survive an app restart the way Android's do —
+  a real, if minor, cross-platform difference, not a faked capability).
+- **Full-screen "cinema mode"** (`FullscreenPreviewOverlay`, new file on both platforms): a Fullscreen
+  button in the preview's corner overlays the whole editor with a full-bleed preview. Since the real
+  multi-track timeline is hidden, a floating bottom toolbar carries transport (start/play-pause/end),
+  Split-at-playhead, Undo/Redo, and Exit, plus a `ScrubBar` — every clip across every track flattened
+  onto one single-lane bar (colored by type) with a playhead line, tap/drag anywhere to seek. This is
+  deliberately a "keep watching, glance-scrub" control, not a second copy of the real timeline.
+- Implemented as an **overlay, not a navigation/early-return** — the normal editor Composable keeps
+  running underneath (so playback, the AI assistant, and the embedded MCP server all stay live while
+  in fullscreen); toggling it just stops/starts drawing the overlay on top.
+
+Not visually exercised live (no Android device/emulator or a desktop display in this environment) —
+verified only by compiling on both platforms.
+
+## "Render Loop Region Only" shipped; "Smart Render" passthrough deferred with reasons (2026-08-12)
+
+Vegas J.4/J.5: a Render modal option to export only the current loop region, and a "Smart Render"
+indicator when the output can pass compliant source footage through without recompression.
+
+- **Region-only render (shipped)**: `Document.clampedToRegion(startMs, endMs)` — a pure, unit-tested
+  pre-processing step that drops clips entirely outside a `[start, end)` window, trims a clip that only
+  partially overlaps it (identical math to a manual edge trim: advance `trimStartMs`/shift keyframes back
+  on the left edge, shorten `durationMs`/drop trailing keyframes on the right), and shifts every
+  surviving clip so the window's start becomes timeline zero. Both `Exporter.export` (Android) and
+  `DesktopExporter.export` (desktop) take an optional `region: LongRange?` and apply this **before**
+  anything else runs — neither render pipeline itself changed, they just see a shorter `Document`. The
+  Export sheet on both platforms offers "Render loop region only" as a checkbox, shown only when
+  `EditorUiState.playbackRegion` is actually set.
+- **Smart Render (deferred, not faked)**: researched before attempting — confirmed genuinely
+  infeasible to ship honestly in this pass, on either platform:
+  - **Android**: Media3's `Composition.setTransmuxVideo`/`setTransmuxAudio` is a real stream-copy knob,
+    but it's whole-composition, and `VideoEffects.geometry` unconditionally appends a
+    `FrameDropEffect` to every clip whenever `settings.fps > 0` (always true) — so virtually no real
+    clip in this app would ever qualify for transmux as the effect pipeline is built today. Enabling it
+    honestly needs that append made conditional on "source fps already equals target fps," which needs
+    a source-fps field the data model doesn't have (`MediaItem` carries no codec/framerate metadata at
+    all).
+  - **Desktop**: `DesktopExporter` has no bypass path anywhere — it's architecturally decode→composite-
+    onto-a-shared-canvas→re-encode for every frame of every clip, including ones with zero effects. A
+    real stream-copy would need a **separate whole-clip export branch** (only reachable when a clip is
+    the sole content across its whole span, with no compositing/crop/filters/keyframes, and matching
+    codecs) — a different code path, not a flag on the existing frame loop.
+  - Neither platform tracks source codec anywhere in the model, so "codec matches" can't even be
+    evaluated without adding a probe step first. A checkbox that mostly renders identically to a full
+    re-encode (because it almost never qualifies) would be misleading, not a real feature — left
+    undone rather than shipped as a no-op.
+
+Covered by new `DocumentTest` cases: drop-outside-window, keep-and-shift a fully-contained clip, trim
+each edge of a straddling clip (with the matching keyframe shift/drop behavior).
+
+## Beat markers and a LUFS meter surfaced directly, not just through the assistant (2026-08-12)
+
+Both `BeatAnalyzer` (spectral-flux onset detection + autocorrelation tempo) and `Loudness`
+(ITU-R BS.1770 K-weighted LUFS) already existed as real, tested on-device DSP — but were reachable
+**only** through the assistant's MCP tools (`get_beat_map`, `normalize_loudness`), with no UI path a
+user could trigger directly and no visual result on the timeline. This closes that gap:
+
+- **Beat markers**: "Detect beats" in the Audio tool (both platforms) decodes the clip's audio
+  on-device (`PcmDecoder`/`DesktopMediaDecoder`) and runs `BeatAnalyzer`, caching the result in a new
+  `EditorUiState.beatMaps` map. `Timeline.kt`'s `ClipView` draws it as thin ticks along the clip (taller/
+  brighter at downbeats) — the same rendering layer the keyframe envelopes already draw on. Beat
+  timestamps are source-media ms; converting to a timeline x assumes constant speed across the clip
+  (a speed-keyframed clip's markers are an approximation, not an exact inverse of the speed curve).
+- **LUFS meter**: "Measure" next to the existing Normalize toggle in the Audio tool runs the same
+  `Loudness.measureLufs` the toggle's gain already used internally, now showing the number
+  (`EditorUiState.lufsByClip`) instead of only applying it blindly.
+
+Both are cached, on-demand analysis, not live meters — decoding+analyzing takes real time, so this
+isn't a per-frame VU meter, it's "press a button, see the number/markers," same interaction shape as
+the assistant tools they're now a direct UI path onto. Both caches are transient view state (like
+`soloedTrackIds`/`selectedClipIds`): derived from a clip's audio, not an edit, so they don't enter
+`Document`/undo history and don't need persisting across a project reload.
+
+**Deliberately not addressed, and why:** live mic recording and DAW-style bus routing (send levels to
+an aux Reverb/Delay bus) — there is no existing audio-input/recording pipeline anywhere in the codebase
+to build a "record while monitoring" feature on top of, and bus routing needs a mixing-graph concept
+Guillotine doesn't have (tracks currently sum flat into the master output, no aux sends). Both are
+real, separate features, not a small addition to this one.
+
+Covered by new `TimelineMechanicsTest` cases: `setBeatMap`/`clearBeatMap`/`setLufs` update the
+transient caches without touching the undoable `Document`.
+
+## Envelope/automation gaps closed: Hold curves, freehand drawing, typed values (2026-08-12)
+
+Auditing `docs/UX_ACTION_TREE.md`'s Branch G (Envelope System) against the codebase found most of it
+**already built**, on both platforms, before this push: `Timeline.kt`'s `ClipView` already plots each
+keyframed property as a value-over-time line with diamond nodes (G.1-G.3), tapping a node selects it
+and exposes its cubic-bezier ease handles for drag-editing (G.4, minus the named Linear/Fast/Slow/
+Smooth presets — the freeform bezier drag already covers everything those presets could express).
+So this entry is the smaller remaining gap, not a rebuild:
+
+- **G.4's "Hold" curve** — the one interpolation shape a cubic bezier genuinely can't express (every
+  bezier still eases smoothly; a hold stays flat at the keyframe's value until the instant the next
+  one arrives, then jumps). Added `Keyframe.hold: Boolean`, honored in `TimelineMath.interpolateSorted`
+  (shared by preview and export), with a checkbox next to each keyframe's easing editor in the Filters
+  panel on both platforms.
+- **G.5 / the touch translation's freehand drawing** — with the Keyframe tool active, dragging across
+  a clip (instead of the existing tap-to-drop-one-node) now samples (time, value) points along the
+  drag path and lays down a whole train of OPACITY keyframes on release, via a new
+  `EditorViewModel.drawEnvelope`. One undoable step per stroke, not one per sampled point — samples are
+  throttled to ~30ms apart client-side so a slow drag doesn't spam a keyframe per pixel. Desktop and
+  Android get the identical gesture (no Shift/modifier needed — the Keyframe tool already
+  unambiguously signals intent the way SPLIT/MARQUEE do elsewhere in this app, so there's nothing for
+  a modifier to disambiguate the way Vegas's Shift needs to on a modeless canvas).
+- **G.8's typed "Set to..." value** — each keyframe's value row gained a small exact-value text field
+  next to the slider, for a mathematically precise number instead of a drag approximation.
+
+**Deliberately not addressed, and why:**
+- **G.7 "Lock Envelopes to Events"** — nothing to build. `Keyframe.timeMs` has always been clip-relative,
+  so moving/trimming a clip already carries its keyframes with it by construction; there's no
+  "unlocked" state that ever existed to lock against.
+- **Track/Master (bus) envelopes** (Branch I) — same architectural gap as the VST-style FX chain entry
+  below: automating a parameter of the post-composite render (a track's overall level, the master
+  output) needs a compositing hook neither platform's renderer has yet. Event-level envelopes (what
+  exists) cover per-clip automation; bus-level is real follow-up work once that hook lands.
+
+Covered by new `TimelineMathTest` cases (hold stays flat then jumps; hold only affects its own segment)
+and `TimelineMechanicsTest` cases (`drawEnvelope` replaces only the drawn span/property, clamps to the
+property's range, no-ops under 2 points).
+
+## Azphalt goes VST-style: a real stackable FX chain, not one shader/one LUT slot (2026-08-12)
+
+Per explicit direction ("Azphalt plugins should be more like VST plugin hosting"): `ClipFilters` gained
+an ordered `fxChain: List<FxLayer>`, each layer independently a LUT or shader, enabled/disabled,
+reorderable, and removable — replacing the old model where a clip had exactly one shader slot and one
+LUT slot, and applying a second one silently discarded the first. `ClipFilters.effectiveFxChain`
+synthesizes a one- or two-layer chain from the legacy `lutPath`/`shaderPath` fields when `fxChain` is
+empty, so an already-saved project renders identically without a migration step.
+
+Every producer and consumer of a clip's shader/LUT now goes through the chain, not the legacy fields:
+- `EditorViewModel`: `addFxLayer`/`removeFxLayer`/`setFxLayerEnabled`/`setFxLayerParams`/`moveFxLayer`.
+- Android `VideoEffects.kt` (`build`/`nonColorStatic`) and desktop `DesktopPreviewPlayer.kt`/
+  `DesktopExporter.kt` all render `effectiveFxChain` in order instead of one hardcoded LUT-then-shader
+  pair — the same render code drives live preview and export on both platforms, so what stacks in the
+  UI is what exports.
+- `AzpAssetApplier`/`DesktopAzpAssetApplier` (an azphalt asset package "Apply to clip") now **stack**:
+  applying a second shader/LUT package adds a layer instead of overwriting the first, and "Remove"
+  removes only that package's layer(s), by filename, from wherever they sit in the chain.
+- The built-in Filters panel (`ClipTools.kt` `FxChainSection`, replacing `LutRow`/`ShaderRow`) is a real
+  chain UI now: per-layer enable checkbox, reorder ▲/▼, Remove, and (for shaders) that layer's own
+  param sliders — not a shared/global set. "+ LUT (.cube)" / "+ Shader (.isf/.fs)" append.
+- The assistant's `apply_lut`/`apply_shader`/`clear_lut`/`clear_shader` MCP tools (`McpTools.kt` +
+  desktop's `DesktopMcpTools.kt`) were quietly broken by the chain existing at all: they wrote straight
+  to the legacy `lutPath`/`shaderPath` fields, which `effectiveFxChain` ignores once `fxChain` is
+  non-empty — so calling them on a clip that already had a real chain (from the Filters panel or an
+  azphalt package) would silently no-op. Fixed to add/remove chain layers directly.
+
+Covered by `shared/src/test/kotlin/.../editor/FxChainTest.kt` (8 tests: legacy fallback, precedence
+once `fxChain` is set, stack/remove/reorder/enable-toggle).
+
+**Deliberately scoped to Event (clip) level only — Media/Track/Master deferred, not guessed at:**
+Vegas's 4-tier FX pipeline is Media (source-level, shared by every clip using that source) / Event
+(per-clip — what shipped here) / Track (every clip on a track, post-composite) / Master (the whole
+timeline, post-composite). Neither platform's render pipeline has a hook to attach an effect *after*
+tracks are composited together — Android's `VideoEffects` builds a per-clip Media3 `Effect` list fed
+into that clip's own `EditedMediaItemSequence`, and desktop's compositor stacks decoded per-clip
+`BufferedImage`s directly with no post-composite pass either. Building Track/Master FX honestly needs
+that compositing hook first, not a chain UI bolted onto nothing. Media-level (apply once, every clip
+sharing that source picks it up) is a data-model question — today `fxChain` lives on `ClipFilters`,
+per-clip, with no notion of "the same effect, same instance, referenced by every clip using media X."
+Both are real follow-up work, not silently dropped.
+
 ## Vegas-Pro-style timeline mechanics (slip/slide/roll/time-stretch/ripple/L-J-cut) (2026-08-12)
 
 Implementing `docs/UX_ACTION_TREE.md` (a forensic Vegas Pro breakdown + touch-native translation),

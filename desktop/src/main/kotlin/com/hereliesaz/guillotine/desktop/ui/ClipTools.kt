@@ -34,10 +34,12 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -219,6 +221,91 @@ private fun AudioToolButton(vm: EditorViewModel, clip: TimelineClip) {
             Checkbox(checked = f.normalize, onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(normalize = c) } })
             Text("Normalize audio", color = Neutral400, fontSize = 12.sp)
         }
+        LoudnessMeterRow(vm, clip)
+        BeatDetectRow(vm, clip)
+    }
+}
+
+/**
+ * On-device integrated loudness (LUFS) readout for the clip — the same
+ * [com.hereliesaz.guillotine.ai.Loudness] math the Normalize toggle already applies as a gain, now made
+ * visible instead of only felt. Measured on demand (not live-metered) since it requires decoding the
+ * clip's audio, same tradeoff as beat detection below.
+ */
+@Composable
+private fun LoudnessMeterRow(vm: EditorViewModel, clip: TimelineClip) {
+    val state by vm.uiState.collectAsState()
+    val media = state.document.mediaFor(clip)
+    val lufs = state.lufsByClip[clip.id]
+    var busy by remember(clip.id) { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            if (lufs != null) "Loudness: ${"%.1f".format(lufs)} LUFS" else "Loudness: —",
+            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (busy) "Measuring…" else "Measure",
+            color = Color(0xFF8AB4F8), fontSize = 12.sp,
+            modifier = Modifier
+                .clickable(enabled = !busy && media != null) {
+                    val uri = media?.uri ?: return@clickable
+                    busy = true
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val pcm = com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder.decodePcmMono(uri)
+                        val value = pcm?.let { com.hereliesaz.guillotine.ai.Loudness.measureLufs(it.samples, it.sampleRate) }
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            busy = false
+                            if (value != null) vm.setLufs(clip.id, value)
+                        }
+                    }
+                }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/**
+ * On-device beat/tempo detection for the clip, feeding the timeline's beat-marker overlay
+ * ([com.hereliesaz.guillotine.model.BeatMap]) — the same analysis the assistant's `get_beat_map` tool
+ * already used internally, now reachable directly so the user can see rhythm markers without asking it.
+ */
+@Composable
+private fun BeatDetectRow(vm: EditorViewModel, clip: TimelineClip) {
+    val state by vm.uiState.collectAsState()
+    val media = state.document.mediaFor(clip)
+    val beatMap = state.beatMaps[clip.id]
+    var busy by remember(clip.id) { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            if (beatMap != null) "Beats: ${"%.0f".format(beatMap.bpm)} BPM, ${beatMap.beatsMs.size} beats" else "Beats: —",
+            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (busy) "Analyzing…" else "Detect beats",
+            color = Color(0xFF8AB4F8), fontSize = 12.sp,
+            modifier = Modifier
+                .clickable(enabled = !busy && media != null) {
+                    val uri = media?.uri ?: return@clickable
+                    busy = true
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val pcm = com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder.decodePcmMono(uri)
+                        val map = pcm?.let { com.hereliesaz.guillotine.ai.BeatAnalyzer.analyze(it.samples, it.sampleRate) }
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            busy = false
+                            if (map != null) vm.setBeatMap(clip.id, map)
+                        }
+                    }
+                }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        if (beatMap != null) {
+            Text(
+                "Clear", color = Neutral500, fontSize = 12.sp,
+                modifier = Modifier.clickable { vm.clearBeatMap(clip.id) }.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
     }
 }
 
@@ -260,16 +347,49 @@ private fun KeyframesToolButton(vm: EditorViewModel, clip: TimelineClip) {
                         modifier = Modifier.size(16.dp).clickable { vm.removeKeyframe(clip.id, kf.id) },
                     )
                 }
-                Slider(
-                    value = kf.value.coerceIn(range.start, range.endInclusive),
-                    onValueChange = { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } },
-                    valueRange = range,
-                )
-                Text("Easing", color = Neutral500, fontSize = 10.sp)
-                CurveEditor(value = kf.easing, onChange = { e -> vm.updateKeyframe(clip.id, kf.id) { it.copy(easing = e) } })
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Slider(
+                        value = kf.value.coerceIn(range.start, range.endInclusive),
+                        onValueChange = { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } },
+                        valueRange = range,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Typed exact value — Vegas's node "Set to..." for mathematically precise input,
+                    // vs. the slider's drag-to-approximate.
+                    ExactValueField(kf.value, range) { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = kf.hold, onCheckedChange = { h -> vm.updateKeyframe(clip.id, kf.id) { it.copy(hold = h) } })
+                    Text("Hold (step to next node, no ease)", color = Neutral400, fontSize = 12.sp)
+                }
+                if (!kf.hold) {
+                    Text("Easing", color = Neutral500, fontSize = 10.sp)
+                    CurveEditor(value = kf.easing, onChange = { e -> vm.updateKeyframe(clip.id, kf.id) { it.copy(easing = e) } })
+                }
             }
         }
     }
+}
+
+/**
+ * A typed numeric entry for a keyframe's exact value — Vegas's node "Set to..." dialog, letting the
+ * user key in a mathematically precise number rather than approximate it with a drag. Local text state
+ * so a mid-edit string ("1." while typing "1.5") isn't clobbered by the recomposition its own commit
+ * triggers; only a value that both parses and falls in [range] calls [onCommit].
+ */
+@Composable
+private fun ExactValueField(value: Float, range: ClosedFloatingPointRange<Float>, onCommit: (Float) -> Unit) {
+    var text by remember(value) { mutableStateOf("%.3f".format(value)) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { s ->
+            text = s
+            s.toFloatOrNull()?.let { v -> if (v in range) onCommit(v) }
+        },
+        singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+        modifier = Modifier.width(72.dp),
+    )
 }
 
 /** One-tap auto-captions. On-device transcription (Vosk) → caption clips, in the chosen style. */

@@ -7,6 +7,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -24,6 +31,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
@@ -31,12 +40,15 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hereliesaz.guillotine.desktop.ui.PanelLayoutPrefs
 import com.hereliesaz.guillotine.desktop.ui.theme.Neutral500
 import com.hereliesaz.guillotine.desktop.ui.theme.Neutral950
+import com.hereliesaz.guillotine.desktop.ui.theme.Red500
 import com.hereliesaz.guillotine.desktop.ui.theme.White
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipType
+import com.hereliesaz.guillotine.model.FxLayer
 import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
@@ -61,10 +73,54 @@ private const val PLAY_DRIFT_POLL_MS = 400L
 fun DesktopPreviewPlayer(
     state: EditorUiState,
     modifier: Modifier = Modifier,
+    /** See [FullscreenPreviewOverlay] — the caller owns fullscreen layout/state; this composable only
+     *  exposes the corner toggle affordance (and, when in fullscreen, its "exit" variant). */
+    isFullscreen: Boolean = false,
+    onToggleFullscreen: (() -> Unit)? = null,
 ) {
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
+    // Persistent preview viewport (zoom + pan), loaded from / saved to PanelLayoutPrefs — same
+    // behavior and persistence as the Android app's equivalent.
+    val savedView = remember { PanelLayoutPrefs.loadPreview() }
+    var zoom by remember { mutableStateOf(savedView.zoom) }
+    var panX by remember { mutableStateOf(savedView.panX) }
+    var panY by remember { mutableStateOf(savedView.panY) }
+    var showZoom by remember { mutableStateOf(false) }
+    var zoomPaneSize by remember { mutableStateOf(IntSize.Zero) }
+    // Hand tool: drag to pan the zoomed-in viewport. Off by default so a plain drag elsewhere on the
+    // preview isn't misread as panning.
+    var panMode by remember { mutableStateOf(false) }
+    fun clampPan() {
+        val maxX = (zoomPaneSize.width * (zoom - 1f) / 2f).coerceAtLeast(0f)
+        val maxY = (zoomPaneSize.height * (zoom - 1f) / 2f).coerceAtLeast(0f)
+        panX = panX.coerceIn(-maxX, maxX)
+        panY = panY.coerceIn(-maxY, maxY)
+    }
+    LaunchedEffect(zoom, zoomPaneSize) { clampPan() }
+    // Debounce disk writes: zoom/pan change rapidly during a drag; persist ~0.4s after they settle.
+    LaunchedEffect(zoom, panX, panY) {
+        delay(400)
+        PanelLayoutPrefs.savePreview(zoom, panX, panY)
+    }
+    fun setZoom(z: Float) {
+        zoom = z.coerceIn(1f, PanelLayoutPrefs.MAX_ZOOM)
+        if (zoom <= 1f) { panX = 0f; panY = 0f } else clampPan()
+    }
+    val panModifier = if (panMode) {
+        Modifier.pointerInput(Unit) {
+            detectDragGestures { change, drag ->
+                change.consume()
+                panX += drag.x
+                panY += drag.y
+                clampPan()
+            }
+        }
+    } else {
+        Modifier
+    }
+
     val now = state.currentTimeMs
-    val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
+    val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
 
@@ -85,9 +141,23 @@ fun DesktopPreviewPlayer(
     val sy = if (crop.h > 0f) 100f / crop.h else 1f
 
     Box(
-        modifier = modifier.background(Neutral950),
+        modifier = modifier.background(Neutral950).onSizeChanged { zoomPaneSize = it }.then(panModifier),
         contentAlignment = Alignment.Center,
     ) {
+      // The composited frame — video, captions, and audio layers — lives in this inner box, which the
+      // zoom/pan graphicsLayer scales and translates as one. Controls (below) sit outside it so they
+      // never scale with the preview.
+      Box(
+          modifier = Modifier
+              .fillMaxSize()
+              .graphicsLayer {
+                  scaleX = zoom
+                  scaleY = zoom
+                  translationX = panX
+                  translationY = panY
+              },
+          contentAlignment = Alignment.Center,
+      ) {
         if (!anyActiveVideo) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
         }
@@ -165,6 +235,84 @@ fun DesktopPreviewPlayer(
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             )
         }
+        }
+      } // end zoomed frame
+
+        // Zoom + fullscreen controls — fixed size, OUTSIDE the zoomed layer so they never scale with
+        // the preview.
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.IconButton(onClick = { setZoom(zoom - PanelLayoutPrefs.ZOOM_STEP) }, enabled = zoom > 1f) {
+                androidx.compose.material3.Icon(
+                    Icons.Filled.ZoomOut,
+                    contentDescription = "Zoom out",
+                    tint = if (zoom > 1f) White else Neutral500,
+                )
+            }
+            androidx.compose.material3.IconButton(onClick = { setZoom(zoom + PanelLayoutPrefs.ZOOM_STEP) }, enabled = zoom < PanelLayoutPrefs.MAX_ZOOM) {
+                androidx.compose.material3.Icon(
+                    Icons.Filled.ZoomIn,
+                    contentDescription = "Zoom in",
+                    tint = if (zoom < PanelLayoutPrefs.MAX_ZOOM) White else Neutral500,
+                )
+            }
+            // Hand tool: drag the zoomed-in preview to pan it.
+            androidx.compose.material3.IconButton(onClick = { panMode = !panMode }) {
+                androidx.compose.material3.Icon(
+                    Icons.Filled.PanTool,
+                    contentDescription = if (panMode) "Hand tool (on)" else "Hand tool",
+                    tint = if (panMode) Red500 else Neutral500,
+                )
+            }
+            Box {
+                androidx.compose.material3.IconButton(onClick = { showZoom = !showZoom }) {
+                    androidx.compose.material3.Icon(
+                        Icons.Filled.ZoomIn,
+                        contentDescription = "Zoom preview",
+                        tint = if (zoom > 1f) White else Neutral500,
+                    )
+                }
+                if (showZoom) {
+                    androidx.compose.ui.window.Popup(
+                        alignment = Alignment.TopEnd,
+                        onDismissRequest = { showZoom = false },
+                        properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+                    ) {
+                        androidx.compose.material3.Surface(
+                            color = Neutral950,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                            modifier = Modifier.width(220.dp).padding(top = 44.dp),
+                        ) {
+                            androidx.compose.foundation.layout.Column(Modifier.padding(12.dp)) {
+                                Text("Zoom  ${"%.1f".format(zoom)}x", color = White, fontSize = 12.sp)
+                                androidx.compose.material3.Slider(
+                                    value = zoom.coerceIn(1f, PanelLayoutPrefs.MAX_ZOOM),
+                                    onValueChange = ::setZoom,
+                                    valueRange = 1f..PanelLayoutPrefs.MAX_ZOOM,
+                                )
+                                androidx.compose.material3.TextButton(onClick = { setZoom(1f) }) {
+                                    Text("Fit", color = White, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (onToggleFullscreen != null) {
+                androidx.compose.material3.IconButton(onClick = onToggleFullscreen) {
+                    androidx.compose.material3.Icon(
+                        if (isFullscreen) {
+                            Icons.Filled.FullscreenExit
+                        } else {
+                            Icons.Filled.Fullscreen
+                        },
+                        contentDescription = if (isFullscreen) "Exit full screen" else "Full screen",
+                        tint = White,
+                    )
+                }
+            }
         }
     }
 }
@@ -335,14 +483,18 @@ private fun applyColorEffects(
         DesktopColorMatrix.applyToImage(img, matrix)
     }
     if (f.blur > 0f) DesktopColorMatrix.blur(img, f.blur)
-    // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). Parsed once and
-    // cached by path so the LUT isn't re-parsed per frame.
-    if (f.lutPath.isNotBlank()) {
-        DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
+    // The clip's FX chain (LUTs/shaders), in chain order — see ClipFilters.effectiveFxChain for the
+    // legacy single-slot fallback that keeps an already-saved project rendering unchanged. LUT layers
+    // apply first (matching the pre-chain LUT-then-shader order); parsed/cached by path so nothing is
+    // re-parsed per frame.
+    val chain = f.effectiveFxChain.filter { it.enabled }
+    for (layer in chain) {
+        if (layer.kind != FxLayer.KIND_LUT) continue
+        DesktopLutCache.get(layer.path)?.let { DesktopColorMatrix.applyLut(img, it) }
     }
 
-    // Subject segmentation, matching the export path's order (after colour/LUT). Only run when the
-    // caller opted in (paused), since ONNX matting is far too slow for live playback:
+    // Subject segmentation, matching the export path's order (after colour/LUT, before shaders). Only
+    // run when the caller opted in (paused), since ONNX matting is far too slow for live playback:
     //  • removeBackground → matte the subject to alpha so lower tracks / the letterbox show through
     //  • bokeh → keep the subject sharp and blur the background
     val segged = if (applySeg) {
@@ -355,11 +507,14 @@ private fun applyColorEffects(
             }
         } else img
     } else img
-    // Custom GLSL/ISF shader, applied last (matches Android + the export path). Rendered via Skia's CPU
-    // raster runtime effect; a no-op if the shader can't be compiled to SkSL.
-    return if (f.shaderPath.isNotBlank()) {
-        DesktopShaderPass.apply(segged, f.shaderPath, f.shaderParams, relMs.coerceAtLeast(0))
-    } else segged
+    // Custom GLSL/ISF shader layers, applied last in chain order (matches the export path). Rendered
+    // via Skia's CPU raster runtime effect; a no-op if a shader can't be compiled to SkSL.
+    var out = segged
+    for (layer in chain) {
+        if (layer.kind != FxLayer.KIND_SHADER) continue
+        out = DesktopShaderPass.apply(out, layer.path, layer.params, relMs.coerceAtLeast(0))
+    }
+    return out
 }
 
 /** A reused FFmpeg decoder for the preview. Seeks (instead of reopening) toward the requested source

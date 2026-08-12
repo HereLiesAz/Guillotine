@@ -34,6 +34,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -59,6 +60,7 @@ import com.hereliesaz.guillotine.model.TextFont
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.ui.theme.Neutral400
 import com.hereliesaz.guillotine.ui.theme.Neutral500
+import com.hereliesaz.guillotine.ui.theme.Neutral700
 import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral900
 import com.hereliesaz.guillotine.ui.theme.Red500
@@ -147,18 +149,100 @@ fun FiltersToolInline(vm: EditorViewModel, clip: TimelineClip) {
         FilterSlider(vm, clip.id, "Invert", f.invert, 0f..100f, "%") { v, ff -> ff.copy(invert = v) }
         FilterSlider(vm, clip.id, "Grayscale", f.grayscale, 0f..100f, "%") { v, ff -> ff.copy(grayscale = v) }
         FilterSlider(vm, clip.id, "Blur", f.blur, 0f..20f, "px") { v, ff -> ff.copy(blur = v) }
-        LutRow(vm, clip)
-        ShaderRow(vm, clip)
+        FxChainSection(vm, clip)
         PresetRow(vm, clip.id)
     }
 }
 
-/** Pick / clear a GLSL shader effect (ISF `.isf` or a raw `.fs`/`.glsl` fragment) for the clip. Copied
- *  into app storage so the Media3 effect can read it by path in preview and export. */
+/**
+ * The clip's stackable FX chain — "VST-style hosting" for shaders/LUTs: any number of layers, in order,
+ * each independently enabled/removed/reordered. Backed by [ClipFilters.effectiveFxChain], so a layer
+ * added here shows up identically to one an azphalt asset package applied (and vice versa).
+ */
 @Composable
-private fun ShaderRow(vm: EditorViewModel, clip: TimelineClip) {
+private fun FxChainSection(vm: EditorViewModel, clip: TimelineClip) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("FX chain", color = Red500, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        val chain = clip.filters.effectiveFxChain
+        chain.forEachIndexed { index, layer ->
+            FxLayerRow(vm, clip, layer, index, chain.size)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AddLutButton(vm, clip)
+            AddShaderButton(vm, clip)
+        }
+    }
+}
+
+@Composable
+private fun FxLayerRow(vm: EditorViewModel, clip: TimelineClip, layer: com.hereliesaz.guillotine.model.FxLayer, index: Int, chainSize: Int) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Neutral900, RoundedCornerShape(6.dp))
+            .padding(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = layer.enabled, onCheckedChange = { vm.setFxLayerEnabled(clip.id, layer.id, it) })
+            val kindLabel = if (layer.kind == com.hereliesaz.guillotine.model.FxLayer.KIND_LUT) "LUT" else "Shader"
+            Text(
+                "$kindLabel: ${java.io.File(layer.path).name}",
+                color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+            )
+            Text(
+                "▲", color = if (index > 0) Color(0xFF8AB4F8) else Neutral700, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable(enabled = index > 0) { vm.moveFxLayer(clip.id, index, -1) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            Text(
+                "▼", color = if (index < chainSize - 1) Color(0xFF8AB4F8) else Neutral700, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable(enabled = index < chainSize - 1) { vm.moveFxLayer(clip.id, index, +1) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            Text(
+                "Remove", color = Neutral500, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable { vm.removeFxLayer(clip.id, layer.id) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+        if (layer.kind == com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER) {
+            ShaderParamSliders(vm, clip.id, layer)
+        }
+    }
+}
+
+/** Sliders for a shader layer's adjustable FLOAT inputs (parsed off the main thread), bound to that
+ *  specific layer's own params — not shared with any other layer in the chain. */
+@Composable
+private fun ShaderParamSliders(vm: EditorViewModel, clipId: String, layer: com.hereliesaz.guillotine.model.FxLayer) {
+    val inputs by produceState(emptyList<com.hereliesaz.guillotine.media.GlslShader.ShaderUniform>(), layer.path) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                com.hereliesaz.guillotine.media.GlslShader.parse(java.io.File(layer.path).readText())
+                    .uniforms.filter { it.values.size == 1 && it.type == com.hereliesaz.guillotine.media.GlslShader.UniformType.FLOAT }
+            }.getOrDefault(emptyList())
+        }
+    }
+    inputs.forEach { u ->
+        val v = layer.params[u.name] ?: u.values[0]
+        val range = if (u.max > u.min) u.min..u.max else u.min..(u.min + 1f)
+        Text("${u.name}: ${"%.2f".format(v)}", color = Neutral500, fontSize = 10.sp)
+        Slider(
+            value = v.coerceIn(range.start, range.endInclusive),
+            onValueChange = { nv -> vm.setFxLayerParams(clipId, layer.id, layer.params + (u.name to nv)) },
+            valueRange = range,
+        )
+    }
+}
+
+/** Picks a GLSL shader (ISF `.isf` or a raw `.fs`/`.glsl` fragment) and stacks it onto the clip's FX
+ *  chain. Copied into app storage so the Media3 effect can read it by path in preview and export. */
+@Composable
+private fun AddShaderButton(vm: EditorViewModel, clip: TimelineClip) {
     val context = LocalContext.current
-    val current = clip.filters.shaderPath
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
@@ -174,66 +258,24 @@ private fun ShaderRow(vm: EditorViewModel, clip: TimelineClip) {
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { input.copyTo(it) }
                 }
-                vm.updateClipFilters(clip.id) { it.copy(shaderPath = dest.absolutePath, shaderParams = emptyMap()) }
+                vm.addFxLayer(clip.id, com.hereliesaz.guillotine.model.FxLayer(kind = com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER, path = dest.absolutePath))
             }
         }
     }
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (current.isNotBlank()) "Shader: ${java.io.File(current).name}" else "Shader: none",
-                color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
-            )
-            Text(
-                "Pick .isf/.fs",
-                color = Color(0xFF8AB4F8), fontSize = 12.sp,
-                modifier = Modifier
-                    .clickable { picker.launch(arrayOf("*/*")) }
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-            if (current.isNotBlank()) {
-                Text(
-                    "Clear",
-                    color = Neutral500, fontSize = 12.sp,
-                    modifier = Modifier
-                        .clickable { vm.updateClipFilters(clip.id) { it.copy(shaderPath = "", shaderParams = emptyMap()) } }
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-            }
-        }
-        if (current.isNotBlank()) ShaderParamSliders(vm, clip, current)
-    }
+    Text(
+        "+ Shader (.isf/.fs)",
+        color = Color(0xFF8AB4F8), fontSize = 12.sp,
+        modifier = Modifier
+            .clickable { picker.launch(arrayOf("*/*")) }
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
-/** Sliders for a shader's adjustable FLOAT inputs (parsed off the main thread), bound to shaderParams. */
+/** Picks a `.cube` 3D LUT color grade and stacks it onto the clip's FX chain. The file is copied into
+ *  app storage so the Media3 effect can read it by path in preview and export. */
 @Composable
-private fun ShaderParamSliders(vm: EditorViewModel, clip: TimelineClip, path: String) {
-    val inputs by produceState(emptyList<com.hereliesaz.guillotine.media.GlslShader.ShaderUniform>(), path) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                com.hereliesaz.guillotine.media.GlslShader.parse(java.io.File(path).readText())
-                    .uniforms.filter { it.values.size == 1 && it.type == com.hereliesaz.guillotine.media.GlslShader.UniformType.FLOAT }
-            }.getOrDefault(emptyList())
-        }
-    }
-    inputs.forEach { u ->
-        val v = clip.filters.shaderParams[u.name] ?: u.values[0]
-        val range = if (u.max > u.min) u.min..u.max else u.min..(u.min + 1f)
-        Text("${u.name}: ${"%.2f".format(v)}", color = Neutral500, fontSize = 10.sp)
-        Slider(
-            value = v.coerceIn(range.start, range.endInclusive),
-            onValueChange = { nv -> vm.updateClipFilters(clip.id) { it.copy(shaderParams = it.shaderParams + (u.name to nv)) } },
-            valueRange = range,
-        )
-    }
-}
-
-/** Pick / clear a `.cube` 3D LUT color grade for the clip. The file is copied into app storage so the
- *  Media3 effect can read it by path in preview and export. */
-@Composable
-private fun LutRow(vm: EditorViewModel, clip: TimelineClip) {
+private fun AddLutButton(vm: EditorViewModel, clip: TimelineClip) {
     val context = LocalContext.current
-    val current = clip.filters.lutPath
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
@@ -249,32 +291,17 @@ private fun LutRow(vm: EditorViewModel, clip: TimelineClip) {
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { input.copyTo(it) }
                 }
-                vm.updateClipFilters(clip.id) { it.copy(lutPath = dest.absolutePath) }
+                vm.addFxLayer(clip.id, com.hereliesaz.guillotine.model.FxLayer(kind = com.hereliesaz.guillotine.model.FxLayer.KIND_LUT, path = dest.absolutePath))
             }
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (current.isNotBlank()) "LUT: ${java.io.File(current).name}" else "LUT: none",
-            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
-        )
-        Text(
-            "Pick .cube",
-            color = Color(0xFF8AB4F8), fontSize = 12.sp,
-            modifier = Modifier
-                .clickable { picker.launch(arrayOf("*/*")) }
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-        if (current.isNotBlank()) {
-            Text(
-                "Clear",
-                color = Neutral500, fontSize = 12.sp,
-                modifier = Modifier
-                    .clickable { vm.updateClipFilters(clip.id) { it.copy(lutPath = "") } }
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
-    }
+    Text(
+        "+ LUT (.cube)",
+        color = Color(0xFF8AB4F8), fontSize = 12.sp,
+        modifier = Modifier
+            .clickable { picker.launch(arrayOf("*/*")) }
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 @Composable
@@ -286,6 +313,93 @@ fun AudioToolInline(vm: EditorViewModel, clip: TimelineClip) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = f.normalize, onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(normalize = c) } })
             Text("Normalize audio", color = Neutral400, fontSize = 12.sp)
+        }
+        LoudnessMeterRow(vm, clip)
+        BeatDetectRow(vm, clip)
+    }
+}
+
+/**
+ * On-device integrated loudness (LUFS) readout for the clip — the same [com.hereliesaz.guillotine.ai.Loudness]
+ * math the Normalize toggle already applies as a gain, now made visible instead of only felt. Measured
+ * on demand (not live-metered) since it requires decoding the clip's audio, same tradeoff as beat
+ * detection below.
+ */
+@Composable
+private fun LoudnessMeterRow(vm: EditorViewModel, clip: TimelineClip) {
+    val context = LocalContext.current
+    val state by vm.uiState.collectAsState()
+    val media = state.document.mediaFor(clip)
+    val lufs = state.lufsByClip[clip.id]
+    var busy by remember(clip.id) { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            if (lufs != null) "Loudness: ${"%.1f".format(lufs)} LUFS" else "Loudness: —",
+            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (busy) "Measuring…" else "Measure",
+            color = Color(0xFF8AB4F8), fontSize = 12.sp,
+            modifier = Modifier
+                .clickable(enabled = !busy && media != null) {
+                    val uri = media?.uri ?: return@clickable
+                    busy = true
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val pcm = com.hereliesaz.guillotine.ai.PcmDecoder.decode(context, android.net.Uri.parse(uri))
+                        val value = pcm?.let { com.hereliesaz.guillotine.ai.Loudness.measureLufs(it.samples, it.sampleRate) }
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            busy = false
+                            if (value != null) vm.setLufs(clip.id, value)
+                        }
+                    }
+                }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/**
+ * On-device beat/tempo detection for the clip, feeding the timeline's beat-marker overlay
+ * ([com.hereliesaz.guillotine.model.BeatMap]) — the same analysis the assistant's `get_beat_map` tool
+ * already used internally, now reachable directly so the user can see rhythm markers without asking it.
+ */
+@Composable
+private fun BeatDetectRow(vm: EditorViewModel, clip: TimelineClip) {
+    val context = LocalContext.current
+    val state by vm.uiState.collectAsState()
+    val media = state.document.mediaFor(clip)
+    val beatMap = state.beatMaps[clip.id]
+    var busy by remember(clip.id) { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            if (beatMap != null) "Beats: ${"%.0f".format(beatMap.bpm)} BPM, ${beatMap.beatsMs.size} beats" else "Beats: —",
+            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (busy) "Analyzing…" else "Detect beats",
+            color = Color(0xFF8AB4F8), fontSize = 12.sp,
+            modifier = Modifier
+                .clickable(enabled = !busy && media != null) {
+                    val uri = media?.uri ?: return@clickable
+                    busy = true
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val pcm = com.hereliesaz.guillotine.ai.PcmDecoder.decode(context, android.net.Uri.parse(uri))
+                        val map = pcm?.let { com.hereliesaz.guillotine.ai.BeatAnalyzer.analyze(it.samples, it.sampleRate) }
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            busy = false
+                            if (map != null) vm.setBeatMap(clip.id, map)
+                        }
+                    }
+                }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        if (beatMap != null) {
+            Text(
+                "Clear", color = Neutral500, fontSize = 12.sp,
+                modifier = Modifier.clickable { vm.clearBeatMap(clip.id) }.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
     }
 }
@@ -326,13 +440,25 @@ fun KeyframesToolInline(vm: EditorViewModel, clip: TimelineClip) {
                         modifier = Modifier.size(16.dp).clickable { vm.removeKeyframe(clip.id, kf.id) },
                     )
                 }
-                Slider(
-                    value = kf.value.coerceIn(range.start, range.endInclusive),
-                    onValueChange = { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } },
-                    valueRange = range,
-                )
-                Text("Easing", color = Neutral500, fontSize = 10.sp)
-                CurveEditor(value = kf.easing, onChange = { e -> vm.updateKeyframe(clip.id, kf.id) { it.copy(easing = e) } })
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Slider(
+                        value = kf.value.coerceIn(range.start, range.endInclusive),
+                        onValueChange = { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } },
+                        valueRange = range,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Typed exact value — Vegas's node "Set to..." for mathematically precise input,
+                    // vs. the slider's drag-to-approximate.
+                    ExactValueField(kf.value, range) { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = kf.hold, onCheckedChange = { h -> vm.updateKeyframe(clip.id, kf.id) { it.copy(hold = h) } })
+                    Text("Hold (step to next node, no ease)", color = Neutral400, fontSize = 12.sp)
+                }
+                if (!kf.hold) {
+                    Text("Easing", color = Neutral500, fontSize = 10.sp)
+                    CurveEditor(value = kf.easing, onChange = { e -> vm.updateKeyframe(clip.id, kf.id) { it.copy(easing = e) } })
+                }
             }
         }
     }
@@ -476,6 +602,28 @@ private fun FilterSlider(
             valueRange = range,
         )
     }
+}
+
+/**
+ * A typed numeric entry for a keyframe's exact value — Vegas's node "Set to..." dialog, letting the
+ * user key in a mathematically precise number rather than approximate it with a drag. Local text state
+ * so a mid-edit string ("1." while typing "1.5") isn't clobbered by the recomposition its own commit
+ * triggers; only a value that both parses and falls in [range] calls [onCommit].
+ */
+@Composable
+private fun ExactValueField(value: Float, range: ClosedFloatingPointRange<Float>, onCommit: (Float) -> Unit) {
+    var text by remember(value) { mutableStateOf("%.3f".format(value)) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { s ->
+            text = s
+            s.toFloatOrNull()?.let { v -> if (v in range) onCommit(v) }
+        },
+        singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+        modifier = Modifier.width(72.dp),
+    )
 }
 
 @Composable

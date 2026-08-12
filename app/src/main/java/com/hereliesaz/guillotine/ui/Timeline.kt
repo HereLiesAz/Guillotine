@@ -25,15 +25,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -476,41 +480,79 @@ private fun TrackHeader(
 ) {
     var open by remember { mutableStateOf(false) }
     val ts = state.document.trackSettingsFor(trackId)
+    val soloed = trackId in state.soloedTrackIds
+    val accent = trackColor(ts.colorHex) ?: Neutral400
     Box(
         Modifier
             .height(state.trackHeight(trackId).dp)
             .fillMaxWidth()
             .background(Neutral900)
+            .then(if (ts.colorHex.isNotBlank()) Modifier.border(2.dp, accent) else Modifier)
             .clickable { open = true },
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                trackId,
-                color = if (ts.disabled) Neutral600 else Neutral400,
+                ts.name.ifBlank { trackId },
+                color = if (ts.disabled) Neutral600 else if (ts.colorHex.isNotBlank()) accent else Neutral400,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
+                maxLines = 1,
             )
             Row {
+                if (soloed) {
+                    Icon(Icons.Filled.Headphones, "Soloed", tint = Red500, modifier = Modifier.size(11.dp))
+                }
                 if (ts.muted && type != ClipType.TEXT) {
                     Icon(Icons.Filled.VolumeOff, "Muted", tint = Red500, modifier = Modifier.size(11.dp))
                 }
                 if (ts.disabled) {
                     Icon(Icons.Filled.VisibilityOff, "Disabled", tint = Red500, modifier = Modifier.size(11.dp))
                 }
+                if (ts.minimized) {
+                    Icon(Icons.Filled.UnfoldLess, "Minimized", tint = Red500, modifier = Modifier.size(11.dp))
+                }
             }
         }
 
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             Column(Modifier.width(220.dp).padding(horizontal = 12.dp, vertical = 4.dp)) {
-                Text("Track $trackId", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                OutlinedTextField(
+                    value = ts.name,
+                    onValueChange = { vm.setTrackName(trackId, it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(trackId, color = Neutral500) },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = White),
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TRACK_COLOR_SWATCHES.forEach { hex ->
+                        val c = trackColor(hex)!!
+                        Box(
+                            Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(c)
+                                .border(if (ts.colorHex == hex) 2.dp else 0.dp, White, CircleShape)
+                                .clickable { vm.setTrackColor(trackId, if (ts.colorHex == hex) "" else hex) },
+                        )
+                    }
+                }
 
+                HorizontalDivider(color = Neutral800, modifier = Modifier.padding(vertical = 6.dp))
+
+                // Solo: isolate this track's preview/playback (additive — several can be soloed at
+                // once). Never affects export, only monitoring, so it's separate from Mute/Hide below.
+                TrackToggle("Solo (preview only)", soloed) { vm.toggleTrackSolo(trackId) }
                 if (type != ClipType.TEXT) {
                     TrackToggle("Mute", ts.muted) { vm.toggleTrackMuted(trackId) }
                 }
                 TrackToggle(if (type == ClipType.AUDIO) "Disable track" else "Hide track", ts.disabled) {
                     vm.toggleTrackDisabled(trackId)
                 }
+                // Collapse to a thin strip — vertical space only, never preview/export.
+                TrackToggle("Minimize", ts.minimized) { vm.toggleTrackMinimized(trackId) }
 
                 if (type == ClipType.AUDIO || type == ClipType.VIDEO) {
                     TrackSlider("Volume", ts.volume, 0f..2f) { vm.setTrackVolume(trackId, it) }
@@ -536,6 +578,13 @@ private fun TrackHeader(
         }
     }
 }
+
+/** A small fixed palette (Vegas D.8's "color palette appears") rather than a full picker — enough to
+ *  tell tracks apart at a glance without building a color-wheel UI. */
+private val TRACK_COLOR_SWATCHES = listOf("#EF5350", "#FFA726", "#FFEE58", "#66BB6A", "#42A5F5", "#AB47BC")
+
+private fun trackColor(hex: String): Color? =
+    hex.takeIf { it.isNotBlank() }?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
 
 @Composable
 private fun TrackToggle(label: String, on: Boolean, onToggle: () -> Unit) {
@@ -839,6 +888,33 @@ private fun ClipView(
                     },
                 )
             }
+            // Freehand envelope drawing (Vegas G.5 "hold Shift, drag across an envelope to generate
+            // dozens of micro-nodes"; the touch translation's finger/stylus drawing): with the Keyframe
+            // tool active, a drag across the clip body samples (time, value) along the path and lays
+            // down a whole train of OPACITY keyframes on release — the tap gesture above still drops a
+            // single node, this is its "draw a curve" sibling. Samples are throttled to ~30ms apart so a
+            // slow drag doesn't spam a keyframe per pixel.
+            .pointerInput(clip.id, state.tool, pps) {
+                if (state.tool != EditorTool.KEYFRAME) return@pointerInput
+                val range = KeyframeProperty.OPACITY.uiRange
+                val samples = mutableListOf<Pair<Long, Float>>()
+                fun sample(offset: Offset) {
+                    val h = size.height.toFloat()
+                    val t = (offset.x / pps * 1000f).toLong().coerceIn(0L, clip.durationMs)
+                    if (samples.isNotEmpty() && kotlin.math.abs(t - samples.last().first) < 30L) return
+                    val norm = (1f - (offset.y / h)).coerceIn(0f, 1f)
+                    samples += t to (range.start + norm * (range.endInclusive - range.start))
+                }
+                detectDragGestures(
+                    onDragStart = { offset -> samples.clear(); sample(offset) },
+                    onDrag = { change, _ -> change.consume(); sample(change.position) },
+                    onDragEnd = {
+                        if (samples.size >= 2) vm.drawEnvelope(clip.id, KeyframeProperty.OPACITY, samples.toList())
+                        samples.clear()
+                    },
+                    onDragCancel = { samples.clear() },
+                )
+            }
             // Drag to move: horizontally on the timeline, vertically across same-type tracks.
             // Disabled while a keyframe of this clip is selected (drag then edits the ease).
             .pointerInput(clip.id, state.tool, pps, sameTypeTracks, state.selectedKeyframeId) {
@@ -998,6 +1074,28 @@ private fun ClipView(
         media?.let { m ->
             if (clip.type == ClipType.AUDIO) ClipWaveform(m.uri)
             else ClipThumbnail(m.uri, m.kind, clip.trimStartMs)
+        }
+        // Beat markers, once "Detect beats" (AudioToolInline) has analyzed this clip — thin ticks at
+        // each detected beat, brighter at downbeats. Beat timestamps are in SOURCE media ms; converted
+        // to a timeline x assuming constant speed across the clip (a speed-keyframed clip's markers are
+        // an approximation, same tradeoff as the rest of this canvas's visual aids).
+        state.beatMaps[clip.id]?.let { beatMap ->
+            val speed = clip.filters.speed.takeIf { it > 0.01f } ?: 1f
+            Canvas(Modifier.fillMaxSize()) {
+                val downbeats = beatMap.downbeatsMs.toHashSet()
+                for (beatMs in beatMap.beatsMs) {
+                    val relSourceMs = beatMs - clip.trimStartMs
+                    if (relSourceMs < 0 || relSourceMs > clip.durationMs * speed) continue
+                    val x = (relSourceMs / speed) / 1000f * pps
+                    val strong = beatMs in downbeats
+                    drawLine(
+                        color = White.copy(alpha = if (strong) 0.8f else 0.4f),
+                        start = Offset(x, 0f),
+                        end = Offset(x, size.height * if (strong) 1f else 0.4f),
+                        strokeWidth = if (strong) 2f else 1f,
+                    )
+                }
+            }
         }
         // Text clips show their caption text.
         if (clip.type == ClipType.TEXT) {

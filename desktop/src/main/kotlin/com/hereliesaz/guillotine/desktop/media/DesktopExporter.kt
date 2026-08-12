@@ -37,11 +37,19 @@ object DesktopExporter {
         val sampleRate: Int = 44100,
     )
 
+    /**
+     * @param region When non-null, "Render Loop Region Only" (Vegas J.4): the export is pre-clamped to
+     * this `[start, end)` timeline window ([Document.clampedToRegion]) before anything else runs, so the
+     * rest of this pipeline (frame/sample loops bounded by `document.totalDurationMs`) is unchanged — it
+     * just sees a shorter document.
+     */
     suspend fun export(
         document: Document,
         config: ExportConfig = ExportConfig(),
         onProgress: (Float, Long) -> Unit = { _, _ -> },
+        region: LongRange? = null,
     ): File = withContext(Dispatchers.IO) {
+        val document = if (region != null) document.clampedToRegion(region.first, region.last) else document
         val safeName = config.name.replace(Regex("[/\\\\]"), "_").replace("..", "_").ifBlank { "export" }
         val outputDir = File(System.getProperty("user.home"), "Videos/Guillotine")
         outputDir.mkdirs()
@@ -401,13 +409,17 @@ object DesktopExporter {
             DesktopColorMatrix.applyToImage(img, matrix)
         }
         if (f.blur > 0f) DesktopColorMatrix.blur(img, f.blur)
-        // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). The LUT is
-        // parsed once and cached by path, so it isn't re-parsed for every exported frame.
-        if (f.lutPath.isNotBlank()) {
-            DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
+        // The clip's FX chain (LUTs/shaders), in chain order — see ClipFilters.effectiveFxChain for the
+        // legacy single-slot fallback that keeps an already-saved project rendering unchanged. LUT
+        // layers apply first (matches the pre-chain LUT-then-shader order); each is parsed once and
+        // cached by path, so it isn't re-parsed for every exported frame.
+        val fxChain = f.effectiveFxChain.filter { it.enabled }
+        for (layer in fxChain) {
+            if (layer.kind != com.hereliesaz.guillotine.model.FxLayer.KIND_LUT) continue
+            DesktopLutCache.get(layer.path)?.let { DesktopColorMatrix.applyLut(img, it) }
         }
 
-        // Subject segmentation (needs a seg model), applied after colour/LUT:
+        // Subject segmentation (needs a seg model), applied after colour/LUT, before shaders:
         //  • removeBackground → matte the subject to alpha so the track beneath shows through
         //  • bokeh → keep the subject sharp and blur the background
         val segModel = DesktopRenderConfig.segModelPath
@@ -416,11 +428,13 @@ object DesktopExporter {
             f.bokeh && segModel.isNotBlank() -> DesktopSegmenter.portraitBlur(img, segModel)
             else -> img
         }
-        // Custom GLSL/ISF shader, applied last (matches Android's order). Rendered through Skia's CPU
-        // raster runtime effect; a no-op if the shader can't be translated/compiled to SkSL.
-        val drawImg = if (f.shaderPath.isNotBlank()) {
-            DesktopShaderPass.apply(segImg, f.shaderPath, f.shaderParams, relMs.coerceAtLeast(0))
-        } else segImg
+        // Custom GLSL/ISF shader layers, applied last in chain order (matches the preview path).
+        // Rendered through Skia's CPU raster runtime effect; a no-op if a shader can't be compiled to SkSL.
+        var drawImg = segImg
+        for (layer in fxChain) {
+            if (layer.kind != com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER) continue
+            drawImg = DesktopShaderPass.apply(drawImg, layer.path, layer.params, relMs.coerceAtLeast(0))
+        }
 
         // Keyframed transforms
         val scale = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)

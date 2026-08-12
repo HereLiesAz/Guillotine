@@ -64,6 +64,7 @@ object TimelineMath {
             val a = kfs[i]
             val b = kfs[i + 1]
             if (clipTimeMs in a.timeMs..b.timeMs) {
+                if (a.hold) return a.value
                 val span = (b.timeMs - a.timeMs).coerceAtLeast(1L)
                 val progress = (clipTimeMs - a.timeMs).toFloat() / span
                 val eased = a.easing.ease(progress)
