@@ -877,7 +877,7 @@ private fun EditorToolStrip(
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // ---- Modes (toggle a tool on/off; active one is highlighted) ----
+            // ---- Group 1: Modes (toggle a tool on/off; active one is highlighted) ----
             IconToolButton(Icons.Filled.NearMe, "Select", active = state.tool == EditorTool.SELECT) {
                 vm.setTool(EditorTool.SELECT)
             }
@@ -888,26 +888,21 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Crop, "Crop / transform", active = state.tool == EditorTool.CROP) {
                 vm.setTool(EditorTool.CROP)
             }
-            IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
-                vm.toggleAutoEase()
-            }
+
+            ToolGroupSeparator()
+
+            // ---- Group 2: Create (add something new to the timeline) ----
             // Text is just a clip on a video track — a discoverable, toolbar-level way to add one.
             IconToolButton(Icons.Filled.TextFields, "Add text") {
                 val track = state.document.videoTracks.firstOrNull()
                 if (track != null) vm.selectClip(vm.addEmptyTextClip(track))
             }
-            // onTranscribe already no-ops unless exactly one clip is selected.
-            IconToolButton(
-                Icons.Filled.ClosedCaption,
-                "Transcribe selected clip",
-                enabled = selected.singleOrNull()?.type == com.hereliesaz.guillotine.model.ClipType.VIDEO,
-            ) {
-                onTranscribe(CaptionStyle.PLAIN)
-            }
+            // Import media (new tracks come from the track-head popup or dragging a clip past the edge).
+            IconToolButton(Icons.Filled.Add, "Import media", onClick = onImport)
 
             ToolGroupSeparator()
 
-            // ---- Actions (do something immediately; no mode) ----
+            // ---- Group 3: Clip editing actions (act on the current selection) ----
             // Scissors splits at the playhead immediately -- the selected clip/group, or
             // every clip on every track when nothing is selected.
             IconToolButton(Icons.Filled.ContentCut, "Split at playhead") {
@@ -917,24 +912,16 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.Diamond, "Keyframe crop/placement at playhead") {
                 vm.addKeyframeAtPlayhead()
             }
-            // Import media (new tracks come from the track-head popup or dragging a clip past the edge).
-            IconToolButton(Icons.Filled.Add, "Import media", onClick = onImport)
+            // onTranscribe already no-ops unless exactly one clip is selected.
+            IconToolButton(
+                Icons.Filled.ClosedCaption,
+                "Transcribe selected clip",
+                enabled = selected.singleOrNull()?.type == com.hereliesaz.guillotine.model.ClipType.VIDEO,
+            ) {
+                onTranscribe(CaptionStyle.PLAIN)
+            }
             IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
                 vm.deleteSelected()
-            }
-            // Ripple: close the gaps among the selected clips (or all clips if none selected).
-            IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
-            IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
-                vm.rippleCloseGaps()
-            }
-            // Auto-Ripple: from here on, deleting a clip closes the gap on its own track automatically
-            // (Vegas's "Affected Tracks" mode) instead of leaving a hole for "Ripple (close gaps)" above
-            // to clean up later.
-            IconToolButton(Icons.Filled.Bolt, "Auto-Ripple: close gaps on delete", active = state.autoRippleEnabled) {
-                vm.toggleAutoRipple()
-            }
-            IconToolButton(Icons.Filled.GridOn, "Snap to edges, playhead, and grid (F8)", active = state.snapEnabled) {
-                vm.toggleSnap()
             }
             // Group / ungroup -- only meaningful with a multi-clip selection.
             if (selected.size > 1) {
@@ -948,8 +935,25 @@ private fun EditorToolStrip(
 
             ToolGroupSeparator()
 
-            // Help: opens the icon key (what every button does).
-            IconToolButton(Icons.Filled.HelpOutline, "Help / icon key", onClick = onHelp)
+            // ---- Group 4: Timeline & playback behavior toggles (change how OTHER actions behave) ----
+            IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
+                vm.toggleAutoEase()
+            }
+            IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
+            // Ripple: close the gaps among the selected clips (or all clips if none selected) --
+            // a one-shot action, distinct from the Auto-Ripple toggle right after it.
+            IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
+                vm.rippleCloseGaps()
+            }
+            // Auto-Ripple: from here on, deleting a clip closes the gap on its own track automatically
+            // (Vegas's "Affected Tracks" mode) instead of leaving a hole for "Ripple (close gaps)" above
+            // to clean up later.
+            IconToolButton(Icons.Filled.Bolt, "Auto-Ripple: close gaps on delete", active = state.autoRippleEnabled) {
+                vm.toggleAutoRipple()
+            }
+            IconToolButton(Icons.Filled.GridOn, "Snap to edges, playhead, and grid (F8)", active = state.snapEnabled) {
+                vm.toggleSnap()
+            }
 
             // Context-sensitive per-clip tools (filters, audio, background, text,
             // keyframes, transcribe, split) -- formerly the Inspector panel. Shown for a
@@ -961,6 +965,11 @@ private fun EditorToolStrip(
                 ToolGroupSeparator()
                 ClipToolButtons(vm, state, onTranscribe)
             }
+
+            ToolGroupSeparator()
+
+            // Help is always last: opens the icon key (what every button does).
+            IconToolButton(Icons.Filled.HelpOutline, "Help / icon key", onClick = onHelp)
         }
 
         // The agent's running status/output now streams into the activity-log bottom panel; the
