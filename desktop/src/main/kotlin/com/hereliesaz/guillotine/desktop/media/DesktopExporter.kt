@@ -37,11 +37,19 @@ object DesktopExporter {
         val sampleRate: Int = 44100,
     )
 
+    /**
+     * @param region When non-null, "Render Loop Region Only" (Vegas J.4): the export is pre-clamped to
+     * this `[start, end)` timeline window ([Document.clampedToRegion]) before anything else runs, so the
+     * rest of this pipeline (frame/sample loops bounded by `document.totalDurationMs`) is unchanged — it
+     * just sees a shorter document.
+     */
     suspend fun export(
         document: Document,
         config: ExportConfig = ExportConfig(),
         onProgress: (Float, Long) -> Unit = { _, _ -> },
+        region: LongRange? = null,
     ): File = withContext(Dispatchers.IO) {
+        val document = if (region != null) document.clampedToRegion(region.first, region.last) else document
         val safeName = config.name.replace(Regex("[/\\\\]"), "_").replace("..", "_").ifBlank { "export" }
         val outputDir = File(System.getProperty("user.home"), "Videos/Guillotine")
         outputDir.mkdirs()

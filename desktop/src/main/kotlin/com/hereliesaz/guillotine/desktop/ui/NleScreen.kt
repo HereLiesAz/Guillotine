@@ -600,11 +600,13 @@ fun NleScreen(
             progress = exportProgress,
             doneMessage = exportDone,
             errorMessage = exportError,
-            onStart = { name ->
+            playbackRegion = state.playbackRegion,
+            onStart = { name, regionOnly ->
                 exporting = true
                 exportProgress = 0f
                 exportError = null
                 exportDone = null
+                val region = if (regionOnly) vm.uiState.value.playbackRegion else null
                 scope.launch {
                     try {
                         val exportDoc = vm.uiState.value.document
@@ -624,8 +626,11 @@ fun NleScreen(
                             config = config,
                             onProgress = { p, ms ->
                                 exportProgress = p
-                                vm.seekTo(ms)
+                                // ms is relative to the clamped (region) document when regionOnly — offset
+                                // back to the full timeline so the live scrub indicator lands in the right place.
+                                vm.seekTo(ms + (region?.first ?: 0L))
                             },
+                            region = region,
                         )
                         exportDone = "Saved to ${file.absolutePath}"
                         ActivityLog.info("Export complete: ${file.absolutePath}")

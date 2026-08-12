@@ -785,11 +785,13 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             doneMessage = exportDone,
             onShare = exportedUri?.let { uri -> { shareVideo(context, uri) } },
             errorMessage = exportError,
-            onStart = { name ->
+            playbackRegion = state.playbackRegion,
+            onStart = { name, regionOnly ->
                 // Show the "render" interstitial as the export begins; rendering continues underneath.
                 (context as? android.app.Activity)?.let { act ->
                     (context.applicationContext as? GuillotineApplication)?.interstitialAdManager?.show(act)
                 }
+                val region = if (regionOnly) vm.uiState.value.playbackRegion else null
                 exporting = true; exportError = null; exportProgress = 0f
                 ActivityLog.info("Exporting \"$name\"…")
                 // Export in the background via the foreground service (cancel-only — Media3 can't pause
@@ -814,12 +816,15 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         name,
                         onProgress = { p, ms ->
                             scope.launch { exportProgress = p } // hop to the main thread for Compose state
-                            vm.seekTo(ms)
+                            // ms is relative to the clamped (region) document when regionOnly — offset
+                            // back to the full timeline so the live scrub indicator lands in the right place.
+                            vm.seekTo(ms + (region?.first ?: 0L))
                             sink.report(p, "Exporting…")
                         },
                         onPhase = { phase ->
                             scope.launch { vm.setExportPhase(phase) }
                         },
+                        region = region,
                     )
                     scope.launch { exportedUri = uri } // for the Share action once done
                 }

@@ -1168,12 +1168,16 @@ fun ExportSheet(
     exportPhase: String?,
     doneMessage: String?,
     errorMessage: String?,
-    onStart: (String) -> Unit,
+    /** The current playback/loop region, if one is set — offered as "Render Loop Region Only" (Vegas
+     *  J.4) when non-null; the checkbox is hidden entirely when there's no region to offer. */
+    playbackRegion: LongRange? = null,
+    onStart: (String, Boolean) -> Unit,
     onDismiss: () -> Unit,
     /** Share the just-exported video; null until the export produced a shareable file. */
     onShare: (() -> Unit)? = null,
 ) {
     var name by remember { mutableStateOf("guillotine_export") }
+    var regionOnly by remember { mutableStateOf(false) }
     var errorExpanded by remember { mutableStateOf(false) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1212,6 +1216,16 @@ fun ExportSheet(
                         singleLine = true,
                     )
                     Text("Duration: ${"%.1f".format(totalDurationMs / 1000f)}s → Movies/Guillotine", color = Neutral500, fontSize = 11.sp)
+                    // "Render Loop Region Only" (Vegas J.4) — only offered when a region is actually set.
+                    if (playbackRegion != null) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Checkbox(checked = regionOnly, onCheckedChange = { regionOnly = it })
+                            Text(
+                                "Render loop region only (${"%.1f".format((playbackRegion.last - playbackRegion.first) / 1000f)}s)",
+                                color = Neutral400, fontSize = 12.sp,
+                            )
+                        }
+                    }
                     errorMessage?.let { msg ->
                         // Collapsed: headline (first line). Expanded: full cause chain + Copy button.
                         // The Media3 diagnostic string carries the errorCodeName, code, and every cause
@@ -1300,7 +1314,7 @@ fun ExportSheet(
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cancel", color = Neutral400, fontSize = 12.sp, modifier = Modifier.padding(end = 16.dp).clickableText(onDismiss))
-                        Button(onClick = { onStart(name) }, colors = ButtonDefaults.buttonColors(containerColor = Red500)) {
+                        Button(onClick = { onStart(name, regionOnly) }, colors = ButtonDefaults.buttonColors(containerColor = Red500)) {
                             Text("Start render", fontSize = 12.sp, color = White)
                         }
                     }

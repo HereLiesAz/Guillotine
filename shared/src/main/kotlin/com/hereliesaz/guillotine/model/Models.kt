@@ -369,4 +369,41 @@ data class Document(
 
     /** Track ids whose whole track is disabled/hidden. */
     val disabledTrackIds: Set<String> get() = trackSettings.filterValues { it.disabled }.keys
+
+    /**
+     * A copy of this document restricted to the `[startMs, endMs)` timeline window — the "Render Loop
+     * Region Only" export option (Vegas J.4). Clips entirely outside the window are dropped; a clip that
+     * only partially overlaps is trimmed to the window, exactly like a manual edge trim
+     * ([com.hereliesaz.guillotine.editor.EditorViewModel.trimClipStart]/`trimClipEnd`): trimming the left
+     * edge advances [TimelineClip.trimStartMs] and shifts keyframes back by the same delta (dropping any
+     * that land before the new start); trimming the right edge shortens [TimelineClip.durationMs] and
+     * drops keyframes past it. Every surviving clip is then shifted so [startMs] becomes the new timeline
+     * zero. The exporters run entirely unchanged against the result — this is a pre-processing step, not
+     * a change to either render pipeline.
+     */
+    fun clampedToRegion(startMs: Long, endMs: Long): Document {
+        require(endMs > startMs) { "endMs ($endMs) must be after startMs ($startMs)" }
+        val newClips = clips.mapNotNull { clip ->
+            if (clip.endTimeMs <= startMs || clip.startTimeMs >= endMs) return@mapNotNull null
+            var c = clip
+            if (c.startTimeMs < startMs) {
+                val d = startMs - c.startTimeMs
+                c = c.copy(
+                    startTimeMs = 0L,
+                    trimStartMs = c.trimStartMs + d,
+                    durationMs = c.durationMs - d,
+                    keyframes = c.keyframes.map { k -> k.copy(timeMs = k.timeMs - d) }.filter { k -> k.timeMs >= 0 },
+                )
+            } else {
+                c = c.copy(startTimeMs = c.startTimeMs - startMs)
+            }
+            val windowMs = endMs - startMs
+            if (c.endTimeMs > windowMs) {
+                val nd = windowMs - c.startTimeMs
+                c = c.copy(durationMs = nd, keyframes = c.keyframes.filter { k -> k.timeMs <= nd })
+            }
+            c
+        }
+        return copy(clips = newClips)
+    }
 }

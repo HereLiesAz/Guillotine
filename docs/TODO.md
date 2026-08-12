@@ -2,6 +2,42 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## "Render Loop Region Only" shipped; "Smart Render" passthrough deferred with reasons (2026-08-12)
+
+Vegas J.4/J.5: a Render modal option to export only the current loop region, and a "Smart Render"
+indicator when the output can pass compliant source footage through without recompression.
+
+- **Region-only render (shipped)**: `Document.clampedToRegion(startMs, endMs)` — a pure, unit-tested
+  pre-processing step that drops clips entirely outside a `[start, end)` window, trims a clip that only
+  partially overlaps it (identical math to a manual edge trim: advance `trimStartMs`/shift keyframes back
+  on the left edge, shorten `durationMs`/drop trailing keyframes on the right), and shifts every
+  surviving clip so the window's start becomes timeline zero. Both `Exporter.export` (Android) and
+  `DesktopExporter.export` (desktop) take an optional `region: LongRange?` and apply this **before**
+  anything else runs — neither render pipeline itself changed, they just see a shorter `Document`. The
+  Export sheet on both platforms offers "Render loop region only" as a checkbox, shown only when
+  `EditorUiState.playbackRegion` is actually set.
+- **Smart Render (deferred, not faked)**: researched before attempting — confirmed genuinely
+  infeasible to ship honestly in this pass, on either platform:
+  - **Android**: Media3's `Composition.setTransmuxVideo`/`setTransmuxAudio` is a real stream-copy knob,
+    but it's whole-composition, and `VideoEffects.geometry` unconditionally appends a
+    `FrameDropEffect` to every clip whenever `settings.fps > 0` (always true) — so virtually no real
+    clip in this app would ever qualify for transmux as the effect pipeline is built today. Enabling it
+    honestly needs that append made conditional on "source fps already equals target fps," which needs
+    a source-fps field the data model doesn't have (`MediaItem` carries no codec/framerate metadata at
+    all).
+  - **Desktop**: `DesktopExporter` has no bypass path anywhere — it's architecturally decode→composite-
+    onto-a-shared-canvas→re-encode for every frame of every clip, including ones with zero effects. A
+    real stream-copy would need a **separate whole-clip export branch** (only reachable when a clip is
+    the sole content across its whole span, with no compositing/crop/filters/keyframes, and matching
+    codecs) — a different code path, not a flag on the existing frame loop.
+  - Neither platform tracks source codec anywhere in the model, so "codec matches" can't even be
+    evaluated without adding a probe step first. A checkbox that mostly renders identically to a full
+    re-encode (because it almost never qualifies) would be misleading, not a real feature — left
+    undone rather than shipped as a no-op.
+
+Covered by new `DocumentTest` cases: drop-outside-window, keep-and-shift a fully-contained clip, trim
+each edge of a straddling clip (with the matching keyframe shift/drop behavior).
+
 ## Beat markers and a LUFS meter surfaced directly, not just through the assistant (2026-08-12)
 
 Both `BeatAnalyzer` (spectral-flux onset detection + autocorrelation tempo) and `Loudness`

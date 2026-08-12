@@ -61,13 +61,20 @@ import kotlin.coroutines.resumeWithException
  */
 object Exporter {
 
+    /**
+     * @param region When non-null, "Render Loop Region Only" (Vegas J.4): the export is pre-clamped to
+     * this `[start, end)` timeline window ([Document.clampedToRegion]) before anything else runs, so the
+     * rest of this pipeline is unchanged — it just sees a shorter document.
+     */
     suspend fun export(
         context: Context,
         document: Document,
         outputName: String,
         onProgress: (Float, Long) -> Unit,
         onPhase: (String) -> Unit = {},
+        region: LongRange? = null,
     ): Uri = withContext(Dispatchers.Main) {
+        val document = if (region != null) document.clampedToRegion(region.first, region.last) else document
         fun phase(name: String) {
             onPhase(name)
             ActivityLog.info(name)
