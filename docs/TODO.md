@@ -2,6 +2,91 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Loop tool + playback-region drag: desktop parity, and one real gap found (2026-08-12)
+
+Turned out most of what was asked for already existed on Android, just not on desktop: `playbackRegion`,
+`toggleLoop`, and `advancePlayhead`'s region/loop-aware playback (`EditorViewModel.kt`) are `:shared` and
+were already fully wired into Android's `Timeline.kt` `Ruler` (drag the ruler strip → replace the
+committed region; tap → seek) and toolbar (a Repeat icon toggles `loopPlayback`) — exactly the
+"dragging the top strip defines the region, dragging the playhead itself scrubs" behavior asked for.
+Desktop had none of it: no loop toggle, and its own `Ruler` treated *any* drag as scrubbing (no
+region-drag at all). Brought desktop to parity: `Ruler` now takes `state.playbackRegion` and mirrors the
+app side's drag-defines/tap-seeks split exactly, `Timeline.kt`'s region overlay band is the same
+translucent-red box, and `EditorToolStrip` got the same Repeat toggle. Zero `:shared` changes needed —
+this was a UI-only gap.
+
+**Real gap, not fixed here:** "the playback area is also the rendering area" is not true today on either
+platform. `Exporter.export`/`DesktopExporter`'s render path always renders the full document —
+`playbackRegion` is read nowhere outside `EditorViewModel`/the two `Timeline.kt`s. Making a set region
+double as the render range needs either a trim parameter threaded through the exporter's whole media
+pipeline, or a pure `EditorDocument` → sub-range transform (drop/clip every track's clips to the window,
+shifting start times and keyframe offsets to match) run before handing the document to `Exporter.export`.
+Deliberately not attempted in this pass: it's real logic over `TimelineClip`'s keyframes/groups/crossfade
+semantics with no device/emulator here to verify the output actually renders correctly, and export
+correctness for every user is a much higher-stakes place to guess wrong than a UI gesture.
+
+## AI settings moved out of Settings into their own menu entry, plus a capability-at-a-glance summary (2026-08-12)
+
+`SettingsScreen`'s "AI Analyzer"/"Generation"/"Transcription" tabs are unambiguously AI setup (model
+paths, provider keys); "Advanced" is a genuine mix of AI (model install) and non-AI (backup/restore,
+updater, crash relay) controls. A user had no reason to think "Settings" was where model setup lived at
+all. Added a `restrictToTabs` param to `SettingsScreen` (both platforms) so the same screen can be
+opened scoped to a subset of its tabs without duplicating ~800 lines of tab content and its ~20 local
+`var`s: a new **AI** menu entry opens tabs 0-2; **Settings** now opens tab 3 only. Also added
+`AiCapabilitySummary`/`DesktopAiCapabilitySummary` — a compact "your setup, at a glance" panel shown
+above the AI tabs, answering "is X on right now" (configured-only, not verified-working: a blank path
+vs. a set one, not a file-exists/ping check) since the tabs themselves only ever answered "how do I
+configure X."
+
+**Not done in this pass:** "Advanced" itself is still mixed (AI model install alongside non-AI backup/
+updater/crash-relay controls) — splitting that tab is a real follow-up, not attempted here since it
+needs reading the tab's full content to separate safely, which this pass didn't have room for.
+
+## Own Azphalt Store catalog browser is back, on both platforms (2026-08-12)
+
+Reversed the 2026-07-28 decision below ("Azphalt Store: delegated acquisition replaces Guillotine's
+own storefront UI"). That decision wasn't wrong on the merits it weighed at the time — a home-grown
+storefront is one more thing to maintain, and the ecosystem's delegated-acquisition handoff genuinely
+means a host doesn't have to build one. It was made **too early**: before the flagship catalog had
+grown past a handful of packages, and before Guillotine's own trust/install machinery (compat checks,
+publisher pinning, install-surface routing, state reporting — all the entries below this one) existed
+to make an in-app browser more than a bare list. Both have since matured well past the point that
+justifies the maintenance cost, so the browser is back.
+
+Verified the real registry shape live before building against it (`curl https://www.azphalt.store/packages`
+et al., 2026-08-12): `GET /packages?page=&q=&types=` returns `{packages,total,page,pages}`; `q` and
+`types` genuinely filter server-side (confirmed: `types=lut` returns only LUTs), but `type`/`category`/
+`kind` are silently ignored despite looking like they should work — worth remembering before assuming
+any query param does something just because the server returns 200 for it. 158 live packages today
+across 4 asset `types` (`lut`/`shader`/`motion`/`onnx`) and 6 manifest `kind`s (`asset`/`app`/`code`/
+`mcp`/`pack`/`skill`).
+
+**Built:**
+- `AzphaltRegistry.browse()`/`browseAll()` (`:shared`) — the catalog-list HTTP client `AzphaltRegistry`
+  lost in the 2026-07-28 cut (only the download half survived). `browseAll()` walks every page once and
+  hands back the whole catalog; at today's size (158 packages, well under a megabyte) that's simpler and
+  more responsive than re-querying the server per keystroke/chip-tap, and sidesteps depending on exactly
+  which fields the server can filter by.
+- Android `AzphaltStoreScreen` now shows its own full-screen catalog browser (search + category chips +
+  card list) as the primary UI, replacing the old "always launch the store app / web store" entry point.
+  Installing a catalog entry runs the *identical* `AzpHandoffInstaller` verification every other route
+  here already used (a browsed package earns no more trust than a downloaded or handed-off one).
+  "Use the Store app" / "Browse the web store" survive as a secondary route behind the browser's own
+  overflow menu.
+- **New: desktop has a Store entry point at all**, for the first time — `DesktopAzphaltStoreScreen`,
+  reachable from the menu's new **Store** item. Desktop previously had no browsing UI whatsoever; the
+  only azphalt install route was the model-specific file picker buried in Settings → AI Analyzer. Applies
+  installed packages via new `DesktopPluginApplier` (`:desktop`), extracted from `DesktopMcpTools`'
+  `apply_azp_plugin`/`clear_azp_plugin` handlers (previously ~90 lines of private, unshared logic) so the
+  Store's install flow and the MCP tool are the same implementation — mirroring the app side's
+  `AzpPluginApplier` parity, which existed for exactly this reason already.
+
+**Deliberately not done in this pass:** no preview-image thumbnails in the catalog cards — neither
+platform has an image-loading dependency (Coil, or a desktop equivalent) today, and pulling one in to
+show `.png` previews of shaders/LUTs is a real, separate scope decision, not a one-line addition. Cards
+show a category/price/maturity text line instead. A `.azp` package's own `preview.image` field
+(`AzpPreview`, already modeled in `AzpManifest`) is unused by the browser for the same reason.
+
 ## Correction: the versionCode collision below was permanent, not a rare race — fixed (2026-08-08)
 
 The entry directly below this one ("Release workflows named a GitHub Release after a version that

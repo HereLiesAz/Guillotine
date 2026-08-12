@@ -107,8 +107,66 @@ private fun SheetCard(content: @Composable () -> Unit) {
     )
 }
 
+/**
+ * What the current setup can actually do, at a glance — the model/key tabs below answer "how do I
+ * configure X" but never "is X on right now," so finding out meant trying each feature and seeing if
+ * it worked. Configured-only (a blank path vs. a set one), not verified-working (doesn't stat the file
+ * or ping the provider) — cheap enough to compute on every recomposition, and an honest floor: "not
+ * configured" is certain, "configured" isn't a guarantee the file is still valid or the key still works.
+ */
 @Composable
-fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss: () -> Unit) {
+private fun AiCapabilitySummary(settings: AiSettings) {
+    val cloudConfigured = settings.provider != AiProviderType.MLKIT && settings.keyFor(settings.provider).isNotBlank()
+    val rows = listOf(
+        "Assistant brain" to (cloudConfigured || settings.agentModelPath.isNotBlank()),
+        "Frame vision (recognition)" to true, // always on-device — bundled defaults if no path is set
+        "Transcription" to (settings.speechModelPath.isNotBlank() || settings.asrModelPath.isNotBlank() || settings.keyFor(AiProviderType.OPENAI).isNotBlank()),
+        "Text-to-speech" to settings.ttsModelPath.isNotBlank(),
+        "Frame captioning (VLM)" to settings.vlmModelPath.isNotBlank(),
+        "Audio highlight detection" to settings.audioEventModelPath.isNotBlank(),
+        "Speaker diarization" to (settings.diarizeSegModelPath.isNotBlank() && settings.diarizeEmbedModelPath.isNotBlank()),
+        "Stem separation" to settings.stemModelPath.isNotBlank(),
+        "Denoise" to settings.denoiseModelPath.isNotBlank(),
+        "Image/video/music generation" to (settings.genKeys.values.any { it.isNotBlank() } || settings.leonardoKey.isNotBlank()),
+        "Cloud may see the current frame" to settings.cloudVision,
+    )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Neutral800)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("Your setup, at a glance", color = White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        rows.chunked(2).forEach { pair ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                pair.forEach { (label, on) ->
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (on) "✓" else "—", color = if (on) Red500 else Neutral500, fontSize = 12.sp)
+                        Text(label, color = Neutral400, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(
+    current: AiSettings,
+    onSave: (AiSettings) -> Unit,
+    onDismiss: () -> Unit,
+    /**
+     * Which of [tabs]' indices to show, in order (null = all four). "AI Analyzer"/"Generation"/
+     * "Transcription" (0-2) are unambiguously AI settings and moved to their own menu entry
+     * ([AiSettingsScreen]) so a user doesn't have to know Settings is where model setup lives;
+     * "Advanced" (3) stays reachable from ordinary Settings too, since it's still a mix of AI
+     * (model install) and non-AI (backup/restore, updater, crash relay) controls — splitting that
+     * tab itself is a real follow-up (see docs/TODO.md), not done in this pass.
+     */
+    restrictToTabs: List<Int>? = null,
+) {
     var provider by remember { mutableStateOf(current.provider) }
     var keys by remember { mutableStateOf(current.keys) }
     var models by remember { mutableStateOf(current.models) }
@@ -344,8 +402,9 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
         }
     }
 
-    var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("AI Analyzer", "Generation", "Transcription", "Advanced")
+    val visibleTabs = restrictToTabs ?: tabs.indices.toList()
+    var selectedTab by remember { mutableStateOf(visibleTabs.first()) }
 
     Column(
         Modifier
@@ -372,12 +431,19 @@ fun SettingsScreen(current: AiSettings, onSave: (AiSettings) -> Unit, onDismiss:
             )
         }
 
-        // Tabs
+        // Capability at-a-glance: what the current setup can actually do, right where model/key setup
+        // lives — the setup itself gives no indication of this otherwise, short of trying each feature.
+        if (0 in visibleTabs) {
+            AiCapabilitySummary(buildSettings())
+        }
+
+        // Tabs (only [visibleTabs], when this screen is scoped to a subset — see [restrictToTabs]).
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            tabs.forEachIndexed { index, title ->
+            visibleTabs.forEach { index ->
+                val title = tabs[index]
                 val isSelected = selectedTab == index
                 Text(
                     text = title,

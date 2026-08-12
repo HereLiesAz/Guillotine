@@ -130,15 +130,23 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   models the latest `spec/extension-manifest.md`: the `app` (companion-app) and `mcp` (MCP-server)
   package kinds alongside `asset`/`code`/`mixed`, plus `targetApps` (host scoping) and a `preview`
   store-card still/clip.
-- ✅ **Delegates browsing to the Azphalt Store app (delegated acquisition).** Guillotine doesn't build or
-  maintain its own storefront UI — [`AzphaltStoreScreen`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzphaltStoreScreen.kt)
-  launches whichever Azphalt Store app is installed over the `store.azphalt.action.BROWSE` handoff
-  (azphalt `spec/store-app.md`) and gets back a package the store app already fetched and checked. A
-  store app is a convenience, never a trust anchor, so Guillotine re-verifies every byte itself through
+- ✅ **Builds its own catalog browser again (own store primary; delegated acquisition as a fallback).**
+  Guillotine briefly delegated all browsing to whichever Azphalt Store app was installed (2026-07-28),
+  reasoning that a host shouldn't have to build a storefront if it doesn't want to. That call was right
+  too early, not right permanently: it was made before the catalog and Guillotine's own trust/install
+  machinery were mature enough to justify the maintenance cost of a browser, and both have grown well
+  past that bar since. As of 2026-08-12,
+  [`AzphaltStoreScreen`](../app/src/main/java/com/hereliesaz/guillotine/ui/AzphaltStoreScreen.kt) (Android)
+  and `DesktopAzphaltStoreScreen` (desktop, which had no Store entry point at all before this) both show
+  Guillotine's own catalog browser — search, category chips, an Install button per package — fetched via
+  [`AzphaltRegistry.browseAll`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzphaltRegistry.kt).
+  The Azphalt Store app's `store.azphalt.action.BROWSE` handoff (azphalt `spec/store-app.md`) and the web
+  storefront both still work — one tap away from the browser's own overflow menu — but as a secondary
+  route now, not the only one. A store app is still a convenience, never a trust anchor, however a
+  package was found: Guillotine re-verifies every byte itself through
   [`AzpHandoffInstaller`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpHandoffInstaller.kt)
-  (integrity, signature, and publisher continuity, exactly as if it had downloaded the bytes itself)
-  before writing it into the app's extensions dir. No Azphalt Store app installed degrades to pointing
-  the user at [azphalt.store](https://azphalt.store) instead of falling back to an in-app catalog.
+  (integrity, signature, and publisher continuity) before writing it into the extensions dir, exactly the
+  same whether the bytes came from the in-app browser, a store app's handoff, or a direct download.
   **The web storefront now has a way in too:** Guillotine claims the `azphalt://install?id=…&version=…`
   deep link, so the store page's **Install** button can hand a package *name* to whatever conforming host
   is on the device (the scheme is host-agnostic by design — no package name is baked in, and Android shows

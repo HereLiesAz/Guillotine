@@ -24,7 +24,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.NearMe
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Redo
@@ -176,6 +179,9 @@ fun NleScreen(
 
 
     var showSettings by remember { mutableStateOf(false) }
+    var showAiSettings by remember { mutableStateOf(false) }
+    var showStore by remember { mutableStateOf(false) }
+    var showExtensionsManager by remember { mutableStateOf(false) }
     var showAiComparison by remember { mutableStateOf(false) }
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -363,7 +369,10 @@ fun NleScreen(
             onSaveProject = { saveLauncher() },
             onExport = { exportDone = null; exportError = null; showExport = true },
             onProjectSettings = { showProjectSettings = true },
+            onOpenStore = { showStore = true },
+            onOpenExtensions = { showExtensionsManager = true },
             onSettings = { showSettings = true },
+            onOpenAiSettings = { showAiSettings = true },
             onAiComparison = { showAiComparison = true },
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
@@ -429,7 +438,28 @@ fun NleScreen(
                 showSettings = false
             },
             onDismiss = { showSettings = false },
+            restrictToTabs = listOf(3),
         )
+    }
+
+    if (showAiSettings) {
+        SettingsScreen(
+            current = settings,
+            onSave = { newSettings ->
+                scope.launch { keyStore.save(newSettings) }
+                showAiSettings = false
+            },
+            onDismiss = { showAiSettings = false },
+            restrictToTabs = listOf(0, 1, 2),
+        )
+    }
+
+    if (showStore) {
+        DesktopAzphaltStoreScreen(vm = vm, onDismiss = { showStore = false })
+    }
+
+    if (showExtensionsManager) {
+        DesktopExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
     }
 
     }
@@ -573,7 +603,10 @@ private fun TopBar(
     onSaveProject: () -> Unit,
     onExport: () -> Unit,
     onProjectSettings: () -> Unit,
+    onOpenStore: () -> Unit,
+    onOpenExtensions: () -> Unit,
     onSettings: () -> Unit,
+    onOpenAiSettings: () -> Unit,
     onAiComparison: () -> Unit,
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
@@ -596,7 +629,10 @@ private fun TopBar(
                 DropdownMenuItem(text = { Text("Render") }, onClick = { menuExpanded = false; onExport() })
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text("Project") }, onClick = { menuExpanded = false; onProjectSettings() })
+                DropdownMenuItem(text = { Text("Store") }, onClick = { menuExpanded = false; onOpenStore() })
+                DropdownMenuItem(text = { Text("Extensions") }, onClick = { menuExpanded = false; onOpenExtensions() })
                 DropdownMenuItem(text = { Text("Settings") }, onClick = { menuExpanded = false; onSettings() })
+                DropdownMenuItem(text = { Text("AI") }, onClick = { menuExpanded = false; onOpenAiSettings() })
                 DropdownMenuItem(text = { Text("Compare AI") }, onClick = { menuExpanded = false; onAiComparison() })
                 DropdownMenuItem(text = { Text("Tutorial") }, onClick = { menuExpanded = false; onTutorial() })
                 DropdownMenuItem(text = { Text("FAQ") }, onClick = { menuExpanded = false; onFaq() })
@@ -790,6 +826,19 @@ private fun EditorToolStrip(
             IconToolButton(Icons.Filled.ShowChart, "Auto-ease keyframes", active = state.autoEase) {
                 vm.toggleAutoEase()
             }
+            // Text is just a clip on a video track — a discoverable, toolbar-level way to add one.
+            IconToolButton(Icons.Filled.TextFields, "Add text") {
+                val track = state.document.videoTracks.firstOrNull()
+                if (track != null) vm.selectClip(vm.addEmptyTextClip(track))
+            }
+            // onTranscribe already no-ops unless exactly one clip is selected.
+            IconToolButton(
+                Icons.Filled.ClosedCaption,
+                "Transcribe selected clip",
+                enabled = selected.singleOrNull()?.type == com.hereliesaz.guillotine.model.ClipType.VIDEO,
+            ) {
+                onTranscribe(CaptionStyle.PLAIN)
+            }
 
             ToolGroupSeparator()
 
@@ -809,6 +858,7 @@ private fun EditorToolStrip(
                 vm.deleteSelected()
             }
             // Ripple: close the gaps among the selected clips (or all clips if none selected).
+            IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
             IconToolButton(Icons.Filled.Compress, "Ripple (close gaps)") {
                 vm.rippleCloseGaps()
             }
