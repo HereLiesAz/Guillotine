@@ -7,6 +7,12 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -58,12 +64,41 @@ import kotlin.math.roundToInt
 private const val SCRUB_SEEK_TOLERANCE_MS = 60L
 private const val PLAY_DRIFT_POLL_MS = 400L
 
+/** Zoom step for the explicit Zoom In/Out buttons and the popup slider's upper bound — matches the
+ *  Android app's PanelLayoutPrefs.ZOOM_STEP/MAX_ZOOM values for consistent behavior across platforms. */
+private const val ZOOM_STEP = 0.25f
+private const val MAX_ZOOM = 5f
+
 @Composable
 fun DesktopPreviewPlayer(
     state: EditorUiState,
     modifier: Modifier = Modifier,
+    /** See [FullscreenPreviewOverlay] — the caller owns fullscreen layout/state; this composable only
+     *  exposes the corner toggle affordance (and, when in fullscreen, its "exit" variant). */
+    isFullscreen: Boolean = false,
+    onToggleFullscreen: (() -> Unit)? = null,
 ) {
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
+    // Persistent-within-session preview viewport (zoom + pan). Unlike Android's PanelLayoutPrefs this
+    // doesn't survive an app restart — desktop has no equivalent small-key-value prefs store yet — but
+    // the zoom/pan/fullscreen behavior itself is otherwise identical.
+    var zoom by remember { mutableStateOf(1f) }
+    var panX by remember { mutableStateOf(0f) }
+    var panY by remember { mutableStateOf(0f) }
+    var showZoom by remember { mutableStateOf(false) }
+    var zoomPaneSize by remember { mutableStateOf(IntSize.Zero) }
+    fun clampPan() {
+        val maxX = (zoomPaneSize.width * (zoom - 1f) / 2f).coerceAtLeast(0f)
+        val maxY = (zoomPaneSize.height * (zoom - 1f) / 2f).coerceAtLeast(0f)
+        panX = panX.coerceIn(-maxX, maxX)
+        panY = panY.coerceIn(-maxY, maxY)
+    }
+    LaunchedEffect(zoom, zoomPaneSize) { clampPan() }
+    fun setZoom(z: Float) {
+        zoom = z.coerceIn(1f, MAX_ZOOM)
+        if (zoom <= 1f) { panX = 0f; panY = 0f } else clampPan()
+    }
+
     val now = state.currentTimeMs
     val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
@@ -86,9 +121,23 @@ fun DesktopPreviewPlayer(
     val sy = if (crop.h > 0f) 100f / crop.h else 1f
 
     Box(
-        modifier = modifier.background(Neutral950),
+        modifier = modifier.background(Neutral950).onSizeChanged { zoomPaneSize = it },
         contentAlignment = Alignment.Center,
     ) {
+      // The composited frame — video, captions, and audio layers — lives in this inner box, which the
+      // zoom/pan graphicsLayer scales and translates as one. Controls (below) sit outside it so they
+      // never scale with the preview.
+      Box(
+          modifier = Modifier
+              .fillMaxSize()
+              .graphicsLayer {
+                  scaleX = zoom
+                  scaleY = zoom
+                  translationX = panX
+                  translationY = panY
+              },
+          contentAlignment = Alignment.Center,
+      ) {
         if (!anyActiveVideo) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
         }
@@ -166,6 +215,76 @@ fun DesktopPreviewPlayer(
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             )
         }
+        }
+      } // end zoomed frame
+
+        // Zoom + fullscreen controls — fixed size, OUTSIDE the zoomed layer so they never scale with
+        // the preview.
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.IconButton(onClick = { setZoom(zoom - ZOOM_STEP) }, enabled = zoom > 1f) {
+                androidx.compose.material3.Icon(
+                    Icons.Filled.ZoomOut,
+                    contentDescription = "Zoom out",
+                    tint = if (zoom > 1f) White else Neutral500,
+                )
+            }
+            androidx.compose.material3.IconButton(onClick = { setZoom(zoom + ZOOM_STEP) }, enabled = zoom < MAX_ZOOM) {
+                androidx.compose.material3.Icon(
+                    Icons.Filled.ZoomIn,
+                    contentDescription = "Zoom in",
+                    tint = if (zoom < MAX_ZOOM) White else Neutral500,
+                )
+            }
+            Box {
+                androidx.compose.material3.IconButton(onClick = { showZoom = !showZoom }) {
+                    androidx.compose.material3.Icon(
+                        Icons.Filled.ZoomIn,
+                        contentDescription = "Zoom preview",
+                        tint = if (zoom > 1f) White else Neutral500,
+                    )
+                }
+                if (showZoom) {
+                    androidx.compose.ui.window.Popup(
+                        alignment = Alignment.TopEnd,
+                        onDismissRequest = { showZoom = false },
+                        properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+                    ) {
+                        androidx.compose.material3.Surface(
+                            color = Neutral950,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                            modifier = Modifier.width(220.dp).padding(top = 44.dp),
+                        ) {
+                            androidx.compose.foundation.layout.Column(Modifier.padding(12.dp)) {
+                                Text("Zoom  ${"%.1f".format(zoom)}x", color = White, fontSize = 12.sp)
+                                androidx.compose.material3.Slider(
+                                    value = zoom.coerceIn(1f, MAX_ZOOM),
+                                    onValueChange = ::setZoom,
+                                    valueRange = 1f..MAX_ZOOM,
+                                )
+                                androidx.compose.material3.TextButton(onClick = { setZoom(1f) }) {
+                                    Text("Fit", color = White, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (onToggleFullscreen != null) {
+                androidx.compose.material3.IconButton(onClick = onToggleFullscreen) {
+                    androidx.compose.material3.Icon(
+                        if (isFullscreen) {
+                            Icons.Filled.FullscreenExit
+                        } else {
+                            Icons.Filled.Fullscreen
+                        },
+                        contentDescription = if (isFullscreen) "Exit full screen" else "Full screen",
+                        tint = White,
+                    )
+                }
+            }
         }
     }
 }

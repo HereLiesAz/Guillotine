@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
@@ -102,6 +105,12 @@ fun PreviewPlayer(
     /** Draw platform safe-zone guides (caption/UI areas) over vertical/square projects. */
     showSafeZones: Boolean = false,
     onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
+    /** Whether this instance is currently the full-screen preview — swaps the corner button's icon
+     *  between "enter" and "exit" fullscreen. The caller owns the fullscreen layout/state entirely;
+     *  this composable only exposes the toggle affordance. Null hides the button (e.g. inside the
+     *  full-screen overlay itself, which has its own dedicated exit control in its floating toolbar). */
+    isFullscreen: Boolean = false,
+    onToggleFullscreen: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
@@ -325,17 +334,38 @@ fun PreviewPlayer(
         }
       } // end inner zoomed frame
 
-        // Zoom control — fixed size, OUTSIDE the zoomed layer so it never scales with the preview.
-        PreviewZoomControl(
-            zoom = zoom,
-            expanded = showZoom,
-            onExpandedChange = { showZoom = it },
-            onZoomChange = { z ->
+        // Zoom + fullscreen controls — fixed size, OUTSIDE the zoomed layer so they never scale with
+        // the preview.
+        Row(
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            fun setZoom(z: Float) {
                 zoom = z.coerceIn(1f, PanelLayoutPrefs.MAX_ZOOM)
                 if (zoom <= 1f) { panX = 0f; panY = 0f } else clampPan()
-            },
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-        )
+            }
+            IconButton(onClick = { setZoom(zoom - PanelLayoutPrefs.ZOOM_STEP) }, enabled = zoom > 1f) {
+                Icon(Icons.Filled.ZoomOut, contentDescription = "Zoom out", tint = if (zoom > 1f) White else Neutral500)
+            }
+            IconButton(onClick = { setZoom(zoom + PanelLayoutPrefs.ZOOM_STEP) }, enabled = zoom < PanelLayoutPrefs.MAX_ZOOM) {
+                Icon(Icons.Filled.ZoomIn, contentDescription = "Zoom in", tint = if (zoom < PanelLayoutPrefs.MAX_ZOOM) White else Neutral500)
+            }
+            PreviewZoomControl(
+                zoom = zoom,
+                expanded = showZoom,
+                onExpandedChange = { showZoom = it },
+                onZoomChange = ::setZoom,
+            )
+            if (onToggleFullscreen != null) {
+                IconButton(onClick = onToggleFullscreen) {
+                    Icon(
+                        if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        contentDescription = if (isFullscreen) "Exit full screen" else "Full screen",
+                        tint = White,
+                    )
+                }
+            }
+        }
     }
 }
 

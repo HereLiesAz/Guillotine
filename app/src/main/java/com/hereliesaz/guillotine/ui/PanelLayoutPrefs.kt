@@ -21,6 +21,8 @@ object PanelLayoutPrefs {
     const val DEFAULT_TALL = 0.5f
     const val DEFAULT_ZOOM = 1f // 1x = fit-to-view (the floor: the preview never zooms out past fit)
     const val MAX_ZOOM = 5f
+    /** Step size for the explicit Zoom In/Out buttons (vs. the popup slider's continuous drag). */
+    const val ZOOM_STEP = 0.25f
 
     /** [orientationOverride]: true = force side-by-side, false = force stacked, null = follow screen. */
     data class Layout(

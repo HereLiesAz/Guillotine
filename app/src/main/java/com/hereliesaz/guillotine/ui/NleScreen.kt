@@ -264,6 +264,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showNewProjectConfirm by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
+    // Full-screen "cinema mode" preview — hides the timeline/side panels behind a full-bleed preview
+    // plus a floating bottom toolbar (see FullscreenPreviewOverlay). Overlays the normal editor
+    // content rather than replacing it, so playback/editor state stays live underneath.
+    var fullscreenPreview by remember { mutableStateOf(false) }
     // Settings & state for non-editor overlays (Help, Faq, Upgrades, Store).
     var showHelp by remember { mutableStateOf(false) }
     var showTutorial by remember { mutableStateOf(false) }
@@ -568,6 +572,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                             cropMode = state.tool == EditorTool.CROP,
                             showSafeZones = state.tool == EditorTool.CROP,
                             onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                            onToggleFullscreen = { fullscreenPreview = true },
                         )
                         TransportControls(vm, state)
                     }
@@ -602,6 +607,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                             cropMode = state.tool == EditorTool.CROP,
                             showSafeZones = state.tool == EditorTool.CROP,
                             onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
+                            onToggleFullscreen = { fullscreenPreview = true },
                         )
                         TransportControls(vm, state)
                     }
@@ -710,6 +716,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onDismiss = { showAiSettings = false },
             restrictToTabs = listOf(0, 1, 2),
         )
+    }
+
+    // Overlays the whole editor rather than replacing it (no early return), so playback/AI-assistant
+    // state stays live underneath — exiting fullscreen just stops drawing this on top.
+    if (fullscreenPreview) {
+        FullscreenPreviewOverlay(vm, state, onExit = { fullscreenPreview = false })
     }
 
     }

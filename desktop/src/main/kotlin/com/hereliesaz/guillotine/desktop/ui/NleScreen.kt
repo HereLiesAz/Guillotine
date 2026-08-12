@@ -194,6 +194,10 @@ fun NleScreen(
     var showNewProjectConfirm by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
+    // Full-screen "cinema mode" preview — hides the timeline/side panels behind a full-bleed preview
+    // plus a floating bottom toolbar (see FullscreenPreviewOverlay). Overlays the normal editor
+    // content rather than replacing it, so playback/editor state stays live underneath.
+    var fullscreenPreview by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var showTutorial by remember { mutableStateOf(false) }
     var showFaq by remember { mutableStateOf(false) }
@@ -401,7 +405,7 @@ fun NleScreen(
         // timeline space.
         var previewWeight by remember { mutableFloatStateOf(0.6f) }
         Column(Modifier.weight(previewWeight).fillMaxWidth()) {
-            VideoPreview(vm, Modifier.weight(1f).fillMaxWidth())
+            VideoPreview(vm, Modifier.weight(1f).fillMaxWidth(), onToggleFullscreen = { fullscreenPreview = true })
             TransportControls(vm, state)
         }
         DraggableSplitDivider(
@@ -525,6 +529,12 @@ fun NleScreen(
                 }
             },
         )
+    }
+
+    // Overlays the whole editor rather than replacing it (no early return), so playback/AI-assistant
+    // state stays live underneath — exiting fullscreen just stops drawing this on top.
+    if (fullscreenPreview) {
+        FullscreenPreviewOverlay(vm, state, onExit = { fullscreenPreview = false })
     }
 
     }

@@ -2,6 +2,29 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Explicit preview zoom in/out buttons + a full-screen "cinema mode" (2026-08-12)
+
+Requested directly (not from `docs/UX_ACTION_TREE.md`): the preview's zoom was previously reachable
+only via a magnifier button that opened a popup slider (drag-to-approximate, no discrete steps) or a
+pinch gesture in crop mode. Added:
+
+- **Zoom In/Out buttons** next to the existing zoom popup, on both platforms — discrete ±0.25x steps
+  (`PanelLayoutPrefs.ZOOM_STEP` on Android; a local `ZOOM_STEP` const on desktop, which has no
+  small-key-value prefs store yet so its zoom/pan don't survive an app restart the way Android's do —
+  a real, if minor, cross-platform difference, not a faked capability).
+- **Full-screen "cinema mode"** (`FullscreenPreviewOverlay`, new file on both platforms): a Fullscreen
+  button in the preview's corner overlays the whole editor with a full-bleed preview. Since the real
+  multi-track timeline is hidden, a floating bottom toolbar carries transport (start/play-pause/end),
+  Split-at-playhead, Undo/Redo, and Exit, plus a `ScrubBar` — every clip across every track flattened
+  onto one single-lane bar (colored by type) with a playhead line, tap/drag anywhere to seek. This is
+  deliberately a "keep watching, glance-scrub" control, not a second copy of the real timeline.
+- Implemented as an **overlay, not a navigation/early-return** — the normal editor Composable keeps
+  running underneath (so playback, the AI assistant, and the embedded MCP server all stay live while
+  in fullscreen); toggling it just stops/starts drawing the overlay on top.
+
+Not visually exercised live (no Android device/emulator or a desktop display in this environment) —
+verified only by compiling on both platforms.
+
 ## "Render Loop Region Only" shipped; "Smart Render" passthrough deferred with reasons (2026-08-12)
 
 Vegas J.4/J.5: a Render modal option to export only the current loop region, and a "Smart Render"
