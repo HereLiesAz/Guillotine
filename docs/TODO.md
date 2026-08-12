@@ -2,6 +2,38 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Beat markers and a LUFS meter surfaced directly, not just through the assistant (2026-08-12)
+
+Both `BeatAnalyzer` (spectral-flux onset detection + autocorrelation tempo) and `Loudness`
+(ITU-R BS.1770 K-weighted LUFS) already existed as real, tested on-device DSP — but were reachable
+**only** through the assistant's MCP tools (`get_beat_map`, `normalize_loudness`), with no UI path a
+user could trigger directly and no visual result on the timeline. This closes that gap:
+
+- **Beat markers**: "Detect beats" in the Audio tool (both platforms) decodes the clip's audio
+  on-device (`PcmDecoder`/`DesktopMediaDecoder`) and runs `BeatAnalyzer`, caching the result in a new
+  `EditorUiState.beatMaps` map. `Timeline.kt`'s `ClipView` draws it as thin ticks along the clip (taller/
+  brighter at downbeats) — the same rendering layer the keyframe envelopes already draw on. Beat
+  timestamps are source-media ms; converting to a timeline x assumes constant speed across the clip
+  (a speed-keyframed clip's markers are an approximation, not an exact inverse of the speed curve).
+- **LUFS meter**: "Measure" next to the existing Normalize toggle in the Audio tool runs the same
+  `Loudness.measureLufs` the toggle's gain already used internally, now showing the number
+  (`EditorUiState.lufsByClip`) instead of only applying it blindly.
+
+Both are cached, on-demand analysis, not live meters — decoding+analyzing takes real time, so this
+isn't a per-frame VU meter, it's "press a button, see the number/markers," same interaction shape as
+the assistant tools they're now a direct UI path onto. Both caches are transient view state (like
+`soloedTrackIds`/`selectedClipIds`): derived from a clip's audio, not an edit, so they don't enter
+`Document`/undo history and don't need persisting across a project reload.
+
+**Deliberately not addressed, and why:** live mic recording and DAW-style bus routing (send levels to
+an aux Reverb/Delay bus) — there is no existing audio-input/recording pipeline anywhere in the codebase
+to build a "record while monitoring" feature on top of, and bus routing needs a mixing-graph concept
+Guillotine doesn't have (tracks currently sum flat into the master output, no aux sends). Both are
+real, separate features, not a small addition to this one.
+
+Covered by new `TimelineMechanicsTest` cases: `setBeatMap`/`clearBeatMap`/`setLufs` update the
+transient caches without touching the undoable `Document`.
+
 ## Envelope/automation gaps closed: Hold curves, freehand drawing, typed values (2026-08-12)
 
 Auditing `docs/UX_ACTION_TREE.md`'s Branch G (Envelope System) against the codebase found most of it

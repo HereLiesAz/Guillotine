@@ -285,4 +285,27 @@ class TimelineMechanicsTest {
         val values = vm.uiState.value.document.clips.single().keyframes.map { it.value }
         assertEquals(listOf(0f, 1f), values) // OPACITY's uiRange is 0f..1f
     }
+
+    // ---- beat map + loudness caches: derived data, transient, not part of the undoable Document ----
+
+    @Test
+    fun `setBeatMap and clearBeatMap update the transient cache without touching the Document`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        val beforeDoc = vm.uiState.value.document
+        val map = com.hereliesaz.guillotine.model.BeatMap(bpm = 120f, beatsMs = listOf(0L, 500L), downbeatsMs = listOf(0L), onsetsMs = emptyList())
+        vm.setBeatMap("c1", map)
+        assertEquals(map, vm.uiState.value.beatMaps["c1"])
+        assertEquals(beforeDoc, vm.uiState.value.document) // no undo-history mutation
+        vm.clearBeatMap("c1")
+        assertTrue(vm.uiState.value.beatMaps.isEmpty())
+    }
+
+    @Test
+    fun `setLufs caches per clip without touching the Document`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        val beforeDoc = vm.uiState.value.document
+        vm.setLufs("c1", -14.2)
+        assertEquals(-14.2, vm.uiState.value.lufsByClip["c1"]!!, 0.0001)
+        assertEquals(beforeDoc, vm.uiState.value.document)
+    }
 }

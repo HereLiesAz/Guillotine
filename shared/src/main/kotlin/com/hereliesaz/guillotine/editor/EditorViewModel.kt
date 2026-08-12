@@ -85,6 +85,19 @@ data class EditorUiState(
      * Transient view state, not part of the undoable [Document] (never exported); see [toggleTrackSolo].
      */
     val soloedTrackIds: Set<String> = emptySet(),
+    /**
+     * On-device rhythm analysis per audio clip, keyed by clip id — a cache of derived data (re-
+     * computable from the clip's audio), not part of the undoable [Document]: analyzing a clip isn't an
+     * edit, so it doesn't belong in export/undo history. Populated by the "Detect beats" action in the
+     * Audio tool; consumed by the timeline's beat-marker overlay. See [BeatMap].
+     */
+    val beatMaps: Map<String, com.hereliesaz.guillotine.model.BeatMap> = emptyMap(),
+    /**
+     * On-device integrated loudness (LUFS) per audio clip, keyed by clip id — the same "derived cache,
+     * not an edit" reasoning as [beatMaps]. Populated by the "Measure loudness" action in the Audio
+     * tool; shown as a readout next to the clip's Normalize toggle.
+     */
+    val lufsByClip: Map<String, Double> = emptyMap(),
 ) {
     val selectedClipId: String? get() = selectedClipIds.singleOrNull()
     val selectedClips: List<TimelineClip>
@@ -1474,6 +1487,24 @@ open class EditorViewModel {
             val solo = st.soloedTrackIds
             st.copy(soloedTrackIds = if (trackId in solo) solo - trackId else solo + trackId)
         }
+    }
+
+    /**
+     * Cache a clip's on-device rhythm analysis (see [EditorUiState.beatMaps]). The decode + analysis
+     * itself is platform-specific (Android's `PcmDecoder`, desktop's `DesktopMediaDecoder`), so the UI
+     * layer runs it off the main thread and hands the result here — this just stores it, transiently.
+     */
+    fun setBeatMap(clipId: String, beatMap: com.hereliesaz.guillotine.model.BeatMap) {
+        _uiState.update { it.copy(beatMaps = it.beatMaps + (clipId to beatMap)) }
+    }
+
+    fun clearBeatMap(clipId: String) {
+        _uiState.update { it.copy(beatMaps = it.beatMaps - clipId) }
+    }
+
+    /** Cache a clip's measured integrated loudness in LUFS (see [EditorUiState.lufsByClip]). */
+    fun setLufs(clipId: String, lufs: Double) {
+        _uiState.update { it.copy(lufsByClip = it.lufsByClip + (clipId to lufs)) }
     }
 
     /** Create an empty caption/text clip on [trackId] at the playhead, ready to edit. */

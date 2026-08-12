@@ -1069,6 +1069,28 @@ private fun ClipView(
             if (clip.type == ClipType.AUDIO) ClipWaveform(m.uri)
             else ClipThumbnail(m.uri, m.kind, clip.trimStartMs)
         }
+        // Beat markers, once "Detect beats" (AudioToolInline) has analyzed this clip — thin ticks at
+        // each detected beat, brighter at downbeats. Beat timestamps are in SOURCE media ms; converted
+        // to a timeline x assuming constant speed across the clip (a speed-keyframed clip's markers are
+        // an approximation, same tradeoff as the rest of this canvas's visual aids).
+        state.beatMaps[clip.id]?.let { beatMap ->
+            val speed = clip.filters.speed.takeIf { it > 0.01f } ?: 1f
+            Canvas(Modifier.fillMaxSize()) {
+                val downbeats = beatMap.downbeatsMs.toHashSet()
+                for (beatMs in beatMap.beatsMs) {
+                    val relSourceMs = beatMs - clip.trimStartMs
+                    if (relSourceMs < 0 || relSourceMs > clip.durationMs * speed) continue
+                    val x = (relSourceMs / speed) / 1000f * pps
+                    val strong = beatMs in downbeats
+                    drawLine(
+                        color = White.copy(alpha = if (strong) 0.8f else 0.4f),
+                        start = Offset(x, 0f),
+                        end = Offset(x, size.height * if (strong) 1f else 0.4f),
+                        strokeWidth = if (strong) 2f else 1f,
+                    )
+                }
+            }
+        }
         // Text clips show their caption text.
         if (clip.type == ClipType.TEXT) {
             Text(

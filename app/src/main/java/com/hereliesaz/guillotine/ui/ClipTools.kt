@@ -34,6 +34,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -312,6 +313,93 @@ fun AudioToolInline(vm: EditorViewModel, clip: TimelineClip) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = f.normalize, onCheckedChange = { c -> vm.updateClipFilters(clip.id) { it.copy(normalize = c) } })
             Text("Normalize audio", color = Neutral400, fontSize = 12.sp)
+        }
+        LoudnessMeterRow(vm, clip)
+        BeatDetectRow(vm, clip)
+    }
+}
+
+/**
+ * On-device integrated loudness (LUFS) readout for the clip — the same [com.hereliesaz.guillotine.ai.Loudness]
+ * math the Normalize toggle already applies as a gain, now made visible instead of only felt. Measured
+ * on demand (not live-metered) since it requires decoding the clip's audio, same tradeoff as beat
+ * detection below.
+ */
+@Composable
+private fun LoudnessMeterRow(vm: EditorViewModel, clip: TimelineClip) {
+    val context = LocalContext.current
+    val state by vm.uiState.collectAsState()
+    val media = state.document.mediaFor(clip)
+    val lufs = state.lufsByClip[clip.id]
+    var busy by remember(clip.id) { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            if (lufs != null) "Loudness: ${"%.1f".format(lufs)} LUFS" else "Loudness: —",
+            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (busy) "Measuring…" else "Measure",
+            color = Color(0xFF8AB4F8), fontSize = 12.sp,
+            modifier = Modifier
+                .clickable(enabled = !busy && media != null) {
+                    val uri = media?.uri ?: return@clickable
+                    busy = true
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val pcm = com.hereliesaz.guillotine.ai.PcmDecoder.decode(context, android.net.Uri.parse(uri))
+                        val value = pcm?.let { com.hereliesaz.guillotine.ai.Loudness.measureLufs(it.samples, it.sampleRate) }
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            busy = false
+                            if (value != null) vm.setLufs(clip.id, value)
+                        }
+                    }
+                }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/**
+ * On-device beat/tempo detection for the clip, feeding the timeline's beat-marker overlay
+ * ([com.hereliesaz.guillotine.model.BeatMap]) — the same analysis the assistant's `get_beat_map` tool
+ * already used internally, now reachable directly so the user can see rhythm markers without asking it.
+ */
+@Composable
+private fun BeatDetectRow(vm: EditorViewModel, clip: TimelineClip) {
+    val context = LocalContext.current
+    val state by vm.uiState.collectAsState()
+    val media = state.document.mediaFor(clip)
+    val beatMap = state.beatMaps[clip.id]
+    var busy by remember(clip.id) { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            if (beatMap != null) "Beats: ${"%.0f".format(beatMap.bpm)} BPM, ${beatMap.beatsMs.size} beats" else "Beats: —",
+            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (busy) "Analyzing…" else "Detect beats",
+            color = Color(0xFF8AB4F8), fontSize = 12.sp,
+            modifier = Modifier
+                .clickable(enabled = !busy && media != null) {
+                    val uri = media?.uri ?: return@clickable
+                    busy = true
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val pcm = com.hereliesaz.guillotine.ai.PcmDecoder.decode(context, android.net.Uri.parse(uri))
+                        val map = pcm?.let { com.hereliesaz.guillotine.ai.BeatAnalyzer.analyze(it.samples, it.sampleRate) }
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            busy = false
+                            if (map != null) vm.setBeatMap(clip.id, map)
+                        }
+                    }
+                }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        if (beatMap != null) {
+            Text(
+                "Clear", color = Neutral500, fontSize = 12.sp,
+                modifier = Modifier.clickable { vm.clearBeatMap(clip.id) }.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
     }
 }
