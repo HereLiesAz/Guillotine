@@ -76,6 +76,10 @@ data class EditorUiState(
     val exportPhase: String? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
+    /** Magnetic snapping to clip edges/playhead/grid while dragging or trimming. */
+    val snapEnabled: Boolean = true,
+    /** When true, deleting a clip closes the gap it leaves on its own track (ripple delete). */
+    val autoRippleEnabled: Boolean = false,
 ) {
     val selectedClipId: String? get() = selectedClipIds.singleOrNull()
     val selectedClips: List<TimelineClip>
@@ -403,8 +407,50 @@ open class EditorViewModel {
     fun deleteSelected() {
         val ids = _uiState.value.selectedClipIds.toSet()
         if (ids.isEmpty()) return
-        mutateDocument { doc -> doc.copy(clips = doc.clips.filter { it.id !in ids }) }
+        deleteClipsRippled(ids)
         _uiState.update { it.copy(selectedClipIds = emptyList()) }
+    }
+
+    /** Toggle Auto-Ripple: from here on, deleting a clip closes the gap on its own track. */
+    fun toggleAutoRipple() {
+        _uiState.update { it.copy(autoRippleEnabled = !it.autoRippleEnabled) }
+    }
+
+    /** Toggle magnetic snapping (edges/playhead/grid) while dragging or trimming a clip. */
+    fun toggleSnap() {
+        _uiState.update { it.copy(snapEnabled = !it.snapEnabled) }
+    }
+
+    /**
+     * Removes [ids], and — only when [EditorUiState.autoRippleEnabled] is on — closes the gap each
+     * removal leaves on its OWN track, one clip's own duration at a time. Unlike [rippleDeleteRange]
+     * (which ripples every track over one shared absolute span), this ripples only the track(s) the
+     * deleted clips actually occupied, since a delete's Auto-Ripple is a per-track operation in Vegas
+     * ("Affected Tracks" mode) — the other tracks' timing is untouched.
+     */
+    private fun deleteClipsRippled(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        val ripple = _uiState.value.autoRippleEnabled
+        mutateDocument { doc ->
+            if (!ripple) return@mutateDocument doc.copy(clips = doc.clips.filter { it.id !in ids })
+            val byTrack = doc.clips.filter { it.id in ids }.groupBy { it.trackId }
+            var clips = doc.clips.filter { it.id !in ids }
+            for ((trackId, removed) in byTrack) {
+                // Close each removed span on this track, earliest first, against positions already
+                // shifted by an earlier removal on the same track — so several deletions in one track
+                // ripple in sequence rather than each computing against the pre-delete layout.
+                for (r in removed.sortedBy { it.startTimeMs }) {
+                    clips = clips.map { c ->
+                        if (c.trackId == trackId && c.startTimeMs >= r.endTimeMs) {
+                            c.copy(startTimeMs = c.startTimeMs - r.durationMs)
+                        } else {
+                            c
+                        }
+                    }
+                }
+            }
+            doc.copy(clips = clips)
+        }
     }
 
     /** Bind every selected clip into one group (they then select/delete/edit together). */
@@ -943,13 +989,11 @@ open class EditorViewModel {
 
     /** Delete a single clip by id, including its linked shadow audio and any group members. */
     fun deleteClip(clipId: String) {
-        mutateDocument { doc ->
-            val c = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
-            val ids = expandGroups(doc, listOf(clipId)).toMutableSet()
-            doc.clips.firstOrNull { it.linkedClipId == clipId }?.let { ids.add(it.id) }
-            c.linkedClipId?.let { ids.add(it) }
-            doc.copy(clips = doc.clips.filter { it.id !in ids })
-        }
+        val c = document.clips.firstOrNull { it.id == clipId } ?: return
+        val ids = expandGroups(document, listOf(clipId)).toMutableSet()
+        document.clips.firstOrNull { it.linkedClipId == clipId }?.let { ids.add(it.id) }
+        c.linkedClipId?.let { ids.add(it) }
+        deleteClipsRippled(ids)
         _uiState.update { st -> st.copy(selectedClipIds = st.selectedClipIds.filter { id -> document.clips.any { it.id == id } }) }
         actionRecorder.record(RecordedAction("delete_clip", mapOf("clip_id" to clipId), "Delete clip"))
     }
@@ -1051,14 +1095,24 @@ open class EditorViewModel {
      * and any that fall before the new start are dropped. Bounded so trimStart >= 0 and
      * the clip keeps a minimum duration.
      */
-    fun trimClipStart(clipId: String, deltaMs: Long) {
+    /**
+     * [includeLinked] mirrors the delta onto this clip's linked waveform-shadow audio clip too — the
+     * default, so a video and its own sound stay aligned. Pass false for an independent (L/J-cut) trim
+     * of just this one clip, breaking that alignment on purpose.
+     */
+    fun trimClipStart(clipId: String, deltaMs: Long, includeLinked: Boolean = true) {
         mutateDocument { doc ->
             val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
             var d = deltaMs.coerceAtLeast(-clip.trimStartMs)
             d = d.coerceAtMost(clip.durationMs - MIN_CLIP_DURATION_MS)
             if (d == 0L) return@mutateDocument doc
-            // The clip's linked waveform shadow (its own audio) trims identically so they stay aligned.
-            val affected = setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
+            // The clip's linked waveform shadow (its own audio) trims identically so they stay aligned,
+            // unless this is a deliberate independent L/J-cut trim of just this one clip.
+            val affected = if (includeLinked) {
+                setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
+            } else {
+                setOf(clipId)
+            }
             doc.copy(clips = doc.clips.map {
                 if (it.id !in affected) it
                 else it.copy(
@@ -1076,7 +1130,8 @@ open class EditorViewModel {
      * Drag the RIGHT edge: change the clip's duration by [deltaMs]. Bounded to a
      * minimum duration and, for time-based media, to the remaining source length.
      */
-    fun trimClipEnd(clipId: String, deltaMs: Long) {
+    /** See [trimClipStart] for [includeLinked]. */
+    fun trimClipEnd(clipId: String, deltaMs: Long, includeLinked: Boolean = true) {
         mutateDocument { doc ->
             val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
             var d = deltaMs.coerceAtLeast(MIN_CLIP_DURATION_MS - clip.durationMs)
@@ -1086,8 +1141,13 @@ open class EditorViewModel {
                 d = d.coerceAtMost(maxDuration - clip.durationMs)
             }
             if (d == 0L) return@mutateDocument doc
-            // The clip's linked waveform shadow (its own audio) extends/shrinks identically.
-            val affected = setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
+            // The clip's linked waveform shadow (its own audio) extends/shrinks identically, unless this
+            // is a deliberate independent L/J-cut trim of just this one clip.
+            val affected = if (includeLinked) {
+                setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
+            } else {
+                setOf(clipId)
+            }
             doc.copy(clips = doc.clips.map {
                 if (it.id !in affected) it
                 else {
@@ -1097,6 +1157,126 @@ open class EditorViewModel {
             })
         }
         actionRecorder.record(RecordedAction("trim_end", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Trim end by ${deltaMs}ms"))
+    }
+
+    /**
+     * Slip edit: slide the source window [deltaMs] without moving the clip on the timeline or changing
+     * its duration — only [TimelineClip.trimStartMs] changes, so the clip shows a different part of the
+     * same source at the same timeline position/length. Bounded so the window stays within the source's
+     * own duration (unbounded for images, which have no fixed length).
+     */
+    fun slipClip(clipId: String, deltaMs: Long) {
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val media = doc.mediaFor(clip)
+            var d = deltaMs.coerceAtLeast(-clip.trimStartMs)
+            if (media != null && media.kind != com.hereliesaz.guillotine.model.MediaKind.IMAGE && media.durationMs > 0) {
+                val maxTrimStart = (media.durationMs - clip.durationMs).coerceAtLeast(0)
+                d = d.coerceAtMost(maxTrimStart - clip.trimStartMs)
+            }
+            if (d == 0L) return@mutateDocument doc
+            val affected = setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
+            doc.copy(clips = doc.clips.map { if (it.id in affected) it.copy(trimStartMs = it.trimStartMs + d) else it })
+        }
+        actionRecorder.record(RecordedAction("slip_clip", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Slip by ${deltaMs}ms"))
+    }
+
+    /**
+     * Slide edit: move [clipId] by [deltaMs] on the timeline without changing what it shows (its own
+     * [TimelineClip.trimStartMs]/[TimelineClip.durationMs] stay fixed) — instead, whichever immediate
+     * neighbor on the same track would otherwise end up overlapped is trimmed to make room: the clip
+     * before retreats its end, the clip after retreats its start, each exactly as far as this slide
+     * pushes into it. Neither neighbor ever grows to fill space the slide vacates — that space is left
+     * empty, matching a real slide edit. Bounded so neither neighbor shrinks below the minimum duration.
+     */
+    fun slideClip(clipId: String, deltaMs: Long) {
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val neighbors = doc.clips.filter { it.trackId == clip.trackId && it.type == clip.type && it.id != clipId }
+            val prev = neighbors.filter { it.startTimeMs <= clip.startTimeMs }.maxByOrNull { it.startTimeMs }
+            val next = neighbors.filter { it.startTimeMs >= clip.startTimeMs }.minByOrNull { it.startTimeMs }
+            var lo = -clip.startTimeMs
+            var hi = Long.MAX_VALUE / 2
+            if (prev != null) lo = maxOf(lo, MIN_CLIP_DURATION_MS - clip.startTimeMs + prev.startTimeMs)
+            if (next != null) hi = minOf(hi, next.startTimeMs + next.durationMs - clip.startTimeMs - clip.durationMs - MIN_CLIP_DURATION_MS)
+            val d = deltaMs.coerceIn(lo, maxOf(lo, hi))
+            if (d == 0L) return@mutateDocument doc
+            val movedIds = setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
+            doc.copy(clips = doc.clips.map { c ->
+                when {
+                    c.id in movedIds -> c.copy(startTimeMs = c.startTimeMs + d)
+                    prev != null && c.id == prev.id -> {
+                        val newDuration = (clip.startTimeMs + d - c.startTimeMs).coerceAtMost(c.durationMs)
+                        if (newDuration < c.durationMs) c.copy(durationMs = newDuration.coerceAtLeast(MIN_CLIP_DURATION_MS)) else c
+                    }
+                    next != null && c.id == next.id -> {
+                        val newStart = (clip.startTimeMs + clip.durationMs + d).coerceAtLeast(c.startTimeMs)
+                        val shrink = newStart - c.startTimeMs
+                        if (shrink > 0) {
+                            c.copy(
+                                startTimeMs = newStart,
+                                trimStartMs = c.trimStartMs + shrink,
+                                durationMs = (c.durationMs - shrink).coerceAtLeast(MIN_CLIP_DURATION_MS),
+                            )
+                        } else {
+                            c
+                        }
+                    }
+                    else -> c
+                }
+            })
+        }
+        actionRecorder.record(RecordedAction("slide_clip", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Slide by ${deltaMs}ms"))
+    }
+
+    /**
+     * Roll edit: move the cut point between two clips that share a boundary on the same track by
+     * [deltaMs] — [leftClipId]'s end and [rightClipId]'s start move together, so the combined span the
+     * two clips cover stays fixed while where one ends and the other begins shifts. Equivalent to
+     * [trimClipEnd] on [leftClipId] and [trimClipStart] on [rightClipId] with the same delta, bounded by
+     * whichever clip's own limits (minimum duration, source length) are tighter.
+     */
+    fun rollEdit(leftClipId: String, rightClipId: String, deltaMs: Long) {
+        val left = document.clips.firstOrNull { it.id == leftClipId } ?: return
+        val right = document.clips.firstOrNull { it.id == rightClipId } ?: return
+        // Computed up front (mirroring trimClipEnd's/trimClipStart's own internal clamps exactly) so the
+        // SAME delta is bounded once and applied to both sides — calling each with an unclamped delta
+        // and letting them independently re-clamp could apply a different amount to each side, breaking
+        // the roll's "combined span stays fixed" invariant.
+        val lo = maxOf(MIN_CLIP_DURATION_MS - left.durationMs, -right.trimStartMs)
+        var hi = minOf(right.durationMs - MIN_CLIP_DURATION_MS, Long.MAX_VALUE / 2)
+        val leftMedia = document.mediaFor(left)
+        if (leftMedia != null && leftMedia.kind != com.hereliesaz.guillotine.model.MediaKind.IMAGE && leftMedia.durationMs > 0) {
+            hi = minOf(hi, leftMedia.durationMs - left.trimStartMs - left.durationMs)
+        }
+        val d = deltaMs.coerceIn(lo, maxOf(lo, hi))
+        if (d == 0L) return
+        trimClipEnd(leftClipId, d)
+        trimClipStart(rightClipId, d)
+    }
+
+    /**
+     * Time-stretch: change [clipId]'s timeline duration to [newDurationMs] while keeping the total span
+     * of source media it consumes fixed — [ClipFilters.speed] is recomputed so the same source range now
+     * plays over the new duration (slower when stretched longer, faster when squeezed shorter), rather
+     * than showing more or less of the source the way [trimClipEnd] does. Bounded to
+     * [ClipFilters.speed]'s documented 0.1x–10x range.
+     */
+    fun timeStretchClip(clipId: String, newDurationMs: Long) {
+        mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            val nd = newDurationMs.coerceAtLeast(MIN_CLIP_DURATION_MS)
+            if (nd == clip.durationMs) return@mutateDocument doc
+            val sourceSpanMs = clip.durationMs.toDouble() * clip.filters.speed
+            val newSpeed = (sourceSpanMs / nd).toFloat().coerceIn(0.1f, 10f)
+            val affected = setOf(clipId) + doc.clips.filter { it.linkedClipId == clipId }.map { it.id }
+            doc.copy(clips = doc.clips.map {
+                if (it.id in affected) it.copy(durationMs = nd, filters = it.filters.copy(speed = newSpeed)) else it
+            })
+        }
+        actionRecorder.record(
+            RecordedAction("time_stretch_clip", mapOf("clip_id" to clipId, "new_duration_ms" to newDurationMs), "Time-stretch to ${newDurationMs}ms"),
+        )
     }
 
     /** Next non-colliding track id for [prefix] ("V"/"A"): one past the max existing numeric suffix
