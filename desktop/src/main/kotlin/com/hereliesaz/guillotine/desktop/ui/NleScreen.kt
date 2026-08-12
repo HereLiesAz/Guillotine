@@ -184,6 +184,10 @@ fun NleScreen(
     var showAiSettings by remember { mutableStateOf(false) }
     var showStore by remember { mutableStateOf(false) }
     var showExtensionsManager by remember { mutableStateOf(false) }
+    // Double-clicking the "X" over two already-overlapping (auto-crossfading) clips on the timeline
+    // opens a transition picker for this pair; null when no picker is showing.
+    var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var transitionSwapBusy by remember { mutableStateOf(false) }
     var showAiComparison by remember { mutableStateOf(false) }
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -286,9 +290,14 @@ fun NleScreen(
     val onTranscribe: (CaptionStyle) -> Unit = onTranscribe@{ style ->
         val clip = vm.uiState.value.selectedClips.singleOrNull() ?: return@onTranscribe
         val media = vm.uiState.value.document.mediaFor(clip) ?: return@onTranscribe
-        val model = System.getProperty("user.home") + "/.azphalt/packages/com.azphalt.model.vosk/assets/vosk-model"
-        if (!java.io.File(model).exists()) {
-            vm.setProcessing(false, "Vosk transcription model missing. Please install it from the AI Storefront.")
+        // Was a hardcoded path assuming one specific azphalt package id (com.azphalt.model.vosk) that
+        // has never existed in the live catalog — a total dead end regardless of what the user actually
+        // configured. ModelResolver.resolve("speechModelPath") is the real, user-settable Vosk path
+        // (Settings → Transcription), the same one DesktopMcpTools.transcribeClip() (the MCP tool this
+        // button duplicates) already correctly uses.
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("speechModelPath")
+        if (model.isBlank() || !java.io.File(model).exists()) {
+            vm.setProcessing(false, "No on-device speech model set. Set a Vosk model folder in Settings → Transcription.")
             return@onTranscribe
         }
         vm.setProcessing(true, null)
@@ -413,7 +422,11 @@ fun NleScreen(
             onImport = { importTargetTrack = null; importLauncher() },
             onHelp = { showHelp = true },
         )
-        TimelinePanel(vm, state, onImportToTrack, onCreateOnTrack, Modifier.weight(1f - previewWeight).fillMaxWidth())
+        TimelinePanel(
+            vm, state, onImportToTrack, onCreateOnTrack,
+            Modifier.weight(1f - previewWeight).fillMaxWidth(),
+            onSwapTransition = { from, to -> pendingTransitionSwap = from to to },
+        )
         } // editor Column
 
         // Integrated activity log (AI chat, running process, progress, errors) -- anchored to
@@ -468,6 +481,50 @@ fun NleScreen(
 
     if (showExtensionsManager) {
         DesktopExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
+    }
+
+    // Swap the free, instant crossfade an overlap already produces for a named FFmpeg xfade
+    // transition — a deliberate, real bake (needs an ffmpeg binary configured, takes real time), not
+    // something that happens automatically just from overlapping two clips.
+    pendingTransitionSwap?.let { (fromId, toId) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { if (!transitionSwapBusy) pendingTransitionSwap = null },
+            title = { androidx.compose.material3.Text(if (transitionSwapBusy) "Building transition…" else "Swap crossfade for…") },
+            text = {
+                if (transitionSwapBusy) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                } else {
+                    Column {
+                        com.hereliesaz.guillotine.model.TransitionCatalog.TYPES.forEach { (type, label) ->
+                            androidx.compose.material3.TextButton(onClick = {
+                                transitionSwapBusy = true
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            mcpTools.call(
+                                                "apply_transition",
+                                                org.json.JSONObject()
+                                                    .put("from_clip_id", fromId)
+                                                    .put("to_clip_id", toId)
+                                                    .put("type", type),
+                                            )
+                                        }
+                                    }
+                                    transitionSwapBusy = false
+                                    pendingTransitionSwap = null
+                                    result.onFailure { vm.setProcessing(false, it.message ?: "Couldn't build the transition.") }
+                                }
+                            }) { androidx.compose.material3.Text(label) }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (!transitionSwapBusy) {
+                    androidx.compose.material3.TextButton(onClick = { pendingTransitionSwap = null }) { androidx.compose.material3.Text("Cancel") }
+                }
+            },
+        )
     }
 
     }

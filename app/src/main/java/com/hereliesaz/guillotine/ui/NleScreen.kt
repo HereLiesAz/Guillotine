@@ -271,6 +271,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showAdFree by remember { mutableStateOf(false) }
     var showAzphaltStore by remember { mutableStateOf(false) }
     var showExtensionsManager by remember { mutableStateOf(false) }
+    // Double-tapping the "X" over two already-overlapping (auto-crossfading) clips on the timeline
+    // opens a transition picker for this pair; null when no picker is showing.
+    var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var transitionSwapBusy by remember { mutableStateOf(false) }
     
     // UMP consent form state.
     var canRequestAds by remember { mutableStateOf(false) }  
@@ -639,11 +643,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
             
             TimelinePanel(
-                vm, state, onImportToTrack, onCreateOnTrack, 
+                vm, state, onImportToTrack, onCreateOnTrack,
                 androidx.compose.ui.Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .animateContentSize()
+                    .animateContentSize(),
+                onSwapTransition = { from, to -> pendingTransitionSwap = from to to },
             )
         }
 
@@ -838,6 +843,51 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
     if (showExtensionsManager) {
         ExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
+    }
+    // Swap the free, instant crossfade an overlap already produces for a named FFmpeg xfade
+    // transition — a deliberate, real bake (needs an ffmpeg binary configured, takes real time), not
+    // something that happens automatically just from overlapping two clips.
+    pendingTransitionSwap?.let { (fromId, toId) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { if (!transitionSwapBusy) pendingTransitionSwap = null },
+            title = { androidx.compose.material3.Text(if (transitionSwapBusy) "Building transition…" else "Swap crossfade for…") },
+            text = {
+                if (transitionSwapBusy) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                } else {
+                    androidx.compose.foundation.layout.Column {
+                        com.hereliesaz.guillotine.model.TransitionCatalog.TYPES.forEach { (type, label) ->
+                            androidx.compose.material3.TextButton(onClick = {
+                                transitionSwapBusy = true
+                                scope.launch {
+                                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        runCatching {
+                                            sharedMcpTools.call(
+                                                "apply_transition",
+                                                org.json.JSONObject()
+                                                    .put("from_clip_id", fromId)
+                                                    .put("to_clip_id", toId)
+                                                    .put("type", type),
+                                            )
+                                        }
+                                    }
+                                    transitionSwapBusy = false
+                                    pendingTransitionSwap = null
+                                    result.onFailure {
+                                        android.widget.Toast.makeText(context, it.message ?: "Couldn't build the transition.", android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }) { androidx.compose.material3.Text(label) }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (!transitionSwapBusy) {
+                    androidx.compose.material3.TextButton(onClick = { pendingTransitionSwap = null }) { androidx.compose.material3.Text("Cancel") }
+                }
+            },
+        )
     }
     // A package handed to Guillotine from outside — a .azp opened from a web-store download, a file
     // manager or a share sheet, or an azphalt://install deep link naming one to fetch. Same

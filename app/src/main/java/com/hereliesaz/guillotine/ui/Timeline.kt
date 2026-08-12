@@ -117,9 +117,10 @@ fun TimelinePanel(
     onImportToTrack: (String) -> Unit,
     onCreateOnTrack: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onSwapTransition: (fromClipId: String, toClipId: String) -> Unit = { _, _ -> },
 ) {
     Column(modifier = modifier.background(Neutral900)) {
-        TimelineLanes(vm, state, onImportToTrack, onCreateOnTrack, modifier = Modifier.fillMaxSize())
+        TimelineLanes(vm, state, onImportToTrack, onCreateOnTrack, onSwapTransition, modifier = Modifier.fillMaxSize())
     }
 }
 
@@ -129,6 +130,7 @@ private fun TimelineLanes(
     state: EditorUiState,
     onImportToTrack: (String) -> Unit,
     onCreateOnTrack: (String) -> Unit,
+    onSwapTransition: (fromClipId: String, toClipId: String) -> Unit,
     modifier: Modifier,
 ) {
     val density = LocalDensity.current
@@ -351,10 +353,10 @@ private fun TimelineLanes(
                         },
                 ) {
                     state.document.videoTracks.forEach { trackId ->
-                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
+                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag, { groupDrag = it }, onSwapTransition)
                     }
                     state.document.audioTracks.forEach { trackId ->
-                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag) { groupDrag = it }
+                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag, { groupDrag = it }, onSwapTransition)
                     }
                 }
             }
@@ -656,6 +658,7 @@ private fun Lane(
     msToDp: (Long) -> androidx.compose.ui.unit.Dp,
     groupDrag: GroupDrag?,
     onGroupDrag: (GroupDrag?) -> Unit,
+    onSwapTransition: (fromClipId: String, toClipId: String) -> Unit,
 ) {
     val clips = state.document.clips.filter { it.trackId == trackId }
     // While a drag is in flight, lift the lane containing the grabbed clip(s) above sibling lanes:
@@ -676,6 +679,55 @@ private fun Lane(
     ) {
         clips.forEach { clip ->
             ClipView(vm, state, clip, pps, msToDp, groupDrag, onGroupDrag)
+        }
+        // Two clips already overlapping on this track are already an automatic crossfade at
+        // playback/export time (PreviewPlayer/Exporter fade the outgoing clip out as the incoming
+        // one fades in, purely from the overlap span) — this is the visual feedback for that, plus a
+        // way to swap the plain crossfade for a named transition. Adjacent-sorted so only genuinely
+        // touching/overlapping pairs get the marker, not every clip against every other.
+        val sorted = clips.sortedBy { it.startTimeMs }
+        for (i in 0 until sorted.size - 1) {
+            val a = sorted[i]
+            val b = sorted[i + 1]
+            if (a.endTimeMs > b.startTimeMs) {
+                CrossfadeOverlapMarker(a, b, pps, msToDp) { onSwapTransition(a.id, b.id) }
+            }
+        }
+    }
+}
+
+/**
+ * The "X" over an already-overlapping clip pair, positioned at the overlap span. Double-tap opens
+ * [onSwapTransition]'s transition picker (see [NleScreen]'s pendingTransitionSwap dialog) — the plain
+ * crossfade this overlap already produces is free and instant; swapping it for a named transition
+ * bakes a new clip via `apply_transition` (FFmpeg `xfade`), which needs an ffmpeg binary configured
+ * and takes real time, so it's a deliberate action, not something that happens just by overlapping.
+ */
+@Composable
+private fun CrossfadeOverlapMarker(
+    a: TimelineClip,
+    b: TimelineClip,
+    pps: Float,
+    msToDp: (Long) -> androidx.compose.ui.unit.Dp,
+    onSwapTransition: () -> Unit,
+) {
+    val density = LocalDensity.current
+    val overlapStartPx = with(density) { msToDp(b.startTimeMs).toPx() }
+    val overlapWidthPx = with(density) { (msToDp(a.endTimeMs).toPx() - overlapStartPx).coerceAtLeast(1f) }
+    Box(
+        Modifier
+            .offset { androidx.compose.ui.unit.IntOffset(overlapStartPx.roundToInt(), 0) }
+            .width(with(density) { overlapWidthPx.toDp() })
+            .fillMaxHeight()
+            .zIndex(2f)
+            .pointerInput(a.id, b.id) {
+                detectTapGestures(onDoubleTap = { onSwapTransition() })
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 2.dp.toPx()
+            drawLine(White.copy(alpha = 0.85f), Offset(0f, 0f), Offset(size.width, size.height), strokeWidth = stroke)
+            drawLine(White.copy(alpha = 0.85f), Offset(size.width, 0f), Offset(0f, size.height), strokeWidth = stroke)
         }
     }
 }
