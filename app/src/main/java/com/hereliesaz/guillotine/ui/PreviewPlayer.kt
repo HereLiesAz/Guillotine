@@ -108,7 +108,7 @@ fun PreviewPlayer(
 
     val now = state.currentTimeMs
     // Disabled/hidden tracks drop out entirely.
-    val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
+    val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
 
     // Audio wiring is per-track (see AudioTrackLayer): each audio track owns its own ExoPlayer
     // and the tracks mix through Android's audio layer, so parallel audio (music + voiceover, etc.)

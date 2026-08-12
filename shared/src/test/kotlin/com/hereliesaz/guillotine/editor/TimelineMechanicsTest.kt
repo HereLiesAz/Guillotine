@@ -193,4 +193,52 @@ class TimelineMechanicsTest {
         vm.toggleSnap()
         assertTrue(!vm.uiState.value.snapEnabled)
     }
+
+    // ---- track solo ----
+
+    private fun vmWithTracks(videoTracks: List<String>, vararg clips: TimelineClip): EditorViewModel {
+        val vm = EditorViewModel()
+        vm.loadDocument(Document(mediaItems = listOf(media), clips = clips.toList(), videoTracks = videoTracks, audioTracks = emptyList()))
+        return vm
+    }
+
+    @Test
+    fun `solo hides every other track from preview but export is unaffected`() {
+        val vm = vmWithTracks(
+            listOf("V1", "V2"),
+            clip("v1", "V1", 0, 0, 1000),
+            clip("v2", "V2", 0, 0, 1000),
+        )
+        vm.toggleTrackSolo("V1")
+        val st = vm.uiState.value
+        assertTrue("V1" !in st.effectivePreviewDisabledTrackIds)
+        assertTrue("V2" in st.effectivePreviewDisabledTrackIds)
+        // Export reads Document.disabledTrackIds directly, never the UI-only solo set.
+        assertTrue(st.document.disabledTrackIds.isEmpty())
+    }
+
+    @Test
+    fun `solo is additive and empty when nothing is soloed`() {
+        val vm = vmWithTracks(
+            listOf("V1", "V2"),
+            clip("v1", "V1", 0, 0, 1000),
+            clip("v2", "V2", 0, 0, 1000),
+        )
+        assertTrue(vm.uiState.value.effectivePreviewDisabledTrackIds.isEmpty())
+        vm.toggleTrackSolo("V1")
+        vm.toggleTrackSolo("V2")
+        assertTrue(vm.uiState.value.effectivePreviewDisabledTrackIds.isEmpty()) // both soloed = same as none
+        vm.toggleTrackSolo("V1")
+        assertEquals(setOf("V1"), vm.uiState.value.effectivePreviewDisabledTrackIds) // only V2 left soloed
+    }
+
+    @Test
+    fun `track name and color are independently settable`() {
+        val vm = vmWith(clip("v1", "V1", 0, 0, 1000))
+        vm.setTrackName("V1", "Interview")
+        vm.setTrackColor("V1", "#FF8800")
+        val ts = vm.uiState.value.document.trackSettingsFor("V1")
+        assertEquals("Interview", ts.name)
+        assertEquals("#FF8800", ts.colorHex)
+    }
 }

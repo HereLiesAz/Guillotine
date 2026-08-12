@@ -25,15 +25,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -476,22 +479,29 @@ private fun TrackHeader(
 ) {
     var open by remember { mutableStateOf(false) }
     val ts = state.document.trackSettingsFor(trackId)
+    val soloed = trackId in state.soloedTrackIds
+    val accent = trackColor(ts.colorHex) ?: Neutral400
     Box(
         Modifier
             .height(state.trackHeight(trackId).dp)
             .fillMaxWidth()
             .background(Neutral900)
+            .then(if (ts.colorHex.isNotBlank()) Modifier.border(2.dp, accent) else Modifier)
             .clickable { open = true },
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                trackId,
-                color = if (ts.disabled) Neutral600 else Neutral400,
+                ts.name.ifBlank { trackId },
+                color = if (ts.disabled) Neutral600 else if (ts.colorHex.isNotBlank()) accent else Neutral400,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
+                maxLines = 1,
             )
             Row {
+                if (soloed) {
+                    Icon(Icons.Filled.Headphones, "Soloed", tint = Red500, modifier = Modifier.size(11.dp))
+                }
                 if (ts.muted && type != ClipType.TEXT) {
                     Icon(Icons.Filled.VolumeOff, "Muted", tint = Red500, modifier = Modifier.size(11.dp))
                 }
@@ -503,8 +513,34 @@ private fun TrackHeader(
 
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             Column(Modifier.width(220.dp).padding(horizontal = 12.dp, vertical = 4.dp)) {
-                Text("Track $trackId", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                OutlinedTextField(
+                    value = ts.name,
+                    onValueChange = { vm.setTrackName(trackId, it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(trackId, color = Neutral500) },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = White),
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TRACK_COLOR_SWATCHES.forEach { hex ->
+                        val c = trackColor(hex)!!
+                        Box(
+                            Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(c)
+                                .border(if (ts.colorHex == hex) 2.dp else 0.dp, White, CircleShape)
+                                .clickable { vm.setTrackColor(trackId, if (ts.colorHex == hex) "" else hex) },
+                        )
+                    }
+                }
 
+                HorizontalDivider(color = Neutral800, modifier = Modifier.padding(vertical = 6.dp))
+
+                // Solo: isolate this track's preview/playback (additive — several can be soloed at
+                // once). Never affects export, only monitoring, so it's separate from Mute/Hide below.
+                TrackToggle("Solo (preview only)", soloed) { vm.toggleTrackSolo(trackId) }
                 if (type != ClipType.TEXT) {
                     TrackToggle("Mute", ts.muted) { vm.toggleTrackMuted(trackId) }
                 }
@@ -536,6 +572,13 @@ private fun TrackHeader(
         }
     }
 }
+
+/** A small fixed palette (Vegas D.8's "color palette appears") rather than a full picker — enough to
+ *  tell tracks apart at a glance without building a color-wheel UI. */
+private val TRACK_COLOR_SWATCHES = listOf("#EF5350", "#FFA726", "#FFEE58", "#66BB6A", "#42A5F5", "#AB47BC")
+
+private fun trackColor(hex: String): Color? =
+    hex.takeIf { it.isNotBlank() }?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
 
 @Composable
 private fun TrackToggle(label: String, on: Boolean, onToggle: () -> Unit) {

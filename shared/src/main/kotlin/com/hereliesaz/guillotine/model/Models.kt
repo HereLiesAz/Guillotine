@@ -254,6 +254,10 @@ data class TrackSettings(
     val opacity: Float = 1f,     // video/text
     val muted: Boolean = false,  // audio/video
     val disabled: Boolean = false, // hide/disable the whole track
+    /** Display name shown instead of the raw track id ("V1"/"A1") once set; blank = show the id. */
+    val name: String = "",
+    /** Header/clip accent color as "#RRGGBB"; blank = the default neutral color. */
+    val colorHex: String = "",
 )
 
 @Serializable

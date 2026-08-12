@@ -80,6 +80,11 @@ data class EditorUiState(
     val snapEnabled: Boolean = true,
     /** When true, deleting a clip closes the gap it leaves on its own track (ripple delete). */
     val autoRippleEnabled: Boolean = false,
+    /**
+     * Tracks currently soloed for monitoring — additive (several can be soloed at once), preview-only.
+     * Transient view state, not part of the undoable [Document] (never exported); see [toggleTrackSolo].
+     */
+    val soloedTrackIds: Set<String> = emptySet(),
 ) {
     val selectedClipId: String? get() = selectedClipIds.singleOrNull()
     val selectedClips: List<TimelineClip>
@@ -90,6 +95,18 @@ data class EditorUiState(
 
     /** Lane height (dp) for [trackId], falling back to the default. */
     fun trackHeight(trackId: String): Float = trackHeights[trackId] ?: DEFAULT_TRACK_HEIGHT
+
+    /**
+     * [Document.disabledTrackIds] plus, when any track is soloed, every non-soloed track — the
+     * preview-time-only set of tracks to skip. Export always uses [Document.disabledTrackIds] alone;
+     * solo is a monitoring convenience, not a project setting, so it never changes what gets rendered.
+     */
+    val effectivePreviewDisabledTrackIds: Set<String>
+        get() = if (soloedTrackIds.isEmpty()) {
+            document.disabledTrackIds
+        } else {
+            (document.videoTracks + document.audioTracks).filterNot { it in soloedTrackIds }.toSet() + document.disabledTrackIds
+        }
 }
 
 const val DEFAULT_TRACK_HEIGHT = 64f
@@ -1404,6 +1421,21 @@ open class EditorViewModel {
     fun toggleTrackDisabled(trackId: String) = updateTrackSettings(trackId) { it.copy(disabled = !it.disabled) }
     fun setTrackVolume(trackId: String, volume: Float) = updateTrackSettings(trackId) { it.copy(volume = volume) }
     fun setTrackOpacity(trackId: String, opacity: Float) = updateTrackSettings(trackId) { it.copy(opacity = opacity) }
+    fun setTrackName(trackId: String, name: String) = updateTrackSettings(trackId) { it.copy(name = name) }
+    fun setTrackColor(trackId: String, colorHex: String) = updateTrackSettings(trackId) { it.copy(colorHex = colorHex) }
+
+    /**
+     * Solo: isolate one or more tracks for monitoring. Toggling a track in or out of the soloed set is
+     * additive, matching a real mixing console — several tracks can be soloed together. Preview-only
+     * (a monitoring convenience), never exported: [EditorUiState.soloedTrackIds] is transient view
+     * state, not part of the undoable [Document], the same category as [EditorUiState.selectedClipIds].
+     */
+    fun toggleTrackSolo(trackId: String) {
+        _uiState.update { st ->
+            val solo = st.soloedTrackIds
+            st.copy(soloedTrackIds = if (trackId in solo) solo - trackId else solo + trackId)
+        }
+    }
 
     /** Create an empty caption/text clip on [trackId] at the playhead, ready to edit. */
     /** Adds a placeholder TEXT clip on [trackId] at the playhead, returning its id so a caller can select it. */

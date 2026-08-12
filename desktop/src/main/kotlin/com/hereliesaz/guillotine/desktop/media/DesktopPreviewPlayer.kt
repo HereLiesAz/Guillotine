@@ -64,7 +64,7 @@ fun DesktopPreviewPlayer(
 ) {
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
     val now = state.currentTimeMs
-    val clips = state.document.clips.filterNot { it.trackId in state.document.disabledTrackIds }
+    val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
 
