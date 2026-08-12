@@ -2,6 +2,44 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Envelope/automation gaps closed: Hold curves, freehand drawing, typed values (2026-08-12)
+
+Auditing `docs/UX_ACTION_TREE.md`'s Branch G (Envelope System) against the codebase found most of it
+**already built**, on both platforms, before this push: `Timeline.kt`'s `ClipView` already plots each
+keyframed property as a value-over-time line with diamond nodes (G.1-G.3), tapping a node selects it
+and exposes its cubic-bezier ease handles for drag-editing (G.4, minus the named Linear/Fast/Slow/
+Smooth presets — the freeform bezier drag already covers everything those presets could express).
+So this entry is the smaller remaining gap, not a rebuild:
+
+- **G.4's "Hold" curve** — the one interpolation shape a cubic bezier genuinely can't express (every
+  bezier still eases smoothly; a hold stays flat at the keyframe's value until the instant the next
+  one arrives, then jumps). Added `Keyframe.hold: Boolean`, honored in `TimelineMath.interpolateSorted`
+  (shared by preview and export), with a checkbox next to each keyframe's easing editor in the Filters
+  panel on both platforms.
+- **G.5 / the touch translation's freehand drawing** — with the Keyframe tool active, dragging across
+  a clip (instead of the existing tap-to-drop-one-node) now samples (time, value) points along the
+  drag path and lays down a whole train of OPACITY keyframes on release, via a new
+  `EditorViewModel.drawEnvelope`. One undoable step per stroke, not one per sampled point — samples are
+  throttled to ~30ms apart client-side so a slow drag doesn't spam a keyframe per pixel. Desktop and
+  Android get the identical gesture (no Shift/modifier needed — the Keyframe tool already
+  unambiguously signals intent the way SPLIT/MARQUEE do elsewhere in this app, so there's nothing for
+  a modifier to disambiguate the way Vegas's Shift needs to on a modeless canvas).
+- **G.8's typed "Set to..." value** — each keyframe's value row gained a small exact-value text field
+  next to the slider, for a mathematically precise number instead of a drag approximation.
+
+**Deliberately not addressed, and why:**
+- **G.7 "Lock Envelopes to Events"** — nothing to build. `Keyframe.timeMs` has always been clip-relative,
+  so moving/trimming a clip already carries its keyframes with it by construction; there's no
+  "unlocked" state that ever existed to lock against.
+- **Track/Master (bus) envelopes** (Branch I) — same architectural gap as the VST-style FX chain entry
+  below: automating a parameter of the post-composite render (a track's overall level, the master
+  output) needs a compositing hook neither platform's renderer has yet. Event-level envelopes (what
+  exists) cover per-clip automation; bus-level is real follow-up work once that hook lands.
+
+Covered by new `TimelineMathTest` cases (hold stays flat then jumps; hold only affects its own segment)
+and `TimelineMechanicsTest` cases (`drawEnvelope` replaces only the drawn span/property, clamps to the
+property's range, no-ops under 2 points).
+
 ## Azphalt goes VST-style: a real stackable FX chain, not one shader/one LUT slot (2026-08-12)
 
 Per explicit direction ("Azphalt plugins should be more like VST plugin hosting"): `ClipFilters` gained

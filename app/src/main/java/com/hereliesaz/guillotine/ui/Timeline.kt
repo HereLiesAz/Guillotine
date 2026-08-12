@@ -882,6 +882,33 @@ private fun ClipView(
                     },
                 )
             }
+            // Freehand envelope drawing (Vegas G.5 "hold Shift, drag across an envelope to generate
+            // dozens of micro-nodes"; the touch translation's finger/stylus drawing): with the Keyframe
+            // tool active, a drag across the clip body samples (time, value) along the path and lays
+            // down a whole train of OPACITY keyframes on release — the tap gesture above still drops a
+            // single node, this is its "draw a curve" sibling. Samples are throttled to ~30ms apart so a
+            // slow drag doesn't spam a keyframe per pixel.
+            .pointerInput(clip.id, state.tool, pps) {
+                if (state.tool != EditorTool.KEYFRAME) return@pointerInput
+                val range = KeyframeProperty.OPACITY.uiRange
+                val samples = mutableListOf<Pair<Long, Float>>()
+                fun sample(offset: Offset) {
+                    val h = size.height.toFloat()
+                    val t = (offset.x / pps * 1000f).toLong().coerceIn(0L, clip.durationMs)
+                    if (samples.isNotEmpty() && kotlin.math.abs(t - samples.last().first) < 30L) return
+                    val norm = (1f - (offset.y / h)).coerceIn(0f, 1f)
+                    samples += t to (range.start + norm * (range.endInclusive - range.start))
+                }
+                detectDragGestures(
+                    onDragStart = { offset -> samples.clear(); sample(offset) },
+                    onDrag = { change, _ -> change.consume(); sample(change.position) },
+                    onDragEnd = {
+                        if (samples.size >= 2) vm.drawEnvelope(clip.id, KeyframeProperty.OPACITY, samples.toList())
+                        samples.clear()
+                    },
+                    onDragCancel = { samples.clear() },
+                )
+            }
             // Drag to move: horizontally on the timeline, vertically across same-type tracks.
             // Disabled while a keyframe of this clip is selected (drag then edits the ease).
             .pointerInput(clip.id, state.tool, pps, sameTypeTracks, state.selectedKeyframeId) {

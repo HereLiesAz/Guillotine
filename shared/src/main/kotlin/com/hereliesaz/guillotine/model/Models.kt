@@ -143,6 +143,13 @@ data class Keyframe(
     val property: KeyframeProperty,
     val easing: CubicBezier = CubicBezier(),
     /**
+     * True to hold this keyframe's [value] constant (no interpolation) across the segment to the next
+     * keyframe, then jump — Vegas Pro's envelope "Hold" curve, the one interpolation shape a cubic
+     * bezier can't express (every bezier still eases smoothly from A to B; a hold stays flat at A's
+     * value until the instant B's time arrives). [easing] is ignored on a held segment.
+     */
+    val hold: Boolean = false,
+    /**
      * True when this keyframe was baked by a kinetic-typography motion preset (see [AzpMotionInterpreter])
      * rather than authored by the user. Lets the editor strip/replace exactly the preset's curve when the
      * user switches or clears a caption's animation, leaving hand-made keyframes on the same channels

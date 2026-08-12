@@ -1684,6 +1684,39 @@ open class EditorViewModel {
         actionRecorder.record(RecordedAction("add_keyframe", mapOf("clip_id" to clipId, "property" to property.name, "at_rel_ms" to relMs), "Add ${property.name} keyframe at ${relMs}ms"))
     }
 
+    /**
+     * Freehand envelope drawing (Vegas G.5 "hold Shift and drag across an envelope"; the touch
+     * translation's stylus/finger drawing): replaces any existing [property] keyframes strictly inside
+     * the drawn time span with the sampled (clip-relative-time, value) points from one continuous drag,
+     * in a single undoable step — not one `mutateDocument` per sample, which would flood undo history.
+     * [points] need not be sorted or deduplicated; both are handled here. No-op on fewer than 2 points
+     * (a single sample isn't a drawn curve).
+     */
+    fun drawEnvelope(clipId: String, property: KeyframeProperty, points: List<Pair<Long, Float>>) {
+        if (points.size < 2) return
+        val sorted = points.sortedBy { it.first }
+        val lo = sorted.first().first
+        val hi = sorted.last().first
+        val range = property.uiRange
+        mutateDocument { doc ->
+            doc.copy(clips = doc.clips.map { clip ->
+                if (clip.id != clipId) return@map clip
+                val kept = clip.keyframes.filterNot { it.property == property && it.timeMs in lo..hi }
+                val drawn = sorted.map { (t, v) ->
+                    Keyframe(id = newId(), timeMs = t, value = v.coerceIn(range.start, range.endInclusive), property = property)
+                }
+                clip.copy(keyframes = (kept + drawn).sortedBy { it.timeMs })
+            })
+        }
+        actionRecorder.record(
+            RecordedAction(
+                "draw_envelope",
+                mapOf("clip_id" to clipId, "property" to property.name, "points" to sorted.size.toString()),
+                "Draw ${property.name} envelope (${sorted.size} points)",
+            ),
+        )
+    }
+
     private fun easingNow() =
         if (_uiState.value.autoEase) com.hereliesaz.guillotine.model.CubicBezier()
         else com.hereliesaz.guillotine.model.CubicBezier(0f, 0f, 1f, 1f)

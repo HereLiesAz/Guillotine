@@ -241,4 +241,48 @@ class TimelineMechanicsTest {
         assertEquals("Interview", ts.name)
         assertEquals("#FF8800", ts.colorHex)
     }
+
+    // ---- freehand envelope drawing (Vegas G.5 "Shift-drag to generate micro-nodes") ----
+
+    @Test
+    fun `drawEnvelope replaces the drawn span with the sampled points`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        vm.drawEnvelope(
+            "c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY,
+            listOf(0L to 0f, 500L to 0.5f, 1000L to 1f),
+        )
+        val kfs = vm.uiState.value.document.clips.single().keyframes
+        assertEquals(3, kfs.size)
+        assertEquals(listOf(0L, 500L, 1000L), kfs.map { it.timeMs })
+        assertEquals(listOf(0f, 0.5f, 1f), kfs.map { it.value })
+    }
+
+    @Test
+    fun `drawEnvelope only replaces keyframes inside the drawn span, and only for its own property`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        vm.addKeyframe("c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY) // at playhead 0
+        vm.addKeyframe("c1", com.hereliesaz.guillotine.model.KeyframeProperty.VOLUME) // at playhead 0, different property
+        vm.drawEnvelope("c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY, listOf(0L to 0.1f, 100L to 0.2f))
+        val kfs = vm.uiState.value.document.clips.single().keyframes
+        // The pre-existing OPACITY keyframe at t=0 was inside [0,100] and got replaced by the two drawn
+        // points; the VOLUME keyframe at the same time is a different property, so it's untouched.
+        assertEquals(3, kfs.size)
+        assertEquals(2, kfs.count { it.property == com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY })
+        assertEquals(1, kfs.count { it.property == com.hereliesaz.guillotine.model.KeyframeProperty.VOLUME })
+    }
+
+    @Test
+    fun `drawEnvelope is a no-op with fewer than two points`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        vm.drawEnvelope("c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY, listOf(0L to 0.5f))
+        assertTrue(vm.uiState.value.document.clips.single().keyframes.isEmpty())
+    }
+
+    @Test
+    fun `drawEnvelope clamps values to the property's range`() {
+        val vm = vmWith(clip("c1", "V1", 0, 0, 2000))
+        vm.drawEnvelope("c1", com.hereliesaz.guillotine.model.KeyframeProperty.OPACITY, listOf(0L to -5f, 100L to 5f))
+        val values = vm.uiState.value.document.clips.single().keyframes.map { it.value }
+        assertEquals(listOf(0f, 1f), values) // OPACITY's uiRange is 0f..1f
+    }
 }

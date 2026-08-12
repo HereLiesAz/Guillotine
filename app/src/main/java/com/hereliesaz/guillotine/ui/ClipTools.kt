@@ -352,13 +352,25 @@ fun KeyframesToolInline(vm: EditorViewModel, clip: TimelineClip) {
                         modifier = Modifier.size(16.dp).clickable { vm.removeKeyframe(clip.id, kf.id) },
                     )
                 }
-                Slider(
-                    value = kf.value.coerceIn(range.start, range.endInclusive),
-                    onValueChange = { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } },
-                    valueRange = range,
-                )
-                Text("Easing", color = Neutral500, fontSize = 10.sp)
-                CurveEditor(value = kf.easing, onChange = { e -> vm.updateKeyframe(clip.id, kf.id) { it.copy(easing = e) } })
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Slider(
+                        value = kf.value.coerceIn(range.start, range.endInclusive),
+                        onValueChange = { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } },
+                        valueRange = range,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Typed exact value — Vegas's node "Set to..." for mathematically precise input,
+                    // vs. the slider's drag-to-approximate.
+                    ExactValueField(kf.value, range) { v -> vm.updateKeyframe(clip.id, kf.id) { it.copy(value = v) } }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = kf.hold, onCheckedChange = { h -> vm.updateKeyframe(clip.id, kf.id) { it.copy(hold = h) } })
+                    Text("Hold (step to next node, no ease)", color = Neutral400, fontSize = 12.sp)
+                }
+                if (!kf.hold) {
+                    Text("Easing", color = Neutral500, fontSize = 10.sp)
+                    CurveEditor(value = kf.easing, onChange = { e -> vm.updateKeyframe(clip.id, kf.id) { it.copy(easing = e) } })
+                }
             }
         }
     }
@@ -502,6 +514,28 @@ private fun FilterSlider(
             valueRange = range,
         )
     }
+}
+
+/**
+ * A typed numeric entry for a keyframe's exact value — Vegas's node "Set to..." dialog, letting the
+ * user key in a mathematically precise number rather than approximate it with a drag. Local text state
+ * so a mid-edit string ("1." while typing "1.5") isn't clobbered by the recomposition its own commit
+ * triggers; only a value that both parses and falls in [range] calls [onCommit].
+ */
+@Composable
+private fun ExactValueField(value: Float, range: ClosedFloatingPointRange<Float>, onCommit: (Float) -> Unit) {
+    var text by remember(value) { mutableStateOf("%.3f".format(value)) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { s ->
+            text = s
+            s.toFloatOrNull()?.let { v -> if (v in range) onCommit(v) }
+        },
+        singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+        modifier = Modifier.width(72.dp),
+    )
 }
 
 @Composable

@@ -298,6 +298,32 @@ class TimelineMathTest {
         assertEquals(0L until 3000L, rAfter[0])
     }
 
+    // ---- hold keyframes: a step function, not a bezier ease, across the segment ----
+
+    @Test fun hold_keyframe_stays_flat_then_jumps() {
+        val kfs = listOf(
+            Keyframe("a", 0, 0f, KeyframeProperty.OPACITY, linear, hold = true),
+            Keyframe("b", 1000, 1f, KeyframeProperty.OPACITY, linear),
+        )
+        val c = clip(0, 0, 1000, kfs = kfs)
+        assertEquals(0f, TimelineMath.valueAt(c, KeyframeProperty.OPACITY, 0, 9f), 0f)
+        assertEquals(0f, TimelineMath.valueAt(c, KeyframeProperty.OPACITY, 500, 9f), 0f)
+        assertEquals(0f, TimelineMath.valueAt(c, KeyframeProperty.OPACITY, 999, 9f), 0f)
+        assertEquals(1f, TimelineMath.valueAt(c, KeyframeProperty.OPACITY, 1000, 9f), 0f)
+    }
+
+    @Test fun hold_only_affects_its_own_segment() {
+        // a(hold) -> b(hold=false, eases to c) -> c: only the a->b segment should be flat.
+        val kfs = listOf(
+            Keyframe("a", 0, 0f, KeyframeProperty.OPACITY, linear, hold = true),
+            Keyframe("b", 1000, 0.5f, KeyframeProperty.OPACITY, linear),
+            Keyframe("c", 2000, 1f, KeyframeProperty.OPACITY, linear),
+        )
+        val c = clip(0, 0, 2000, kfs = kfs)
+        assertEquals(0f, TimelineMath.valueAt(c, KeyframeProperty.OPACITY, 500, 9f), 0f)   // held on a->b
+        assertEquals(0.75f, TimelineMath.valueAt(c, KeyframeProperty.OPACITY, 1500, 9f), 0.001f) // eased b->c
+    }
+
     // ---- previewSourceTimeMs: preview must show what will be rendered ----
 
     @Test fun previewSourceTime_matches_sourceTime_when_no_edits() {
