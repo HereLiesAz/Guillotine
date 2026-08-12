@@ -2,6 +2,37 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Vegas-Pro-style timeline mechanics (slip/slide/roll/time-stretch/ripple/L-J-cut) (2026-08-12)
+
+Implementing `docs/UX_ACTION_TREE.md` (a forensic Vegas Pro breakdown + touch-native translation),
+per agreed scope: desktop gets the literal modifier-key paradigm, Android gets the touch-gesture
+translation, azphalt gets elevated toward VST-style multi-level plugin hosting (separate PR),
+delivered as several themed PRs rather than one mega-diff. First themes shipped: `EditorViewModel`
+gained `slipClip`/`slideClip`/`rollEdit`/`timeStretchClip`, an `includeLinked` L/J-cut path on
+`trimClipStart`/`trimClipEnd`, and a ripple-aware delete gated on `autoRippleEnabled` — all unit
+tested. Desktop wired Ctrl/Alt/Shift-held mouse-drags to time-stretch/slide/independent-trim via a
+new `HeldModifiers` tracker, plus Auto-Ripple/Snap toolbar toggles and F8. Android wired two-/three-
+finger clip-body drags to slip/slide, plus the same two toolbar toggles.
+
+**Still open, deliberately not guessed at:**
+- **Android has no time-stretch or L/J-cut-isolate gesture yet.** Both of Vegas's touch translations
+  for these (`docs/UX_ACTION_TREE.md` §1) collide with gestures `ClipView` already uses for something
+  else: single-finger long-press+drag near an edge is already the plain-trim gesture (there's no
+  slack left for "a *different* long-press enters time-stretch" without a real disambiguator — a
+  hold-duration threshold, a distinct finger count, something), and double-tap on the clip already
+  sets the playback region (colliding with "double-tap the audio/video half of a linked pair to
+  isolate an L/J-cut trim"). Desktop has clean, unambiguous Ctrl/Shift modifiers for both and shipped
+  them; Android needs a resolved interaction design first.
+- **No live visual preview for a Slip drag.** A Slip edit doesn't move the clip on the timeline (only
+  its source window changes), so unlike Move/Trim there's nothing today showing the source-scrub in
+  progress — the delta only takes effect on release. A thumbnail-scrub preview would need decoding a
+  live frame at the in-progress `trimStartMs`, which neither platform's existing per-clip thumbnail
+  cache is wired for.
+- **Auto-crossfade drag-to-overlap assembly, transition swap, track header controls (color/rename/
+  solo/group), the VST-style azphalt plugin chain, visual envelope editing, audio/beat/LUFS extras,
+  and the desktop Trimmer window** are the remaining themed PRs in this same push — tracked as
+  separate work, not folded into this entry.
+
 ## Loop tool + playback-region drag: desktop parity, and one real gap found (2026-08-12)
 
 Turned out most of what was asked for already existed on Android, just not on desktop: `playbackRegion`,
