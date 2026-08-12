@@ -116,12 +116,26 @@ fun PreviewPlayer(
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
 
+    // The frame's own shape must never depend on how the surrounding (resizable) pane happens to be
+    // sized — that's exactly the "preview window gets modified by something that isn't the user
+    // editing the frame" class of bug (see the crop-tool viewport-pan removal above). For a fixed
+    // project aspect ratio that's already true (Modifier.aspectRatio below is a hard Compose-level
+    // lock, independent of the pane). For ORIGINAL there was no such lock at all — Modifier.fillMaxSize()
+    // let the frame's own proportions become whatever shape the pane currently has, relying solely on
+    // PlayerView's native resize_mode="fit" to letterbox *inside* that ever-changing box. That is a
+    // second system (Android's View measure/layout) racing Compose's own layout on every resize frame,
+    // which is exactly the kind of two-systems-fighting setup that shows as a stretched/squished frame
+    // mid-drag. Tracked from the topmost video track's own player (the layer actually on top,
+    // `videoTracks[0]`), so ORIGINAL gets the same single-source-of-truth Compose-level lock every
+    // other ratio already has, the moment the reference clip's real size is known.
+    var referenceVideoAspect by remember { mutableStateOf<Float?>(null) }
+
     // ---- surface ----
     val aspectMod = when (state.document.settings.aspectRatio) {
         AspectRatio.RATIO_16_9 -> Modifier.aspectRatio(16f / 9f)
         AspectRatio.RATIO_9_16 -> Modifier.aspectRatio(9f / 16f)
         AspectRatio.RATIO_1_1 -> Modifier.aspectRatio(1f)
-        AspectRatio.ORIGINAL -> Modifier.fillMaxSize()
+        AspectRatio.ORIGINAL -> referenceVideoAspect?.let { Modifier.aspectRatio(it) } ?: Modifier.fillMaxSize()
     }
 
     val cropModifier = if (cropMode) {
@@ -228,6 +242,14 @@ fun PreviewPlayer(
                     maxVideoDim = state.previewQuality.maxDimension,
                     aspectMod = aspectMod,
                     projectFps = state.document.settings.fps,
+                    // Only the topmost track (videoTracks[0] — see the class doc above) sets the
+                    // frame's own aspect ratio; a lower track's own footage may be a different shape
+                    // and must not fight the reference track for the frame's shape.
+                    onAspectChanged = if (trackId == state.document.videoTracks.firstOrNull()) {
+                        { referenceVideoAspect = it }
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -388,6 +410,8 @@ private fun VideoTrackLayer(
     maxVideoDim: Int,
     aspectMod: Modifier,
     projectFps: Int,
+    /** Non-null only for the reference (topmost) track — see [PreviewPlayer]'s `referenceVideoAspect`. */
+    onAspectChanged: ((Float) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val gainA = remember { LiveAudioProcessor() }
@@ -406,6 +430,26 @@ private fun VideoTrackLayer(
         onDispose {
             playerA.release()
             playerB.release()
+        }
+    }
+    // The reference track's own decoded video size, not the project's chosen export aspect ratio —
+    // see the ORIGINAL-mode comment in PreviewPlayer. playerA is "outgoing", i.e. whichever clip is
+    // actually visible on this track right now; a listener rather than a one-shot read because the
+    // size isn't known until the decoder reports it, and changes again if the track's clip changes.
+    val currentOnAspectChanged by rememberUpdatedState(onAspectChanged)
+    if (onAspectChanged != null) {
+        DisposableEffect(playerA) {
+            val listener = object : androidx.media3.common.Player.Listener {
+                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                    if (videoSize.width <= 0 || videoSize.height <= 0) return
+                    val rotated = videoSize.unappliedRotationDegrees % 180 != 0
+                    val w = if (rotated) videoSize.height else videoSize.width
+                    val h = if (rotated) videoSize.width else videoSize.height
+                    currentOnAspectChanged?.invoke((w * videoSize.pixelWidthHeightRatio) / h)
+                }
+            }
+            playerA.addListener(listener)
+            onDispose { playerA.removeListener(listener) }
         }
     }
     // Preview-quality cap: constrain the players' target video resolution (longest edge). Lower
