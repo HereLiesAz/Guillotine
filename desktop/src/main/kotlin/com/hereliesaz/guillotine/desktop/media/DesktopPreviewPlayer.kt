@@ -32,7 +32,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import com.hereliesaz.guillotine.desktop.ui.HeldModifiers
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
@@ -73,6 +75,13 @@ private const val PLAY_DRIFT_POLL_MS = 400L
 fun DesktopPreviewPlayer(
     state: EditorUiState,
     modifier: Modifier = Modifier,
+    /** True while the Crop tool is selected — enables the mouse transform gesture below on the
+     *  selected clip. Mirrors the Android app's `cropMode`. */
+    cropMode: Boolean = false,
+    /** Mouse equivalent of Android's pinch/pan/rotate `detectTransformGestures`: called with the
+     *  same (zoom, panXFrac, panYFrac, rotationDelta) shape [EditorViewModel.transformSelectedClip]
+     *  expects, so the caller can wire it to that one shared function unchanged. */
+    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
     /** See [FullscreenPreviewOverlay] — the caller owns fullscreen layout/state; this composable only
      *  exposes the corner toggle affordance (and, when in fullscreen, its "exit" variant). */
     isFullscreen: Boolean = false,
@@ -119,6 +128,48 @@ fun DesktopPreviewPlayer(
         Modifier
     }
 
+    // Crop/transform tool — the mouse equivalent of Android's pinch-drag-rotate on the preview.
+    // No pinch on a mouse, so: plain drag pans the clip (matching Android's single-finger pan),
+    // Shift-held drag rotates instead (checked once at drag-start, the same "snapshot the held
+    // modifier when the gesture begins" pattern the timeline's clip drag already uses for its own
+    // Ctrl/Alt/Shift-gated edits), and the scroll wheel zooms.
+    val cropModifier = if (cropMode) {
+        Modifier
+            .pointerInput(Unit) {
+                var rotateMode = false
+                detectDragGestures(
+                    onDragStart = { rotateMode = HeldModifiers.shift.value },
+                    onDrag = { change, drag ->
+                        change.consume()
+                        if (rotateMode) {
+                            onCropTransform(1f, 0f, 0f, drag.x * 0.3f)
+                        } else {
+                            val w = zoomPaneSize.width.coerceAtLeast(1)
+                            val h = zoomPaneSize.height.coerceAtLeast(1)
+                            onCropTransform(1f, drag.x / w, drag.y / h, 0f)
+                        }
+                    },
+                )
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type == PointerEventType.Scroll) {
+                            val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                            if (dy != 0f) {
+                                event.changes.forEach { it.consume() }
+                                onCropTransform(if (dy > 0) 0.95f else 1.05f, 0f, 0f, 0f)
+                            }
+                        }
+                    }
+                }
+            }
+    } else {
+        Modifier
+    }
+    val gestureModifier = if (cropMode) cropModifier else panModifier
+
     val now = state.currentTimeMs
     val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
@@ -141,7 +192,7 @@ fun DesktopPreviewPlayer(
     val sy = if (crop.h > 0f) 100f / crop.h else 1f
 
     Box(
-        modifier = modifier.background(Neutral950).onSizeChanged { zoomPaneSize = it }.then(panModifier),
+        modifier = modifier.background(Neutral950).onSizeChanged { zoomPaneSize = it }.then(gestureModifier),
         contentAlignment = Alignment.Center,
     ) {
       // The composited frame — video, captions, and audio layers — lives in this inner box, which the
@@ -607,11 +658,23 @@ private fun AudioTrackLayer(
         }
     }
 
+    // This coroutine is launched once per (isPlaying, active clip) pair and then keeps running
+    // across every later recomposition without being relaunched — so reading `now`/`active`
+    // directly here would close over whatever value they happened to have at launch time, frozen
+    // for the rest of the clip's playback. That was the bug: every ~400ms this recomputed `src`
+    // from that stale, unchanging `now`, so once the live position drifted past it by 300ms the
+    // poll kept seeking the player back to nearly the same point — audio looping a small window
+    // while video (whose decode loops already read `rememberUpdatedState` values, see VideoSlot's
+    // `currentSourceMs`/`currentClip`) kept advancing normally. `rememberUpdatedState` gives this
+    // loop the live values on every poll instead.
+    val currentNow by rememberUpdatedState(now)
+    val currentActive by rememberUpdatedState(active)
     LaunchedEffect(isPlaying, active?.id) {
         if (active != null && isPlaying) {
             while (isActive) {
                 delay(PLAY_DRIFT_POLL_MS)
-                val src = TimelineMath.sourceTimeMs(active, now).coerceAtLeast(0)
+                val clip = currentActive ?: continue
+                val src = TimelineMath.sourceTimeMs(clip, currentNow).coerceAtLeast(0)
                 if (abs(player.positionMs - src) > 300L) {
                     player.seek(src)
                 }
