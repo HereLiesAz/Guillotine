@@ -2,6 +2,48 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Azphalt goes VST-style: a real stackable FX chain, not one shader/one LUT slot (2026-08-12)
+
+Per explicit direction ("Azphalt plugins should be more like VST plugin hosting"): `ClipFilters` gained
+an ordered `fxChain: List<FxLayer>`, each layer independently a LUT or shader, enabled/disabled,
+reorderable, and removable — replacing the old model where a clip had exactly one shader slot and one
+LUT slot, and applying a second one silently discarded the first. `ClipFilters.effectiveFxChain`
+synthesizes a one- or two-layer chain from the legacy `lutPath`/`shaderPath` fields when `fxChain` is
+empty, so an already-saved project renders identically without a migration step.
+
+Every producer and consumer of a clip's shader/LUT now goes through the chain, not the legacy fields:
+- `EditorViewModel`: `addFxLayer`/`removeFxLayer`/`setFxLayerEnabled`/`setFxLayerParams`/`moveFxLayer`.
+- Android `VideoEffects.kt` (`build`/`nonColorStatic`) and desktop `DesktopPreviewPlayer.kt`/
+  `DesktopExporter.kt` all render `effectiveFxChain` in order instead of one hardcoded LUT-then-shader
+  pair — the same render code drives live preview and export on both platforms, so what stacks in the
+  UI is what exports.
+- `AzpAssetApplier`/`DesktopAzpAssetApplier` (an azphalt asset package "Apply to clip") now **stack**:
+  applying a second shader/LUT package adds a layer instead of overwriting the first, and "Remove"
+  removes only that package's layer(s), by filename, from wherever they sit in the chain.
+- The built-in Filters panel (`ClipTools.kt` `FxChainSection`, replacing `LutRow`/`ShaderRow`) is a real
+  chain UI now: per-layer enable checkbox, reorder ▲/▼, Remove, and (for shaders) that layer's own
+  param sliders — not a shared/global set. "+ LUT (.cube)" / "+ Shader (.isf/.fs)" append.
+- The assistant's `apply_lut`/`apply_shader`/`clear_lut`/`clear_shader` MCP tools (`McpTools.kt` +
+  desktop's `DesktopMcpTools.kt`) were quietly broken by the chain existing at all: they wrote straight
+  to the legacy `lutPath`/`shaderPath` fields, which `effectiveFxChain` ignores once `fxChain` is
+  non-empty — so calling them on a clip that already had a real chain (from the Filters panel or an
+  azphalt package) would silently no-op. Fixed to add/remove chain layers directly.
+
+Covered by `shared/src/test/kotlin/.../editor/FxChainTest.kt` (8 tests: legacy fallback, precedence
+once `fxChain` is set, stack/remove/reorder/enable-toggle).
+
+**Deliberately scoped to Event (clip) level only — Media/Track/Master deferred, not guessed at:**
+Vegas's 4-tier FX pipeline is Media (source-level, shared by every clip using that source) / Event
+(per-clip — what shipped here) / Track (every clip on a track, post-composite) / Master (the whole
+timeline, post-composite). Neither platform's render pipeline has a hook to attach an effect *after*
+tracks are composited together — Android's `VideoEffects` builds a per-clip Media3 `Effect` list fed
+into that clip's own `EditedMediaItemSequence`, and desktop's compositor stacks decoded per-clip
+`BufferedImage`s directly with no post-composite pass either. Building Track/Master FX honestly needs
+that compositing hook first, not a chain UI bolted onto nothing. Media-level (apply once, every clip
+sharing that source picks it up) is a data-model question — today `fxChain` lives on `ClipFilters`,
+per-clip, with no notion of "the same effect, same instance, referenced by every clip using media X."
+Both are real follow-up work, not silently dropped.
+
 ## Vegas-Pro-style timeline mechanics (slip/slide/roll/time-stretch/ripple/L-J-cut) (2026-08-12)
 
 Implementing `docs/UX_ACTION_TREE.md` (a forensic Vegas Pro breakdown + touch-native translation),

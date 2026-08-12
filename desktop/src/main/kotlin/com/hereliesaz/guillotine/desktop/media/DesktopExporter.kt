@@ -401,13 +401,17 @@ object DesktopExporter {
             DesktopColorMatrix.applyToImage(img, matrix)
         }
         if (f.blur > 0f) DesktopColorMatrix.blur(img, f.blur)
-        // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). The LUT is
-        // parsed once and cached by path, so it isn't re-parsed for every exported frame.
-        if (f.lutPath.isNotBlank()) {
-            DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
+        // The clip's FX chain (LUTs/shaders), in chain order — see ClipFilters.effectiveFxChain for the
+        // legacy single-slot fallback that keeps an already-saved project rendering unchanged. LUT
+        // layers apply first (matches the pre-chain LUT-then-shader order); each is parsed once and
+        // cached by path, so it isn't re-parsed for every exported frame.
+        val fxChain = f.effectiveFxChain.filter { it.enabled }
+        for (layer in fxChain) {
+            if (layer.kind != com.hereliesaz.guillotine.model.FxLayer.KIND_LUT) continue
+            DesktopLutCache.get(layer.path)?.let { DesktopColorMatrix.applyLut(img, it) }
         }
 
-        // Subject segmentation (needs a seg model), applied after colour/LUT:
+        // Subject segmentation (needs a seg model), applied after colour/LUT, before shaders:
         //  • removeBackground → matte the subject to alpha so the track beneath shows through
         //  • bokeh → keep the subject sharp and blur the background
         val segModel = DesktopRenderConfig.segModelPath
@@ -416,11 +420,13 @@ object DesktopExporter {
             f.bokeh && segModel.isNotBlank() -> DesktopSegmenter.portraitBlur(img, segModel)
             else -> img
         }
-        // Custom GLSL/ISF shader, applied last (matches Android's order). Rendered through Skia's CPU
-        // raster runtime effect; a no-op if the shader can't be translated/compiled to SkSL.
-        val drawImg = if (f.shaderPath.isNotBlank()) {
-            DesktopShaderPass.apply(segImg, f.shaderPath, f.shaderParams, relMs.coerceAtLeast(0))
-        } else segImg
+        // Custom GLSL/ISF shader layers, applied last in chain order (matches the preview path).
+        // Rendered through Skia's CPU raster runtime effect; a no-op if a shader can't be compiled to SkSL.
+        var drawImg = segImg
+        for (layer in fxChain) {
+            if (layer.kind != com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER) continue
+            drawImg = DesktopShaderPass.apply(drawImg, layer.path, layer.params, relMs.coerceAtLeast(0))
+        }
 
         // Keyframed transforms
         val scale = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)

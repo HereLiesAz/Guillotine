@@ -59,6 +59,7 @@ import com.hereliesaz.guillotine.model.TextFont
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.ui.theme.Neutral400
 import com.hereliesaz.guillotine.ui.theme.Neutral500
+import com.hereliesaz.guillotine.ui.theme.Neutral700
 import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral900
 import com.hereliesaz.guillotine.ui.theme.Red500
@@ -147,18 +148,100 @@ fun FiltersToolInline(vm: EditorViewModel, clip: TimelineClip) {
         FilterSlider(vm, clip.id, "Invert", f.invert, 0f..100f, "%") { v, ff -> ff.copy(invert = v) }
         FilterSlider(vm, clip.id, "Grayscale", f.grayscale, 0f..100f, "%") { v, ff -> ff.copy(grayscale = v) }
         FilterSlider(vm, clip.id, "Blur", f.blur, 0f..20f, "px") { v, ff -> ff.copy(blur = v) }
-        LutRow(vm, clip)
-        ShaderRow(vm, clip)
+        FxChainSection(vm, clip)
         PresetRow(vm, clip.id)
     }
 }
 
-/** Pick / clear a GLSL shader effect (ISF `.isf` or a raw `.fs`/`.glsl` fragment) for the clip. Copied
- *  into app storage so the Media3 effect can read it by path in preview and export. */
+/**
+ * The clip's stackable FX chain — "VST-style hosting" for shaders/LUTs: any number of layers, in order,
+ * each independently enabled/removed/reordered. Backed by [ClipFilters.effectiveFxChain], so a layer
+ * added here shows up identically to one an azphalt asset package applied (and vice versa).
+ */
 @Composable
-private fun ShaderRow(vm: EditorViewModel, clip: TimelineClip) {
+private fun FxChainSection(vm: EditorViewModel, clip: TimelineClip) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("FX chain", color = Red500, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        val chain = clip.filters.effectiveFxChain
+        chain.forEachIndexed { index, layer ->
+            FxLayerRow(vm, clip, layer, index, chain.size)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AddLutButton(vm, clip)
+            AddShaderButton(vm, clip)
+        }
+    }
+}
+
+@Composable
+private fun FxLayerRow(vm: EditorViewModel, clip: TimelineClip, layer: com.hereliesaz.guillotine.model.FxLayer, index: Int, chainSize: Int) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Neutral900, RoundedCornerShape(6.dp))
+            .padding(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = layer.enabled, onCheckedChange = { vm.setFxLayerEnabled(clip.id, layer.id, it) })
+            val kindLabel = if (layer.kind == com.hereliesaz.guillotine.model.FxLayer.KIND_LUT) "LUT" else "Shader"
+            Text(
+                "$kindLabel: ${java.io.File(layer.path).name}",
+                color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
+            )
+            Text(
+                "▲", color = if (index > 0) Color(0xFF8AB4F8) else Neutral700, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable(enabled = index > 0) { vm.moveFxLayer(clip.id, index, -1) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            Text(
+                "▼", color = if (index < chainSize - 1) Color(0xFF8AB4F8) else Neutral700, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable(enabled = index < chainSize - 1) { vm.moveFxLayer(clip.id, index, +1) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            Text(
+                "Remove", color = Neutral500, fontSize = 12.sp,
+                modifier = Modifier
+                    .clickable { vm.removeFxLayer(clip.id, layer.id) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+        if (layer.kind == com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER) {
+            ShaderParamSliders(vm, clip.id, layer)
+        }
+    }
+}
+
+/** Sliders for a shader layer's adjustable FLOAT inputs (parsed off the main thread), bound to that
+ *  specific layer's own params — not shared with any other layer in the chain. */
+@Composable
+private fun ShaderParamSliders(vm: EditorViewModel, clipId: String, layer: com.hereliesaz.guillotine.model.FxLayer) {
+    val inputs by produceState(emptyList<com.hereliesaz.guillotine.media.GlslShader.ShaderUniform>(), layer.path) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                com.hereliesaz.guillotine.media.GlslShader.parse(java.io.File(layer.path).readText())
+                    .uniforms.filter { it.values.size == 1 && it.type == com.hereliesaz.guillotine.media.GlslShader.UniformType.FLOAT }
+            }.getOrDefault(emptyList())
+        }
+    }
+    inputs.forEach { u ->
+        val v = layer.params[u.name] ?: u.values[0]
+        val range = if (u.max > u.min) u.min..u.max else u.min..(u.min + 1f)
+        Text("${u.name}: ${"%.2f".format(v)}", color = Neutral500, fontSize = 10.sp)
+        Slider(
+            value = v.coerceIn(range.start, range.endInclusive),
+            onValueChange = { nv -> vm.setFxLayerParams(clipId, layer.id, layer.params + (u.name to nv)) },
+            valueRange = range,
+        )
+    }
+}
+
+/** Picks a GLSL shader (ISF `.isf` or a raw `.fs`/`.glsl` fragment) and stacks it onto the clip's FX
+ *  chain. Copied into app storage so the Media3 effect can read it by path in preview and export. */
+@Composable
+private fun AddShaderButton(vm: EditorViewModel, clip: TimelineClip) {
     val context = LocalContext.current
-    val current = clip.filters.shaderPath
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
@@ -174,66 +257,24 @@ private fun ShaderRow(vm: EditorViewModel, clip: TimelineClip) {
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { input.copyTo(it) }
                 }
-                vm.updateClipFilters(clip.id) { it.copy(shaderPath = dest.absolutePath, shaderParams = emptyMap()) }
+                vm.addFxLayer(clip.id, com.hereliesaz.guillotine.model.FxLayer(kind = com.hereliesaz.guillotine.model.FxLayer.KIND_SHADER, path = dest.absolutePath))
             }
         }
     }
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (current.isNotBlank()) "Shader: ${java.io.File(current).name}" else "Shader: none",
-                color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
-            )
-            Text(
-                "Pick .isf/.fs",
-                color = Color(0xFF8AB4F8), fontSize = 12.sp,
-                modifier = Modifier
-                    .clickable { picker.launch(arrayOf("*/*")) }
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-            if (current.isNotBlank()) {
-                Text(
-                    "Clear",
-                    color = Neutral500, fontSize = 12.sp,
-                    modifier = Modifier
-                        .clickable { vm.updateClipFilters(clip.id) { it.copy(shaderPath = "", shaderParams = emptyMap()) } }
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-            }
-        }
-        if (current.isNotBlank()) ShaderParamSliders(vm, clip, current)
-    }
+    Text(
+        "+ Shader (.isf/.fs)",
+        color = Color(0xFF8AB4F8), fontSize = 12.sp,
+        modifier = Modifier
+            .clickable { picker.launch(arrayOf("*/*")) }
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
-/** Sliders for a shader's adjustable FLOAT inputs (parsed off the main thread), bound to shaderParams. */
+/** Picks a `.cube` 3D LUT color grade and stacks it onto the clip's FX chain. The file is copied into
+ *  app storage so the Media3 effect can read it by path in preview and export. */
 @Composable
-private fun ShaderParamSliders(vm: EditorViewModel, clip: TimelineClip, path: String) {
-    val inputs by produceState(emptyList<com.hereliesaz.guillotine.media.GlslShader.ShaderUniform>(), path) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                com.hereliesaz.guillotine.media.GlslShader.parse(java.io.File(path).readText())
-                    .uniforms.filter { it.values.size == 1 && it.type == com.hereliesaz.guillotine.media.GlslShader.UniformType.FLOAT }
-            }.getOrDefault(emptyList())
-        }
-    }
-    inputs.forEach { u ->
-        val v = clip.filters.shaderParams[u.name] ?: u.values[0]
-        val range = if (u.max > u.min) u.min..u.max else u.min..(u.min + 1f)
-        Text("${u.name}: ${"%.2f".format(v)}", color = Neutral500, fontSize = 10.sp)
-        Slider(
-            value = v.coerceIn(range.start, range.endInclusive),
-            onValueChange = { nv -> vm.updateClipFilters(clip.id) { it.copy(shaderParams = it.shaderParams + (u.name to nv)) } },
-            valueRange = range,
-        )
-    }
-}
-
-/** Pick / clear a `.cube` 3D LUT color grade for the clip. The file is copied into app storage so the
- *  Media3 effect can read it by path in preview and export. */
-@Composable
-private fun LutRow(vm: EditorViewModel, clip: TimelineClip) {
+private fun AddLutButton(vm: EditorViewModel, clip: TimelineClip) {
     val context = LocalContext.current
-    val current = clip.filters.lutPath
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
@@ -249,32 +290,17 @@ private fun LutRow(vm: EditorViewModel, clip: TimelineClip) {
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { input.copyTo(it) }
                 }
-                vm.updateClipFilters(clip.id) { it.copy(lutPath = dest.absolutePath) }
+                vm.addFxLayer(clip.id, com.hereliesaz.guillotine.model.FxLayer(kind = com.hereliesaz.guillotine.model.FxLayer.KIND_LUT, path = dest.absolutePath))
             }
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (current.isNotBlank()) "LUT: ${java.io.File(current).name}" else "LUT: none",
-            color = Neutral400, fontSize = 12.sp, modifier = Modifier.weight(1f),
-        )
-        Text(
-            "Pick .cube",
-            color = Color(0xFF8AB4F8), fontSize = 12.sp,
-            modifier = Modifier
-                .clickable { picker.launch(arrayOf("*/*")) }
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-        if (current.isNotBlank()) {
-            Text(
-                "Clear",
-                color = Neutral500, fontSize = 12.sp,
-                modifier = Modifier
-                    .clickable { vm.updateClipFilters(clip.id) { it.copy(lutPath = "") } }
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
-    }
+    Text(
+        "+ LUT (.cube)",
+        color = Color(0xFF8AB4F8), fontSize = 12.sp,
+        modifier = Modifier
+            .clickable { picker.launch(arrayOf("*/*")) }
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 @Composable

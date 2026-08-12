@@ -37,6 +37,7 @@ import com.hereliesaz.guillotine.desktop.ui.theme.White
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipType
+import com.hereliesaz.guillotine.model.FxLayer
 import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
@@ -335,14 +336,18 @@ private fun applyColorEffects(
         DesktopColorMatrix.applyToImage(img, matrix)
     }
     if (f.blur > 0f) DesktopColorMatrix.blur(img, f.blur)
-    // 3D `.cube` LUT grade, applied after the color matrix (matches Android's order). Parsed once and
-    // cached by path so the LUT isn't re-parsed per frame.
-    if (f.lutPath.isNotBlank()) {
-        DesktopLutCache.get(f.lutPath)?.let { DesktopColorMatrix.applyLut(img, it) }
+    // The clip's FX chain (LUTs/shaders), in chain order — see ClipFilters.effectiveFxChain for the
+    // legacy single-slot fallback that keeps an already-saved project rendering unchanged. LUT layers
+    // apply first (matching the pre-chain LUT-then-shader order); parsed/cached by path so nothing is
+    // re-parsed per frame.
+    val chain = f.effectiveFxChain.filter { it.enabled }
+    for (layer in chain) {
+        if (layer.kind != FxLayer.KIND_LUT) continue
+        DesktopLutCache.get(layer.path)?.let { DesktopColorMatrix.applyLut(img, it) }
     }
 
-    // Subject segmentation, matching the export path's order (after colour/LUT). Only run when the
-    // caller opted in (paused), since ONNX matting is far too slow for live playback:
+    // Subject segmentation, matching the export path's order (after colour/LUT, before shaders). Only
+    // run when the caller opted in (paused), since ONNX matting is far too slow for live playback:
     //  • removeBackground → matte the subject to alpha so lower tracks / the letterbox show through
     //  • bokeh → keep the subject sharp and blur the background
     val segged = if (applySeg) {
@@ -355,11 +360,14 @@ private fun applyColorEffects(
             }
         } else img
     } else img
-    // Custom GLSL/ISF shader, applied last (matches Android + the export path). Rendered via Skia's CPU
-    // raster runtime effect; a no-op if the shader can't be compiled to SkSL.
-    return if (f.shaderPath.isNotBlank()) {
-        DesktopShaderPass.apply(segged, f.shaderPath, f.shaderParams, relMs.coerceAtLeast(0))
-    } else segged
+    // Custom GLSL/ISF shader layers, applied last in chain order (matches the export path). Rendered
+    // via Skia's CPU raster runtime effect; a no-op if a shader can't be compiled to SkSL.
+    var out = segged
+    for (layer in chain) {
+        if (layer.kind != FxLayer.KIND_SHADER) continue
+        out = DesktopShaderPass.apply(out, layer.path, layer.params, relMs.coerceAtLeast(0))
+    }
+    return out
 }
 
 /** A reused FFmpeg decoder for the preview. Seeks (instead of reopening) toward the requested source

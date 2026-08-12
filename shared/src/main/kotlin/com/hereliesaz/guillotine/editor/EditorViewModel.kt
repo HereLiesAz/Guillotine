@@ -404,6 +404,45 @@ open class EditorViewModel {
         }
     }
 
+    /**
+     * Appends [layer] to [clipId]'s FX chain — the "VST-style hosting" apply path: a second shader/LUT
+     * stacks on top of the first instead of replacing it. Reads [ClipFilters.effectiveFxChain] (not
+     * [ClipFilters.fxChain] directly) as the base, so appending to a clip that still only has the
+     * legacy single-slot fields set correctly migrates it to a real chain starting from what it already
+     * had, rather than silently discarding a pre-existing shader/LUT the first time this is called.
+     */
+    fun addFxLayer(clipId: String, layer: com.hereliesaz.guillotine.model.FxLayer) {
+        updateClipFilters(clipId) { it.copy(fxChain = it.effectiveFxChain + layer) }
+    }
+
+    fun removeFxLayer(clipId: String, layerId: String) {
+        updateClipFilters(clipId) { it.copy(fxChain = it.effectiveFxChain.filterNot { l -> l.id == layerId }) }
+    }
+
+    fun setFxLayerEnabled(clipId: String, layerId: String, enabled: Boolean) {
+        updateClipFilters(clipId) {
+            it.copy(fxChain = it.effectiveFxChain.map { l -> if (l.id == layerId) l.copy(enabled = enabled) else l })
+        }
+    }
+
+    fun setFxLayerParams(clipId: String, layerId: String, params: Map<String, Float>) {
+        updateClipFilters(clipId) {
+            it.copy(fxChain = it.effectiveFxChain.map { l -> if (l.id == layerId) l.copy(params = params) else l })
+        }
+    }
+
+    /** Moves the layer at [index] one step toward the start (-1) or end (+1) of the chain. No-op at an edge. */
+    fun moveFxLayer(clipId: String, index: Int, delta: Int) {
+        updateClipFilters(clipId) {
+            val chain = it.effectiveFxChain.toMutableList()
+            val target = index + delta
+            if (index !in chain.indices || target !in chain.indices) return@updateClipFilters it
+            val item = chain.removeAt(index)
+            chain.add(target, item)
+            it.copy(fxChain = chain)
+        }
+    }
+
     fun updateSelectedFilters(transform: (ClipFilters) -> ClipFilters) {
         val ids = _uiState.value.selectedClipIds.toSet()
         if (ids.isEmpty()) return

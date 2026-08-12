@@ -3,6 +3,7 @@ package com.hereliesaz.guillotine.desktop.platform
 import com.hereliesaz.guillotine.azphalt.AzpInstalledUi
 import com.hereliesaz.guillotine.azphalt.AzpPackage
 import com.hereliesaz.guillotine.editor.EditorViewModel
+import com.hereliesaz.guillotine.model.FxLayer
 import java.io.File
 
 /**
@@ -26,10 +27,11 @@ object DesktopAzpAssetApplier {
         data class Failure(val message: String) : Result()
     }
 
-    fun isApplied(panel: AzpInstalledUi.Panel, shaderOrLutPath: String): Boolean {
-        if (shaderOrLutPath.isBlank()) return false
+    /** Whether any layer in [chain] is the file this [panel] installs (i.e. the panel is applied to the clip). */
+    fun isApplied(panel: AzpInstalledUi.Panel, chain: List<FxLayer>): Boolean {
         val ext = extensionFor(panel)
-        return File(shaderOrLutPath).name == panel.installFileName(ext)
+        val name = panel.installFileName(ext)
+        return chain.any { File(it.path).name == name }
     }
 
     private fun extensionFor(panel: AzpInstalledUi.Panel): String {
@@ -59,13 +61,13 @@ object DesktopAzpAssetApplier {
             AzpInstalledUi.RenderKind.SHADER -> {
                 val dest = write("shaders", panel.installFileName(extensionFor(panel)), assetBytes)
                     ?: return Result.Failure("Could not write the shader.")
-                vm.updateClipFilters(clipId) { it.copy(shaderPath = dest.absolutePath, shaderParams = panel.defaultParams) }
+                vm.addFxLayer(clipId, FxLayer(kind = FxLayer.KIND_SHADER, path = dest.absolutePath, params = panel.defaultParams))
                 Result.Applied
             }
             AzpInstalledUi.RenderKind.LUT -> {
                 val dest = write("luts", panel.installFileName(extensionFor(panel)), assetBytes)
                     ?: return Result.Failure("Could not write the LUT.")
-                vm.updateClipFilters(clipId) { it.copy(lutPath = dest.absolutePath) }
+                vm.addFxLayer(clipId, FxLayer(kind = FxLayer.KIND_LUT, path = dest.absolutePath))
                 Result.Applied
             }
             AzpInstalledUi.RenderKind.OTHER ->
@@ -73,15 +75,12 @@ object DesktopAzpAssetApplier {
         }
     }
 
-    /** Remove this package's effect from the clip (shader or LUT), if it's the one applied. */
+    /** Removes this package's layer(s) from the clip's FX chain, if any are present. */
     fun remove(vm: EditorViewModel, clipId: String, panel: AzpInstalledUi.Panel, current: com.hereliesaz.guillotine.model.ClipFilters) {
-        when (panel.renderKind) {
-            AzpInstalledUi.RenderKind.SHADER ->
-                if (isApplied(panel, current.shaderPath)) vm.updateClipFilters(clipId) { it.copy(shaderPath = "", shaderParams = emptyMap()) }
-            AzpInstalledUi.RenderKind.LUT ->
-                if (isApplied(panel, current.lutPath)) vm.updateClipFilters(clipId) { it.copy(lutPath = "") }
-            AzpInstalledUi.RenderKind.OTHER -> {}
-        }
+        if (panel.renderKind == AzpInstalledUi.RenderKind.OTHER) return
+        val ext = extensionFor(panel)
+        val name = panel.installFileName(ext)
+        current.effectiveFxChain.filter { File(it.path).name == name }.forEach { vm.removeFxLayer(clipId, it.id) }
     }
 
     private fun write(subdir: String, name: String, bytes: ByteArray): File? = try {
