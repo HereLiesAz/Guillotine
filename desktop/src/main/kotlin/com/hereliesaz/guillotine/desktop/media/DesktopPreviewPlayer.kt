@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Text
@@ -30,6 +31,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
@@ -37,8 +40,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hereliesaz.guillotine.desktop.ui.PanelLayoutPrefs
 import com.hereliesaz.guillotine.desktop.ui.theme.Neutral500
 import com.hereliesaz.guillotine.desktop.ui.theme.Neutral950
+import com.hereliesaz.guillotine.desktop.ui.theme.Red500
 import com.hereliesaz.guillotine.desktop.ui.theme.White
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.model.AspectRatio
@@ -64,11 +69,6 @@ import kotlin.math.roundToInt
 private const val SCRUB_SEEK_TOLERANCE_MS = 60L
 private const val PLAY_DRIFT_POLL_MS = 400L
 
-/** Zoom step for the explicit Zoom In/Out buttons and the popup slider's upper bound — matches the
- *  Android app's PanelLayoutPrefs.ZOOM_STEP/MAX_ZOOM values for consistent behavior across platforms. */
-private const val ZOOM_STEP = 0.25f
-private const val MAX_ZOOM = 5f
-
 @Composable
 fun DesktopPreviewPlayer(
     state: EditorUiState,
@@ -79,14 +79,17 @@ fun DesktopPreviewPlayer(
     onToggleFullscreen: (() -> Unit)? = null,
 ) {
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
-    // Persistent-within-session preview viewport (zoom + pan). Unlike Android's PanelLayoutPrefs this
-    // doesn't survive an app restart — desktop has no equivalent small-key-value prefs store yet — but
-    // the zoom/pan/fullscreen behavior itself is otherwise identical.
-    var zoom by remember { mutableStateOf(1f) }
-    var panX by remember { mutableStateOf(0f) }
-    var panY by remember { mutableStateOf(0f) }
+    // Persistent preview viewport (zoom + pan), loaded from / saved to PanelLayoutPrefs — same
+    // behavior and persistence as the Android app's equivalent.
+    val savedView = remember { PanelLayoutPrefs.loadPreview() }
+    var zoom by remember { mutableStateOf(savedView.zoom) }
+    var panX by remember { mutableStateOf(savedView.panX) }
+    var panY by remember { mutableStateOf(savedView.panY) }
     var showZoom by remember { mutableStateOf(false) }
     var zoomPaneSize by remember { mutableStateOf(IntSize.Zero) }
+    // Hand tool: drag to pan the zoomed-in viewport. Off by default so a plain drag elsewhere on the
+    // preview isn't misread as panning.
+    var panMode by remember { mutableStateOf(false) }
     fun clampPan() {
         val maxX = (zoomPaneSize.width * (zoom - 1f) / 2f).coerceAtLeast(0f)
         val maxY = (zoomPaneSize.height * (zoom - 1f) / 2f).coerceAtLeast(0f)
@@ -94,9 +97,26 @@ fun DesktopPreviewPlayer(
         panY = panY.coerceIn(-maxY, maxY)
     }
     LaunchedEffect(zoom, zoomPaneSize) { clampPan() }
+    // Debounce disk writes: zoom/pan change rapidly during a drag; persist ~0.4s after they settle.
+    LaunchedEffect(zoom, panX, panY) {
+        delay(400)
+        PanelLayoutPrefs.savePreview(zoom, panX, panY)
+    }
     fun setZoom(z: Float) {
-        zoom = z.coerceIn(1f, MAX_ZOOM)
+        zoom = z.coerceIn(1f, PanelLayoutPrefs.MAX_ZOOM)
         if (zoom <= 1f) { panX = 0f; panY = 0f } else clampPan()
+    }
+    val panModifier = if (panMode) {
+        Modifier.pointerInput(Unit) {
+            detectDragGestures { change, drag ->
+                change.consume()
+                panX += drag.x
+                panY += drag.y
+                clampPan()
+            }
+        }
+    } else {
+        Modifier
     }
 
     val now = state.currentTimeMs
@@ -121,7 +141,7 @@ fun DesktopPreviewPlayer(
     val sy = if (crop.h > 0f) 100f / crop.h else 1f
 
     Box(
-        modifier = modifier.background(Neutral950).onSizeChanged { zoomPaneSize = it },
+        modifier = modifier.background(Neutral950).onSizeChanged { zoomPaneSize = it }.then(panModifier),
         contentAlignment = Alignment.Center,
     ) {
       // The composited frame — video, captions, and audio layers — lives in this inner box, which the
@@ -224,18 +244,26 @@ fun DesktopPreviewPlayer(
             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            androidx.compose.material3.IconButton(onClick = { setZoom(zoom - ZOOM_STEP) }, enabled = zoom > 1f) {
+            androidx.compose.material3.IconButton(onClick = { setZoom(zoom - PanelLayoutPrefs.ZOOM_STEP) }, enabled = zoom > 1f) {
                 androidx.compose.material3.Icon(
                     Icons.Filled.ZoomOut,
                     contentDescription = "Zoom out",
                     tint = if (zoom > 1f) White else Neutral500,
                 )
             }
-            androidx.compose.material3.IconButton(onClick = { setZoom(zoom + ZOOM_STEP) }, enabled = zoom < MAX_ZOOM) {
+            androidx.compose.material3.IconButton(onClick = { setZoom(zoom + PanelLayoutPrefs.ZOOM_STEP) }, enabled = zoom < PanelLayoutPrefs.MAX_ZOOM) {
                 androidx.compose.material3.Icon(
                     Icons.Filled.ZoomIn,
                     contentDescription = "Zoom in",
-                    tint = if (zoom < MAX_ZOOM) White else Neutral500,
+                    tint = if (zoom < PanelLayoutPrefs.MAX_ZOOM) White else Neutral500,
+                )
+            }
+            // Hand tool: drag the zoomed-in preview to pan it.
+            androidx.compose.material3.IconButton(onClick = { panMode = !panMode }) {
+                androidx.compose.material3.Icon(
+                    Icons.Filled.PanTool,
+                    contentDescription = if (panMode) "Hand tool (on)" else "Hand tool",
+                    tint = if (panMode) Red500 else Neutral500,
                 )
             }
             Box {
@@ -260,9 +288,9 @@ fun DesktopPreviewPlayer(
                             androidx.compose.foundation.layout.Column(Modifier.padding(12.dp)) {
                                 Text("Zoom  ${"%.1f".format(zoom)}x", color = White, fontSize = 12.sp)
                                 androidx.compose.material3.Slider(
-                                    value = zoom.coerceIn(1f, MAX_ZOOM),
+                                    value = zoom.coerceIn(1f, PanelLayoutPrefs.MAX_ZOOM),
                                     onValueChange = ::setZoom,
-                                    valueRange = 1f..MAX_ZOOM,
+                                    valueRange = 1f..PanelLayoutPrefs.MAX_ZOOM,
                                 )
                                 androidx.compose.material3.TextButton(onClick = { setZoom(1f) }) {
                                     Text("Fit", color = White, fontSize = 12.sp)

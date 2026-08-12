@@ -2,6 +2,73 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Preview hand tool (a real pan gesture, since there wasn't one) + per-track Minimize (2026-08-12)
+
+Requested directly, both on both platforms:
+
+- **Hand tool for the preview.** Auditing the existing zoom/pan viewport (`panX`/`panY`, persisted,
+  clamped, applied to the frame's `graphicsLayer`) found the "pan" half was dead: the state existed and
+  round-tripped to disk, but nothing anywhere ever *wrote* a nonzero value — no drag gesture was wired
+  to it at all. Added a Hand-tool toggle button next to the zoom controls; while it's on, dragging the
+  preview pans the zoomed frame (`detectDragGestures` → `panX`/`panY`, reusing the existing clamp/
+  persist logic verbatim). Off by default and mutually exclusive with Android's crop-transform gesture
+  (`cropMode`), so a plain drag on the preview is never ambiguous between "pan the viewport" and "move
+  the clip's crop."
+- **Per-track Minimize**, alongside Solo/Mute/Hide in the track header's dropdown (`TrackSettings.
+  minimized`, additive field). Collapses that track's lane to a fixed thin strip
+  (`MINIMIZED_TRACK_HEIGHT`, deliberately below the existing user-draggable `MIN_TRACK_HEIGHT` — a
+  distinct "collapsed" state, not just the smallest a manual resize could reach) via
+  `EditorUiState.trackHeight`, and shows a status glyph next to the soloed/muted/hidden icons already
+  in the header. Purely a vertical-space toggle: doesn't touch `disabled`/`muted`/volume/opacity or
+  anything preview/export reads — a minimized track still plays and exports exactly as before.
+
+Covered by a new `TimelineMechanicsTest` case: minimizing collapses `trackHeight` to
+`MINIMIZED_TRACK_HEIGHT` and back to `DEFAULT_TRACK_HEIGHT`, independent of an unrelated per-track
+setting (solo) toggled alongside it.
+
+## A real Media Bin — Guillotine had none — plus panel layout persistence for desktop (2026-08-12)
+
+Research before building found the "media bin" wasn't a feature to extend — **it didn't exist**: import
+lands a file straight onto the timeline with no separate pool/browse step, so anything removed from the
+timeline (or just not reused yet) was permanently unreachable even though `Document.mediaItems` still
+held it. This is that panel, built from scratch, on both platforms (`MediaBinScreen.kt` /
+`DesktopMediaBinScreen.kt`), reached from the project menu ("Media Bin", next to "Import"):
+
+- Every item in `Document.mediaItems`, with a thumbnail, name, duration, and whether it's currently
+  on the timeline.
+- **Search** (name or tag substring) + **kind chips** (All/Video/Audio/Image) + **tag chips** built
+  from every keyword already in use — clicking one filters to just that tag. This is Vegas B.6's
+  "Smart Bin": there's no saved query object, the filter runs live over editor state, so tagging one
+  more clip "b-roll" makes it show up under an existing "b-roll" search/chip immediately — it "auto-
+  updates" by construction, not by a background job.
+- **Add** drops a fresh clip from an already-imported item at the playhead (`EditorViewModel.
+  addClipFromMedia`) — no file re-pick, no re-decode, and it does not duplicate the `mediaItems` entry.
+- **Tag** / untag inline (`addMediaTag`/`removeMediaTag` — new `MediaItem.tags: List<String>` field,
+  additive so already-saved projects decode it as `emptyList()`, no migration).
+- **Remove from project** only when nothing on the timeline still references the item — deleting
+  referenced media would orphan clips, so that's refused rather than silently breaking something.
+
+**Deliberately not built:** literal drag-and-drop from the bin onto the timeline — the bin is a Dialog
+overlay and the timeline is a separate composable underneath it; wiring a cross-window Compose drag
+target is real work with its own failure modes, and "tap Add, it lands at the playhead" is a complete,
+honest substitute for the same outcome (get this media onto the timeline), not a stand-in for it.
+
+**Panel layout save/recall** (Vegas A.6/A.7 "Window Layouts"): Guillotine has one fixed arrangement,
+not Vegas's dockable/floating multi-window topology, so there's no set of named layouts to switch
+between — what "save/recall" means here is persisting every resizable split this app's layout actually
+has, restored automatically on next launch instead of behind a manual recall action:
+- Android's `PanelLayoutPrefs` already covered the preview/tools split + orientation + preview zoom/pan;
+  added the one thing it was missing, the timeline's own height (`timelineWeight` was `remember`-only
+  before this).
+- **Desktop had zero persisted UI-layout state of any kind** — confirmed by the research pass, and
+  called out as a known gap in this same day's earlier preview-zoom entry below. Built a small
+  `.properties`-file-backed `PanelLayoutPrefs` (`desktop/.../ui/PanelLayoutPrefs.kt`) covering desktop's
+  one real split (preview vs. timeline height) *and* closing that exact preview zoom/pan gap — it no
+  longer resets on every relaunch.
+
+Covered by new `MediaBinTest.kt` (`addClipFromMedia` reuse/no-duplicate/image-default-duration/unknown-
+id no-op, tag add/dedupe/trim/blank-ignored/remove, `removeUnusedMedia` refuses when referenced).
+
 ## Explicit preview zoom in/out buttons + a full-screen "cinema mode" (2026-08-12)
 
 Requested directly (not from `docs/UX_ACTION_TREE.md`): the preview's zoom was previously reachable

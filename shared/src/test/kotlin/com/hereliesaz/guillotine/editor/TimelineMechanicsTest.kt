@@ -308,4 +308,19 @@ class TimelineMechanicsTest {
         assertEquals(-14.2, vm.uiState.value.lufsByClip["c1"]!!, 0.0001)
         assertEquals(beforeDoc, vm.uiState.value.document)
     }
+
+    // ---- track minimize: a thin-strip collapse, vertical space only ----
+
+    @Test
+    fun `toggleTrackMinimized collapses the lane height and is independent of other track settings`() {
+        val vm = vmWith(clip("v1", "V1", 0, 0, 1000))
+        assertEquals(com.hereliesaz.guillotine.editor.DEFAULT_TRACK_HEIGHT, vm.uiState.value.trackHeight("V1"), 0f)
+        vm.toggleTrackSolo("V1") // an unrelated per-track setting, should be untouched by minimize
+        vm.toggleTrackMinimized("V1")
+        assertEquals(com.hereliesaz.guillotine.editor.MINIMIZED_TRACK_HEIGHT, vm.uiState.value.trackHeight("V1"), 0f)
+        assertTrue(vm.uiState.value.document.trackSettingsFor("V1").minimized)
+        assertTrue("V1" in vm.uiState.value.soloedTrackIds) // solo untouched
+        vm.toggleTrackMinimized("V1")
+        assertEquals(com.hereliesaz.guillotine.editor.DEFAULT_TRACK_HEIGHT, vm.uiState.value.trackHeight("V1"), 0f)
+    }
 }

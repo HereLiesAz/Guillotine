@@ -123,6 +123,10 @@ data class MediaItem(
     val durationMs: Long,
     /** True if a VIDEO file also carries an audio stream (→ auto-add a paired audio clip). */
     val hasAudio: Boolean = false,
+    /** User-defined keywords (e.g. "b-roll", "interview") — the Media Bin's search matches these
+     *  alongside [name], and its category chips filter by them, so tagging one clip "b-roll" makes
+     *  every future search for that tag find it automatically (Vegas B.6's "Smart Bin"). */
+    val tags: List<String> = emptyList(),
 )
 
 /** Cubic-bezier easing control points (P1, P2); endpoints are fixed at (0,0)/(1,1). */
@@ -322,6 +326,10 @@ data class TrackSettings(
     val name: String = "",
     /** Header/clip accent color as "#RRGGBB"; blank = the default neutral color. */
     val colorHex: String = "",
+    /** Collapsed to a thin strip in the timeline (a visual/vertical-space toggle only — clips, edits,
+     *  and every other setting on this track are completely unaffected; unlike [disabled] this never
+     *  touches preview or export). */
+    val minimized: Boolean = false,
 )
 
 @Serializable

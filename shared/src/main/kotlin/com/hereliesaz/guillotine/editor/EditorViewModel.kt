@@ -106,8 +106,12 @@ data class EditorUiState(
     /** Most recent prompt (the inline hint / empty-submit default). */
     val lastPrompt: String get() = promptHistory.firstOrNull().orEmpty()
 
-    /** Lane height (dp) for [trackId], falling back to the default. */
-    fun trackHeight(trackId: String): Float = trackHeights[trackId] ?: DEFAULT_TRACK_HEIGHT
+    /** Lane height (dp) for [trackId] — collapsed to [MINIMIZED_TRACK_HEIGHT] when the track's
+     *  [com.hereliesaz.guillotine.model.TrackSettings.minimized] is set, else the stored/dragged
+     *  height, falling back to the default. */
+    fun trackHeight(trackId: String): Float =
+        if (document.trackSettingsFor(trackId).minimized) MINIMIZED_TRACK_HEIGHT
+        else trackHeights[trackId] ?: DEFAULT_TRACK_HEIGHT
 
     /**
      * [Document.disabledTrackIds] plus, when any track is soloed, every non-soloed track — the
@@ -125,6 +129,9 @@ data class EditorUiState(
 const val DEFAULT_TRACK_HEIGHT = 64f
 const val MIN_TRACK_HEIGHT = 44f
 const val MAX_TRACK_HEIGHT = 240f
+/** Below [MIN_TRACK_HEIGHT] deliberately — a minimized track is a distinct "collapsed to a thin
+ *  strip" state, not just the smallest a user could drag a track to. */
+const val MINIMIZED_TRACK_HEIGHT = 22f
 private const val MAX_PROMPT_HISTORY = 7
 
 /** Animated caption scale range: syllables start at BASE and grow to PEAK when spoken. */
@@ -275,6 +282,69 @@ open class EditorViewModel {
         // when the timeline's content just changed. Runs after mutateDocument so totalDurationMs
         // reflects the new clips.
         fitZoomToTimeline()
+    }
+
+    // ---- media bin: reuse already-imported media, tag it, or drop unused entries ------------------
+
+    /**
+     * Add a NEW clip referencing an already-imported [mediaId] (from the Media Bin), at the playhead —
+     * the same per-kind clip shape [addMedia] gives a freshly-imported file (a video's own-audio
+     * shadow, an image's default duration), but without appending to [Document.mediaItems] again,
+     * since the media is already in the pool. No-op if [mediaId] isn't a known media item.
+     */
+    fun addClipFromMedia(mediaId: String, targetTrack: String? = null) {
+        val m = document.mediaItems.firstOrNull { it.id == mediaId } ?: return
+        mutateDocument { doc ->
+            val videoTrack = targetTrack?.takeIf { it in doc.videoTracks } ?: "V1"
+            val audioTrack = targetTrack?.takeIf { it in doc.audioTracks } ?: "A1"
+            val cursor = _uiState.value.currentTimeMs
+            val newClips = mutableListOf<TimelineClip>()
+            when (m.kind) {
+                MediaKind.VIDEO -> {
+                    if (m.hasAudio) {
+                        val gid = newId()
+                        val video = videoClip(m, cursor, videoTrack).copy(groupId = gid)
+                        newClips += video
+                        newClips += audioClip(m, cursor, audioTrack).copy(groupId = gid, linkedClipId = video.id)
+                    } else {
+                        newClips += videoClip(m, cursor, videoTrack)
+                    }
+                }
+                MediaKind.AUDIO -> newClips += audioClip(m, cursor, audioTrack)
+                MediaKind.IMAGE -> {
+                    val dur = if (m.durationMs > 0) m.durationMs else IMAGE_DEFAULT_DURATION_MS
+                    newClips += videoClip(m.copy(durationMs = dur), cursor, videoTrack)
+                }
+            }
+            doc.copy(clips = doc.clips + newClips)
+        }
+    }
+
+    /** Add [tag] (trimmed, deduped) to a media item's keyword list. No-op on a blank tag. */
+    fun addMediaTag(mediaId: String, tag: String) {
+        val t = tag.trim()
+        if (t.isEmpty()) return
+        mutateDocument { doc ->
+            doc.copy(mediaItems = doc.mediaItems.map { if (it.id == mediaId && t !in it.tags) it.copy(tags = it.tags + t) else it })
+        }
+    }
+
+    fun removeMediaTag(mediaId: String, tag: String) {
+        mutateDocument { doc ->
+            doc.copy(mediaItems = doc.mediaItems.map { if (it.id == mediaId) it.copy(tags = it.tags - tag) else it })
+        }
+    }
+
+    /**
+     * Drop a media item from the project pool — only when no clip on the timeline still references
+     * it, since removing referenced media would orphan those clips. No-op otherwise (including when
+     * the id doesn't exist).
+     */
+    fun removeUnusedMedia(mediaId: String) {
+        mutateDocument { doc ->
+            if (doc.clips.any { it.mediaId == mediaId }) return@mutateDocument doc
+            doc.copy(mediaItems = doc.mediaItems.filterNot { it.id == mediaId })
+        }
     }
 
     /**
@@ -1475,6 +1545,10 @@ open class EditorViewModel {
     fun setTrackOpacity(trackId: String, opacity: Float) = updateTrackSettings(trackId) { it.copy(opacity = opacity) }
     fun setTrackName(trackId: String, name: String) = updateTrackSettings(trackId) { it.copy(name = name) }
     fun setTrackColor(trackId: String, colorHex: String) = updateTrackSettings(trackId) { it.copy(colorHex = colorHex) }
+
+    /** Collapse/expand a track to a thin strip — vertical space only, never preview/export (see
+     *  [com.hereliesaz.guillotine.model.TrackSettings.minimized]). */
+    fun toggleTrackMinimized(trackId: String) = updateTrackSettings(trackId) { it.copy(minimized = !it.minimized) }
 
     /**
      * Solo: isolate one or more tracks for monitoring. Toggling a track in or out of the soloed set is

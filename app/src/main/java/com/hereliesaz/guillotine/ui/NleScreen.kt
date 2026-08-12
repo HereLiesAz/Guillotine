@@ -275,6 +275,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showAdFree by remember { mutableStateOf(false) }
     var showAzphaltStore by remember { mutableStateOf(false) }
     var showExtensionsManager by remember { mutableStateOf(false) }
+    var showMediaBin by remember { mutableStateOf(false) }
     // Double-tapping the "X" over two already-overlapping (auto-crossfading) clips on the timeline
     // opens a transition picker for this pair; null when no picker is showing.
     var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -509,6 +510,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onOpenAiSettings = { showAiSettings = true },
             onOpenStore = { showAzphaltStore = true },
             onOpenExtensions = { showExtensionsManager = true },
+            onOpenMediaBin = { showMediaBin = true },
             onAiComparison = { showAiComparison = true },
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
@@ -518,15 +520,19 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
 
         // Analysis/export status & errors now stream into the activity-log bottom sheet below,
         // so there's no separate status strip here.
-        var timelineWeight by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0.4f) }
-
         // Split between the preview and the clip-properties panel (AdvancedToolView), resizable by a
         // divider in BOTH arrangements: a vertical grip when they sit side-by-side (wide) and a
         // horizontal grip when stacked (tall). Each orientation remembers its own fraction. The
-        // fraction, and any pinned orientation, persist across sessions via PanelLayoutPrefs.
+        // fraction, any pinned orientation, and the timeline's own height all persist across sessions
+        // via PanelLayoutPrefs — this is the "Save/recall panel layout" feature (Vegas A.6/A.7's
+        // Window Layouts): Guillotine has one fixed arrangement rather than Vegas's dockable/floating
+        // multi-window topology, so there's nothing to name/switch between — what persists here is
+        // every degree of freedom this app's layout actually has, restored automatically on next launch
+        // rather than behind a manual "recall" action.
         val savedLayout = androidx.compose.runtime.remember { PanelLayoutPrefs.load(context) }
         var previewWeightWide by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.previewWeightWide) }
         var previewWeightTall by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.previewWeightTall) }
+        var timelineWeight by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.timelineWeight) }
         // Pinned orientation: null = follow the screen shape; true = force side-by-side; false = stacked.
         // Double-tapping the preview/panel grip toggles it.
         var orientationOverride by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(savedLayout.orientationOverride) }
@@ -539,6 +545,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         androidx.compose.runtime.LaunchedEffect(previewWeightTall) {
             kotlinx.coroutines.delay(500)
             PanelLayoutPrefs.saveTall(context, previewWeightTall)
+        }
+        androidx.compose.runtime.LaunchedEffect(timelineWeight) {
+            kotlinx.coroutines.delay(500)
+            PanelLayoutPrefs.saveTimeline(context, timelineWeight)
         }
         androidx.compose.foundation.layout.BoxWithConstraints(
             androidx.compose.ui.Modifier
@@ -861,6 +871,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     if (showExtensionsManager) {
         ExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
     }
+    if (showMediaBin) {
+        MediaBinScreen(vm = vm, onDismiss = { showMediaBin = false })
+    }
     // Swap the free, instant crossfade an overlap already produces for a named FFmpeg xfade
     // transition — a deliberate, real bake (needs an ffmpeg binary configured, takes real time), not
     // something that happens automatically just from overlapping two clips.
@@ -975,6 +988,7 @@ private fun TopBar(
     onOpenAiSettings: () -> Unit,
     onOpenStore: () -> Unit,
     onOpenExtensions: () -> Unit,
+    onOpenMediaBin: () -> Unit,
     onAiComparison: () -> Unit,
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
@@ -1003,6 +1017,7 @@ private fun TopBar(
                 azItem("Save") { onSaveProject() }
                 azItem("Rename") { onNameProject() }
                 azItem("Import") { onImport() }
+                azItem("Media Bin") { onOpenMediaBin() }
                 azItem("Generate") { onGenerate() }
                 azItem("Render") { onExport() }
                 azDivider()

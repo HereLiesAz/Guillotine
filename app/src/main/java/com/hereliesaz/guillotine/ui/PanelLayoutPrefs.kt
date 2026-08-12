@@ -16,9 +16,11 @@ object PanelLayoutPrefs {
     private const val KEY_ZOOM = "preview_zoom"
     private const val KEY_PAN_X = "preview_pan_x"
     private const val KEY_PAN_Y = "preview_pan_y"
+    private const val KEY_TIMELINE = "timeline_weight"
 
     const val DEFAULT_WIDE = 0.65f
     const val DEFAULT_TALL = 0.5f
+    const val DEFAULT_TIMELINE = 0.4f
     const val DEFAULT_ZOOM = 1f // 1x = fit-to-view (the floor: the preview never zooms out past fit)
     const val MAX_ZOOM = 5f
     /** Step size for the explicit Zoom In/Out buttons (vs. the popup slider's continuous drag). */
@@ -29,6 +31,7 @@ object PanelLayoutPrefs {
         val previewWeightWide: Float,
         val previewWeightTall: Float,
         val orientationOverride: Boolean?,
+        val timelineWeight: Float,
     )
 
     fun load(context: Context): Layout {
@@ -37,8 +40,12 @@ object PanelLayoutPrefs {
             previewWeightWide = p.getFloat(KEY_WIDE, DEFAULT_WIDE),
             previewWeightTall = p.getFloat(KEY_TALL, DEFAULT_TALL),
             orientationOverride = if (p.contains(KEY_ORIENTATION)) p.getInt(KEY_ORIENTATION, 1) == 1 else null,
+            timelineWeight = p.getFloat(KEY_TIMELINE, DEFAULT_TIMELINE),
         )
     }
+
+    fun saveTimeline(context: Context, v: Float) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putFloat(KEY_TIMELINE, v).apply()
 
     fun saveWide(context: Context, v: Float) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putFloat(KEY_WIDE, v).apply()

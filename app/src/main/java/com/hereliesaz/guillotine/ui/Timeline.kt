@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.DropdownMenu
@@ -508,6 +509,9 @@ private fun TrackHeader(
                 if (ts.disabled) {
                     Icon(Icons.Filled.VisibilityOff, "Disabled", tint = Red500, modifier = Modifier.size(11.dp))
                 }
+                if (ts.minimized) {
+                    Icon(Icons.Filled.UnfoldLess, "Minimized", tint = Red500, modifier = Modifier.size(11.dp))
+                }
             }
         }
 
@@ -547,6 +551,8 @@ private fun TrackHeader(
                 TrackToggle(if (type == ClipType.AUDIO) "Disable track" else "Hide track", ts.disabled) {
                     vm.toggleTrackDisabled(trackId)
                 }
+                // Collapse to a thin strip — vertical space only, never preview/export.
+                TrackToggle("Minimize", ts.minimized) { vm.toggleTrackMinimized(trackId) }
 
                 if (type == ClipType.AUDIO || type == ClipType.VIDEO) {
                     TrackSlider("Volume", ts.volume, 0f..2f) { vm.setTrackVolume(trackId, it) }

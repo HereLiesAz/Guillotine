@@ -121,6 +121,7 @@ import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.model.newId
 import com.hereliesaz.guillotine.ui.ActivityLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -184,6 +185,7 @@ fun NleScreen(
     var showAiSettings by remember { mutableStateOf(false) }
     var showStore by remember { mutableStateOf(false) }
     var showExtensionsManager by remember { mutableStateOf(false) }
+    var showMediaBin by remember { mutableStateOf(false) }
     // Double-clicking the "X" over two already-overlapping (auto-crossfading) clips on the timeline
     // opens a transition picker for this pair; null when no picker is showing.
     var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -392,6 +394,7 @@ fun NleScreen(
             onProjectSettings = { showProjectSettings = true },
             onOpenStore = { showStore = true },
             onOpenExtensions = { showExtensionsManager = true },
+            onOpenMediaBin = { showMediaBin = true },
             onSettings = { showSettings = true },
             onOpenAiSettings = { showAiSettings = true },
             onAiComparison = { showAiComparison = true },
@@ -402,8 +405,13 @@ fun NleScreen(
 
         // Preview (top) over the timeline (bottom), split resizable via the divider below the preview.
         // Defaults to 60/40; the tool strip in between is fixed-height, so dragging trades preview for
-        // timeline space.
-        var previewWeight by remember { mutableFloatStateOf(0.6f) }
+        // timeline space. Persists across restarts via PanelLayoutPrefs — "Save/recall panel layout"
+        // (Vegas A.6/A.7's Window Layouts) for the one split desktop's fixed arrangement actually has.
+        var previewWeight by remember { mutableFloatStateOf(PanelLayoutPrefs.loadPreviewWeight()) }
+        LaunchedEffect(previewWeight) {
+            delay(500)
+            PanelLayoutPrefs.savePreviewWeight(previewWeight)
+        }
         Column(Modifier.weight(previewWeight).fillMaxWidth()) {
             VideoPreview(vm, Modifier.weight(1f).fillMaxWidth(), onToggleFullscreen = { fullscreenPreview = true })
             TransportControls(vm, state)
@@ -485,6 +493,9 @@ fun NleScreen(
 
     if (showExtensionsManager) {
         DesktopExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
+    }
+    if (showMediaBin) {
+        DesktopMediaBinScreen(vm = vm, onDismiss = { showMediaBin = false })
     }
 
     // Swap the free, instant crossfade an overlap already produces for a named FFmpeg xfade
@@ -685,6 +696,7 @@ private fun TopBar(
     onProjectSettings: () -> Unit,
     onOpenStore: () -> Unit,
     onOpenExtensions: () -> Unit,
+    onOpenMediaBin: () -> Unit,
     onSettings: () -> Unit,
     onOpenAiSettings: () -> Unit,
     onAiComparison: () -> Unit,
@@ -705,6 +717,7 @@ private fun TopBar(
                 DropdownMenuItem(text = { Text("Open") }, onClick = { menuExpanded = false; onOpenProject() })
                 DropdownMenuItem(text = { Text("Save") }, onClick = { menuExpanded = false; onSaveProject() })
                 DropdownMenuItem(text = { Text("Import") }, onClick = { menuExpanded = false; onImport() })
+                DropdownMenuItem(text = { Text("Media Bin") }, onClick = { menuExpanded = false; onOpenMediaBin() })
                 DropdownMenuItem(text = { Text("Generate") }, onClick = { menuExpanded = false; onGenerate() })
                 DropdownMenuItem(text = { Text("Render") }, onClick = { menuExpanded = false; onExport() })
                 HorizontalDivider()
