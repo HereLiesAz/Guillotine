@@ -1,10 +1,15 @@
 name: Release Desktop Installers
 
-# Piggy-back on the existing Android release tags — `release-apk.yml` and `merged-build.yml`
-# force-push `latest-release-v<MAJOR>.<MINOR>` and `latest-debug-v<MAJOR>.<MINOR>` respectively,
-# each creating (or updating) a GitHub Release with the APK/AAB. This workflow attaches the
-# matching desktop installers to the SAME release, so a v0.9 tag ends up with the Android
-# artifacts + macOS DMG + Windows MSI + Linux DEB in one place.
+# Normally piggy-backs on the existing Android release tags — `release-apk.yml` and
+# `merged-build.yml` force-push `latest-release-v<MAJOR>.<MINOR>` and
+# `latest-debug-v<MAJOR>.<MINOR>` respectively, each creating (or updating) a GitHub Release with
+# the APK/AAB. This workflow attaches the matching desktop installers to the SAME release, so a
+# v0.9 tag ends up with the Android artifacts + macOS DMG + Windows MSI + Linux DEB in one place.
+#
+# It's also self-sufficient when run on its own (workflow_dispatch with no `tag` input): the
+# `resolve-tag` job derives `latest-release-v<major>.<minor>` from version.properties and creates
+# that tag at the current commit if it doesn't exist yet, instead of requiring the caller to
+# already know (or another workflow to have already pushed) a matching tag.
 #
 # Force-pushing an existing tag still fires push:tags — softprops/action-gh-release@v3 upserts,
 # so re-runs cleanly replace the installers on the release.
@@ -20,8 +25,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to attach installers to (e.g. latest-release-v0.9)'
-        required: true
+        description: 'Existing tag to attach installers to (leave blank to auto-derive latest-release-v<major>.<minor> from version.properties, creating it if it does not exist yet)'
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +36,52 @@ permissions:
   contents: write
 
 jobs:
+  # Figures out which tag this run should attach installers to, once, so the three OS jobs below
+  # don't each race to create/push the same tag. Three cases:
+  #   1. Triggered by a tag push (the common case) → that tag, already real.
+  #   2. workflow_dispatch with an explicit `tag` input → that tag (must already exist).
+  #   3. workflow_dispatch with no input → derive `latest-release-v<major>.<minor>` from
+  #      version.properties (the same convention release-apk.yml's manual release uses) and create
+  #      it at the current commit if it doesn't exist yet, so this workflow is self-sufficient
+  #      instead of depending on another workflow having tagged first.
+  resolve-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve or create the release tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            TAG_NAME="$INPUT_TAG"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG_NAME="${{ github.ref_name }}"
+          else
+            MAJOR=$(grep 'versionMajor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
+            MINOR=$(grep 'versionMinor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
+            TAG_NAME="latest-release-v${MAJOR}.${MINOR}"
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" > /dev/null 2>&1; then
+            echo "Using existing tag $TAG_NAME"
+          else
+            echo "Tag $TAG_NAME doesn't exist yet — creating it at $GITHUB_SHA"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG_NAME" -m "Desktop release" "$GITHUB_SHA"
+            git push origin "$TAG_NAME"
+          fi
+
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
   release-desktop:
+    needs: resolve-tag
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +128,7 @@ jobs:
       - name: Attach installer to release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
           files: ${{ matrix.path }}
           fail_on_unmatched_files: true
           body: |
