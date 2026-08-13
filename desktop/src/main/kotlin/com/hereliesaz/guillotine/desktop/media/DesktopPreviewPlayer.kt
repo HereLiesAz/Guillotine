@@ -506,17 +506,20 @@ private fun VideoSlot(
     val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX)
     val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY)
 
+    // Clip to the frame BEFORE the transform below, for every clip except the one the crop tool is
+    // actively editing. A graphicsLayer scale/rotate doesn't clip its own content by default, so
+    // without this a transformed clip paints past the frame's own rectangle — into the letterbox,
+    // over the zoom controls — which for a resting (non-target) clip reads as "the preview moved"
+    // rather than "the clip overflowed," so it stays clipped there (matching Android's VideoSlot,
+    // which has always clipped, and export, which never shows what's outside the frame). But the
+    // clip actively being cropped is deliberately exempted: the whole point of dragging/scaling it
+    // is to decide what ends up inside the frame vs. cut away, and that decision needs the
+    // overflowing part visible, not hidden — the wireframe below marks where the frame boundary
+    // actually is so "in frame" vs. "will be cropped" stays legible while it paints past that line.
+    val isCropTarget = clip.id == cropTargetClipId
     val mod = Modifier
         .fillMaxSize()
-        // Clip BEFORE the transform below: a graphicsLayer scale/rotate doesn't clip its own content
-        // by default, so a crop-tool zoom/pan/rotation on this clip could paint past the frame's own
-        // rectangle — into the letterbox, over the zoom-control button, past where the picture is
-        // supposed to end, which reads as "the whole preview is moving" since there's nothing to show
-        // where the clip's own bounds actually are. The frame's bounding box must stay the topmost
-        // visual limit for every layer; clipping at the pre-transform (fillMaxSize) bounds enforces
-        // that regardless of how far the transform below pushes the content. Matches Android's
-        // PreviewPlayer.VideoSlot, which has always clipped here.
-        .clipToBounds()
+        .then(if (isCropTarget) Modifier else Modifier.clipToBounds())
         .graphicsLayer {
             this.alpha = alpha.coerceIn(0f, 1f)
             scaleX = s
@@ -530,13 +533,12 @@ private fun VideoSlot(
         frame?.let { bmp ->
             Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
         }
-        // Crop tool: a wireframe of this clip's TRUE rectangle, drawn OUTSIDE the clip above so it is
-        // never cut off at the frame edge — a scaled-up or panned-off-frame clip's actual bounds
-        // extend past what's visible, and a handle sitting on a corner that clipToBounds hid would be
-        // unreachable. Sharing the same scale/rotate/pan transform (but skipping the clip and the
-        // rotation, for both simplicity and because a corner-drag resize is easiest to reason about
+        // Crop tool: a wireframe marking this clip's frame boundary, so — now that this clip's own
+        // content is unclipped above and free to paint past that line — "in frame" vs. "will be
+        // cropped away" stays legible. Sharing the same scale/pan transform (but skipping rotation,
+        // for both simplicity and because a corner-drag resize is easiest to reason about
         // axis-aligned) keeps the wireframe and its handles tracking the clip exactly.
-        if (clip.id == cropTargetClipId) {
+        if (isCropTarget) {
             CropWireframe(scale = s, offsetXFrac = offXFrac, offsetYFrac = offYFrac, onCropTransform = onCropTransform)
         }
     }

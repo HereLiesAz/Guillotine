@@ -13,13 +13,17 @@ panned/rotated the whole rendered picture, letterbox bars included — not the s
   aspect-locked frame's rectangle — into the letterbox, over the zoom controls, anywhere — and since
   the letterbox and the overflow are the same background color, that overflow reads as "the entire
   preview moved," not "the clip moved past its frame." Android's `PreviewPlayer.VideoSlot` has always
-  clipped here (with a comment explaining exactly this); desktop never did. Added the same
-  `clipToBounds()` immediately before the transform, so the frame's edge is the hard visual limit for
-  every layer again, matching Android and export.
-- **No visible boundary, so "which layer is this even affecting" was a fair question even once
-  targeting was correct.** Added a wireframe outline around the crop-target clip's true rectangle —
-  drawn on a separate, unclipped overlay (so it stays visible even when the clip is scaled up or
-  panned partway off-frame, where the actual clip content is now correctly clipped away).
+  clipped here (with a comment explaining exactly this); desktop never did.
+- First fix added `clipToBounds()` unconditionally, matching Android and export — but that's wrong
+  for the one clip actually being edited: cropping/panning is precisely how you decide what ends up
+  inside the frame vs. cut away, and that decision needs the overflowing part visible, not hidden the
+  instant it crosses the edge. So the clip is now exempted from `clipToBounds()` only while it's the
+  crop tool's active target — every other clip (including this same one once the tool moves on)
+  stays clipped exactly as export would show it.
+- **No visible boundary, so "in frame" vs. "will be cropped away" was illegible once the target clip
+  could paint past the frame again.** Added a wireframe outline around the crop-target clip's true
+  rectangle, on a separate, unclipped overlay so it stays visible however far the clip is scaled up
+  or panned off-frame, marking exactly where that line is.
 - **No way to resize by dragging at all** — only scroll-wheel zoom existed. Added four corner
   handles on that wireframe, counter-scaled to a constant on-screen size regardless of the clip's
   current zoom level, each draggable to grow/shrink the clip from its centre (dragging a corner
