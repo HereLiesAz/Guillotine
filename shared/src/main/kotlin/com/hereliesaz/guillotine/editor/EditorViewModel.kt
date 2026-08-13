@@ -1,5 +1,6 @@
 package com.hereliesaz.guillotine.editor
 
+import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.CubicBezier
@@ -98,6 +99,15 @@ data class EditorUiState(
      * tool; shown as a readout next to the clip's Normalize toggle.
      */
     val lufsByClip: Map<String, Double> = emptyMap(),
+    /**
+     * True right after the first clip lands on an otherwise-empty project whose aspect ratio is
+     * still a fixed preset (not [com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL]) — the UI
+     * shows a one-shot "match the project to this clip's own shape?" prompt (Vegas B.4: adding the
+     * first clip to an empty timeline offers to match project properties to the source). Cleared by
+     * [EditorViewModel.resolveAspectMatchSuggestion] regardless of the user's choice, so it never
+     * re-fires for later clips. Transient view state, not part of the undoable [Document].
+     */
+    val suggestAspectMatch: Boolean = false,
 ) {
     val selectedClipId: String? get() = selectedClipIds.singleOrNull()
     val selectedClips: List<TimelineClip>
@@ -238,6 +248,7 @@ open class EditorViewModel {
      */
     fun addMedia(items: List<MediaItem>, targetTrack: String? = null) {
         if (items.isEmpty()) return
+        val wasEmpty = document.clips.isEmpty()
         mutateDocument { doc ->
             val videoTrack = targetTrack?.takeIf { it in doc.videoTracks } ?: "V1"
             val audioTrack = targetTrack?.takeIf { it in doc.audioTracks } ?: "A1"
@@ -282,6 +293,26 @@ open class EditorViewModel {
         // when the timeline's content just changed. Runs after mutateDocument so totalDurationMs
         // reflects the new clips.
         fitZoomToTimeline()
+        // Vegas B.4: the FIRST clip landing on an empty project offers to match project properties
+        // to it, rather than silently forcing the clip into whatever fixed ratio the project happens
+        // to be set to (letterboxing a mismatched clip with no easy way back). Only fires once per
+        // project — later imports land inside an already-shaped project and shouldn't re-suggest.
+        // ORIGINAL is skipped: it already derives the frame from the reference clip's own shape, so
+        // there's nothing to offer.
+        if (wasEmpty && document.settings.aspectRatio != AspectRatio.ORIGINAL) {
+            _uiState.update { it.copy(suggestAspectMatch = true) }
+        }
+    }
+
+    /**
+     * Resolves the one-shot [EditorUiState.suggestAspectMatch] prompt [addMedia] raised. [match]
+     * true switches the project to [AspectRatio.ORIGINAL] — following the clip's own shape instead
+     * of a fixed preset; false just dismisses, keeping the project's current ratio. Either way the
+     * prompt is cleared and won't fire again this session.
+     */
+    fun resolveAspectMatchSuggestion(match: Boolean) {
+        _uiState.update { it.copy(suggestAspectMatch = false) }
+        if (match) setGlobalSettings(document.settings.copy(aspectRatio = AspectRatio.ORIGINAL))
     }
 
     // ---- media bin: reuse already-imported media, tag it, or drop unused entries ------------------

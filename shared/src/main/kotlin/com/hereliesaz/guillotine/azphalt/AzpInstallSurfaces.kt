@@ -73,4 +73,26 @@ object AzpInstallSurfaces {
         }
         return out.toList()
     }
+
+    /**
+     * Best-effort answer to "would this catalog entry reach [Surface.NONE]", using only the
+     * browse-list summary's [types] — no download, no manifest. A `pack`/`app`/`mcp`/`code`
+     * package's summary always has empty (or otherwise unrecognized) `types`, since
+     * [AzphaltRegistry.CatalogEntry.types] mirrors its assets' own declared types; this lets the
+     * store filter those out before a user spends an install on something guaranteed to be inert,
+     * without a network round-trip per entry — installing still doesn't happen until the user asks,
+     * but browsing shouldn't offer an "Install" button for something that can only ever land on
+     * [Surface.NONE].
+     *
+     * Every type string [of] treats as a real consumer is checked here too, so this can't produce a
+     * false positive (hiding something that would actually work). A false negative — showing
+     * something that turns out inert — would mean a catalog entry's `types` doesn't reflect its own
+     * assets, a registry-data problem rather than something to design around client-side.
+     */
+    fun hasKnownConsumer(types: List<String>): Boolean = types.any { raw ->
+        val type = raw.trim().lowercase()
+        type in AzpMotionInstaller.MOTION_TYPES ||
+            type in AzpModelInstaller.MODEL_TYPES ||
+            AzpInstalledUi.renderKindOf(type) != AzpInstalledUi.RenderKind.OTHER
+    }
 }
