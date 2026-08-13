@@ -270,6 +270,36 @@ private val DESKTOP_CATEGORY_CHIPS = listOf(
     "Skills" to "skill",
 )
 
+/**
+ * A live preview of what this listing's LUT/shader actually looks like — the app's own icon run
+ * through the real (not-yet-installed) effect asset, not a generic category icon. Lazily rendered
+ * off the main thread and cached (see [DesktopStorePreviewRenderer]); silently absent (falls back
+ * to nothing, not a placeholder image) while loading, on a network/parse failure, or for asset
+ * types with no still-image render path (motion, AI models).
+ */
+@Composable
+private fun CatalogEntryPreviewThumbnail(entry: AzphaltRegistry.CatalogEntry) {
+    val preview by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, entry.id, entry.latest) {
+        value = com.hereliesaz.guillotine.desktop.media.DesktopStorePreviewRenderer.render(entry)
+    }
+    Box(
+        Modifier
+            .size(48.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Neutral900),
+        contentAlignment = Alignment.Center,
+    ) {
+        preview?.let {
+            androidx.compose.foundation.Image(
+                bitmap = it,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
 @Composable
 private fun DesktopCatalogEntryRow(entry: AzphaltRegistry.CatalogEntry, installed: Boolean, onInstall: () -> Unit) {
     Row(
@@ -281,6 +311,8 @@ private fun DesktopCatalogEntryRow(entry: AzphaltRegistry.CatalogEntry, installe
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        CatalogEntryPreviewThumbnail(entry)
+        androidx.compose.foundation.layout.Spacer(Modifier.size(10.dp))
         Column(Modifier.weight(1f)) {
             Text(entry.name, color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             if (entry.description.isNotBlank()) {

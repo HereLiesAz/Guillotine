@@ -32,20 +32,31 @@ object DesktopShaderPass {
     // path -> compiled effect (Optional.empty caches a failed compile so we don't retry every frame).
     private val cache = ConcurrentHashMap<String, Optional<Compiled>>()
 
+    // shader source text -> compiled effect, for callers that have the GLSL in hand rather than a path
+    // on disk (e.g. a not-yet-installed store package's shader asset, extracted straight from its .azp
+    // without ever being written to a file). Separate map: a path and its file contents aren't
+    // interchangeable cache keys.
+    private val sourceCache = ConcurrentHashMap<String, Optional<Compiled>>()
+
     /** True if [shaderPath] parses, translates, and compiles as SkSL — i.e. it will actually render. */
     fun canRender(shaderPath: String): Boolean =
         shaderPath.isNotBlank() && compiled(shaderPath) != null
 
     private fun compiled(path: String): Compiled? =
         cache.getOrPut(path) {
-            Optional.ofNullable(
-                runCatching {
-                    val program = GlslShader.parse(java.io.File(path).readText())
-                    val sksl = GlslToSksl.translate(program)
-                    Compiled(RuntimeEffect.makeForShader(sksl), program.uniforms)
-                }.getOrNull(),
-            )
+            Optional.ofNullable(runCatching { compileText(java.io.File(path).readText()) }.getOrNull())
         }.orElse(null)
+
+    private fun compiledFromSource(source: String): Compiled? =
+        sourceCache.getOrPut(source) {
+            Optional.ofNullable(runCatching { compileText(source) }.getOrNull())
+        }.orElse(null)
+
+    private fun compileText(source: String): Compiled {
+        val program = GlslShader.parse(source)
+        val sksl = GlslToSksl.translate(program)
+        return Compiled(RuntimeEffect.makeForShader(sksl), program.uniforms)
+    }
 
     /**
      * Apply the shader at [shaderPath] to [img], overriding scalar uniforms from [params] and feeding
@@ -54,6 +65,17 @@ object DesktopShaderPass {
     fun apply(img: BufferedImage, shaderPath: String, params: Map<String, Float>, timeMs: Long): BufferedImage {
         if (shaderPath.isBlank()) return img
         val c = compiled(shaderPath) ?: return img
+        return runCatching { render(img, c, params, timeMs) }.getOrDefault(img)
+    }
+
+    /**
+     * Same as [apply], but for shader GLSL [source] already in hand (no file on disk) — the store's
+     * live effect-preview path, which extracts a not-yet-installed package's shader asset straight
+     * from its downloaded `.azp` bytes.
+     */
+    fun applyFromSource(img: BufferedImage, source: String, params: Map<String, Float>, timeMs: Long): BufferedImage {
+        if (source.isBlank()) return img
+        val c = compiledFromSource(source) ?: return img
         return runCatching { render(img, c, params, timeMs) }.getOrDefault(img)
     }
 
