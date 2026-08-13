@@ -2,6 +2,44 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Desktop crop tool: it really was transforming the viewport, plus real resize handles (2026-08-13)
+
+Follow-up to the crop-tool wiring below, reported directly: dragging with Crop selected visibly
+panned/rotated the whole rendered picture, letterbox bars included — not the selected clip.
+
+- **Root cause, found by diffing against Android's own `VideoSlot`:** desktop's per-clip
+  `graphicsLayer` (scale/rotate/pan) had no `clipToBounds()` before it. A `graphicsLayer` transform
+  doesn't clip its own content by default, so a scaled/rotated/panned clip painted straight past the
+  aspect-locked frame's rectangle — into the letterbox, over the zoom controls, anywhere — and since
+  the letterbox and the overflow are the same background color, that overflow reads as "the entire
+  preview moved," not "the clip moved past its frame." Android's `PreviewPlayer.VideoSlot` has always
+  clipped here (with a comment explaining exactly this); desktop never did.
+- First fix added `clipToBounds()` unconditionally, matching Android and export — but that's wrong
+  for the one clip actually being edited: cropping/panning is precisely how you decide what ends up
+  inside the frame vs. cut away, and that decision needs the overflowing part visible, not hidden the
+  instant it crosses the edge. So the clip is now exempted from `clipToBounds()` only while it's the
+  crop tool's active target — every other clip (including this same one once the tool moves on)
+  stays clipped exactly as export would show it.
+- **No visible boundary, so "in frame" vs. "will be cropped away" was illegible once the target clip
+  could paint past the frame again.** Added a wireframe outline around the crop-target clip's true
+  rectangle, on a separate, unclipped overlay so it stays visible however far the clip is scaled up
+  or panned off-frame, marking exactly where that line is.
+- **No way to resize by dragging at all** — only scroll-wheel zoom existed. Added four corner
+  handles on that wireframe, counter-scaled to a constant on-screen size regardless of the clip's
+  current zoom level, each draggable to grow/shrink the clip from its centre (dragging a corner
+  outward grows, inward shrinks — the radial component of the drag along that corner's direction).
+  Deliberately not rotation-aware: handles sit at the axis-aligned scaled+panned rectangle, ignoring
+  the clip's own rotation. Combining a rotated wireframe with correct drag-to-resize math is a lot of
+  added complexity for a case most edits won't hit; rotate (Shift-drag) and resize (corner handles)
+  are each fully usable, just not simultaneously precise while the clip is heavily rotated. Resize is
+  also centre-anchored, not opposite-corner-anchored — the model has one uniform `scale`, so growing
+  from a fixed corner would require also compensating `offsetX`/`offsetY`, deferred as added scope
+  beyond what was asked.
+- **Parity gap closed in passing:** desktop was still compositing the document's global crop
+  rectangle while the per-clip crop tool was active, double-cropping the preview during the exact
+  gesture meant to show what's being cut. Android already suppresses this (`if (cropMode) null else
+  ...`); desktop now does too.
+
 ## Audio-loop bug fixed; desktop crop tool now actually transforms clips (2026-08-12)
 
 Two bugs reported directly:

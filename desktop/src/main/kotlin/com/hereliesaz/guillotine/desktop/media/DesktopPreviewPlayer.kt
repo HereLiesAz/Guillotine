@@ -2,11 +2,13 @@ package com.hereliesaz.guillotine.desktop.media
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fullscreen
@@ -27,6 +29,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
@@ -174,6 +177,16 @@ fun DesktopPreviewPlayer(
     val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
+    // Which clip the crop tool's drag/scroll gestures above actually target — mirrors
+    // EditorViewModel.cropTargetClipId's own resolution exactly, so the outline drawn below always
+    // matches what transformSelectedClip will act on. Used to outline that one clip's frame while
+    // the tool is active, so it's visually unambiguous that only this clip — not the preview
+    // viewport — is what the gesture moves.
+    val cropTargetClipId = if (cropMode) {
+        (state.selectedClips.firstOrNull { it.type != ClipType.AUDIO } ?: state.selectedClips.firstOrNull())?.id
+    } else {
+        null
+    }
 
     val aspectMod = when (state.document.settings.aspectRatio) {
         AspectRatio.RATIO_16_9 -> Modifier.aspectRatio(16f / 9f)
@@ -186,8 +199,10 @@ fun DesktopPreviewPlayer(
     // the preview matches the export's crop semantics (DesktopExporter takes the same sub-rect and
     // scales it to the output). Applied to the whole framed content — video AND text — via a single
     // graphicsLayer, then clipped, so captions crop and scale in lockstep with the footage (WYSIWYG).
+    // Suppressed in crop mode, matching Android: the user is dragging the crop itself and needs to
+    // see what they are cutting away, not a preview already cropped by the project-level rectangle.
     val crop = state.document.settings.crop
-    val cropped = crop.x != 0f || crop.y != 0f || crop.w != 100f || crop.h != 100f
+    val cropped = !cropMode && (crop.x != 0f || crop.y != 0f || crop.w != 100f || crop.h != 100f)
     val sx = if (crop.w > 0f) 100f / crop.w else 1f
     val sy = if (crop.h > 0f) 100f / crop.h else 1f
 
@@ -251,6 +266,8 @@ fun DesktopPreviewPlayer(
                     now = now,
                     isPlaying = state.isPlaying,
                     frameDurationMs = state.document.settings.frameDurationMs,
+                    cropTargetClipId = cropTargetClipId,
+                    onCropTransform = onCropTransform,
                 )
             }
         }
@@ -283,7 +300,14 @@ fun DesktopPreviewPlayer(
                     }
                     .graphicsLayer { scaleX = scale; scaleY = scale; rotationZ = rotation }
                     .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .then(
+                        if (t.id == cropTargetClipId) {
+                            Modifier.border(1.dp, Red500)
+                        } else {
+                            Modifier
+                        },
+                    ),
             )
         }
         }
@@ -377,6 +401,8 @@ private fun VideoTrackLayer(
     now: Long,
     isPlaying: Boolean,
     frameDurationMs: Double,
+    cropTargetClipId: String? = null,
+    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
 ) {
     val active = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
         .filter { it.trackId == trackId }
@@ -399,8 +425,8 @@ private fun VideoTrackLayer(
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
     }?.times(trackOpacity)?.times(xfade ?: 0f) ?: 0f
 
-    VideoSlot(outgoing, mediaFor, opacityA, now, isPlaying, frameDurationMs)
-    VideoSlot(incoming, mediaFor, opacityB, now, isPlaying, frameDurationMs)
+    VideoSlot(outgoing, mediaFor, opacityA, now, isPlaying, frameDurationMs, cropTargetClipId, onCropTransform)
+    VideoSlot(incoming, mediaFor, opacityB, now, isPlaying, frameDurationMs, cropTargetClipId, onCropTransform)
 }
 
 @Composable
@@ -411,6 +437,8 @@ private fun VideoSlot(
     now: Long,
     isPlaying: Boolean,
     frameDurationMs: Double,
+    cropTargetClipId: String? = null,
+    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
 ) {
     if (clip == null || alpha <= 0f) return
     val media = mediaFor(clip) ?: return
@@ -473,22 +501,110 @@ private fun VideoSlot(
     }
 
     val relMs = now - clip.startTimeMs
+    val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
+    val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
+    val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX)
+    val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY)
+
+    // Clip to the frame BEFORE the transform below, for every clip except the one the crop tool is
+    // actively editing. A graphicsLayer scale/rotate doesn't clip its own content by default, so
+    // without this a transformed clip paints past the frame's own rectangle — into the letterbox,
+    // over the zoom controls — which for a resting (non-target) clip reads as "the preview moved"
+    // rather than "the clip overflowed," so it stays clipped there (matching Android's VideoSlot,
+    // which has always clipped, and export, which never shows what's outside the frame). But the
+    // clip actively being cropped is deliberately exempted: the whole point of dragging/scaling it
+    // is to decide what ends up inside the frame vs. cut away, and that decision needs the
+    // overflowing part visible, not hidden — the wireframe below marks where the frame boundary
+    // actually is so "in frame" vs. "will be cropped" stays legible while it paints past that line.
+    val isCropTarget = clip.id == cropTargetClipId
     val mod = Modifier
         .fillMaxSize()
+        .then(if (isCropTarget) Modifier else Modifier.clipToBounds())
         .graphicsLayer {
             this.alpha = alpha.coerceIn(0f, 1f)
-            val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
             scaleX = s
             scaleY = s
-            rotationZ = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
-            translationX = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX) * size.width
-            translationY = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY) * size.height
+            rotationZ = rotationDeg
+            translationX = offXFrac * size.width
+            translationY = offYFrac * size.height
         }
 
-    frame?.let { bmp ->
-        Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
+    Box(Modifier.fillMaxSize()) {
+        frame?.let { bmp ->
+            Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
+        }
+        // Crop tool: a wireframe marking this clip's frame boundary, so — now that this clip's own
+        // content is unclipped above and free to paint past that line — "in frame" vs. "will be
+        // cropped away" stays legible. Sharing the same scale/pan transform (but skipping rotation,
+        // for both simplicity and because a corner-drag resize is easiest to reason about
+        // axis-aligned) keeps the wireframe and its handles tracking the clip exactly.
+        if (isCropTarget) {
+            CropWireframe(scale = s, offsetXFrac = offXFrac, offsetYFrac = offYFrac, onCropTransform = onCropTransform)
+        }
     }
 }
+
+/**
+ * The crop tool's resize affordance: an outline at the selected clip's true (possibly off-frame)
+ * corners, with a small handle at each corner. Dragging a handle scales the clip from its centre —
+ * the model has one uniform `scale`, not independent width/height, so there's no meaningful
+ * per-edge resize, only "grow/shrink toward or away from this corner's direction". Deliberately not
+ * rotation-aware (handles sit at the axis-aligned scaled+panned rectangle, ignoring the clip's own
+ * rotation) — combining a rotated wireframe with correct drag-to-resize math is a lot of added
+ * complexity for a case (resizing while heavily rotated) most edits won't hit; rotate and resize are
+ * still each fully usable, just not simultaneously precise.
+ */
+@Composable
+private fun CropWireframe(
+    scale: Float,
+    offsetXFrac: Float,
+    offsetYFrac: Float,
+    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = offsetXFrac * size.width
+                translationY = offsetYFrac * size.height
+            }
+            .border(1.dp, Red500),
+    ) {
+        val corners = listOf(
+            Alignment.TopStart to Pair(-1f, -1f),
+            Alignment.TopEnd to Pair(1f, -1f),
+            Alignment.BottomStart to Pair(-1f, 1f),
+            Alignment.BottomEnd to Pair(1f, 1f),
+        )
+        corners.forEach { (alignment, sign) ->
+            val (signX, signY) = sign
+            // Counter-scale so the handle stays a constant on-screen size regardless of how zoomed
+            // in/out the clip is — otherwise a 6x-scaled clip's handle would render at 6x size, and a
+            // 0.1x one would shrink to under a pixel.
+            val handleSize = (HANDLE_SIZE_DP / scale.coerceAtLeast(0.05f)).dp
+            Box(
+                Modifier
+                    .align(alignment)
+                    .size(handleSize)
+                    .background(Red500)
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, drag ->
+                            change.consume()
+                            // Radial component of the drag along this corner's outward direction:
+                            // dragging away from centre grows the clip, dragging toward it shrinks.
+                            val radial = drag.x * signX + drag.y * signY
+                            onCropTransform(1f + radial / RESIZE_SENSITIVITY, 0f, 0f, 0f)
+                        }
+                    },
+            )
+        }
+    }
+}
+
+private const val HANDLE_SIZE_DP = 10f
+private const val RESIZE_SENSITIVITY = 200f
 
 private fun decodeFrame(
     media: MediaItem,
