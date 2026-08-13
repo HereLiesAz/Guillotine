@@ -2,6 +2,49 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Azphalt Store listings now show a live effect preview, not a generic icon (2026-08-13)
+
+Requested directly: run the app's own icon through each store listing's real LUT/shader asset and
+show that as the listing's thumbnail, instead of a static/generic image, so browsing the store
+shows what an effect actually looks like before installing it.
+
+- **No lighter "just the preview" endpoint exists** — `AzphaltRegistry`'s own doc comment confirms
+  the registry has no separate preview-fetch API; a package's `preview.image` field (an author's
+  own submitted static screenshot) is the only thing short of a full download. Since the ask was
+  specifically to render *our own* sample image through the *real* effect, not show the author's
+  screenshot, this downloads the same `.azp` a real install would (`AzphaltRegistry.download`),
+  reads it with `AzpPackage` (no install side effect — nothing written to the extensions dir,
+  nothing marked installed), and pulls out the first LUT/shader asset via the already-existing
+  `AzpInstalledUi.renderKindOf` classification. New shared `AzpPreviewFetcher` does this once,
+  platform-agnostically, returning null for entries whose only assets are motion/AI-model types —
+  there is no meaningful still-image preview for those, and it says so rather than faking one.
+- **Desktop** already had everything needed to render onto a still image: `CubeLut` for LUT parsing,
+  `DesktopColorMatrix.applyLut`, and `DesktopShaderPass` for GLSL-via-SkSL-on-Skia's-CPU-raster-backend
+  shader rendering — the last one only compiled from a file path, so it gained an
+  `applyFromSource(text)` sibling for shader source that only exists as extracted-in-memory bytes,
+  never written to disk. New `DesktopStorePreviewRenderer` ties it together: loads the bundled
+  `icon.png`, fetches+renders, and caches the result twice (in-memory for the session, on disk
+  under `DesktopStorage.dataDir/cache/store-previews` keyed by `id@version`) so re-opening the
+  store doesn't re-download and re-render every entry already scrolled past.
+- **Android had no still-image render path at all** — its LUT/shader pipeline
+  (`LutCube`/`ShaderCache`/`GlslEffect`) is Media3/GL-video-only, built for a texture at playback
+  framerate, not a one-off Bitmap. Two new small utilities close that gap purely for this feature:
+  `AndroidLutBitmap` (the identical trilinear-interpolation math `DesktopColorMatrix.applyLut` uses,
+  ported to `Bitmap.getPixels`/`setPixels` — CPU, no GL) and `AndroidShaderBitmap`, which reuses the
+  *exact same* shared `GlslShader.parse` + `GlslToSksl.translate` pipeline desktop uses and feeds
+  the result into `android.graphics.RuntimeShader` — Android's own public API onto the same
+  Skia/SkSL runtime-effect system, so no second translator was needed. `AzpStorePreviewRenderer`
+  mirrors the desktop renderer (decodes `R.drawable.guillotine_icon`, `LruCache` + `cacheDir` disk
+  cache).
+- **Honest scope note:** `RuntimeShader` requires API 33; Guillotine's minSdk is 26. Below API 33,
+  shader-type listings simply show no preview on Android (LUT-type ones are unaffected — the
+  trilinear remap is a plain Bitmap CPU loop, no API ceiling). This is a real platform constraint,
+  not a shortcut — there is no still-Bitmap shader render path on Android before `RuntimeShader`
+  shipped.
+- Both platforms render lazily (only for rows actually scrolled into view, via Compose's
+  `LazyColumn` + `produceState`) and fail silently to "no thumbnail" — never a wrong or fabricated
+  one — on any network error, malformed package, or unsupported asset type.
+
 ## Desktop crop tool: it really was transforming the viewport, plus real resize handles (2026-08-13)
 
 Follow-up to the crop-tool wiring below, reported directly: dragging with Crop selected visibly

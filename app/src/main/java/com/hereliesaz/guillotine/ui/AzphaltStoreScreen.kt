@@ -8,6 +8,8 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,11 +45,15 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +67,7 @@ import com.hereliesaz.guillotine.azphalt.AzpInstallSurfaces
 import com.hereliesaz.guillotine.azphalt.AzpInstalledUi
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpStateReport
+import com.hereliesaz.guillotine.azphalt.AzpStorePreviewRenderer
 import com.hereliesaz.guillotine.azphalt.AzphaltRegistry
 import com.hereliesaz.guillotine.azphalt.AzphaltStoreHandoff
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
@@ -620,6 +627,34 @@ private val CATEGORY_CHIPS = listOf(
     "Skills" to "skill",
 )
 
+/**
+ * A live preview of what this listing's LUT/shader actually looks like — the app's own icon run
+ * through the real (not-yet-installed) effect asset, not a generic category icon. Lazily rendered
+ * off the main thread and cached (see [AzpStorePreviewRenderer]); silently absent (falls back to
+ * nothing, not a placeholder image) while loading, on a network/parse failure, or for asset types
+ * with no still-image render path (motion, AI models).
+ */
+@Composable
+private fun CatalogEntryPreviewThumbnail(entry: AzphaltRegistry.CatalogEntry) {
+    val context = LocalContext.current
+    val preview by produceState<ImageBitmap?>(null, entry.id, entry.latest) {
+        value = AzpStorePreviewRenderer.render(context, entry)
+    }
+    Box(
+        Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        preview?.let {
+            Image(
+                bitmap = it,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
 @Composable
 private fun CatalogEntryCard(entry: AzphaltRegistry.CatalogEntry, installed: Boolean, onInstall: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -627,6 +662,8 @@ private fun CatalogEntryCard(entry: AzphaltRegistry.CatalogEntry, installed: Boo
             Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            CatalogEntryPreviewThumbnail(entry)
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(entry.name, fontWeight = FontWeight.Bold)
                 if (entry.description.isNotBlank()) {
