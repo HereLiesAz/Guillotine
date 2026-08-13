@@ -2,6 +2,40 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Match project aspect to the first clip (Vegas B.4); hide store listings nothing can apply (2026-08-13)
+
+Two issues reported directly from screenshots: a clip letterboxed inside a mismatched project frame,
+and a "3D Environment" (kind `pack`) extension that installed and then did nothing.
+
+- **Aspect ratio.** `Document.settings.aspectRatio` defaults to `ORIGINAL` (derive the frame from the
+  clip's own shape) for every new project — confirmed no code path defaults it to a fixed ratio, and
+  `AspectRatio.ORIGINAL`'s existing lock-to-reference-clip logic (`PreviewPlayer.kt`'s
+  `referenceVideoAspect`) already works correctly once a video's real size is known. So the reported
+  letterboxing means the project's ratio had been explicitly set to something fixed (e.g. 9:16, most
+  likely via Project Settings) that doesn't match the clip in question — not a bug in `ORIGINAL`
+  itself, just docs/UX_ACTION_TREE.md Branch B.4 ("first clip on an empty timeline offers to match
+  project properties to it") never having been built, so there was no easy way back once that
+  happened. Added it: `EditorViewModel.addMedia` now checks, only for the very first clip landing on
+  an empty project, whether the project's ratio is still a fixed preset — if so it raises a one-shot
+  `EditorUiState.suggestAspectMatch` flag, and a new dialog on both platforms offers "Match to clip"
+  (switches to `ORIGINAL`, reusing its already-correct lock-to-clip behavior) or "Keep [ratio]". Later
+  imports never re-trigger it — the prompt is specifically about the empty-project moment.
+- **Inert store listings.** The post-install dialog already explained that `code`/`app`/`mcp`/`pack`
+  packages have no consumer in this build (`AzpInstallSurfaces.Surface.NONE`) — but only *after* an
+  install, with the store offering an identical "Install" button for those as for a working LUT or
+  shader. Per the report's own two acceptable options ("either it should be hidden, or the
+  requirements to make it work should be offered in this popup"), went with hiding: new
+  `AzpInstallSurfaces.hasKnownConsumer(types)` answers the same "would this reach `Surface.NONE`"
+  question from the browse-list summary's `types` alone (no download needed — a `pack`/`app`/`mcp`
+  package's summary always carries empty `types`, mirroring its manifest's empty `assets`), and both
+  store screens now filter every browse view to only entries with a known consumer. The "Apps" /
+  "MCP" / "Packs" / "Skills" category chips (the last one also dead — `skill` has no consumer either,
+  same check) were removed rather than left as permanently-empty dead ends. Nothing was deleted from
+  the registry or hidden from a determined user reading `AzphaltRegistry` directly — this is a
+  browse-list filter, not a capability removal, and the moment any of these kinds gets a real
+  consumer, adding its type string to the relevant check in `AzpInstallSurfaces` re-surfaces it
+  everywhere at once (both the store filter and the post-install dialog derive from the same source).
+
 ## Azphalt Store listings now show a live effect preview, not a generic icon (2026-08-13)
 
 Requested directly: run the app's own icon through each store listing's real LUT/shader asset and

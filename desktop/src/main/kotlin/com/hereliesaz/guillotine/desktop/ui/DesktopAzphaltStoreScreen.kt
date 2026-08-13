@@ -153,6 +153,10 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     val filtered = remember(catalog, query, category) {
         catalog?.filter { e ->
             e.targetsApp(DesktopPluginApplier.HOST_APP_ID) &&
+                // Browsing shouldn't offer an "Install" button for something that can only ever land
+                // on AzpInstallSurfaces.Surface.NONE (code/app/mcp/pack packages — nothing in this
+                // build applies them to anything). See AzpInstallSurfaces.hasKnownConsumer.
+                AzpInstallSurfaces.hasKnownConsumer(e.types) &&
                 (category == null || e.category == category) &&
                 (query.isBlank() || e.name.contains(query, ignoreCase = true) || e.description.contains(query, ignoreCase = true))
         }?.sortedWith(compareBy({ it.id !in installedIds }, { it.name }))
@@ -258,16 +262,18 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * Apps/MCP/Packs/Skills are deliberately absent — those kinds always fail
+ * [AzpInstallSurfaces.hasKnownConsumer] (nothing in this build applies them to anything), so
+ * [filtered] already excludes every entry a tap on one of those chips would have shown; keeping a
+ * chip that can only ever return zero results is worse than not offering it.
+ */
 private val DESKTOP_CATEGORY_CHIPS = listOf(
     "All" to null,
     "LUTs" to "lut",
     "Shaders" to "shader",
     "Kinetic type" to "motion",
     "AI models" to "onnx",
-    "Apps" to "app",
-    "MCP" to "mcp",
-    "Packs" to "pack",
-    "Skills" to "skill",
 )
 
 /**

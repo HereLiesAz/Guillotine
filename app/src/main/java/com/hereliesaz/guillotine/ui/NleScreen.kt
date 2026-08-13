@@ -743,6 +743,38 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onDismiss = { showProjectSettings = false },
         )
     }
+    if (state.suggestAspectMatch) {
+        // Vegas B.4: the first clip on an empty project offers to match project properties to it,
+        // instead of silently letterboxing a clip that doesn't fit whatever fixed ratio the project
+        // happened to already be set to.
+        val currentLabel = when (state.document.settings.aspectRatio) {
+            com.hereliesaz.guillotine.model.AspectRatio.RATIO_16_9 -> "16:9"
+            com.hereliesaz.guillotine.model.AspectRatio.RATIO_9_16 -> "9:16"
+            com.hereliesaz.guillotine.model.AspectRatio.RATIO_1_1 -> "1:1"
+            com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL -> "Original"
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { vm.resolveAspectMatchSuggestion(match = false) },
+            title = { Text("Match project to this clip?", color = White) },
+            text = {
+                Text(
+                    "This project is set to $currentLabel, which doesn't match the clip you just added " +
+                        "— it'll be letterboxed. Switch the project to follow the clip's own shape instead?",
+                    color = Neutral400, fontSize = 12.sp,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.resolveAspectMatchSuggestion(match = true) }) {
+                    Text("Match to clip")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.resolveAspectMatchSuggestion(match = false) }) {
+                    Text("Keep $currentLabel")
+                }
+            },
+        )
+    }
     if (showNameDialog) {
         NameProjectDialog(
             current = state.document.name,

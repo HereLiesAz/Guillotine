@@ -99,4 +99,31 @@ class AzpInstallSurfacesTest {
             AzpInstallSurfaces.of(manifest("asset", listOf("shader", "lut", "glsl"))),
         )
     }
+
+    // ---- hasKnownConsumer: the store's pre-download "would this even do anything" check ----
+
+    @Test fun knownConsumerTypesAreRecognizedFromSummaryTypesAlone() {
+        for (type in listOf("shader", "isf", "glsl", "lut", "cube", "motion") + AzpModelInstaller.MODEL_TYPES) {
+            assertEquals("type $type", true, AzpInstallSurfaces.hasKnownConsumer(listOf(type)))
+        }
+    }
+
+    @Test fun emptyTypesHasNoKnownConsumer() {
+        // Mirrors payloadlessKindsSurfaceNowhere above: code/app/mcp/pack summaries carry empty
+        // `types`, exactly like their manifests carry empty `assets`.
+        assertEquals(false, AzpInstallSurfaces.hasKnownConsumer(emptyList()))
+    }
+
+    @Test fun unrecognizedTypeHasNoKnownConsumer() {
+        assertEquals(false, AzpInstallSurfaces.hasKnownConsumer(listOf("font")))
+        assertEquals(false, AzpInstallSurfaces.hasKnownConsumer(listOf("skill")))
+    }
+
+    @Test fun oneKnownTypeIsEnoughAmongSeveral() {
+        assertEquals(true, AzpInstallSurfaces.hasKnownConsumer(listOf("font", "shader")))
+    }
+
+    @Test fun hasKnownConsumerIsCaseAndSpaceInsensitive() {
+        assertEquals(true, AzpInstallSurfaces.hasKnownConsumer(listOf("  SHADER ")))
+    }
 }

@@ -537,6 +537,10 @@ private fun CatalogBrowser(
     val filtered = remember(entries, query, category, installedIds) {
         entries?.filter { e ->
             e.targetsApp(hostAppId) &&
+                // Browsing shouldn't offer an "Install" button for something that can only ever land
+                // on AzpInstallSurfaces.Surface.NONE (code/app/mcp/pack packages — nothing in this
+                // build applies them to anything). See AzpInstallSurfaces.hasKnownConsumer.
+                AzpInstallSurfaces.hasKnownConsumer(e.types) &&
                 (category == null || e.category == category) &&
                 (query.isBlank() || e.name.contains(query, ignoreCase = true) || e.description.contains(query, ignoreCase = true))
         }?.sortedWith(compareBy({ it.id !in installedIds }, { it.name }))
@@ -614,17 +618,19 @@ private fun CatalogBrowser(
     }
 }
 
-/** (label shown, filter value used against [AzphaltRegistry.CatalogEntry.category]; null = All). */
+/**
+ * (label shown, filter value used against [AzphaltRegistry.CatalogEntry.category]; null = All).
+ * Apps/MCP/Packs/Skills are deliberately absent — those kinds always fail
+ * [AzpInstallSurfaces.hasKnownConsumer] (nothing in this build applies them to anything), so [filtered]
+ * already excludes every entry a tap on one of those chips would have shown; keeping a chip that can
+ * only ever return zero results is worse than not offering it.
+ */
 private val CATEGORY_CHIPS = listOf(
     "All" to null,
     "LUTs" to "lut",
     "Shaders" to "shader",
     "Kinetic type" to "motion",
     "AI models" to "onnx",
-    "Apps" to "app",
-    "MCP" to "mcp",
-    "Packs" to "pack",
-    "Skills" to "skill",
 )
 
 /**

@@ -112,6 +112,7 @@ import com.hereliesaz.guillotine.editor.EditorTool
 import com.hereliesaz.guillotine.editor.EditorUiState
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
+import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.Document
 import com.hereliesaz.guillotine.model.EditAction
@@ -561,6 +562,38 @@ fun NleScreen(
             current = state.document.settings,
             onChange = { vm.setGlobalSettings(it) },
             onDismiss = { showProjectSettings = false },
+        )
+    }
+    if (state.suggestAspectMatch) {
+        // Vegas B.4: the first clip on an empty project offers to match project properties to it,
+        // instead of silently letterboxing a clip that doesn't fit whatever fixed ratio the project
+        // happened to already be set to.
+        val currentLabel = when (state.document.settings.aspectRatio) {
+            AspectRatio.RATIO_16_9 -> "16:9"
+            AspectRatio.RATIO_9_16 -> "9:16"
+            AspectRatio.RATIO_1_1 -> "1:1"
+            AspectRatio.ORIGINAL -> "Original"
+        }
+        AlertDialog(
+            onDismissRequest = { vm.resolveAspectMatchSuggestion(match = false) },
+            title = { Text("Match project to this clip?", color = White) },
+            text = {
+                Text(
+                    "This project is set to $currentLabel, which doesn't match the clip you just added " +
+                        "— it'll be letterboxed. Switch the project to follow the clip's own shape instead?",
+                    color = Neutral400, fontSize = 12.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.resolveAspectMatchSuggestion(match = true) }) {
+                    Text("Match to clip")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.resolveAspectMatchSuggestion(match = false) }) {
+                    Text("Keep $currentLabel")
+                }
+            },
         )
     }
     if (showNameDialog) {
