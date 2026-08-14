@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -58,18 +59,25 @@ fun IconToolButton(
         active -> Red500
         else -> Neutral400
     }
-    Icon(
-        imageVector = icon,
-        contentDescription = contentDescription,
-        tint = tint,
+    // The clickable region is sized to the 48dp accessibility-minimum touch target (outer Box);
+    // the icon itself keeps its original 18dp visual size, centered inside — only the tappable
+    // area grows, nothing looks bigger on screen.
+    Box(
         modifier = Modifier
             .padding(horizontal = 2.dp)
             .clip(RoundedCornerShape(4.dp))
             .then(if (active) Modifier.background(Red500.copy(alpha = 0.18f)) else Modifier)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(8.dp)
-            .size(18.dp),
-    )
+            .size(48.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(18.dp),
+        )
+    }
 }
 
 
