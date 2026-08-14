@@ -207,6 +207,9 @@ object Exporter {
         } finally {
             // Free the precomputed matte bitmaps once the encode is done (or it failed/cancelled).
             mattes.values.forEach { runCatching { it.recycle() } }
+            // Free the precomputed face-blur patch bitmaps too — a 60s face-blur clip can hold
+            // hundreds of MB across ~600 bitmaps (one per 100ms bucket, up to 720x720 ARGB_8888).
+            faceBlur.values.forEach { runCatching { it.recycle() } }
         }
     }
 

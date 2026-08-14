@@ -209,7 +209,10 @@ object DesktopExporter {
                 exportAudio(recorder, document, clips, config, totalDurationMs)
             }
         } finally {
-            grabberCache.values.forEach { runCatching { it.stop(); it.release() } }
+            grabberCache.values.forEach {
+                runCatching { it.stop() }
+                runCatching { it.release() }
+            }
             recorder.stop()
             recorder.release()
         }
@@ -273,7 +276,12 @@ object DesktopExporter {
             grabber.sampleRate = config.sampleRate
             grabber.audioChannels = 2
             grabber.sampleFormat = avutil.AV_SAMPLE_FMT_S16
-            grabber.start()
+            try {
+                grabber.start()
+            } catch (e: Exception) {
+                runCatching { grabber.release() }
+                throw e
+            }
             try {
                 grabber.timestamp = clip.trimStartMs * 1000L
                 val startSample = (clip.startTimeMs * config.sampleRate / 1000L).toInt()
@@ -310,8 +318,8 @@ object DesktopExporter {
                     }
                 }
             } finally {
-                grabber.stop()
-                grabber.release()
+                runCatching { grabber.stop() }
+                runCatching { grabber.release() }
             }
         }
 
@@ -372,7 +380,7 @@ object DesktopExporter {
                 // Reuse (or open once) a grabber for this file; seek instead of reopening per frame.
                 val path = file.absolutePath
                 val grabber = runCatching {
-                    grabbers.getOrPut(path) { FFmpegFrameGrabber(file).apply { start() } }
+                    grabbers.getOrPut(path) { openExportGrabber(file) }
                 }.getOrNull() ?: return
                 runCatching {
                     // Only seek when not already positioned just before the target — a per-frame seek is
@@ -392,7 +400,8 @@ object DesktopExporter {
                 }.onFailure {
                     // Evict a broken grabber so later frames don't keep hitting the same failure.
                     grabbers.remove(path)
-                    runCatching { grabber.stop(); grabber.release() }
+                    runCatching { grabber.stop() }
+                    runCatching { grabber.release() }
                 }.getOrNull()
             }
         } ?: return
@@ -464,6 +473,22 @@ object DesktopExporter {
         g.drawImage(drawImg, 0, 0, null)
         g.transform = prevTransform
         g.composite = prevComposite
+    }
+
+    /**
+     * Open and start an [FFmpegFrameGrabber] on [file] for the per-file grabber cache, releasing its
+     * native handle first if `start()` throws (corrupt/truncated file, unsupported codec) instead of
+     * leaking the AVFormatContext.
+     */
+    private fun openExportGrabber(file: File): FFmpegFrameGrabber {
+        val grabber = FFmpegFrameGrabber(file)
+        try {
+            grabber.start()
+        } catch (e: Exception) {
+            runCatching { grabber.release() }
+            throw e
+        }
+        return grabber
     }
 
     private fun uriToFile(uri: String): File? = runCatching {

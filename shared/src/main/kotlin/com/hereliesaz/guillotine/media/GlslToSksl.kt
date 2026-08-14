@@ -151,7 +151,12 @@ object GlslToSksl {
         val prelude =
             "half4 main(float2 fragCoord) {\n" +
                 "    float2 vTexSamplingCoord = fragCoord / RENDERSIZE;\n" +
-                "    float4 _fragColor = float4(0.0);\n"
+                // Default alpha to opaque (1.0), matching how GLSL fragment shaders that only ever
+                // write `gl_FragColor.rgb` are normally interpreted — the alpha channel is simply
+                // left untouched, not zeroed. Initializing to float4(0.0) here made every such
+                // shader (a common, legitimate pattern) render fully transparent with no compile
+                // error and no visible failure.
+                "    float4 _fragColor = float4(0.0, 0.0, 0.0, 1.0);\n"
         return buildString {
             append(src, 0, m.range.first)
             append(prelude)
