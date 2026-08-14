@@ -15,9 +15,10 @@ cloud-backed exceptions are the generation tools and one object-removal path, wh
 require your own provider key (see [Generation](#generation-cloud-byo-key) and
 [`remove_object_generative`](#vision--recognition)).
 
-This document lists **66 tools** across 10 categories, plus 2 read-only resources. It is generated
-from the live tool definitions, which are always the source of truth — an MCP client can introspect
-the whole catalog at runtime with `tools/list`.
+This document lists **110 tools** across 12 categories, plus 2 read-only resources. It is
+**manually maintained** (there is no codegen step tying it to the tool definitions), so it can drift
+from the actual catalog — when in doubt, the live tool definitions are always the source of truth: an
+MCP client can introspect the whole catalog at runtime with `tools/list`.
 
 **See also:** [PLUGINS.md](PLUGINS.md) (the plugin protocol and how to connect a client),
 [ECOSYSTEM.md](ECOSYSTEM.md) (LUT / shader / Frei0r / FFmpeg formats), [SETTINGS.md](SETTINGS.md)
@@ -37,7 +38,7 @@ app — at it and it sees the tools below like any other MCP server.
 | **Transport** | HTTP, JSON-RPC 2.0 |
 | **Endpoint** | `POST /mcp` (bearer-gated) — JSON-RPC request/response |
 | **Liveness** | `GET /health` (open, no token) → `{"status":"ok"}` |
-| **Port** | `6274` (default; bound to all interfaces so tools on your network can reach the app) |
+| **Port** | `6274` (default; bound to loopback (`127.0.0.1`) only — a security fix that stops a bearer token from being sniffable off the LAN. Reach it from another device via the encrypted Cloudflare relay or an `adb`/USB port-forward, not by exposing the port directly) |
 | **Protocol version** | `2024-11-05` |
 | **Server info** | name `guillotine-editor`, version `1.0.0` |
 | **Auth** | `Authorization: Bearer <token>` on every `/mcp` call |
@@ -85,8 +86,14 @@ curl -s http://<device-ip>:6274/mcp \
 curl -s http://<device-ip>:6274/mcp \
   -H "Authorization: Bearer $GUILLOTINE_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"apply_lut","arguments":{"path":"/sdcard/luts/teal.cube"}}}'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"apply_lut","arguments":{"path":"/data/data/com.hereliesaz.guillotine/files/luts/teal.cube"}}}'
 ```
+
+`path`/`image_path` arguments (`apply_lut`, `replace_background`, …) are only accepted if they
+canonicalize to somewhere the app already controls — its own `filesDir` (where a LUT picked via the
+clip's "+ LUT (.cube)" button, or imported media, already lives — see `luts/`, `imported-models/`) or
+`cacheDir`. A path outside that — `/sdcard/...`, another app's storage, anything reachable only
+because the caller happened to type it — is rejected with a clear error rather than read.
 
 To drive the editor from off-device without exposing the phone directly, deploy the Cloudflare relay
 (`tools/mcp-relay`) and run the local proxy with the **same token** — **Settings → Advanced → Remote
@@ -116,11 +123,12 @@ literal default in code).
 | [Color, LUT, shader, FFmpeg/Frei0r & transitions](#color-lut-shader-ffmpegfrei0r--transitions) | 9 |
 | [Named video effects (FFmpeg bake)](#named-video-effects-ffmpeg-bake) | 30 |
 | [Neural image effects & compositing](#neural-image-effects--compositing) | 4 |
+| [Azphalt plugins](#azphalt-plugins) | 3 |
 | [Scene, highlights, reframe & export](#scene-highlights-reframe--export) | 4 |
 | [Beat-sync / rhythm](#beat-sync--rhythm) | 5 |
 | [Generation (cloud, BYO key)](#generation-cloud-byo-key) | 3 |
 | [User-defined tools & action recording](#user-defined-tools--action-recording) | 7 |
-| **Total** | **107** |
+| **Total** | **110** |
 
 ---
 
@@ -668,6 +676,43 @@ Provide `color` **or** `image_path`; defaults to black.
 
 ---
 
+## Azphalt plugins
+
+Discover and apply installed **azphalt `.azp` packages** — third-party effect / kinetic-typography
+extensions dropped into the app's extensions directories (see [PLUGINS.md](PLUGINS.md) for the
+package format). This is the same apply path the Azphalt Store's own install flow uses
+(`AzpPluginApplier`), so "installed from the store" and "applied via an MCP client" can't diverge on
+what "applied" means.
+
+### `list_azp_plugins`
+List every installed `.azp` plugin: id, name, tags, and a coarse category (layer effect, scenery
+effect, kinetic typography, "smart" kinetic typography) inferred from the package. Use this to
+discover what's available before calling `apply_azp_plugin`.
+
+_No arguments._
+
+### `apply_azp_plugin`
+Apply an installed plugin (by id, from `list_azp_plugins`) to a clip. A kinetic-typography motion
+plugin applied to a caption (TEXT clip) is baked into real keyframes, so it animates in both preview
+and export and stays editable afterward; other package kinds apply via whatever real render path they
+support (shader, LUT, …). Errors — rather than reporting success — if the package has no apply path
+for that clip yet.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `clip_id` | string | required | — | The clip to apply the plugin to. |
+| `plugin_id` | string | required | — | The plugin id (from `list_azp_plugins`). |
+
+### `clear_azp_plugin`
+Remove an applied kinetic-typography preset (its baked keyframes) and the applied-plugin marker from a
+clip. Hand-authored keyframes the user added on top are kept.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `clip_id` | string | required | — | The clip to clear the plugin/preset from. |
+
+---
+
 ## Scene, highlights, reframe & export
 
 Segment and repackage footage on-device: visual scene-cut detection, audio-highlight detection,
@@ -873,5 +918,7 @@ _No arguments._
 
 ---
 
-_This reference is generated from the tool definitions in `McpTools`. The live `tools/list` catalog is
-always authoritative — an MCP client can introspect every tool, description, and schema at runtime._
+_This reference is **manually maintained** against the tool definitions in `McpTools`, `TimelineTools`,
+and `VideoFilterCatalog` (there is no codegen step, so it can drift — TODO: generate it from the
+definitions instead). The live `tools/list` catalog is always authoritative — an MCP client can
+introspect every tool, description, and schema at runtime._

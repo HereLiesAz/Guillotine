@@ -2178,6 +2178,26 @@ class DesktopMcpTools(
     /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). Stacks onto the clip's
      *  FX chain — see [com.hereliesaz.guillotine.model.FxLayer] — so it renders in preview + export
      *  alongside whatever else (an azphalt shader/LUT, an earlier applyLut call) is already on the clip. */
+    /**
+     * Reject an FFmpeg filtergraph that opens its own arbitrary local file instead of the clip's own
+     * media. `movie=`/`amovie=` (and the other listed sources) read a path directly from the filter
+     * string, bypassing any path check the MCP surface applies elsewhere — a caller could read any
+     * file this process can access. Mirrors the identical guard in the Android MCP tool surface
+     * (`app/.../mcp/McpTools.kt`).
+     */
+    private fun rejectUnsafeFfmpegFilterSources(filterGraph: String) {
+        val unsafeSource = Regex("""(?i)(?:^|[,;\]])\s*(movie|amovie|subtitles|ass|afir)\s*=""")
+        val match = unsafeSource.find(filterGraph)
+        if (match != null) {
+            val name = match.groupValues[1]
+            throw IllegalArgumentException(
+                "The \"$name\" filter reads its own file path and isn't allowed in apply_ffmpeg_filter " +
+                    "— it can read any file on this machine, not just this clip's media. Use a filter " +
+                    "that operates only on the clip's own video/audio streams.",
+            )
+        }
+    }
+
     private fun applyLut(clipId: String, path: String): JSONObject {
         require(path.isNotBlank()) { "Provide the path to a .cube LUT file." }
         val file = File(path)
@@ -2740,6 +2760,7 @@ class DesktopMcpTools(
     /** Bake an FFmpeg/Frei0r `-vf` filtergraph onto a clip's video in-process, adding a new clip. */
     private fun applyFfmpegFilter(clipId: String, filterGraph: String): JSONObject {
         require(filterGraph.isNotBlank()) { "Provide an FFmpeg -vf filtergraph." }
+        rejectUnsafeFfmpegFilterSources(filterGraph)
         val doc = vm.uiState.value.document
         val clip = doc.clips.firstOrNull { it.id == clipId }
             ?: throw IllegalArgumentException("Clip not found: $clipId")

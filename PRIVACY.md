@@ -1,6 +1,6 @@
 # Privacy Policy — Guillotine
 
-**Effective date:** 2026-07-04
+**Effective date:** 2026-08-14
 
 Guillotine is an on-device, non-linear video editor for Android, tablets, Chromebooks, and native
 desktop apps for macOS, Windows, and Linux. This policy explains what the app does and does not
@@ -142,8 +142,16 @@ shown. You can also reset or limit ad personalization in your device’s Google 
   generative removal, or export) running with a progress notification while the app is in the
   background. These are purely local; nothing is transmitted.
 
-The app does not request location, contacts, the microphone, or the camera; it only works with
-media you explicitly import.
+- **Microphone (`RECORD_AUDIO`)** — used only for voice-command dictation: tap the mic button to
+  start recording, tap again to stop; the captured audio is transcribed **on-device** (an offline
+  speech-recognition model you configure) and dropped into the prompt box for you to review before
+  it's sent anywhere. The mic only records between those two taps, and the captured audio itself
+  is never uploaded or stored — only the transcribed text is kept (as part of your prompt/project
+  data, per "Information stored on your device" above). This feature is unused, and the app never
+  touches the mic, until you configure an offline speech model and use it.
+
+The app does not request location, contacts, or the camera; it only works with media you
+explicitly import.
 
 ## Analytics and tracking
 

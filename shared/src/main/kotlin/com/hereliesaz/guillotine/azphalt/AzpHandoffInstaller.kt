@@ -1,6 +1,8 @@
 package com.hereliesaz.guillotine.azphalt
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * Verifies and lands an already-fetched `.azp`'s bytes on disk. Browsing and downloading are the
@@ -126,7 +128,30 @@ object AzpHandoffInstaller {
         // length so a pathological id can't blow the filesystem's 255-char name limit.
         val sanitized = manifest.id.replace(Regex("[^A-Za-z0-9._-]"), "_")
         val safeName = sanitized.take(120) + ".azp"
-        File(dir, safeName).writeBytes(bytes)
+        val target = File(dir, safeName)
+        // Two different raw ids can sanitize to the same filename (e.g. "com.foo.my_pack" and
+        // "com.foo.my/pack" both collapse to "com.foo.my_pack.azp" — every non-alphanumeric character
+        // collapses to the same "_"). AzpPublisherPins is keyed on the *raw* id, not this sanitized
+        // name (deliberately — it's shared with AzpModelInstall's raw-id keying, see its own doc), so a
+        // publisher-pin check alone would never notice this collision: an attacker's never-pinned id
+        // would sail through as a "fresh install" of what it thinks is a brand-new id, while actually
+        // overwriting a different, legitimately-pinned package's installed bytes on disk. Check what's
+        // actually sitting at the target path itself — the same granularity as what's about to be
+        // written — and refuse when it belongs to a different id than the one being installed now (an
+        // update to the *same* id, sanitizing to the same name, is exactly the normal update flow).
+        if (target.isFile) {
+            val existingId = runCatching { AzpPackage.read(target.readBytes()).manifest.id }.getOrNull()
+            if (existingId != null && existingId != manifest.id) {
+                return InstallResult.Failure(
+                    "“${manifest.name}” (id \"${manifest.id}\") would overwrite a different installed " +
+                        "package (\"$existingId\") that sanitizes to the same filename. Refusing to install.",
+                )
+            }
+        }
+        // Written atomically (temp file + move) so a crash or full disk mid-write can never leave a
+        // truncated `.azp` in place of a previously-good install — same pattern AzpPublisherPins.pin
+        // already uses for its own file.
+        writeAtomically(target, bytes)
         // Pin the publisher on first install, or when the caller approved a rotation. Only signed
         // packages pin — an unsigned package leaves no key to enforce against.
         if (trust.signerPublicKey != null && pins != null && (pinnedKey == null || allowPublisherChange)) {
@@ -144,5 +169,28 @@ object AzpHandoffInstaller {
             signatureValid = signatureValid,
             surfaces = AzpInstallSurfaces.of(manifest),
         )
+    }
+
+    /**
+     * Write [bytes] to [target] via a temp file + atomic move, so a crash or full disk mid-write can
+     * never leave [target] truncated — `File.writeBytes` truncates the destination before writing a
+     * single byte, so a failure partway through corrupts a previously-good install in place. Mirrors
+     * [AzpPublisherPins.pin]'s own atomic-write fallback chain: `ATOMIC_MOVE` where the filesystem
+     * supports it, a plain replace-move where it doesn't (e.g. across filesystems), and a direct write
+     * only as a last resort.
+     */
+    private fun writeAtomically(target: File, bytes: ByteArray) {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        tmp.writeBytes(bytes)
+        try {
+            Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: Exception) {
+            try {
+                Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: Exception) {
+                target.writeBytes(bytes)
+                tmp.delete()
+            }
+        }
     }
 }

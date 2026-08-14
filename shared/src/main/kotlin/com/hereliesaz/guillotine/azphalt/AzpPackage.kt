@@ -2,6 +2,8 @@ package com.hereliesaz.guillotine.azphalt
 
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.zip.ZipInputStream
@@ -33,6 +35,34 @@ object AzpPackage {
 
     /** Ceiling on counter-signature chain length — a DoS guard against attacker-crafted deep chains. */
     private const val MAX_CHAIN_DEPTH = 10
+
+    /**
+     * Zip-bomb guards for [unzip]: a compressed `.azp` claiming to inflate to gigabytes must not be
+     * allowed to actually do it just because someone opened it (a store preview scroll, an install, a
+     * `verify()` call — all of them unzip). [MAX_ENTRY_BYTES] caps any single decompressed entry,
+     * [MAX_TOTAL_BYTES] caps the sum across the whole archive, and [MAX_ENTRIES] caps entry *count* —
+     * a highly-compressible archive of a million empty-ish entries can exhaust memory/CPU on bookkeeping
+     * alone even if no single entry is large. All three fail the install/verify cleanly (an
+     * [AzpException], never an OOM or a hang), well above any legitimate package: `AzphaltRegistry`
+     * itself caps a downloaded `.azp` at 128 MiB, so even a fully-legitimate max-size package inflates
+     * to a small multiple of that at most.
+     */
+    private const val MAX_ENTRY_BYTES = 512L * 1024 * 1024
+    private const val MAX_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
+    private const val MAX_ENTRIES = 10_000
+
+    /**
+     * Highest `azphalt` manifest **format** major version this build understands ([AzpManifest.azphalt]
+     * — distinct from [AzpCompat.HOST_API_VERSION], which is the *host-API* version a package's `compat`
+     * field is checked against). Every package this codebase builds or tests against declares `"0.1"`
+     * (major `0`) — see `AzpManifestSpecTest`/`AzpPackageTest`/etc. A manifest declaring a strictly
+     * newer major is a package format this build was never taught to parse safely (field meanings and
+     * even the envelope shape can change across majors), so it's refused outright rather than parsed and
+     * silently mishandled — deliberately simple (major-only, no minor/patch negotiation): the same
+     * "small, exact grammar" call [AzpCompat] documents for `compat`, made here for the manifest's own
+     * version field, which until now was read and never checked at all.
+     */
+    private const val SUPPORTED_AZPHALT_MAJOR = 0
 
     /** A parsed package: the manifest plus every payload entry (all entries except `manifest.json`). */
     data class Loaded(val manifest: AzpManifest, val payload: Map<String, ByteArray>)
@@ -84,23 +114,53 @@ object AzpPackage {
 
     private fun unzip(bytes: ByteArray): Map<String, ByteArray> {
         val out = LinkedHashMap<String, ByteArray>()
+        var totalBytes = 0L
+        var entryCount = 0
         ZipInputStream(ByteArrayInputStream(bytes)).use { zin ->
             var entry = zin.nextEntry
             while (entry != null) {
                 if (!entry.isDirectory) {
+                    entryCount++
+                    if (entryCount > MAX_ENTRIES) {
+                        throw AzpException("azp: package has more than $MAX_ENTRIES entries — refusing to extract")
+                    }
                     // Normalize Windows-style separators so a backslash can't smuggle a `..` past the
                     // forward-slash path check (spec mandates forward-slash names anyway).
                     val name = entry.name.replace('\\', '/')
                     // Reject duplicate entries: a second entry silently overwriting the first is a
                     // ZIP-confusion vector (verify one copy, a different parser runs the other).
                     if (out.containsKey(name)) throw AzpException("azp: duplicate entry $name")
-                    out[name] = zin.readBytes()
+                    val data = readEntryBounded(zin, name)
+                    totalBytes += data.size
+                    if (totalBytes > MAX_TOTAL_BYTES) {
+                        throw AzpException(
+                            "azp: package decompresses to more than ${MAX_TOTAL_BYTES / (1024 * 1024)} MB — refusing to extract",
+                        )
+                    }
+                    out[name] = data
                 }
                 zin.closeEntry()
                 entry = zin.nextEntry
             }
         }
         return out
+    }
+
+    /** Reads one zip entry's bytes, refusing to inflate past [MAX_ENTRY_BYTES] — a per-entry zip-bomb guard. */
+    private fun readEntryBounded(input: InputStream, name: String): ByteArray {
+        val buf = ByteArray(64 * 1024)
+        val bos = ByteArrayOutputStream()
+        var total = 0L
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > MAX_ENTRY_BYTES) {
+                throw AzpException("azp: entry $name exceeds the ${MAX_ENTRY_BYTES / (1024 * 1024)} MB per-entry limit — refusing to extract")
+            }
+            bos.write(buf, 0, n)
+        }
+        return bos.toByteArray()
     }
 
     private fun parseManifest(raw: ByteArray): AzpManifest = try {
@@ -141,6 +201,19 @@ object AzpPackage {
         }
         val payload = entries.filterKeys { it != "manifest.json" }
         val errors = mutableListOf<String>()
+
+        // The manifest's own format-version field, checked for the first time: a manifest declaring a
+        // major version newer than this build understands is refused with a clear message rather than
+        // parsed and silently mishandled (or crashing on a field shape this build doesn't expect). An
+        // unparseable value is treated the same as "too new" — this build has no basis for assuming a
+        // string it can't read as MAJOR[.MINOR[.PATCH]] is one it can safely handle.
+        val specMajor = manifest.azphalt.trim().substringBefore('.').toIntOrNull()
+        if (specMajor == null || specMajor > SUPPORTED_AZPHALT_MAJOR) {
+            errors.add(
+                "azp: unsupported package format — manifest declares azphalt \"${manifest.azphalt}\", this " +
+                    "build supports major version $SUPPORTED_AZPHALT_MAJOR",
+            )
+        }
 
         for (path in payload.keys) {
             // Reject absolute paths, `..` traversal, and colons (Windows drive letters like `C:evil`

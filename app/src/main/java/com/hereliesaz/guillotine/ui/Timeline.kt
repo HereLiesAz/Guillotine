@@ -143,6 +143,20 @@ private fun TimelineLanes(
     // Live, group-aware drag offset: while a clip is dragged, every clip in its group reads this and
     // moves together (snapped) — so the whole group tracks the cursor, not just the grabbed clip.
     var groupDrag by remember { mutableStateOf<GroupDrag?>(null) }
+    // groupDrag is normally cleared by the dragged clip's own onDragEnd/onDragCancel. But Delete is
+    // wired editor-wide (toolbar button + hardware key), independent of any gesture — pressing it
+    // mid-drag structurally removes the dragged clip's composable, cancelling its pointerInput
+    // coroutine WITHOUT ever running onDragEnd/onDragCancel. Left alone, groupDrag would keep
+    // pointing at ids from a group that no longer fully exists, and a surviving linked clip (same
+    // groupId, e.g. the audio shadow of a deleted video clip) would render at that stale offset
+    // forever — until some unrelated clip elsewhere is dragged and overwrites groupDrag. Watch the
+    // live clip list and drop groupDrag the moment any id it references disappears from the document.
+    LaunchedEffect(state.document.clips) {
+        val gd = groupDrag
+        if (gd != null && gd.ids.any { id -> state.document.clips.none { it.id == id } }) {
+            groupDrag = null
+        }
+    }
     // Visible timeline width in px, updated whenever the horizontally-scrolled BoxWithConstraints
     // (re)measures. Read from the pps-change effect to clamp the playhead into view.
     var viewportWidthPx by remember { mutableIntStateOf(0) }
@@ -356,11 +370,32 @@ private fun TimelineLanes(
                             vm.setTimelineLanesHeightDp(with(density) { size.height.toDp().value })
                         },
                 ) {
-                    state.document.videoTracks.forEach { trackId ->
-                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag, { groupDrag = it }, onSwapTransition)
+                    // Narrow, per-lane values instead of the whole `state` blob: state.currentTimeMs
+                    // changes ~60x/second during playback, and EditorUiState's collection-typed fields
+                    // make it an unstable Compose parameter type, so passing `state` itself into Lane/
+                    // ClipView forced every lane and every clip (each with its own pointerInput gesture
+                    // stack, thumbnail, waveform) to fully recompose on every playback frame. These
+                    // fields are stable across a pure playhead tick (only currentTimeMs changes then),
+                    // so passing them individually lets Lane/ClipView skip when nothing they actually
+                    // read has changed.
+                    val document = state.document
+                    val tool = state.tool
+                    val selectedClipIds = state.selectedClipIds
+                    val selectedKeyframeId = state.selectedKeyframeId
+                    val beatMaps = state.beatMaps
+                    document.videoTracks.forEach { trackId ->
+                        Lane(
+                            vm, document, trackId, state.trackHeight(trackId).dp, pps, { msToDp(it) },
+                            tool, selectedClipIds, selectedKeyframeId, beatMaps,
+                            groupDrag, { groupDrag = it }, onSwapTransition,
+                        )
                     }
-                    state.document.audioTracks.forEach { trackId ->
-                        Lane(vm, state, trackId, pps, { msToDp(it) }, groupDrag, { groupDrag = it }, onSwapTransition)
+                    document.audioTracks.forEach { trackId ->
+                        Lane(
+                            vm, document, trackId, state.trackHeight(trackId).dp, pps, { msToDp(it) },
+                            tool, selectedClipIds, selectedKeyframeId, beatMaps,
+                            groupDrag, { groupDrag = it }, onSwapTransition,
+                        )
                     }
                 }
             }
@@ -701,15 +736,20 @@ private fun Ruler(
 @Composable
 private fun Lane(
     vm: EditorViewModel,
-    state: EditorUiState,
+    document: com.hereliesaz.guillotine.model.Document,
     trackId: String,
+    trackHeightDp: androidx.compose.ui.unit.Dp,
     pps: Float,
     msToDp: (Long) -> androidx.compose.ui.unit.Dp,
+    tool: EditorTool,
+    selectedClipIds: List<String>,
+    selectedKeyframeId: String?,
+    beatMaps: Map<String, com.hereliesaz.guillotine.model.BeatMap>,
     groupDrag: GroupDrag?,
     onGroupDrag: (GroupDrag?) -> Unit,
     onSwapTransition: (fromClipId: String, toClipId: String) -> Unit,
 ) {
-    val clips = state.document.clips.filter { it.trackId == trackId }
+    val clips = document.clips.filter { it.trackId == trackId }
     // While a drag is in flight, lift the lane containing the grabbed clip(s) above sibling lanes:
     // the dragged clip is offset in Y by its live drag delta, which pushes its rendered pixels
     // outside this lane's box — and the next lane down (drawn later in the tracks Column) would
@@ -721,13 +761,24 @@ private fun Lane(
     Box(
         Modifier
             .fillMaxWidth()
-            .height(state.trackHeight(trackId).dp)
+            .height(trackHeightDp)
             .zIndex(if (dragging) 1f else 0f)
             .background(Neutral850)
             .border(0.5.dp, Neutral800),
     ) {
         clips.forEach { clip ->
-            ClipView(vm, state, clip, pps, msToDp, groupDrag, onGroupDrag)
+            val selected = clip.id in selectedClipIds
+            val media = document.mediaFor(clip)
+            // Text clips live on video tracks, like any overlay/image clip.
+            val sameTypeTracks = when (clip.type) {
+                ClipType.VIDEO, ClipType.TEXT -> document.videoTracks
+                ClipType.AUDIO -> document.audioTracks
+            }
+            ClipView(
+                vm, clip, pps, msToDp, tool, selected, selectedKeyframeId,
+                media, sameTypeTracks, beatMaps[clip.id], trackHeightDp,
+                groupDrag, onGroupDrag,
+            )
         }
         // Two clips already overlapping on this track are already an automatic crossfade at
         // playback/export time (PreviewPlayer/Exporter fade the outgoing clip out as the incoming
@@ -784,18 +835,22 @@ private fun CrossfadeOverlapMarker(
 @Composable
 private fun ClipView(
     vm: EditorViewModel,
-    state: EditorUiState,
     clip: TimelineClip,
     pps: Float,
     msToDp: (Long) -> androidx.compose.ui.unit.Dp,
+    tool: EditorTool,
+    selected: Boolean,
+    selectedKeyframeId: String?,
+    media: com.hereliesaz.guillotine.model.MediaItem?,
+    sameTypeTracks: List<String>,
+    beatMap: com.hereliesaz.guillotine.model.BeatMap?,
+    trackHeightDp: androidx.compose.ui.unit.Dp,
     groupDrag: GroupDrag?,
     onGroupDrag: (GroupDrag?) -> Unit,
 ) {
-    val selected = clip.id in state.selectedClipIds
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
-    val media = state.document.mediaFor(clip)
-    val selectedKf = clip.keyframes.firstOrNull { it.id == state.selectedKeyframeId }
+    val selectedKf = clip.keyframes.firstOrNull { it.id == selectedKeyframeId }
     // Raw accumulated drag of THIS clip (when it's the grabbed one); the live visual offset comes from
     // the shared, snapped groupDrag so every group member moves together.
     var dragPx by remember(clip.id) { mutableFloatStateOf(0f) }
@@ -818,12 +873,7 @@ private fun ClipView(
     val moveDx = moveDrag?.dx ?: 0f
     val moveDy = moveDrag?.dy ?: 0f
     val baseLeftPx = with(density) { msToDp(clip.startTimeMs).toPx() }
-    val trackHeightPx = with(density) { state.trackHeight(clip.trackId).dp.toPx() }
-    val sameTypeTracks = when (clip.type) {
-        // Text clips live on video tracks, like any overlay/image clip.
-        ClipType.VIDEO, ClipType.TEXT -> state.document.videoTracks
-        ClipType.AUDIO -> state.document.audioTracks
-    }
+    val trackHeightPx = with(density) { trackHeightDp.toPx() }
 
     // Held past the top/bottom edge for ~1s → create a new track of this clip's type there and drop the
     // clip onto it. Keyed on holdEdge, so moving back into range before the second elapses cancels it.
@@ -831,7 +881,7 @@ private fun ClipView(
         if (holdEdge != 0 && !autoTrackConsumed) {
             delay(1000)
             autoTrackConsumed = true
-            val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
+            val deltaMs = snappedDeltaMs(vm.uiState.value, clip, (dragPx / pps * 1000f).toLong(), pps)
             vm.addEdgeTrackAndMoveClip(clip.id, atTop = holdEdge < 0, deltaMs = deltaMs)
             onGroupDrag(null)
         }
@@ -850,7 +900,7 @@ private fun ClipView(
             .border(1.dp, if (selected) Red500 else Neutral700, RoundedCornerShape(4.dp))
             // Tap: select, or split when split tool is active. Long-press: range-select
             // from the current selection to this clip (across tracks, all clips between).
-            .pointerInput(clip.id, state.tool, pps, clip.keyframes) {
+            .pointerInput(clip.id, tool, pps, clip.keyframes) {
                 detectTapGestures(
                     // NB: no onLongPress here — long-press is owned solely by the edge-trim detector below
                     // (detectTapGestures.onLongPress would consume the press first and starve it). Middle
@@ -870,7 +920,7 @@ private fun ClipView(
                             return@onTap
                         }
                         val tappedMs = clip.startTimeMs + (offset.x / pps * 1000f).toLong()
-                        when (state.tool) {
+                        when (tool) {
                             EditorTool.SPLIT -> vm.splitClip(clip.id, tappedMs)
                             EditorTool.KEYFRAME -> {
                                 // Keyframe tool: drop a keyframe at the tapped point.
@@ -894,8 +944,8 @@ private fun ClipView(
             // down a whole train of OPACITY keyframes on release — the tap gesture above still drops a
             // single node, this is its "draw a curve" sibling. Samples are throttled to ~30ms apart so a
             // slow drag doesn't spam a keyframe per pixel.
-            .pointerInput(clip.id, state.tool, pps) {
-                if (state.tool != EditorTool.KEYFRAME) return@pointerInput
+            .pointerInput(clip.id, tool, pps) {
+                if (tool != EditorTool.KEYFRAME) return@pointerInput
                 val range = KeyframeProperty.OPACITY.uiRange
                 val samples = mutableListOf<Pair<Long, Float>>()
                 fun sample(offset: Offset) {
@@ -917,9 +967,12 @@ private fun ClipView(
             }
             // Drag to move: horizontally on the timeline, vertically across same-type tracks.
             // Disabled while a keyframe of this clip is selected (drag then edits the ease).
-            .pointerInput(clip.id, state.tool, pps, sameTypeTracks, state.selectedKeyframeId) {
-                if (state.tool == EditorTool.SELECT && selectedKf == null) {
-                    val ids = groupIdsOf(state, clip)
+            .pointerInput(clip.id, tool, pps, sameTypeTracks, selectedKeyframeId) {
+                if (tool == EditorTool.SELECT && selectedKf == null) {
+                    // Read the LIVE state from the ViewModel (not a captured parameter) — this
+                    // pointerInput block only restarts when its keys above change, so a plain
+                    // captured value here could go stale across a long-running drag.
+                    val ids = groupIdsOf(vm.uiState.value, clip)
                     // NB: every handler yields when an edge-trim is active (trimEdge != 0, set at the
                     // long-press before any drag) so move and trim never both fire — this is
                     // order-independent, so it doesn't depend on which drag detector the framework
@@ -938,7 +991,7 @@ private fun ClipView(
                                 if (!autoTrackConsumed) {
                                     // Commit the same snapped delta the live preview showed. Group-aware:
                                     // moveClipBy moves the whole group together.
-                                    val deltaMs = snappedDeltaMs(state, clip, (dragPx / pps * 1000f).toLong(), pps)
+                                    val deltaMs = snappedDeltaMs(vm.uiState.value, clip, (dragPx / pps * 1000f).toLong(), pps)
                                     val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
                                     vm.moveClipBy(clip.id, shift, deltaMs)
                                 }
@@ -950,7 +1003,7 @@ private fun ClipView(
                             if (trimEdge == 0) {
                                 change.consume(); dragPx += drag.x; dragPy += drag.y
                                 // Live + snapped: the whole group jumps to the magnet as any edge nears it.
-                                onGroupDrag(GroupDrag(ids, snappedDragPx(state, clip, dragPx, pps), dragPy))
+                                onGroupDrag(GroupDrag(ids, snappedDragPx(vm.uiState.value, clip, dragPx, pps), dragPy))
                                 // Track whether the clip is currently dragged past the first/last lane of its
                                 // type — holding there for ~1s (see LaunchedEffect) spawns a new track.
                                 val shift = if (trackHeightPx > 0f) (dragPy / trackHeightPx).roundToInt() else 0
@@ -969,13 +1022,13 @@ private fun ClipView(
             // Long-press near an edge, then drag, to trim that in/out point . A previously
             // split/trimmed clip re-extends by dragging its edge outward — trimClipStart/trimClipEnd
             // bound it to the source media. The grabbed edge previews live and commits on release.
-            .pointerInput(clip.id, pps, state.tool) {
+            .pointerInput(clip.id, pps, tool) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { down ->
                         // Edge-trim is a SELECT-tool action; a long-press within 24dp of either end grabs
                         // that cut point. A middle long-press (or any long-press in another tool) instead
                         // range-selects — this is the sole long-press handler so it can't be starved.
-                        trimEdge = if (state.tool == EditorTool.SELECT) {
+                        trimEdge = if (tool == EditorTool.SELECT) {
                             when {
                                 down.x <= edgeThresholdPx -> -1
                                 down.x >= size.width - edgeThresholdPx -> 1
@@ -1013,8 +1066,8 @@ private fun ClipView(
             // gesture are deliberately NOT mapped here yet: both collide with gestures this clip already
             // uses (single-finger long-press+drag is already the trim gesture; double-tap already sets
             // the playback region) and need a resolved disambiguation before landing, not a guess.
-            .pointerInput(clip.id, state.tool, pps) {
-                if (state.tool != EditorTool.SELECT) return@pointerInput
+            .pointerInput(clip.id, tool, pps) {
+                if (tool != EditorTool.SELECT) return@pointerInput
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
                     var mode = 0 // 0 = undecided (yield to the single-finger detectors above), 2 = slip, 3 = slide
@@ -1038,8 +1091,8 @@ private fun ClipView(
                 }
             }
             // With a keyframe selected, dragging adjusts its nearest bezier ease handle.
-            .pointerInput(clip.id, state.selectedKeyframeId, pps) {
-                val sel = clip.keyframes.firstOrNull { it.id == state.selectedKeyframeId } ?: return@pointerInput
+            .pointerInput(clip.id, selectedKeyframeId, pps) {
+                val sel = clip.keyframes.firstOrNull { it.id == selectedKeyframeId } ?: return@pointerInput
                 val next = nextKeyframe(clip, sel) ?: return@pointerInput
                 val h = size.height.toFloat()
                 var which = 1
@@ -1079,7 +1132,7 @@ private fun ClipView(
         // each detected beat, brighter at downbeats. Beat timestamps are in SOURCE media ms; converted
         // to a timeline x assuming constant speed across the clip (a speed-keyframed clip's markers are
         // an approximation, same tradeoff as the rest of this canvas's visual aids).
-        state.beatMaps[clip.id]?.let { beatMap ->
+        beatMap?.let { beatMap ->
             val speed = clip.filters.speed.takeIf { it > 0.01f } ?: 1f
             Canvas(Modifier.fillMaxSize()) {
                 val downbeats = beatMap.downbeatsMs.toHashSet()
@@ -1184,7 +1237,7 @@ private fun ClipView(
 
         // Edge affordance: a subtle handle on each edge when selected (long-press + drag to trim),
         // brightening on the edge currently being trimmed.
-        if (selected && state.tool == EditorTool.SELECT) {
+        if (selected && tool == EditorTool.SELECT) {
             Box(
                 Modifier
                     .align(Alignment.CenterStart)

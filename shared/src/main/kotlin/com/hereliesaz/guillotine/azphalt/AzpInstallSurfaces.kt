@@ -77,22 +77,21 @@ object AzpInstallSurfaces {
     /**
      * Best-effort answer to "would this catalog entry reach [Surface.NONE]", using only the
      * browse-list summary's [types] — no download, no manifest. A `pack`/`app`/`mcp`/`code`
-     * package's summary always has empty (or otherwise unrecognized) `types`, since
-     * [AzphaltRegistry.CatalogEntry.types] mirrors its assets' own declared types; this lets the
-     * store filter those out before a user spends an install on something guaranteed to be inert,
-     * without a network round-trip per entry — installing still doesn't happen until the user asks,
-     * but browsing shouldn't offer an "Install" button for something that can only ever land on
-     * [Surface.NONE].
+     * package's summary always has empty `types`, since [AzphaltRegistry.CatalogEntry.types] mirrors
+     * its assets' own declared types and [of] only reaches [Surface.NONE] when `manifest.assets` is
+     * empty; this lets the store filter those out before a user spends an install on something
+     * guaranteed to be inert, without a network round-trip per entry.
      *
-     * Every type string [of] treats as a real consumer is checked here too, so this can't produce a
-     * false positive (hiding something that would actually work). A false negative — showing
-     * something that turns out inert — would mean a catalog entry's `types` doesn't reflect its own
-     * assets, a registry-data problem rather than something to design around client-side.
+     * **Any non-empty [types] has a known consumer.** [of]'s own `when` has no branch that maps a
+     * present asset to [Surface.NONE] — an asset type [of] doesn't recognize (a `font`, say) still
+     * lands on [Surface.LISTED_NOT_APPLICABLE], which *is* a real, reachable surface: the clip panel
+     * genuinely lists it. Only an *empty* asset list (mirrored here as empty `types`) reaches
+     * [Surface.NONE]. So this correctly returns `true` for `["font"]` — that used to be the bug: an
+     * asset type unrecognized by name is not the same thing as a package with no consumer at all, and
+     * treating them the same hid packages ([Surface.LISTED_NOT_APPLICABLE] ones) that install and work
+     * from the very browser meant to offer them. A false negative here — hiding something that
+     * actually works — would mean a catalog entry's `types` doesn't reflect its own assets, a
+     * registry-data problem rather than something to design around client-side.
      */
-    fun hasKnownConsumer(types: List<String>): Boolean = types.any { raw ->
-        val type = raw.trim().lowercase()
-        type in AzpMotionInstaller.MOTION_TYPES ||
-            type in AzpModelInstaller.MODEL_TYPES ||
-            AzpInstalledUi.renderKindOf(type) != AzpInstalledUi.RenderKind.OTHER
-    }
+    fun hasKnownConsumer(types: List<String>): Boolean = types.isNotEmpty()
 }
