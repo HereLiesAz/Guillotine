@@ -10,7 +10,15 @@ object DesktopMediaImport {
 
     fun probe(file: File): MediaItem? = runCatching {
         val grabber = FFmpegFrameGrabber(file)
-        grabber.start()
+        try {
+            grabber.start()
+        } catch (e: Exception) {
+            // start() can throw (truncated/corrupt file, unsupported codec) before allocating the
+            // native handles `finally` below would otherwise release — release explicitly here too,
+            // or a bad import leaks the native AVFormatContext.
+            runCatching { grabber.release() }
+            throw e
+        }
         try {
             val hasVideo = grabber.imageWidth > 0 && grabber.imageHeight > 0
             val hasAudio = grabber.audioChannels > 0
@@ -30,10 +38,12 @@ object DesktopMediaImport {
                 kind = kind,
                 durationMs = if (kind == MediaKind.IMAGE) 5000L else durationMs,
                 hasAudio = hasVideo && hasAudio,
+                widthPx = if (hasVideo) grabber.imageWidth else null,
+                heightPx = if (hasVideo) grabber.imageHeight else null,
             )
         } finally {
-            grabber.stop()
-            grabber.release()
+            runCatching { grabber.stop() }
+            runCatching { grabber.release() }
         }
     }.getOrNull()
 

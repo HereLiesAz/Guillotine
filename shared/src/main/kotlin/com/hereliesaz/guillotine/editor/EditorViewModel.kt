@@ -101,11 +101,16 @@ data class EditorUiState(
     val lufsByClip: Map<String, Double> = emptyMap(),
     /**
      * True right after the first clip lands on an otherwise-empty project whose aspect ratio is
-     * still a fixed preset (not [com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL]) — the UI
-     * shows a one-shot "match the project to this clip's own shape?" prompt (Vegas B.4: adding the
-     * first clip to an empty timeline offers to match project properties to the source). Cleared by
-     * [EditorViewModel.resolveAspectMatchSuggestion] regardless of the user's choice, so it never
-     * re-fires for later clips. Transient view state, not part of the undoable [Document].
+     * still a fixed preset (not [com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL]) AND the
+     * clip's own shape doesn't actually fit it — the UI shows a "match the project to this clip's
+     * own shape?" prompt (Vegas B.4: adding the first clip to an empty timeline offers to match
+     * project properties to the source). Cleared by [EditorViewModel.resolveAspectMatchSuggestion]
+     * regardless of the user's choice, so it won't re-fire for a later clip on the SAME project —
+     * though clearing every clip back to empty and importing again is treated as a fresh "first
+     * clip" and can raise it again, same as it would for a brand-new project. Also cleared by
+     * [EditorViewModel.loadDocument] (switching projects), so an unanswered prompt from a project
+     * the user navigated away from can never resolve against a different one. Transient view state,
+     * not part of the undoable [Document].
      */
     val suggestAspectMatch: Boolean = false,
 ) {
@@ -208,6 +213,17 @@ open class EditorViewModel {
         }
     }
 
+    /**
+     * Like [mutateDocument] but doesn't push undo history — for document fields that are
+     * transient/derived state (e.g. [TimelineClip.isAnalyzing], the project name, prompt history)
+     * rather than user edits. Still takes [historyLock] so it can't race with a concurrent
+     * [mutateDocument]/[undo]/[redo] call: without it, a background write here between another
+     * thread's document read and its final swap would be silently clobbered by that swap.
+     */
+    private fun updateDocumentTransient(transform: (Document) -> Document) = synchronized(historyLock) {
+        _uiState.update { it.copy(document = transform(it.document)) }
+    }
+
     fun undo() = synchronized(historyLock) {
         if (past.isEmpty()) return@synchronized
         val prev = past.removeLast()
@@ -298,10 +314,28 @@ open class EditorViewModel {
         // to be set to (letterboxing a mismatched clip with no easy way back). Only fires once per
         // project — later imports land inside an already-shaped project and shouldn't re-suggest.
         // ORIGINAL is skipped: it already derives the frame from the reference clip's own shape, so
-        // there's nothing to offer.
+        // there's nothing to offer. An audio-only import has no picture to letterbox, so it's skipped
+        // too — the FIRST item with an actual frame (video/image) is what's checked for a real
+        // dimension mismatch, not just assumed to clash with whatever ratio the project is set to.
         if (wasEmpty && document.settings.aspectRatio != AspectRatio.ORIGINAL) {
-            _uiState.update { it.copy(suggestAspectMatch = true) }
+            val visual = items.firstOrNull { it.kind != MediaKind.AUDIO }
+            if (visual != null && wouldLetterbox(visual, document.settings.aspectRatio)) {
+                _uiState.update { it.copy(suggestAspectMatch = true) }
+            }
         }
+    }
+
+    /**
+     * True when [media]'s own aspect ratio doesn't fit [target] closely enough to render without
+     * letterboxing/pillarboxing. [media]'s dimensions are unknown (older probe, unusual source) errs
+     * toward true — we can't rule out a mismatch, and the suggestion is a low-cost, dismissible
+     * prompt either way.
+     */
+    private fun wouldLetterbox(media: MediaItem, target: AspectRatio): Boolean {
+        val fixed = target.fixedRatioValue ?: return false
+        val clipRatio = media.aspectRatioValue ?: return true
+        val tolerance = 0.02 // ~2% slack for common near-exact presets (e.g. 1920x1080 vs 16:9)
+        return kotlin.math.abs(clipRatio - fixed) > fixed * tolerance
     }
 
     /**
@@ -1054,6 +1088,10 @@ open class EditorViewModel {
             edits = emptyList(),
             groupId = groupId,
             linkedClipId = null,
+            // A piece cut from a clip that was mid-analysis gets a brand-new id no future
+            // setAnalyzing(false, oldId) call can ever reach — start it clear rather than inheriting
+            // a flag that would otherwise be stuck true forever.
+            isAnalyzing = false,
             keyframes = run {
                 // Half-open [relStart, relStart+dur) assigns a keyframe on an interior cut boundary to the
                 // NEXT piece (where it sits at relStart). But the piece that reaches the clip's END has no
@@ -1402,9 +1440,11 @@ open class EditorViewModel {
     /**
      * Roll edit: move the cut point between two clips that share a boundary on the same track by
      * [deltaMs] — [leftClipId]'s end and [rightClipId]'s start move together, so the combined span the
-     * two clips cover stays fixed while where one ends and the other begins shifts. Equivalent to
-     * [trimClipEnd] on [leftClipId] and [trimClipStart] on [rightClipId] with the same delta, bounded by
-     * whichever clip's own limits (minimum duration, source length) are tighter.
+     * two clips cover stays fixed while where one ends and the other begins shifts. Bounded by whichever
+     * clip's own limits (minimum duration, source length) are tighter. Applies both sides in a single
+     * [mutateDocument] call (not by delegating to [trimClipEnd]+[trimClipStart], which would each push
+     * their own undo entry) so one Undo reverts the whole roll instead of leaving the two clips
+     * overlapping.
      */
     fun rollEdit(leftClipId: String, rightClipId: String, deltaMs: Long) {
         val left = document.clips.firstOrNull { it.id == leftClipId } ?: return
@@ -1421,8 +1461,26 @@ open class EditorViewModel {
         }
         val d = deltaMs.coerceIn(lo, maxOf(lo, hi))
         if (d == 0L) return
-        trimClipEnd(leftClipId, d)
-        trimClipStart(rightClipId, d)
+        mutateDocument { doc ->
+            val leftAffected = setOf(leftClipId) + doc.clips.filter { it.linkedClipId == leftClipId }.map { it.id }
+            val rightAffected = setOf(rightClipId) + doc.clips.filter { it.linkedClipId == rightClipId }.map { it.id }
+            doc.copy(clips = doc.clips.map { c ->
+                when {
+                    c.id in leftAffected -> {
+                        val nd = c.durationMs + d
+                        c.copy(durationMs = nd, keyframes = c.keyframes.filter { k -> k.timeMs <= nd })
+                    }
+                    c.id in rightAffected -> c.copy(
+                        startTimeMs = (c.startTimeMs + d).coerceAtLeast(0),
+                        trimStartMs = c.trimStartMs + d,
+                        durationMs = c.durationMs - d,
+                        keyframes = c.keyframes.map { k -> k.copy(timeMs = k.timeMs - d) }.filter { k -> k.timeMs >= 0 },
+                    )
+                    else -> c
+                }
+            })
+        }
+        actionRecorder.record(RecordedAction("roll_edit", mapOf("left_clip_id" to leftClipId, "right_clip_id" to rightClipId, "delta_ms" to deltaMs), "Roll edit by ${deltaMs}ms"))
     }
 
     /**
@@ -1998,10 +2056,10 @@ open class EditorViewModel {
 
     fun setAnalyzing(ids: Collection<String>, analyzing: Boolean) {
         val set = ids.toSet()
-        _uiState.update { st ->
-            st.copy(document = st.document.copy(clips = st.document.clips.map {
+        updateDocumentTransient { doc ->
+            doc.copy(clips = doc.clips.map {
                 if (it.id in set) it.copy(isAnalyzing = analyzing) else it
-            }))
+            })
         }
     }
 
@@ -2036,7 +2094,7 @@ open class EditorViewModel {
 
     /** Set the project name (autosaved with the document; not an undo step). */
     fun setProjectName(name: String) =
-        _uiState.update { it.copy(document = it.document.copy(name = name.trim())) }
+        updateDocumentTransient { it.copy(name = name.trim()) }
 
     /**
      * Record a submitted prompt at the head of the project's prompt history (deduped,
@@ -2046,9 +2104,11 @@ open class EditorViewModel {
     fun rememberPrompt(prompt: String) {
         val p = prompt.trim()
         if (p.isBlank()) return
-        _uiState.update { st ->
-            val hist = (listOf(p) + st.promptHistory.filter { it != p }).take(MAX_PROMPT_HISTORY)
-            st.copy(promptHistory = hist, document = st.document.copy(promptHistory = hist))
+        synchronized(historyLock) {
+            _uiState.update { st ->
+                val hist = (listOf(p) + st.promptHistory.filter { it != p }).take(MAX_PROMPT_HISTORY)
+                st.copy(promptHistory = hist, document = st.document.copy(promptHistory = hist))
+            }
         }
     }
 
@@ -2392,6 +2452,12 @@ open class EditorViewModel {
                 pixelsPerSecond = doc.pixelsPerSecond ?: it.pixelsPerSecond,
                 canUndo = false,
                 canRedo = false,
+                // Both are transient, per-project view state (see their KDoc) — track ids collide
+                // across projects (every new project's default tracks are "V1"/"A1"), so leaving a
+                // stale solo/suggestion set from the PREVIOUS project would silently hide tracks or
+                // re-show a mismatched suggestion in this one.
+                soloedTrackIds = emptySet(),
+                suggestAspectMatch = false,
             )
         }
         // If the loaded project doesn't have a persisted zoom, snap to fit-all once the viewport
