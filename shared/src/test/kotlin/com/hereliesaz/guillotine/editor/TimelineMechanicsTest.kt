@@ -101,6 +101,23 @@ class TimelineMechanicsTest {
         assertEquals(5000L, byId["right"]!!.startTimeMs + byId["right"]!!.durationMs)
     }
 
+    @Test
+    fun `roll edit is a single undo step`() {
+        val vm = vmWith(
+            clip("left", "V1", 0, 0, 2000),
+            clip("right", "V1", 2000, 0, 3000),
+        )
+        vm.rollEdit("left", "right", 400)
+        vm.undo()
+        val byId = vm.uiState.value.document.clips.associateBy { it.id }
+        // One undo must restore BOTH sides — not leave left trimmed while right is still at its
+        // pre-roll boundary (which would overlap the two clips on the same track).
+        assertEquals(2000L, byId["left"]!!.durationMs)
+        assertEquals(2000L, byId["right"]!!.startTimeMs)
+        assertEquals(3000L, byId["right"]!!.durationMs)
+        assertTrue(!vm.uiState.value.canUndo) // nothing left to undo past the roll
+    }
+
     // ---- time-stretch ----
 
     @Test
@@ -230,6 +247,17 @@ class TimelineMechanicsTest {
         assertTrue(vm.uiState.value.effectivePreviewDisabledTrackIds.isEmpty()) // both soloed = same as none
         vm.toggleTrackSolo("V1")
         assertEquals(setOf("V1"), vm.uiState.value.effectivePreviewDisabledTrackIds) // only V2 left soloed
+    }
+
+    @Test
+    fun `loading a new document clears solo state from the previous project`() {
+        val vm = vmWithTracks(listOf("V1", "V2"), clip("v1", "V1", 0, 0, 1000))
+        vm.toggleTrackSolo("V1")
+        assertTrue("V1" in vm.uiState.value.soloedTrackIds)
+        // A different project can reuse the same default track ids ("V1"/"V2"), so a stale solo set
+        // would silently hide tracks that were never soloed in the newly-loaded project.
+        vm.loadDocument(Document(mediaItems = listOf(media), videoTracks = listOf("V1", "V2"), audioTracks = emptyList()))
+        assertTrue(vm.uiState.value.soloedTrackIds.isEmpty())
     }
 
     @Test

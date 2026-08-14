@@ -377,6 +377,10 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 vm.setAnalysisProgress(null)
             },
             onComplete = {
+                // Clips that had cuts applied already lost their old id (and its isAnalyzing flag)
+                // when applyCuts replaced them with fresh pieces; this only matters for ones where
+                // nothing was removed, whose isAnalyzing would otherwise stay stuck true forever.
+                vm.setAnalyzing(ids, false)
                 vm.setProcessing(false, null)
                 vm.setAnalysisProgress(null)
                 ActivityLog.success("Analysis complete.")

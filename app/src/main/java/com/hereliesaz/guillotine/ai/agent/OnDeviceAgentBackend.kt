@@ -9,6 +9,7 @@ import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -87,6 +88,7 @@ class OnDeviceAgentBackend(
             val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
+                ensureActive() // honor cancellation between turns — stop mutating the document once cancelled
                 val prompt = preamble + "\n" + transcript + "ASSISTANT: "
                 // Fetch each turn: a look may have upgraded the single engine to vision mode; text turns
                 // run on that same engine (generateResponse works on a vision engine too).

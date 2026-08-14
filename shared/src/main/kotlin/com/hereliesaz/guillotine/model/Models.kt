@@ -90,7 +90,18 @@ val TEXT_STYLE_PRESETS: List<TextStylePreset> = listOf(
 enum class EditAction { KEEP, REMOVE }
 
 @Serializable
-enum class AspectRatio { RATIO_16_9, RATIO_9_16, RATIO_1_1, ORIGINAL }
+enum class AspectRatio {
+    RATIO_16_9, RATIO_9_16, RATIO_1_1, ORIGINAL;
+
+    /** This preset's fixed width/height ratio, or null for [ORIGINAL] (no fixed frame to compare against). */
+    val fixedRatioValue: Double?
+        get() = when (this) {
+            RATIO_16_9 -> 16.0 / 9.0
+            RATIO_9_16 -> 9.0 / 16.0
+            RATIO_1_1 -> 1.0
+            ORIGINAL -> null
+        }
+}
 
 @Serializable
 enum class Quality {
@@ -127,7 +138,24 @@ data class MediaItem(
      *  alongside [name], and its category chips filter by them, so tagging one clip "b-roll" makes
      *  every future search for that tag find it automatically (Vegas B.6's "Smart Bin"). */
     val tags: List<String> = emptyList(),
-)
+    /**
+     * The source's own pixel dimensions (display orientation already applied — a portrait phone
+     * video's [heightPx] is the larger value), when the importer could determine them. Null for
+     * AUDIO, and for VIDEO/IMAGE sources a probe failed to read (older projects, an unusual
+     * container). Used to detect an actual aspect-ratio mismatch against the project's fixed ratio
+     * rather than assuming one — see [com.hereliesaz.guillotine.editor.EditorViewModel.addMedia].
+     */
+    val widthPx: Int? = null,
+    val heightPx: Int? = null,
+) {
+    /** [widthPx]/[heightPx] as a ratio, or null when either is unknown/non-positive. */
+    val aspectRatioValue: Double?
+        get() {
+            val w = widthPx?.takeIf { it > 0 } ?: return null
+            val h = heightPx?.takeIf { it > 0 } ?: return null
+            return w.toDouble() / h.toDouble()
+        }
+}
 
 /** Cubic-bezier easing control points (P1, P2); endpoints are fixed at (0,0)/(1,1). */
 @Serializable

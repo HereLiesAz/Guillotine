@@ -46,6 +46,8 @@ object MediaImport {
 
         var durationMs = 0L
         var hasAudio = false
+        var widthPx: Int? = null
+        var heightPx: Int? = null
         var retrieverError: String? = null
         if (kind != MediaKind.IMAGE) {
             val retriever = MediaMetadataRetriever()
@@ -59,10 +61,35 @@ object MediaImport {
                 hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes"
                 if (!hasVideo && hasAudio) kind = MediaKind.AUDIO
                 else if (hasVideo) kind = MediaKind.VIDEO
+                if (hasVideo) {
+                    val rawW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+                    val rawH = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+                    // A 90/270 rotation swaps which raw dimension is actually "up" — e.g. a phone-shot
+                    // portrait video is stored as 1920x1080 with a 90° rotation flag, so the DISPLAYED
+                    // (and letterboxing-relevant) shape is 1080x1920.
+                    val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                    val swapped = rotation == 90 || rotation == 270
+                    if (rawW != null && rawH != null && rawW > 0 && rawH > 0) {
+                        widthPx = if (swapped) rawH else rawW
+                        heightPx = if (swapped) rawW else rawH
+                    }
+                }
             } catch (e: Exception) {
                 retrieverError = "${e.javaClass.simpleName}: ${e.message ?: "no detail"}"
             } finally {
                 runCatching { retriever.release() }
+            }
+        } else {
+            // Decode only the bounds (no pixels loaded) to get an image's dimensions cheaply.
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeStream(stream, null, opts)
+                    if (opts.outWidth > 0 && opts.outHeight > 0) {
+                        widthPx = opts.outWidth
+                        heightPx = opts.outHeight
+                    }
+                }
             }
         }
 
@@ -85,6 +112,8 @@ object MediaImport {
             durationMs = durationMs,
             // Only a VIDEO file's audio is split to its own track; a pure AUDIO file already is audio.
             hasAudio = hasAudio && kind == MediaKind.VIDEO,
+            widthPx = widthPx,
+            heightPx = heightPx,
         )
     }
 
