@@ -769,6 +769,14 @@ fun SettingsScreen(
                             "Regenerate to revoke tools that have the old token.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+                    Text(
+                        "The server only accepts connections from this device (127.0.0.1) — this is " +
+                            "plaintext HTTP, not TLS, so it never binds to the network where a bearer " +
+                            "token could be sniffed off the wire. To drive the editor from another " +
+                            "device, use the encrypted Cloudflare relay below or an adb/USB port-forward " +
+                            "rather than exposing this port on your LAN.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
 
                     Text("Encrypted cloud relay (optional)", color = Neutral400, fontSize = 12.sp)
                     Row(verticalAlignment = Alignment.CenterVertically) {
