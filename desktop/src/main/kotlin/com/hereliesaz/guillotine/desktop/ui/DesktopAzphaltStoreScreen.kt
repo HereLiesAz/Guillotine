@@ -90,6 +90,14 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
     var busy by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var pendingUntrusted by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    // A package whose signer differs from the one this package id was first installed under. Handled
+    // right here with the SAME general-purpose AzpHandoffInstaller the rest of this screen already uses
+    // — NOT by pointing the user at Settings → Advanced, which re-installs through AzpModelInstall (a
+    // models-only installer whose asset filter yields an empty list for anything that isn't an AI model,
+    // i.e. every LUT/shader/pack this Store actually browses — it used to report "Installed 0 model(s)…
+    // (trusted)" as if that had worked, while nothing was ever written to the extensions directory).
+    var pendingPublisherChange by remember { mutableStateOf<AzpHandoffInstaller.InstallResult.PublisherChanged?>(null) }
+    var pendingPublisherChangeBytes by remember { mutableStateOf<ByteArray?>(null) }
 
     LaunchedEffect(Unit) {
         installedIds = withContext(Dispatchers.IO) {
@@ -99,7 +107,7 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
         result.fold(onSuccess = { catalog = it }, onFailure = { loadError = it.message ?: "Couldn't reach azphalt.store." })
     }
 
-    fun runInstall(bytes: ByteArray, allowUntrusted: Boolean = false) {
+    fun runInstall(bytes: ByteArray, allowUntrusted: Boolean = false, allowPublisherChange: Boolean = false) {
         busy = "Verifying…"
         scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -108,6 +116,7 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
                     trustedKeys = setOf(AzphaltTrust.FLAGSHIP_SIGNING_KEY),
                     pins = publisherPins,
                     allowUntrusted = allowUntrusted,
+                    allowPublisherChange = allowPublisherChange,
                     hostAppId = DesktopPluginApplier.HOST_APP_ID,
                 )
             }
@@ -132,9 +141,10 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
                     notice = "“${result.name}” needs azphalt ${result.required}; this build provides ${result.hostVersion}."
                 is AzpHandoffInstaller.InstallResult.Failure -> notice = result.message
                 is AzpHandoffInstaller.InstallResult.Untrusted -> pendingUntrusted = bytes to result.reason
-                is AzpHandoffInstaller.InstallResult.PublisherChanged ->
-                    notice = "“${result.packageId}” was signed by a different publisher than the installed version. " +
-                        "Re-install from Settings → Advanced to approve the change."
+                is AzpHandoffInstaller.InstallResult.PublisherChanged -> {
+                    pendingPublisherChangeBytes = bytes
+                    pendingPublisherChange = result
+                }
             }
         }
     }
@@ -257,6 +267,36 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { pendingUntrusted = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // Mirrors the Android AzphaltStoreScreen's pendingPublisherChange dialog: re-installs right here
+    // through AzpHandoffInstaller (the general installer this whole screen already uses), not by sending
+    // the user off to a models-only installer that would silently no-op on a non-model package.
+    pendingPublisherChange?.let { change ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingPublisherChange = null; pendingPublisherChangeBytes = null },
+            title = { Text("Publisher changed") },
+            text = {
+                Text(
+                    "“${change.packageId}” was signed by a different publisher than the installed version. " +
+                        "This can mean a legitimate key rotation — or someone else trying to replace the " +
+                        "extension. Only continue if you trust the new publisher.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val bytes = pendingPublisherChangeBytes
+                    pendingPublisherChange = null
+                    pendingPublisherChangeBytes = null
+                    if (bytes != null) runInstall(bytes, allowUntrusted = true, allowPublisherChange = true)
+                }) { Text("Trust new publisher", color = Red500) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    pendingPublisherChange = null; pendingPublisherChangeBytes = null
+                }) { Text("Cancel") }
             },
         )
     }

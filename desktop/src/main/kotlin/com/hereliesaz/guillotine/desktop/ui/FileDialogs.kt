@@ -50,6 +50,12 @@ fun rememberOpenProjectLauncher(onPicked: (File) -> Unit): () -> Unit {
     return remember {
         {
             val fd = FileDialog(null as Frame?, "Open Project", FileDialog.LOAD)
+            // Restrict to Guillotine's own project files (the extension DesktopProjectAutosave.saveToFile
+            // / .save actually write, e.g. "project.gilt") so a huge or unrelated file can't be picked by
+            // mistake and fed straight into the JSON parser. FilenameFilter is the cross-platform way to
+            // do this with AWT's native FileDialog (setting fd.file to a glob only works reliably on some
+            // platforms/toolkits).
+            fd.filenameFilter = java.io.FilenameFilter { _, name -> name.endsWith(".gilt", ignoreCase = true) }
             fd.isVisible = true
             val dir = fd.directory
             val name = fd.file
