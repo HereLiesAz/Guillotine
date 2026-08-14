@@ -66,25 +66,47 @@ object GenBackends {
 
     private fun decodeB64(s: String): ByteArray = Base64.getDecoder().decode(s)
 
-    private fun firstUrlIn(json: JSONObject): String? {
-        // Depth-first search for the first "url"/"uri" string value.
+    /** Result-URL keys confirmed working for the providers that already rely on [firstUrlIn]. Checked
+     *  before [EXTRA_URL_KEYS] so an established field always wins over a guessed one. */
+    private val PRIMARY_URL_KEYS = setOf("url", "uri", "video", "audio")
+
+    /** Common alternate result-url field names seen across generation APIs (e.g. `download_url`,
+     *  `video_url`) that would otherwise be misread as "no result" from an otherwise-successful
+     *  generation. Only consulted when nothing in [PRIMARY_URL_KEYS] matched anywhere in the payload. */
+    private val EXTRA_URL_KEYS = setOf(
+        "download_url", "downloadUrl",
+        "video_url", "videoUrl",
+        "audio_url", "audioUrl",
+        "file_url", "fileUrl",
+        "output_url", "outputUrl",
+        "output",
+        "result_url", "resultUrl",
+    )
+
+    private fun firstUrlIn(json: JSONObject): String? =
+        firstUrlIn(json, PRIMARY_URL_KEYS) ?: firstUrlIn(json, EXTRA_URL_KEYS)
+
+    /** Depth-first search for the first string value under one of [keys]. */
+    private fun firstUrlIn(json: JSONObject, keys: Set<String>): String? {
         for (key in json.keys()) {
             when (val v = json.get(key)) {
-                is String -> if ((key == "url" || key == "uri" || key == "video" || key == "audio") &&
-                    v.startsWith("http")) return v
-                is JSONObject -> firstUrlIn(v)?.let { return it }
-                is JSONArray -> firstUrlIn(v)?.let { return it }
+                is String -> if (key in keys && v.startsWith("http")) return v
+                is JSONObject -> firstUrlIn(v, keys)?.let { return it }
+                is JSONArray -> firstUrlIn(v, keys)?.let { return it }
             }
         }
         return null
     }
 
-    private fun firstUrlIn(arr: JSONArray): String? {
+    private fun firstUrlIn(arr: JSONArray): String? =
+        firstUrlIn(arr, PRIMARY_URL_KEYS) ?: firstUrlIn(arr, EXTRA_URL_KEYS)
+
+    private fun firstUrlIn(arr: JSONArray, keys: Set<String>): String? {
         for (i in 0 until arr.length()) {
             when (val v = arr.get(i)) {
                 is String -> if (v.startsWith("http")) return v
-                is JSONObject -> firstUrlIn(v)?.let { return it }
-                is JSONArray -> firstUrlIn(v)?.let { return it }
+                is JSONObject -> firstUrlIn(v, keys)?.let { return it }
+                is JSONArray -> firstUrlIn(v, keys)?.let { return it }
             }
         }
         return null

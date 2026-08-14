@@ -41,7 +41,7 @@ val AiProviderType.meta: ProviderMeta
             "Anthropic",
             "Claude · drives the editor via tools (no video sent).",
             keyUrl = "https://console.anthropic.com/settings/keys",
-            defaultModel = "claude-opus-4-8",
+            defaultModel = "claude-opus-5",
         )
         AiProviderType.OPENROUTER -> ProviderMeta(
             "OpenRouter",

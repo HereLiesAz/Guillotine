@@ -7,10 +7,11 @@ package com.hereliesaz.guillotine.ai.vocab
  * generates surface forms (see [LexiconExpander]/[RuleExpander]) and the resolver reads negation/intensity
  * cues at query time so that e.g. "less sharp" resolves to the *opposite* of `sharpen`.
  *
- * It feeds three things:
+ * It feeds two things:
  *  1. the agent system prompt, via [promptAppendix] (so the model maps varied phrasings + opposites);
- *  2. a deterministic pre-model resolver, via [resolve] (word → tool + whether the sense is inverted);
- *  3. a queryable `lookup_vocabulary` MCP tool, via [lookup].
+ *  2. the queryable `lookup_vocabulary` MCP tool, via [lookupJson] — which internally calls [lookup] and
+ *     [resolve] (the latter for negation/inversion: word → tool + whether the sense is flipped). [resolve]
+ *     has no other caller; it is not an independent pre-model routing path, only [lookupJson]'s helper.
  *
  * The seed is intentionally small and hand-checked; breadth comes from expansion, so a fuller lexical
  * source (WordNet, an embeddings/LLM pass) can be plugged in later as another [LexiconExpander] without
