@@ -8,6 +8,8 @@ import androidx.compose.runtime.Composable
 import com.hereliesaz.guillotine.model.Document
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * The always-on current project: the editor document is continuously written to a file in
@@ -21,7 +23,18 @@ object ProjectAutosave {
     fun save(context: Context, document: Document) {
         // Guard the write: a failed autosave (disk full / IO error), including the on-pause flush on
         // the main thread, must not crash the app — a dropped autosave is recoverable, a crash isn't.
-        runCatching { File(context.filesDir, FILE).writeText(ProjectStore.serialize(document)) }
+        // Write atomically: a plain writeText() truncates the real file to 0 bytes before writing,
+        // so a process death mid-write (OOM-kill while backgrounded, force-stop) leaves a
+        // truncated/corrupt file that load() silently treats as "no project". Instead write to a
+        // temp file in the same directory, then atomically rename it over the real file — the
+        // real file is either the old complete version or the new complete version, never a
+        // partial write, no matter when the process dies.
+        runCatching {
+            val real = File(context.filesDir, FILE)
+            val tmp = File(context.filesDir, "$FILE.tmp")
+            tmp.writeText(ProjectStore.serialize(document))
+            Files.move(tmp.toPath(), real.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 
     /** The autosaved current project, or null if none exists yet / it can't be read. */
@@ -50,8 +63,16 @@ object ProjectStore {
     fun deserialize(text: String): Document = json.decodeFromString(Document.serializer(), text)
 
     fun save(context: Context, uri: Uri, document: Document) {
+        // Serialize BEFORE opening the destination stream: "wt" mode truncates the target the
+        // moment it's opened, so if we serialized lazily inside the `use` block a bad Document
+        // (an encoding failure) would leave an empty file at the user's chosen location. This
+        // way that class of failure never touches the target at all. SAF gives us no portable
+        // atomic-replace primitive (unlike the internal-storage autosave above, which uses a
+        // temp-file + atomic rename), so a genuine I/O failure *during* the write can still leave
+        // a truncated file — that residual risk is inherent to SAF, not fixable from here.
+        val text = serialize(document)
         context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
-            out.write(serialize(document).toByteArray())
+            out.write(text.toByteArray())
         } ?: throw IllegalStateException("Could not open project file for writing.")
     }
 

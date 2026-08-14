@@ -5,6 +5,8 @@ import com.hereliesaz.guillotine.model.LearnedConcept
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * On-device persistence for [LearnedConcept]s — mirrors [UserToolStore]. A plain JSON file in
@@ -23,10 +25,14 @@ object LearnedConceptStore {
     }
 
     fun save(context: Context, concepts: List<LearnedConcept>) {
+        // Atomic write (temp file + atomic rename): a plain writeText() truncates the real file
+        // to 0 bytes before writing, so a process death mid-write would silently destroy all
+        // learned concepts with no error. See ProjectStore.ProjectAutosave.save for the same fix.
         runCatching {
-            File(context.filesDir, FILE).writeText(
-                json.encodeToString(ListSerializer(LearnedConcept.serializer()), concepts),
-            )
+            val real = File(context.filesDir, FILE)
+            val tmp = File(context.filesDir, "$FILE.tmp")
+            tmp.writeText(json.encodeToString(ListSerializer(LearnedConcept.serializer()), concepts))
+            Files.move(tmp.toPath(), real.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         }
     }
 
