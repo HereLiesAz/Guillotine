@@ -99,6 +99,17 @@ class McpTools(
         }
     }
 
+    /**
+     * Cancel whatever [OperationController] currently has claimed. It only ever tracks one in-flight
+     * long operation (analyze/generate/export) for the whole app, so there's no per-[requestId]
+     * bookkeeping to do here — [McpDispatcher] has already confirmed [requestId] is the one it's
+     * tracking as in-flight before calling this. A blocking MCP tool built on
+     * [OperationController.runBlocking] observes the cancel via [OperationController.Sink.checkpointBlocking].
+     */
+    override fun cancel(requestId: Any?) {
+        OperationController.cancel()
+    }
+
     // ---- tool definitions ---------------------------------------------------
 
     override fun definitions(): JSONArray = JSONArray().apply {
@@ -2039,6 +2050,7 @@ class McpTools(
             "No ffmpeg set. Set an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters."
         }
         require(filterGraph.isNotBlank()) { "Provide an FFmpeg -vf filtergraph." }
+        rejectUnsafeFfmpegFilterSources(filterGraph)
         val doc = vm.uiState.value.document
         val clip = doc.clips.firstOrNull { it.id == clipId }
             ?: throw IllegalArgumentException("Clip not found: $clipId")
@@ -2397,13 +2409,60 @@ class McpTools(
         }
     }
 
+    /**
+     * Resolve a caller-supplied filesystem path to a [java.io.File], but only if it canonicalizes to
+     * somewhere the app already controls: [Context.getFilesDir] (where imported LUTs (`luts/`),
+     * imported models, and installed azp extensions already live — see [com.hereliesaz.guillotine.ui.ClipTools]
+     * and [com.hereliesaz.guillotine.ai.ModelImport]) or [Context.getCacheDir] (where this same tool
+     * surface writes generated intermediates, e.g. `solidColorPng`). Anything else — `/sdcard/...`,
+     * `/system/...`, another app's storage, a `../` escape — is rejected with a clear MCP-facing error
+     * instead of being handed to a `File`/`ffmpeg` read and silently composited into the export.
+     */
+    private fun resolveAssetPath(rawPath: String, whatFor: String): java.io.File {
+        require(rawPath.isNotBlank()) { "Provide the path to $whatFor." }
+        val canonical = runCatching { java.io.File(rawPath).canonicalFile }
+            .getOrElse { throw IllegalArgumentException("Not a valid path: $rawPath") }
+        val allowedRoots = listOf(context.filesDir, context.cacheDir)
+            .mapNotNull { root -> runCatching { root.canonicalFile }.getOrNull() }
+        val allowed = allowedRoots.any { root ->
+            canonical == root || canonical.path.startsWith(root.path + java.io.File.separator)
+        }
+        require(allowed) {
+            "Path outside the app's own storage isn't allowed: $rawPath. Import it into the app first " +
+                "(e.g. via the LUT picker on the clip, or the media importer) so it lives under the " +
+                "app's own storage, then pass that path."
+        }
+        require(canonical.isFile) { "No file at: $rawPath" }
+        return canonical
+    }
+
+    /**
+     * Reject an FFmpeg filtergraph that opens its own arbitrary local file instead of the clip's own
+     * media. `movie=`/`amovie=` are the canonical filter *sources* that read a path directly from the
+     * graph string; `subtitles=`/`ass=` and `afir=` accept a `filename=`/bare-path argument too. All
+     * five are legitimate FFmpeg filters otherwise, so we don't ban FFmpeg-filter syntax generally —
+     * just the specific filter names that would let `filter` smuggle in a path this tool never
+     * validated against [resolveAssetPath]'s allowlist. A filter node starts at the beginning of the
+     * graph or right after a `,`/`;`/`]` link, so match the name there followed by `=`.
+     */
+    private fun rejectUnsafeFfmpegFilterSources(filterGraph: String) {
+        val unsafeSource = Regex("""(?i)(?:^|[,;\]])\s*(movie|amovie|subtitles|ass|afir)\s*=""")
+        val match = unsafeSource.find(filterGraph)
+        if (match != null) {
+            val name = match.groupValues[1]
+            throw IllegalArgumentException(
+                "The \"$name\" filter reads its own file path and isn't allowed in apply_ffmpeg_filter " +
+                    "— it can read any file on the device, not just this clip's media. Use a filter that " +
+                    "operates only on the clip's own video/audio streams.",
+            )
+        }
+    }
+
     /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). Stacks onto the clip's
      *  FX chain — see [com.hereliesaz.guillotine.model.FxLayer] — alongside whatever else (an azphalt
      *  shader/LUT, an earlier applyLut call) is already on the clip. */
     private fun applyLut(clipId: String, path: String): JSONObject {
-        require(path.isNotBlank()) { "Provide the path to a .cube LUT file." }
-        val file = java.io.File(path)
-        require(file.isFile) { "No .cube file at: $path" }
+        val file = resolveAssetPath(path, "a .cube LUT file")
         // Parse up front so a bad file fails here with a clear message rather than silently doing nothing.
         runCatching { com.hereliesaz.guillotine.media.CubeLut.parse(file.readText()) }
             .onFailure { throw IllegalArgumentException("Not a valid 3D .cube LUT: ${it.message}") }
@@ -2416,8 +2475,7 @@ class McpTools(
     private fun replaceBackgroundTool(clipId: String, color: String, imagePath: String): JSONObject {
         val fg = resolveClipOrPlayhead(clipId)
         val bg: MediaItem = if (imagePath.isNotBlank()) {
-            val f = java.io.File(imagePath)
-            require(f.isFile) { "No image at: $imagePath" }
+            val f = resolveAssetPath(imagePath, "a background image")
             MediaItem(newId(), Uri.fromFile(f).toString(), "bg: ${f.name}", MediaKind.IMAGE, fg.durationMs)
         } else {
             val hex = color.ifBlank { "#000000" }
