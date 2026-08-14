@@ -18,6 +18,21 @@ import javax.imageio.ImageIO
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+/**
+ * Start [this] grabber, releasing its native handle first if `start()` throws (corrupt/truncated
+ * file, unsupported codec) instead of leaking the AVFormatContext — every call site here wraps the
+ * decode in `runCatching { }.getOrNull()`, which would otherwise swallow the exception and hide the
+ * leak.
+ */
+private fun FFmpegFrameGrabber.startOrRelease() {
+    try {
+        start()
+    } catch (e: Exception) {
+        runCatching { release() }
+        throw e
+    }
+}
+
 object DesktopMediaDecoder {
 
     data class Waveform(val left: FloatArray, val right: FloatArray)
@@ -51,7 +66,7 @@ object DesktopMediaDecoder {
         val grabber = FFmpegFrameGrabber(file)
         // Interleaved 16-bit; leave sampleRate/channels at the source so we get native stereo.
         grabber.sampleFormat = avutil.AV_SAMPLE_FMT_S16
-        grabber.start()
+        grabber.startOrRelease()
         try {
             val sr = grabber.sampleRate
             val channels = grabber.audioChannels.coerceAtLeast(1)
@@ -77,8 +92,8 @@ object DesktopMediaDecoder {
             if (left.isEmpty()) return null
             return StereoPcm(left.toFloatArray(), right.toFloatArray(), sr, channels)
         } finally {
-            grabber.stop()
-            grabber.release()
+            runCatching { grabber.stop() }
+            runCatching { grabber.release() }
         }
     }
 
@@ -99,7 +114,7 @@ object DesktopMediaDecoder {
         grabber.sampleRate = targetRate
         grabber.audioChannels = 1
         grabber.sampleFormat = avutil.AV_SAMPLE_FMT_S16
-        grabber.start()
+        grabber.startOrRelease()
         try {
             val out = ArrayList<Float>(1 shl 18)
             while (true) {
@@ -113,8 +128,8 @@ object DesktopMediaDecoder {
             if (out.isEmpty()) return null
             return Pcm(out.toFloatArray(), targetRate)
         } finally {
-            grabber.stop()
-            grabber.release()
+            runCatching { grabber.stop() }
+            runCatching { grabber.release() }
         }
     }
 
@@ -137,7 +152,7 @@ object DesktopMediaDecoder {
         val cuts = ArrayList<Long>()
         val converter = Java2DFrameConverter()
         val grabber = FFmpegFrameGrabber(file)
-        grabber.start()
+        grabber.startOrRelease()
         try {
             var prev: FloatArray? = null
             var srcMs = startMs
@@ -157,8 +172,8 @@ object DesktopMediaDecoder {
                 srcMs += sampleMs
             }
         } finally {
-            grabber.stop()
-            grabber.release()
+            runCatching { grabber.stop() }
+            runCatching { grabber.release() }
         }
         return cuts
     }
@@ -260,7 +275,7 @@ object DesktopMediaDecoder {
     private fun extractVideoFrame(file: File, atMs: Long, maxPx: Int): BufferedImage? {
         val converter = Java2DFrameConverter()
         val grabber = FFmpegFrameGrabber(file)
-        grabber.start()
+        grabber.startOrRelease()
         try {
             val ts = atMs * 1000L // microseconds
             grabber.timestamp = ts
@@ -273,8 +288,8 @@ object DesktopMediaDecoder {
             val img = converter.convert(frame) ?: return null
             return downscale(img, maxPx)
         } finally {
-            grabber.stop()
-            grabber.release()
+            runCatching { grabber.stop() }
+            runCatching { grabber.release() }
         }
     }
 
@@ -282,7 +297,7 @@ object DesktopMediaDecoder {
         val left = FloatArray(buckets)
         val right = FloatArray(buckets)
         val grabber = FFmpegFrameGrabber(file)
-        grabber.start()
+        grabber.startOrRelease()
         try {
             val totalUs = grabber.lengthInTime
             if (totalUs <= 0) return Waveform(left, right)
@@ -318,8 +333,8 @@ object DesktopMediaDecoder {
                 }
             }
         } finally {
-            grabber.stop()
-            grabber.release()
+            runCatching { grabber.stop() }
+            runCatching { grabber.release() }
         }
 
         fillGaps(left)

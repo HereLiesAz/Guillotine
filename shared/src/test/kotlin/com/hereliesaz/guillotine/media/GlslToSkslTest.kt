@@ -72,6 +72,22 @@ class GlslToSkslTest {
         assertFalse("no vec4 keyword", Regex("\\bvec4\\b").containsMatchIn(sksl))
     }
 
+    @Test fun rgb_only_write_defaults_to_opaque_alpha() {
+        // A shader that only ever assigns gl_FragColor.rgb (never touches .a or the full vec4) is a
+        // common, legitimate GLSL pattern — alpha is implicitly left at its default (opaque), not
+        // zeroed. The generated SkSL prelude must seed _fragColor's alpha as 1.0 so such a shader
+        // doesn't silently render fully transparent.
+        val rgbOnly = """
+            void main() {
+                vec4 c = texture2D(uTexSampler, vTexSamplingCoord);
+                gl_FragColor.rgb = 1.0 - c.rgb;
+            }
+        """.trimIndent()
+        val sksl = translate(rgbOnly)
+        assertTrue("alpha defaults to opaque", sksl.contains("float4 _fragColor = float4(0.0, 0.0, 0.0, 1.0);"))
+        assertFalse("alpha is not defaulted to transparent", sksl.contains("float4 _fragColor = float4(0.0);"))
+    }
+
     @Test fun nested_parens_in_sample_coord_are_balanced() {
         val glsl = """
             void main() {
