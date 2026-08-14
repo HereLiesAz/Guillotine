@@ -688,7 +688,10 @@ private fun applyColorEffects(
  *  time, grabbing forward when the target is just ahead — the same cheap-seek strategy as the export
  *  path. Accessed from both the scrub and playback IO loops, so every method is synchronized. */
 private class PreviewGrabber(file: File) {
-    private val grabber = FFmpegFrameGrabber(file).apply { start() }
+    // Open via a helper (not `FFmpegFrameGrabber(file).apply { start() }` inline) so a `start()`
+    // failure (corrupt/truncated file, unsupported codec) releases the native handle before the
+    // exception propagates, instead of leaking the AVFormatContext.
+    private val grabber = openGrabber(file)
     private val converter = Java2DFrameConverter()
     private var closed = false
 
@@ -714,8 +717,24 @@ private class PreviewGrabber(file: File) {
     fun release() {
         if (closed) return
         closed = true
-        runCatching { grabber.stop(); grabber.release() }
+        runCatching { grabber.stop() }
+        runCatching { grabber.release() }
     }
+}
+
+/**
+ * Open and start an [FFmpegFrameGrabber] on [file], releasing its native handle first if `start()`
+ * throws instead of leaking the AVFormatContext.
+ */
+private fun openGrabber(file: File): FFmpegFrameGrabber {
+    val grabber = FFmpegFrameGrabber(file)
+    try {
+        grabber.start()
+    } catch (e: Exception) {
+        runCatching { grabber.release() }
+        throw e
+    }
+    return grabber
 }
 
 @Composable
