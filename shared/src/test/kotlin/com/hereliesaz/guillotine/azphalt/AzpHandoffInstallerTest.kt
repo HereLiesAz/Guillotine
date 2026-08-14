@@ -158,6 +158,36 @@ class AzpHandoffInstallerTest {
         assertEquals(b64(hijacker.public.encoded), pins.keyFor(id))
     }
 
+    // ---- sanitized-filename collisions (publisher-pin bypass) ----
+
+    @Test fun differentIdsSanitizingToTheSameFilenameCannotOverwriteEachOther() {
+        val dir = tmp.newFolder("ext5")
+        val first = AzpHandoffInstaller.install(unsignedPackage("com.foo.my_pack"), dir.absolutePath, hostAppId = HOST)
+        assertTrue("expected Success, got $first", first is AzpHandoffInstaller.InstallResult.Success)
+
+        // A different raw id whose sanitized form collides with the one above — "/" and "_" both
+        // collapse to "_", so both ids sanitize to "com.foo.my_pack.azp". This must NOT silently
+        // overwrite the first package's installed bytes just because it never carried a publisher
+        // pin under this (different) raw id.
+        val second = AzpHandoffInstaller.install(unsignedPackage("com.foo.my/pack"), dir.absolutePath, hostAppId = HOST)
+        val failure = second as? AzpHandoffInstaller.InstallResult.Failure ?: error("expected Failure, got $second")
+        assertTrue(failure.message.contains("com.foo.my_pack"))
+
+        // The original package's file is untouched.
+        val onDisk = dir.listFiles()!!.single { it.name.endsWith(".azp") }
+        assertEquals("com.foo.my_pack", AzpPackage.read(onDisk.readBytes()).manifest.id)
+    }
+
+    @Test fun sameIdReinstallingOverItsOwnFileIsStillAnOrdinaryUpdate() {
+        // The collision guard must not block the completely normal case: the same id installed twice
+        // (e.g. a version bump) always sanitizes to its own existing file and must overwrite it.
+        val dir = tmp.newFolder("ext6")
+        val id = "com.hereliesaz.reinstalled"
+        AzpHandoffInstaller.install(unsignedPackage(id), dir.absolutePath, hostAppId = HOST)
+        val second = AzpHandoffInstaller.install(unsignedPackage(id), dir.absolutePath, hostAppId = HOST)
+        assertTrue("expected Success, got $second", second is AzpHandoffInstaller.InstallResult.Success)
+    }
+
     // ---- host scoping (azphalt spec/web-handoff.md § Host obligations, 5) ----
 
     /** As [manifest], but declaring `targetApps`. */

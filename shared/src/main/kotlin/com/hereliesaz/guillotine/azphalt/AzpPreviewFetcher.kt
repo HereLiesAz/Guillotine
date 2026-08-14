@@ -23,11 +23,19 @@ object AzpPreviewFetcher {
 
     /**
      * Blocking network + parse — call off the main thread. Null on any failure (network,
-     * malformed package) or when [id]'s latest version carries no LUT/shader asset.
+     * malformed package, **failed integrity verification**) or when [id]'s latest version carries no
+     * LUT/shader asset.
+     *
+     * [AzpPackage.load] (integrity-verifying) is used here rather than the unverified [AzpPackage.read]
+     * — a shader preview hands raw GLSL straight to a renderer that compiles and executes it, so the
+     * source shown here must be exactly what the manifest's digests say it is, never bytes an entry
+     * could have swapped past an unlisted-payload or path-traversal trick. A package that fails
+     * integrity gets no preview at all (the store falls back to its plain listing row) rather than
+     * having its unverified bytes executed anyway.
      */
     fun fetch(id: String, version: String?): PreviewSource? = runCatching {
         val bytes = AzphaltRegistry.download(AzpInstallLink(id, version))
-        val loaded = AzpPackage.read(bytes)
+        val loaded = AzpPackage.load(bytes)
         val asset = loaded.manifest.assets.firstOrNull {
             AzpInstalledUi.renderKindOf(it.type) != AzpInstalledUi.RenderKind.OTHER
         } ?: return@runCatching null

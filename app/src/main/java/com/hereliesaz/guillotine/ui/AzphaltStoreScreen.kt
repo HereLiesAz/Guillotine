@@ -66,6 +66,7 @@ import com.hereliesaz.guillotine.azphalt.AzpInstallLink
 import com.hereliesaz.guillotine.azphalt.AzpInstallSurfaces
 import com.hereliesaz.guillotine.azphalt.AzpInstalledUi
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
+import com.hereliesaz.guillotine.azphalt.AzpPackage
 import com.hereliesaz.guillotine.azphalt.AzpStateReport
 import com.hereliesaz.guillotine.azphalt.AzpStorePreviewRenderer
 import com.hereliesaz.guillotine.azphalt.AzphaltRegistry
@@ -126,6 +127,12 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
     var notice by remember { mutableStateOf<InstalledNotice?>(null) }
     // A deep link that hasn't been confirmed yet. An unsolicited link shouldn't silently pull bytes.
     var pendingLink by remember { mutableStateOf<AzpInstallLink?>(null) }
+    // A `.azp` handed in via the exported VIEW intent (a browser download, a file manager, a share
+    // sheet) that hasn't been confirmed yet either. The bytes are already on-device — unlike a deep
+    // link there's nothing to download — but they arrived the same unsolicited way a link does: some
+    // other app decided to hand Guillotine a file, and that app choosing to do so is not the user
+    // asking to install anything. Mirrors pendingLink's gate rather than calling runInstall directly.
+    var pendingExternalFile by remember { mutableStateOf<PendingExternalFile?>(null) }
     var pendingBytes by remember { mutableStateOf<ByteArray?>(null) }
     var pendingUntrusted by remember { mutableStateOf<String?>(null) }
     var pendingPublisherChange by remember { mutableStateOf<AzpHandoffInstaller.InstallResult.PublisherChanged?>(null) }
@@ -298,7 +305,17 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
             val bytes = withContext(Dispatchers.IO) {
                 runCatching { context.contentResolver.openInputStream(incoming.uri)?.use { it.readBytes() } }.getOrNull()
             }
-            if (bytes == null) finish("Could not read that .azp package.") else runInstall(bytes)
+            if (bytes == null) {
+                finish("Could not read that .azp package.")
+            } else {
+                // A best-effort name for the confirmation dialog only — a malformed or tampered package
+                // still gets refused properly by runInstall's own verification once confirmed; a name
+                // that can't be read here just falls back to a generic label.
+                val name = withContext(Dispatchers.IO) {
+                    runCatching { AzpPackage.read(bytes).manifest.name }.getOrNull()
+                }
+                pendingExternalFile = PendingExternalFile(bytes, name)
+            }
         } else if (incoming is AzpExternalOpen.Incoming.Link) {
             pendingLink = incoming.link
         } else {
@@ -408,6 +425,37 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                 }) { Text("Download") }
             },
             dismissButton = { TextButton(onClick = { pendingLink = null; onDismiss() }) { Text("Cancel") } },
+        )
+    }
+
+    // A `.azp` handed in via the exported VIEW intent gets the same treatment as a deep link: some
+    // *other* app decided to open this one into Guillotine (a browser download, a file manager, a
+    // share sheet), and that app's decision is not the user asking to install anything — see the
+    // CRITICAL finding this closes: this route used to call runInstall directly with zero confirmation,
+    // while the deep-link route right above it already asked first. Unlike a deep link the bytes are
+    // already on-device, so there's nothing to download — only something to confirm before it's verified
+    // and written to the extensions dir.
+    pendingExternalFile?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { pendingExternalFile = null; onDismiss() },
+            title = {
+                Text(pending.name?.let { "Install “$it” from an external app?" } ?: "Install from an external app?")
+            },
+            text = {
+                Text(
+                    "This package was opened from outside Guillotine — a browser download, a file " +
+                        "manager, or another app's share sheet — not from the in-app Store. It will be " +
+                        "verified before anything is installed; being opened doesn't vouch for it.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val bytes = pending.bytes
+                    pendingExternalFile = null
+                    runInstall(bytes)
+                }) { Text("Install") }
+            },
+            dismissButton = { TextButton(onClick = { pendingExternalFile = null; onDismiss() }) { Text("Cancel") } },
         )
     }
 
@@ -693,6 +741,15 @@ private fun CatalogEntryCard(entry: AzphaltRegistry.CatalogEntry, installed: Boo
         }
     }
 }
+
+/**
+ * A `.azp` handed to Guillotine via the exported VIEW intent, waiting on the user's explicit
+ * confirmation before [AzpHandoffInstaller] ever sees its bytes. [name] is a best-effort manifest read
+ * for the confirmation dialog only — null when the bytes couldn't even be parsed that far, in which
+ * case the dialog falls back to a generic label and the real verification (and its real error message)
+ * happens once the user confirms.
+ */
+private data class PendingExternalFile(val bytes: ByteArray, val name: String?)
 
 /** What happened to a freshly installed package beyond landing on disk. */
 private sealed interface InstallOutcome {

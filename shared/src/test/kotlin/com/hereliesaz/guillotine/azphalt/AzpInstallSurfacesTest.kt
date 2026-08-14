@@ -114,9 +114,13 @@ class AzpInstallSurfacesTest {
         assertEquals(false, AzpInstallSurfaces.hasKnownConsumer(emptyList()))
     }
 
-    @Test fun unrecognizedTypeHasNoKnownConsumer() {
-        assertEquals(false, AzpInstallSurfaces.hasKnownConsumer(listOf("font")))
-        assertEquals(false, AzpInstallSurfaces.hasKnownConsumer(listOf("skill")))
+    @Test fun unrecognizedAssetTypeStillHasAKnownConsumer() {
+        // This was the bug: of(manifest("asset", listOf("font"))) reaches Surface.LISTED_NOT_APPLICABLE,
+        // not Surface.NONE (see unknownAssetTypeIsListedButNotApplicable above) — a real, reachable
+        // surface the clip panel actually lists. hasKnownConsumer used to say false here, hiding a
+        // package from Store browse that would have installed and shown up just fine.
+        assertEquals(true, AzpInstallSurfaces.hasKnownConsumer(listOf("font")))
+        assertEquals(true, AzpInstallSurfaces.hasKnownConsumer(listOf("skill")))
     }
 
     @Test fun oneKnownTypeIsEnoughAmongSeveral() {

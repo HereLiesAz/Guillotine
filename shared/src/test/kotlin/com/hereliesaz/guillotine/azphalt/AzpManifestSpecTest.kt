@@ -109,4 +109,42 @@ class AzpManifestSpecTest {
         assertTrue(mcpM.isMcp)
         assertTrue(mcpM.mcp != null)
     }
+
+    // ---- the manifest's own `azphalt` format-version field (distinct from `compat`) ----
+
+    private fun withSpecVersion(azphalt: String): ByteArray {
+        val code = "export function f(){}".encodeToByteArray()
+        return azp(
+            { d ->
+                """
+                {"azphalt":"$azphalt","id":"com.hereliesaz.specver","name":"V","version":"1.0.0",
+                 "kind":"code","license":"MIT","compat":">=0.1","entry":"code/main.js","runtime":"js",
+                 "files":{"code/main.js":"${d["code/main.js"]}"}}
+                """.trimIndent()
+            },
+            mapOf("code/main.js" to code),
+        )
+    }
+
+    @Test fun theCurrentSpecMajorVerifies() {
+        assertTrue(AzpPackage.verify(withSpecVersion("0.1")).isEmpty())
+    }
+
+    @Test fun aNewerMinorWithinTheSameMajorStillVerifies() {
+        // Major-only check by design (see AzpPackage.SUPPORTED_AZPHALT_MAJOR) — a newer minor within
+        // the same major is not refused, mirroring AzpCompat's own "don't over-build negotiation" call.
+        assertTrue(AzpPackage.verify(withSpecVersion("0.9")).isEmpty())
+    }
+
+    @Test fun aNewerMajorSpecVersionIsRefused() {
+        val errors = AzpPackage.verify(withSpecVersion("1.0"))
+        assertTrue(errors.any { it.contains("unsupported package format") })
+    }
+
+    @Test fun anUnparseableSpecVersionIsRefused() {
+        // Unlike `compat` (where an unparseable comparator says nothing and installs), an unparseable
+        // *format* version has no fallback reading — this build has no basis for assuming it's safe.
+        val errors = AzpPackage.verify(withSpecVersion("not-a-version"))
+        assertTrue(errors.any { it.contains("unsupported package format") })
+    }
 }

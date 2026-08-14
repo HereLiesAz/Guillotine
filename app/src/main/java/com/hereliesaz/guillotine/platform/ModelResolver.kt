@@ -24,6 +24,17 @@ import java.io.File
  * Gemma 3n E2B and E4B), whichever happened to come first in the catalog always won, no matter what the
  * user selected — and a hand-typed custom path was silently inert. [settings] is now checked first;
  * disk auto-detection is only the fallback for a blank/deleted-out-from-under-it field.
+ *
+ * This resolver has no manifest to check by the time it runs — only a path — so it cannot itself tell a
+ * legitimate model apart from a `.azp` asset whose path basename happens to match a catalog filename
+ * (e.g. `gemma3-1b-it-int4.task`). That check has to happen upstream, where the manifest still exists:
+ * every file under `azp-models/` was written by
+ * [com.hereliesaz.guillotine.azphalt.AzpModelInstall], which never writes a byte before its trust gate
+ * ([com.hereliesaz.guillotine.azphalt.AzpModelInstaller.plan]) passes — directly trusted, or an explicit
+ * user override — and which refuses (rather than silently overwriting) a filename collision between two
+ * *different* package ids via its own provenance guard. So "eligible to satisfy a resolver slot" is
+ * enforced at write time, not read time; this resolver trusting whatever is already on disk is safe only
+ * because nothing else in this app writes into `azp-models/` without going through that gate.
  */
 object ModelResolver {
 
