@@ -76,8 +76,14 @@ object SettingsBackup {
             stemModelPath = settings.stemModelPath,
             denoiseModelPath = settings.denoiseModelPath,
         )
+        // Serialize BEFORE opening the destination stream — "wt" mode truncates the target the
+        // moment it's opened, so serializing first means an encoding failure never touches the
+        // file at the user's chosen location (see ProjectStore.save for the same reasoning; SAF
+        // has no portable atomic-replace primitive, so this only covers encode failures, not a
+        // genuine I/O error mid-write).
+        val text = json.encodeToString(SettingsBundle.serializer(), bundle)
         context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
-            out.write(json.encodeToString(SettingsBundle.serializer(), bundle).toByteArray())
+            out.write(text.toByteArray())
         } ?: throw IllegalStateException("Could not open file for writing.")
     }
 
