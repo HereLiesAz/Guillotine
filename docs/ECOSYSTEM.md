@@ -159,9 +159,10 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   This route was built against a contract that has since been **published as `spec/web-handoff.md`**
   (status: Proposed). Guillotine meets its host obligations with one gap: it parses defensively, verifies
   integrity and signature, enforces publisher continuity, **refuses a package whose non-empty `targetApps`
-  excludes this host**, and asks before installing. Obligation 5 is only partly met, though: besides
-  `targetApps` it names `kind`, `compat` and `mediaDomains`, and none of those three is gated at install —
-  `compat` is parsed and never evaluated, `kind` is never checked, and `mediaDomains` isn't a manifest
+  excludes this host**, refuses one whose `compat` the host's azphalt-API version doesn't satisfy
+  (`AzpCompat.satisfies`, surfaced as `InstallResult.Incompatible`), and asks before installing. Obligation
+  5 is only partly met, though: besides `targetApps` and `compat` it also names `kind` and `mediaDomains`,
+  neither of which is gated at install — `kind` is never checked, and `mediaDomains` isn't a manifest
   field at all (it's a repository-summary field, so a host verifying raw bytes has nothing to read). The spec's optional `repo` parameter is ignored, which *is* explicitly
   conforming: a host MUST NOT fetch from a repository it doesn't already trust, and how a host *starts*
   trusting one is still an open question upstream.
@@ -174,12 +175,18 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   still accept it. Guillotine accepts it for servers that haven't caught up — azphalt.store itself has,
   and returns the normative type as of 2026-08-01 — plus `.azp`-suffixed octet-stream/zip
   downloads, and a SEND share-sheet route), so a package downloaded from azphalt.store in the browser,
-  sitting in a file manager, or shared from another app opens straight into the editor. The type is a
-  routing hint only; nothing is ever trusted because of it.
+  sitting in a file manager, or shared from another app opens straight into the editor's confirmation
+  dialog — not straight into an install. The type is a routing hint only; nothing is ever trusted
+  because of it, and being opened this way is not by itself the user asking to install anything: some
+  *other* app decided to hand Guillotine this file, which is exactly as unsolicited as an
+  `azphalt://install` deep link naming one. Both routes now ask before a byte is written — the file-open
+  route used to call straight into install with no confirmation at all, the one gap in an otherwise
+  identical treatment of "arrived from outside the app".
   [`AzpExternalOpen`](../app/src/main/java/com/hereliesaz/guillotine/azphalt/AzpExternalOpen.kt) carries
   it — a file URI or an install link, one sealed `Incoming` rather than two parallel flows — from
-  `MainActivity` to `AzphaltStoreScreen`, which runs the identical `AzpHandoffInstaller` verification:
-  bytes arriving with no trust anchor at all is precisely the case it was written for.
+  `MainActivity` to `AzphaltStoreScreen`, which confirms with the user and then runs the identical
+  `AzpHandoffInstaller` verification either way: bytes arriving with no trust anchor at all is precisely
+  the case it was written for.
 - ✅ **Says what was installed, and where to find it.** An install that succeeds and then can't be located
   is, from the user's side, indistinguishable from one that failed — and the destination is *different per
   package*: a shader gets its own section in the clip panel, named after the package (note

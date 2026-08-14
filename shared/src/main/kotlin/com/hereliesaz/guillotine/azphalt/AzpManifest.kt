@@ -23,7 +23,7 @@ data class AzpManifest(
     val name: String,
     /** Semver of the package itself. */
     val version: String,
-    /** `asset` | `code` | `mixed` | `app` | `mcp`. */
+    /** `asset` | `code` | `mixed` | `app` | `mcp` | `pack`. */
     val kind: String,
     /** SPDX license id. */
     val license: String,
