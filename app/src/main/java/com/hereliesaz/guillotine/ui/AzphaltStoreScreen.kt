@@ -57,6 +57,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -673,7 +674,7 @@ private fun CatalogEntryCard(entry: AzphaltRegistry.CatalogEntry, installed: Boo
             Column(Modifier.weight(1f)) {
                 Text(entry.name, fontWeight = FontWeight.Bold)
                 if (entry.description.isNotBlank()) {
-                    Text(entry.description, color = Neutral400, maxLines = 2)
+                    Text(entry.description, color = Neutral400, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Text(
                     listOfNotNull(
