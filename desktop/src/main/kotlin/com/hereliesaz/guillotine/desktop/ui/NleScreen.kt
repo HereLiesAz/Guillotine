@@ -239,20 +239,28 @@ fun NleScreen(
     // The project is auto-saved internally; "Save" exports it as a .gilt file. Load imports a .gilt copy.
     val openLauncher = rememberOpenProjectLauncher { file ->
         scope.launch {
-            val doc = withContext(Dispatchers.IO) {
-                runCatching { DesktopProjectAutosave.loadFromFile(file) }.getOrNull()
+            val result = withContext(Dispatchers.IO) {
+                runCatching { DesktopProjectAutosave.loadFromFile(file) }
             }
-            if (doc != null) {
-                vm.loadDocument(doc)
-                currentAgentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
-            }
+            result.fold(
+                onSuccess = { doc ->
+                    vm.loadDocument(doc)
+                    currentAgentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
+                },
+                onFailure = { e ->
+                    ActivityLog.error("Couldn't open project \"${file.name}\": ${e.message ?: e::class.simpleName}")
+                },
+            )
         }
     }
-    
+
     val saveLauncher = rememberSaveProjectLauncher { file ->
         scope.launch {
-            withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 runCatching { DesktopProjectAutosave.saveToFile(file, vm.uiState.value.document) }
+            }
+            result.onFailure { e ->
+                ActivityLog.error("Couldn't save project \"${file.name}\": ${e.message ?: e::class.simpleName}")
             }
         }
     }
@@ -654,8 +662,15 @@ fun NleScreen(
         )
     }
     if (showExport) {
+        // Export at the project's aspect ratio (what the preview already shows) instead of a fixed
+        // 1920x1080 — otherwise a 9:16 vertical or 1:1 square project exports as letterboxed landscape.
+        // Computed once here (not just inside onStart) so the sheet's own summary text can show the real
+        // dimensions instead of a hardcoded "1920x1080" that was wrong for anything but 16:9/Original.
+        val (exportW, exportH) = exportDimensionsFor(state.document.settings.aspectRatio)
         ExportSheet(
             totalDurationMs = state.document.totalDurationMs,
+            exportWidth = exportW,
+            exportHeight = exportH,
             isExporting = exporting,
             progress = exportProgress,
             doneMessage = exportDone,
@@ -670,14 +685,6 @@ fun NleScreen(
                 scope.launch {
                     try {
                         val exportDoc = vm.uiState.value.document
-                        // Export at the project's aspect ratio (what the preview already shows) instead of
-                        // a fixed 1920x1080 — otherwise a 9:16 vertical or 1:1 square project exported as
-                        // letterboxed landscape.
-                        val (exportW, exportH) = when (exportDoc.settings.aspectRatio) {
-                            com.hereliesaz.guillotine.model.AspectRatio.RATIO_9_16 -> 1080 to 1920
-                            com.hereliesaz.guillotine.model.AspectRatio.RATIO_1_1 -> 1080 to 1080
-                            else -> 1920 to 1080 // RATIO_16_9 and ORIGINAL → 1080p landscape
-                        }
                         val config = com.hereliesaz.guillotine.desktop.media.DesktopExporter.ExportConfig(
                             name = name, width = exportW, height = exportH,
                         )
@@ -1127,6 +1134,17 @@ private fun EditorToolStrip(
             }
         }
     }
+}
+
+/**
+ * Real export pixel dimensions for a project's aspect ratio -- what [NleScreen]'s export flow actually
+ * renders at, and what [ExportSheet]'s summary text should describe instead of a hardcoded "1920x1080"
+ * that was wrong for a 9:16 or 1:1 project.
+ */
+private fun exportDimensionsFor(aspectRatio: AspectRatio): Pair<Int, Int> = when (aspectRatio) {
+    AspectRatio.RATIO_9_16 -> 1080 to 1920
+    AspectRatio.RATIO_1_1 -> 1080 to 1080
+    else -> 1920 to 1080 // RATIO_16_9 and ORIGINAL → 1080p landscape
 }
 
 // -------------------------------------------------------------------------------------

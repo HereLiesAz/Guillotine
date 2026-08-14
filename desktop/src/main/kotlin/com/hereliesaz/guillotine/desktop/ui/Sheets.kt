@@ -542,6 +542,11 @@ private fun ProviderRow(label: String, blurb: String, selected: Boolean, onClick
 @Composable
 fun ExportSheet(
     totalDurationMs: Long,
+    /** Real output pixel size for the project's actual aspect ratio (see NleScreen's
+     *  `exportDimensionsFor`) -- shown in the summary text instead of a hardcoded "1920x1080" that was
+     *  wrong for anything but a 16:9/Original project. */
+    exportWidth: Int,
+    exportHeight: Int,
     isExporting: Boolean,
     progress: Float,
     doneMessage: String?,
@@ -579,7 +584,7 @@ fun ExportSheet(
                         singleLine = true,
                     )
                     Text("Duration: ${"%.1f".format(totalDurationMs / 1000f)}s", color = Neutral500, fontSize = 11.sp)
-                    Text("Output: H.264 + AAC in MP4, 1920x1080 @ 30fps", color = Neutral500, fontSize = 11.sp)
+                    Text("Output: H.264 + AAC in MP4, ${exportWidth}x$exportHeight @ 30fps", color = Neutral500, fontSize = 11.sp)
                     // "Render Loop Region Only" (Vegas J.4) — only offered when a region is actually set.
                     if (playbackRegion != null) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
