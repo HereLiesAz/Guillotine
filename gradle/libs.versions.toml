@@ -72,7 +72,7 @@ composeMultiplatform = "1.11.1"
 # below (JavaCV 1.5.13 bundles JavaCPP 1.5.13 with FFmpeg 8.0.1). Previously ffmpeg was on the
 # 1.5.13 line while javacv/javacpp lagged at 1.5.11 — a latent UnsatisfiedLinkError. Desktop-only
 # deps (Android uses Media3). See https://github.com/bytedeco/javacv/blob/master/CHANGELOG.md.
-javacv = "1.5.13"
+javacv = "1.5.14"
 javacpp = "1.5.13"
 ffmpeg = "8.0.1-1.5.13"
 
