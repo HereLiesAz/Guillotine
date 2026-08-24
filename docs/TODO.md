@@ -2,6 +2,71 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## R8 broke on-device VLM captioning in release builds; preview frame vanished with no clips; "no model set" errors were dead-end text (2026-08-24)
+
+Reported directly from a screenshot: running "remove all frames with a smartphone" surfaced
+`✗ Field modelPath_ for sz2 not found. Known fields are [public ej2 sz2.t, public static final sz2
+sz2.u, public static volatile i32 sz2.v]` in the activity log, plus two standing requests — errors
+requiring user action must always link to the fix, and the preview's output frame must always be
+visibly outlined, empty project or not.
+
+- **R8 root cause.** `LlmInference.LlmInferenceOptions`/`BaseOptions` (MediaPipe Tasks GenAI/Vision)
+  are `protobuf-javalite` `GeneratedMessageLite` classes — parsed via reflection over field names at
+  runtime, not getters/setters R8 can trace. `app/proguard-rules.pro` had only kotlinx.serialization
+  rules; nothing kept these fields, so R8 renamed/stripped them in the release build (`isMinifyEnabled
+  = true`) and MediaPipe threw at runtime. The obfuscated field in the trace (`modelPath_`) matches
+  `LlmInferenceOptions.setModelPath(...)`, called from `VlmCaptioner.engine()` for on-device VLM frame
+  captioning — which the natural-language "remove frames with X" agent flow uses. Fixed with the
+  standard protobuf-lite keep rule (`-keepclassmembers class * extends
+  com.google.protobuf.GeneratedMessageLite { <fields>; }`). Also hardened `VlmCaptioner.engine()` to
+  `runCatching` the `LlmInference.createFromOptions` call, matching how `ObjectVision`/
+  `SceneClassifier`/`ImageEmbed` already degrade to "unavailable" on model-load failure instead of
+  throwing through the agent loop — `describe()` now returns `""` on a load failure, which its only
+  caller (`McpTools.captionFrame`) already renders as "The VLM returned no description."
+
+- **Preview frame invisible with no active clip; then revised per direct follow-up.** `PreviewPlayer.kt`'s
+  aspect-locked frame box only ever got created inside `VideoSlot`, which returns immediately when its
+  `clip` is `null` — so on an empty project, or scrubbed to a timeline gap, *no* element anywhere used
+  `aspectMod` at all. The frame didn't just lack a border, it didn't exist: flat background + a "No
+  video at Xs" string, no indication of the actual output canvas shape/edges. First fix drew a
+  persistent bordered `Box(aspectMod)` at the *back* of the stack, Android-only. Direct follow-up
+  corrected both: (1) the border needed to be in **front** of every video/caption/guide layer, so it
+  stays visible over content that fills right up to it, instead of being paintable-over — but still
+  **immovable** (no per-clip transform, only the shared preview zoom); (2) every active clip needed its
+  own red outline *in front of the border*, not just the crop tool's target — generalized the
+  crop-target-only wireframe (previously drawn inline inside `VideoSlot`, so it could never paint above
+  a sibling border box regardless of z-order tricks) into a top-level `ClipFrameOutline` pass run once
+  per active clip after the border, so red always wins over neutral. Also closed a real cross-platform
+  gap the first pass introduced: `DesktopPreviewPlayer.kt` never got the persistent border at all
+  despite being logged as done — brought to parity with the same front/immovable border plus per-clip
+  outlines, with desktop's actively-targeted clip keeping its richer interactive `CropWireframe`
+  (drag-to-resize handles) and every other active clip getting the plain outline. Known, accepted edge
+  case on both platforms: the border/outlines sit outside the project-level crop's own transform (which
+  only wraps the video tracks), so they track the *true* full frame rather than a currently-previewed
+  project crop — correct for the border, but a resting clip's outline can visually drift from its
+  (cropped-view) picture in that specific combination. Not worth chasing: the previous crop-target-only
+  wireframe never had to handle this case at all, since crop mode always suppressed the project crop
+  whenever it was showing.
+
+- **"No model set" errors were instructions with no link.** Per direct instruction: an error the user
+  has to act on must always come with both instructions *and* a link to fix it. ~20 on-device-model/
+  tool errors across `McpTools.kt`/`FfmpegFilter.kt`/`Transcription.kt`/`GenController.kt` already say
+  exactly where to go (`"...in Settings → AI Analyzer → Frame captioning (VLM)."` etc.) but that was
+  plain text — no way to get there from the error itself. `ActivityLogSheet.kt` (both platforms) now
+  renders a tappable "Open Settings →" line under any `ERROR`-level entry whose text contains
+  "Settings", routed to the already-existing `showAiSettings` (AI Analyzer/Generation/Transcription
+  tabs) or `showSettings` (Advanced tab, for azphalt model-install errors) state, picked by whether the
+  message says "Advanced". Deliberately scoped to this one error family — the largest, most consistent
+  class of "the user has to go configure something" in the app — rather than rewriting all ~170
+  `require`/exception call sites in `McpTools.kt`: most of those (e.g. "Clip not found: X") are
+  in-session usage mistakes with no Settings-style fix to link to, not configuration gaps.
+
+Not verified against a real build in this pass — no Android SDK in the sandbox this ran in
+(`:app:compileGithubDebugKotlin` fails at Gradle configuration on `SDK location not found`, unrelated
+to these changes). Verified by manual re-read of every edited file for type/control-flow correctness
+and by confirming every call site the changes touch. CI (which does have the SDK) should be the first
+real signal.
+
 ## Android crop tool: same "transforming the whole preview" illusion desktop already fixed (2026-08-24)
 
 Reported directly: with Crop & Transform active, dragging/pinching/twisting on the preview reads as

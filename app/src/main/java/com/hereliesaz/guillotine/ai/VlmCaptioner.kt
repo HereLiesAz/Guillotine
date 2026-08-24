@@ -18,34 +18,43 @@ object VlmCaptioner {
     private var path: String? = null
     private var instance: LlmInference? = null
 
-    /** Load (or reuse) the vision-enabled engine for [modelPath]; switching paths closes the previous. */
+    /**
+     * Load (or reuse) the vision-enabled engine for [modelPath]; switching paths closes the previous.
+     * Null if the engine can't be created (bad/missing model file, unsupported device, native lib
+     * load failure) — callers treat that as "captioning unavailable" rather than propagating a raw
+     * engine-construction exception up through the agent loop.
+     */
     @Synchronized
-    private fun engine(context: Context, modelPath: String): LlmInference {
+    private fun engine(context: Context, modelPath: String): LlmInference? {
         instance?.let { if (path == modelPath) return it }
         // Clear state BEFORE (re)creating: if createFromOptions throws we must not leave `instance`
         // pointing at the just-closed engine, or a retry with the same path would return a dead handle.
         runCatching { instance?.close() }
         instance = null
         path = null
-        instance = LlmInference.createFromOptions(
-            context.applicationContext,
-            LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(modelPath)
-                .setMaxTokens(1024)
-                .setMaxNumImages(1)
-                .build(),
-        )
+        val created = runCatching {
+            LlmInference.createFromOptions(
+                context.applicationContext,
+                LlmInference.LlmInferenceOptions.builder()
+                    .setModelPath(modelPath)
+                    .setMaxTokens(1024)
+                    .setMaxNumImages(1)
+                    .build(),
+            )
+        }.getOrNull() ?: return null
+        instance = created
         path = modelPath
-        return instance!!
+        return created
     }
 
     /**
      * Answer [prompt] about [frame] using the multimodal model at [modelPath]. A fresh session is opened
-     * per call (so images don't accumulate) with vision enabled; returns the model's response text.
+     * per call (so images don't accumulate) with vision enabled; returns the model's response text, or
+     * empty if the engine is unavailable.
      */
     @Synchronized
     fun describe(context: Context, modelPath: String, frame: Bitmap, prompt: String): String {
-        val llm = engine(context, modelPath)
+        val llm = engine(context, modelPath) ?: return ""
         val session = LlmInferenceSession.createFromOptions(
             llm,
             LlmInferenceSession.LlmInferenceSessionOptions.builder()

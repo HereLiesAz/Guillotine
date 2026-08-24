@@ -61,6 +61,11 @@ import com.hereliesaz.guillotine.ui.theme.White
  * @param processFraction 0..1 when the running process reports determinate progress, else null
  * @param awaitingReply   true when the agent finished with a question and wants a user answer here
  * @param onReply         invoked with the user's clarification text; the sheet clears its field on send
+ * @param onOpenAiSettings invoked when the user taps the "Open Settings →" link on an error that names
+ *                        an unconfigured AI Analyzer/Generation/Transcription slot (e.g. "No VLM model
+ *                        set... in Settings → AI Analyzer → ..."). Errors are otherwise a dead end —
+ *                        the user has to remember the path and go find it themselves.
+ * @param onOpenSettings  same, for errors naming the Advanced tab specifically (azphalt model installs).
  */
 @Composable
 fun ActivityLogSheet(
@@ -71,6 +76,8 @@ fun ActivityLogSheet(
     onClear: () -> Unit,
     awaitingReply: Boolean = false,
     onReply: (String) -> Unit = {},
+    onOpenAiSettings: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Raise a collapsed sheet to PEEK when new activity arrives, so a running agent / analysis /
@@ -104,7 +111,10 @@ fun ActivityLogSheet(
             AzSheetDetent.HIDDEN -> Unit
             AzSheetDetent.PEEK -> PeekTicker(entries, processLabel, processFraction, awaitingReply)
             AzSheetDetent.HALF, AzSheetDetent.FULL ->
-                ExpandedLog(entries, processLabel, processFraction, onClear, awaitingReply, onReply)
+                ExpandedLog(
+                    entries, processLabel, processFraction, onClear, awaitingReply, onReply,
+                    onOpenAiSettings, onOpenSettings,
+                )
         }
     }
 }
@@ -163,6 +173,8 @@ private fun ExpandedLog(
     onClear: () -> Unit,
     awaitingReply: Boolean,
     onReply: (String) -> Unit,
+    onOpenAiSettings: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -219,14 +231,35 @@ private fun ExpandedLog(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(entries.asReversed(), key = { it.id }) { entry ->
-                    Text(
-                        prefix(entry.level) + entry.text,
-                        color = levelColor(entry.level),
-                        fontSize = 12.sp,
-                        fontFamily = if (entry.level == ActivityLog.Level.USER) FontFamily.Default else FontFamily.Monospace,
-                        fontWeight = if (entry.level == ActivityLog.Level.USER) FontWeight.Medium else FontWeight.Normal,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                    )
+                    Column(Modifier.fillMaxWidth()) {
+                        Text(
+                            prefix(entry.level) + entry.text,
+                            color = levelColor(entry.level),
+                            fontSize = 12.sp,
+                            fontFamily = if (entry.level == ActivityLog.Level.USER) FontFamily.Default else FontFamily.Monospace,
+                            fontWeight = if (entry.level == ActivityLog.Level.USER) FontWeight.Medium else FontWeight.Normal,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                        )
+                        // Every "no model/tool configured" error names the exact Settings path to fix
+                        // it (e.g. "...in Settings → AI Analyzer → Frame captioning (VLM)."), but until
+                        // now that was just text — the user still had to remember it and find their own
+                        // way there. This turns it into an actual one-tap link to that screen. "Advanced"
+                        // errors (azphalt model installs) route to Settings' own tab; everything else
+                        // naming "Settings" is an AI Analyzer/Generation/Transcription slot.
+                        if (entry.level == ActivityLog.Level.ERROR && "Settings" in entry.text) {
+                            Text(
+                                "Open Settings →",
+                                color = White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .clickable(
+                                        onClick = if ("Advanced" in entry.text) onOpenSettings else onOpenAiSettings,
+                                    )
+                                    .padding(start = 12.dp, top = 1.dp, bottom = 3.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

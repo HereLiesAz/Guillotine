@@ -689,6 +689,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onReply = { t ->
                 assistantVm.sendReply(t, sharedMcpTools, agentBackend)
             },
+            onOpenAiSettings = { showAiSettings = true },
+            onOpenSettings = { showSettings = true },
         )
         } // editor + sheet Box
 

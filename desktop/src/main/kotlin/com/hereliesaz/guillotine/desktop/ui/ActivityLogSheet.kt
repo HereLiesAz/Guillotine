@@ -63,6 +63,10 @@ fun ActivityLogPanel(
     onClear: () -> Unit,
     awaitingReply: Boolean = false,
     onReply: (String) -> Unit = {},
+    /** Tapped from an error naming an unconfigured AI Analyzer/Generation/Transcription slot. */
+    onOpenAiSettings: () -> Unit = {},
+    /** Tapped from an error naming the Advanced tab specifically (azphalt model installs). */
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val newestId = entries.lastOrNull()?.id ?: 0L
@@ -105,6 +109,7 @@ fun ActivityLogPanel(
                 )
                 LogPanelState.EXPANDED -> ExpandedLog(
                     entries, processLabel, processFraction, onClear, awaitingReply, onReply,
+                    onOpenAiSettings, onOpenSettings,
                 )
             }
         }
@@ -185,6 +190,8 @@ private fun ExpandedLog(
     onClear: () -> Unit,
     awaitingReply: Boolean,
     onReply: (String) -> Unit,
+    onOpenAiSettings: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().height(320.dp)) {
         Row(
@@ -226,14 +233,32 @@ private fun ExpandedLog(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(entries.asReversed(), key = { it.id }) { entry ->
-                    Text(
-                        prefix(entry.level) + entry.text,
-                        color = levelColor(entry.level),
-                        fontSize = 12.sp,
-                        fontFamily = if (entry.level == ActivityLog.Level.USER) FontFamily.Default else FontFamily.Monospace,
-                        fontWeight = if (entry.level == ActivityLog.Level.USER) FontWeight.Medium else FontWeight.Normal,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                    )
+                    Column(Modifier.fillMaxWidth()) {
+                        Text(
+                            prefix(entry.level) + entry.text,
+                            color = levelColor(entry.level),
+                            fontSize = 12.sp,
+                            fontFamily = if (entry.level == ActivityLog.Level.USER) FontFamily.Default else FontFamily.Monospace,
+                            fontWeight = if (entry.level == ActivityLog.Level.USER) FontWeight.Medium else FontWeight.Normal,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                        )
+                        // Same fix as Android's ActivityLogSheet: a "no model configured" error already
+                        // names the exact Settings path — make that an actual one-tap link instead of
+                        // text the user has to go find their own way from.
+                        if (entry.level == ActivityLog.Level.ERROR && "Settings" in entry.text) {
+                            Text(
+                                "Open Settings →",
+                                color = White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .clickable(
+                                        onClick = if ("Advanced" in entry.text) onOpenSettings else onOpenAiSettings,
+                                    )
+                                    .padding(start = 12.dp, top = 1.dp, bottom = 3.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

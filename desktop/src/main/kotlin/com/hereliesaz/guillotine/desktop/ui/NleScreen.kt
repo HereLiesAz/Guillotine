@@ -474,6 +474,8 @@ fun NleScreen(
             onReply = { t ->
                 assistantVm.sendReply(t, mcpTools, agentBackend)
             },
+            onOpenAiSettings = { showAiSettings = true },
+            onOpenSettings = { showSettings = true },
         )
         } // editor + panel Box
     }

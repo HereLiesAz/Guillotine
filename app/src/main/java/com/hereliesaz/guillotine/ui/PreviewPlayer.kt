@@ -128,7 +128,8 @@ fun PreviewPlayer(
     // and the tracks mix through Android's audio layer, so parallel audio (music + voiceover, etc.)
     // all plays. Video layers are muted (picture only) so preview audio only comes from here.
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
-    val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
+    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+    val anyActiveVideo = activeVideoClips.isNotEmpty()
 
     // Which clip the crop-tool gesture below actually targets — mirrors
     // EditorViewModel.cropTargetClipId's own resolution exactly, so the wireframe drawn below always
@@ -361,6 +362,25 @@ fun PreviewPlayer(
                     style = stroke,
                 )
             }
+        }
+        // Persistent frame boundary — the actual output canvas rectangle. Drawn LAST (front of every
+        // video/caption/guide layer above) so it stays visible however opaque or overflowing the
+        // content beneath it is, instead of being paintable-over by a clip that fills to the frame
+        // edge. Immovable: unlike a clip's own picture, it carries no per-clip graphicsLayer transform
+        // — just aspectMod's fixed sizing — so it never scales/pans/rotates with a clip's crop, only
+        // with the shared preview zoom (the same graphicsLayer this whole inner box already sits in).
+        // Also covers the empty-project case: VideoSlot only exists per-clip and bails out when its
+        // clip is null, so without a boundary drawn independently of clip state the frame vanished
+        // completely with no clips (or scrubbed to a gap) — nothing distinguished the true canvas edge
+        // from the surrounding (same-colored) letterbox.
+        Box(modifier = aspectMod.border(1.dp, Neutral500))
+        // Each active video clip's own true rectangle, drawn after (in front of) the frame boundary
+        // above — so it's visible exactly where a clip's content is cut off by the frame, or (for the
+        // crop tool's target, which alone is exempted from clipToBounds in VideoSlot) traces the
+        // overflowing picture past the frame edge. Shares the clip's own scale/rotate/pan so it tracks
+        // exactly what the clip is doing; a plain resting clip's outline just coincides with the frame.
+        activeVideoClips.forEach { clip ->
+            key(clip.id) { ClipFrameOutline(clip = clip, now = now, aspectMod = aspectMod) }
         }
       } // end inner zoomed frame
 
@@ -651,9 +671,10 @@ private fun VideoSlot(
     // rather than "the clip overflowed," so it stays clipped there, matching export (which never
     // shows what's outside the frame). The clip actively being cropped is deliberately exempted: the
     // whole point of dragging/pinching/twisting it is to decide what ends up inside the frame vs. cut
-    // away, and that decision needs the overflowing part visible — the wireframe below marks where
-    // the frame boundary actually is, so "in frame" vs. "will be cropped" stays legible while this
-    // clip paints past that line and the frame itself visibly stays put.
+    // away, and that decision needs the overflowing part visible — [ClipFrameOutline], drawn by the
+    // caller as a top-level pass over every active clip, marks where the frame boundary actually is,
+    // so "in frame" vs. "will be cropped" stays legible while this clip paints past that line and the
+    // frame itself visibly stays put.
     val isCropTarget = clip.id == cropTargetClipId
     // The outer box establishes the frame's own size (aspect-locked) and never moves; everything
     // that can be transformed by the crop tool lives inside it as a fillMaxSize child so the frame's
@@ -661,17 +682,8 @@ private fun VideoSlot(
     Box(modifier = aspectMod, contentAlignment = Alignment.Center) {
         val mod = Modifier
             .fillMaxSize()
-            // Clip BEFORE the transform below, for every clip except the one the crop tool is
-            // actively editing. A graphicsLayer scale/rotate doesn't clip its own content by default,
-            // so without this a transformed clip paints past the frame's own rectangle — into the
-            // letterbox, over the zoom controls — which for a resting (non-target) clip reads as "the
-            // preview moved" rather than "the clip overflowed," so it stays clipped there, matching
-            // export (which never shows what's outside the frame). The clip actively being cropped is
-            // deliberately exempted: the whole point of dragging/pinching/twisting it is to decide
-            // what ends up inside the frame vs. cut away, and that decision needs the overflowing part
-            // visible — the wireframe below marks where the frame boundary actually is, so "in frame"
-            // vs. "will be cropped" stays legible while this clip paints past that line and the
-            // frame's own box (this Box's fixed layout bounds) visibly stays put.
+            // Same clipToBounds exemption as explained above this function's `isCropTarget` — kept
+            // here since it's this box, not that one, that actually carries the transform being clipped.
             .then(if (isCropTarget) Modifier else Modifier.clipToBounds())
             .graphicsLayer {
                 this.alpha = alpha.coerceIn(0f, 1f)
@@ -712,24 +724,36 @@ private fun VideoSlot(
                 }
             }
         }
-        // Crop tool: a wireframe marking this clip's true frame boundary — the fixed rectangle the
-        // export will actually keep — so it's visually unambiguous that the gesture is moving this
-        // clip's content past/within that fixed line, not the preview window itself. Shares the
-        // clip's own scale/rotate/pan so it tracks exactly what the gesture is doing.
-        if (isCropTarget) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = s
-                        scaleY = s
-                        rotationZ = rotationDeg
-                        translationX = offXFrac * size.width
-                        translationY = offYFrac * size.height
-                    }
-                    .border(1.dp, Red500),
-            )
-        }
+    }
+}
+
+/**
+ * A red outline tracing [clip]'s true rectangle — its full scale/rotate/pan transform, unclipped —
+ * drawn as a top-level pass in [PreviewPlayer] (in front of the frame boundary, see there) rather
+ * than inside [VideoSlot], so it's never hidden beneath another layer's picture. For a resting clip
+ * this just coincides with the frame; for the crop tool's active target (the one clip exempted from
+ * `clipToBounds` in [VideoSlot]) it traces exactly how far the clip's content now overflows past it.
+ */
+@Composable
+private fun ClipFrameOutline(clip: TimelineClip, now: Long, aspectMod: Modifier) {
+    val rel = now - clip.startTimeMs
+    val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, rel, clip.scale).coerceAtLeast(0f)
+    val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, rel, clip.rotation)
+    val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, rel, clip.offsetX)
+    val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, rel, clip.offsetY)
+    Box(modifier = aspectMod, contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = s
+                    scaleY = s
+                    rotationZ = rotationDeg
+                    translationX = offXFrac * size.width
+                    translationY = offYFrac * size.height
+                }
+                .border(1.dp, Red500),
+        )
     }
 }
 
