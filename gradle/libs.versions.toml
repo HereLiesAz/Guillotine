@@ -73,7 +73,7 @@ composeMultiplatform = "1.11.1"
 # 1.5.13 line while javacv/javacpp lagged at 1.5.11 — a latent UnsatisfiedLinkError. Desktop-only
 # deps (Android uses Media3). See https://github.com/bytedeco/javacv/blob/master/CHANGELOG.md.
 javacv = "1.5.13"
-javacpp = "1.5.13"
+javacpp = "1.5.14"
 ffmpeg = "8.0.1-1.5.13"
 
 [libraries]
