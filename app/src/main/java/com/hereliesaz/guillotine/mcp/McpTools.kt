@@ -723,6 +723,20 @@ class McpTools(
                 required = listOf("prompt"),
             ),
         ))
+        put(toolDefinition(
+            "add_shape_layer",
+            "Add a solid-color rectangle as a new opaque image clip on its own new video track, stacked " +
+                "at the very back — an instant, on-device \"shape layer\" (no provider/key, unlike " +
+                "generate_image). Use this to put an opaque background behind a text/caption clip that " +
+                "needs to read over bright footage (text clips are transparent glyphs only and never " +
+                "bake in a background themselves), or as a plain colored background/wipe on its own. " +
+                "color is any CSS color name or hex code (#RRGGBB or #AARRGGBB).",
+            objSchema(
+                "color" to stringProp("e.g. \"#000000\", \"black\", \"#000000AA\""),
+                "opacity" to numberProp("0..1, multiplies the color's own alpha; default 1"),
+                required = listOf("color"),
+            ),
+        ))
 
         // ---- rhythm / edit-to-the-beat ----
         put(toolDefinition(
@@ -889,6 +903,7 @@ class McpTools(
         "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
         "generate_video" -> generateMedia(GenKind.VIDEO, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
         "generate_music" -> generateMedia(GenKind.MUSIC, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
+        "add_shape_layer" -> addShapeLayer(args.getString("color"), args.optDouble("opacity", 1.0).toFloat())
         "get_beat_map" -> getBeatMap(args.getString("audio_clip_id"))
         "cut_to_beats" -> cutToBeats(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("every_n", 1))
         "apply_on_beat" -> applyOnBeat(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.getString("effect"), args.optString("mode", "downbeats"))
@@ -1280,6 +1295,50 @@ class McpTools(
             }
         }
     }
+
+    /**
+     * Instant, on-device (no provider/key) counterpart to [generateMedia]: rasterizes a solid-color
+     * rectangle via [com.hereliesaz.guillotine.media.ShapeLayer] and adds it the same way — a plain
+     * `ClipType.VIDEO`/`MediaKind.IMAGE` clip via `addMedia`. Always lands on a brand-new track
+     * appended to the end of [com.hereliesaz.guillotine.model.Document.videoTracks] (the bottommost/
+     * backmost position — see `PreviewPlayer`'s "stacked bottom-to-top" stacking order), since a
+     * background has to be on a *different* track from whatever it sits behind — two clips on the
+     * same track can only ever be sequential, never simultaneous layers.
+     */
+    private fun addShapeLayer(color: String, opacity: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        val (w, h) = resolveFrameSize(doc)
+        val item = com.hereliesaz.guillotine.media.ShapeLayer.generate(context, color, opacity, w, h)
+        vm.addTrack(com.hereliesaz.guillotine.model.ClipType.VIDEO)
+        val track = vm.uiState.value.document.videoTracks.last()
+        vm.addMedia(listOf(item), targetTrack = track)
+        return ok().apply {
+            put("trackId", track)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Added a $color shape layer behind everything else on $track.")
+        }
+    }
+
+    /**
+     * A pixel size matching the project's current aspect ratio, so the shape's `ContentScale.Fit`
+     * picture (see `VideoSlot`) fills the frame exactly instead of letterboxing inside it. `ORIGINAL`
+     * has no fixed ratio of its own — falls back to the first video clip's own probed dimensions
+     * (same source `PreviewPlayer`'s `referenceVideoAspect` would resolve to once playing), or a
+     * plain 16:9 default for a genuinely empty project.
+     */
+    private fun resolveFrameSize(doc: com.hereliesaz.guillotine.model.Document): Pair<Int, Int> =
+        when (doc.settings.aspectRatio) {
+            com.hereliesaz.guillotine.model.AspectRatio.RATIO_16_9 -> 1280 to 720
+            com.hereliesaz.guillotine.model.AspectRatio.RATIO_9_16 -> 720 to 1280
+            com.hereliesaz.guillotine.model.AspectRatio.RATIO_1_1 -> 1080 to 1080
+            com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL -> {
+                val ref = doc.clips.firstOrNull { it.type == com.hereliesaz.guillotine.model.ClipType.VIDEO }
+                    ?.let(doc::mediaFor)
+                val w = ref?.widthPx?.takeIf { it > 0 }
+                val h = ref?.heightPx?.takeIf { it > 0 }
+                if (w != null && h != null) w to h else 1280 to 720
+            }
+        }
 
     // ---- rhythm / edit-to-the-beat ------------------------------------------
 
