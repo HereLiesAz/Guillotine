@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCut
@@ -59,6 +60,10 @@ fun FullscreenPreviewOverlay(vm: EditorViewModel, state: EditorUiState, onExit: 
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
+                // This Box is edge-to-edge with no ancestor inset padding (cinema mode hides the
+                // normal systemBarsPadding()'d editor chrome), so the scrubber/transport toolbar must
+                // clear the navigation bar (or a side-docked one in landscape) itself.
+                .systemBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             ScrubBar(state, onSeek = vm::seekTo)
