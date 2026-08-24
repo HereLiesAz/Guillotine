@@ -15,7 +15,7 @@ cloud-backed exceptions are the generation tools and one object-removal path, wh
 require your own provider key (see [Generation](#generation-cloud-byo-key) and
 [`remove_object_generative`](#vision--recognition)).
 
-This document lists **110 tools** across 12 categories, plus 2 read-only resources. It is
+This document lists **111 tools** across 13 categories, plus 2 read-only resources. It is
 **manually maintained** (there is no codegen step tying it to the tool definitions), so it can drift
 from the actual catalog — when in doubt, the live tool definitions are always the source of truth: an
 MCP client can introspect the whole catalog at runtime with `tools/list`.
@@ -127,8 +127,9 @@ literal default in code).
 | [Scene, highlights, reframe & export](#scene-highlights-reframe--export) | 4 |
 | [Beat-sync / rhythm](#beat-sync--rhythm) | 5 |
 | [Generation (cloud, BYO key)](#generation-cloud-byo-key) | 3 |
+| [Shape layer (on-device, no key)](#shape-layer-on-device-no-key) | 1 |
 | [User-defined tools & action recording](#user-defined-tools--action-recording) | 7 |
-| **Total** | **110** |
+| **Total** | **111** |
 
 ---
 
@@ -854,6 +855,24 @@ Describe mood/genre/length in the prompt.
 | `provider` | string | optional | — | Optional provider id. |
 | `model` | string | optional | — | Optional model id. |
 | `duration_sec` | integer | optional | `8` | Requested length in seconds. |
+
+---
+
+## Shape layer (on-device, no key)
+
+Unlike the cloud tools above, this needs no provider/key and returns instantly — a plain solid-color
+rectangle rasterized on-device.
+
+### `add_shape_layer`
+Add a solid-color rectangle as a new opaque image clip on its own new video track, stacked at the very
+back. Useful as an opaque background behind a text/caption clip (text clips are transparent glyphs
+only and never bake in a background themselves — see `add_text`), or as a plain colored
+background/wipe on its own.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `color` | string | required | — | A CSS color name or hex code (`#RRGGBB` or `#AARRGGBB`). |
+| `opacity` | number | optional | `1` | `0..1`, multiplies the color's own alpha. |
 
 ---
 

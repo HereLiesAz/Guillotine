@@ -2,6 +2,45 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## New `add_shape_layer` MCP tool — the deferred "shape layer" from the text-transparency entry below (2026-08-24)
+
+Follow-up on the entry directly below this one, which deliberately left text clips fully transparent
+(no baked-in background) per direct instruction: "If an opaque background is needed for the text, we
+can generate a shape layer to put behind it." This builds that.
+
+- **What it does.** `add_shape_layer(color, opacity?)` rasterizes a solid-color rectangle on-device
+  (no provider/key, instant — unlike `generate_image`/`generate_video`/`generate_music`, the only
+  other tools that add new media) and adds it via the exact same `addMedia` path as any imported or
+  generated image: a plain `ClipType.VIDEO`/`MediaKind.IMAGE` clip, indistinguishable from any other
+  video layer by construction (same conclusion the entry below reached for AI-generated images).
+- **Always lands on a brand-new track, appended to the end of `videoTracks`** (the bottommost/backmost
+  stacking position) rather than the shared default `"V1"` `generate_image`/`add_text` fall back to.
+  A background *has* to be on a different track from whatever it sits behind — two clips on the same
+  track can only ever be sequential (crossfading in time), never simultaneous layers stacked on top of
+  each other. `EditorViewModel.addTrack(ClipType.VIDEO)` already appends (confirmed by reading it, not
+  assumed) — `videoTracks[0]` is topmost per `PreviewPlayer`'s own doc comment, so appending is exactly
+  "put this at the back."
+- **Sized to the project's current aspect ratio** (falling back to the first video clip's own probed
+  dimensions for `ORIGINAL`, or a plain 16:9 default for a genuinely empty project) so the image's
+  `ContentScale.Fit` picture fills the frame exactly — a mismatched aspect would letterbox *inside*
+  the frame, leaving gaps at the edges that defeat the point of an opaque background.
+- **New on-device rasterizers**, one per platform (`ShapeLayer.kt` using `android.graphics.Bitmap`;
+  `DesktopShapeLayer.kt` using AWT `BufferedImage`, probed back through the existing
+  `DesktopMediaImport.probe` — the same path any desktop-imported file takes, so `MediaKind`/
+  dimensions get set correctly rather than hand-constructed). `color` accepts a hex code
+  (`#RRGGBB`/`#AARRGGBB`) on both platforms; named CSS colors work via Android's own
+  `Color.parseColor` for free, and via a small 16-keyword-plus-a-few-extras lookup table on desktop
+  (AWT has no built-in CSS name resolver) — a real, documented, minor platform gap for obscure color
+  names, not silently different behavior for common ones.
+- Documented in `docs/TOOLS.md` as its own short section ("on-device, no key") distinct from the
+  neighboring cloud-generation tools, and given no `VocabularyGraph` entry — following the existing
+  precedent that `generate_image`/`generate_video`/`generate_music` don't have one either; the tool's
+  own description is specific enough for the agent to route to without a vocabulary shortcut.
+
+Not verified against a real build in this pass — no Android SDK in the sandbox this ran in. Verified
+by manual re-read of both new files and both call sites for type/control-flow correctness, and by
+confirming `EditorViewModel.addTrack`/`addMedia`'s exact behavior by reading their implementations
+rather than assuming.
 ## Settings' "Advanced" tab is now genuinely non-AI — closes a gap flagged 2026-08-12 (2026-08-24)
 
 Picked up from the "AI settings moved out of Settings into their own menu entry" entry further below,
