@@ -366,6 +366,23 @@ fun SettingsScreen(
                         color = Neutral500, fontSize = 10.sp,
                     )
 
+                    // Was in Advanced (mixed with the non-AI MCP-server section) — moved here so every
+                    // on-device AI model control lives in one place, matching Android's Sheets.kt.
+                    Text("Install AI model (.azp)", color = Neutral400, fontSize = 12.sp)
+                    Text(
+                        if (azpBusy) "Installing…" else "Install",
+                        color = if (azpBusy) Neutral500 else Red500,
+                        fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable(enabled = !azpBusy) { installModelLauncher() },
+                    )
+                    if (azpBusy) LinearProgressIndicator(color = Red500, modifier = Modifier.fillMaxWidth())
+                    azpStatus?.let { Text(it, color = Neutral400, fontSize = 10.sp) }
+                    Text(
+                        "Install an on-device AI model shipped as an azphalt package (ONNX / sherpa). " +
+                            "The package is integrity-checked; a remote model is verified against its " +
+                            "checksum before it's wired in. Saved automatically on success.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 1 -> {
                     Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
@@ -386,22 +403,6 @@ fun SettingsScreen(
                     Text(
                         "The MCP server runs on port 7865. External AI tools can connect using " +
                             "the bearer token configured in the desktop key store.",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
-
-                    Text("Install AI model (.azp)", color = Neutral400, fontSize = 12.sp)
-                    Text(
-                        if (azpBusy) "Installing…" else "Install",
-                        color = if (azpBusy) Neutral500 else Red500,
-                        fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickable(enabled = !azpBusy) { installModelLauncher() },
-                    )
-                    if (azpBusy) LinearProgressIndicator(color = Red500, modifier = Modifier.fillMaxWidth())
-                    azpStatus?.let { Text(it, color = Neutral400, fontSize = 10.sp) }
-                    Text(
-                        "Install an on-device AI model shipped as an azphalt package (ONNX / sherpa). " +
-                            "The package is integrity-checked; a remote model is verified against its " +
-                            "checksum before it's wired in. Saved automatically on success.",
                         color = Neutral500, fontSize = 10.sp,
                     )
                 }

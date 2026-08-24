@@ -159,11 +159,11 @@ fun SettingsScreen(
     onDismiss: () -> Unit,
     /**
      * Which of [tabs]' indices to show, in order (null = all four). "AI Analyzer"/"Generation"/
-     * "Transcription" (0-2) are unambiguously AI settings and moved to their own menu entry
-     * ([AiSettingsScreen]) so a user doesn't have to know Settings is where model setup lives;
-     * "Advanced" (3) stays reachable from ordinary Settings too, since it's still a mix of AI
-     * (model install) and non-AI (backup/restore, updater, crash relay) controls — splitting that
-     * tab itself is a real follow-up (see docs/TODO.md), not done in this pass.
+     * "Transcription" (0-2) are unambiguously AI settings and moved to their own menu entry so a
+     * user doesn't have to know Settings is where model setup lives; "Advanced" (3) stays reachable
+     * from ordinary Settings and is now genuinely non-AI (backup/restore, updater, crash relay, MCP/
+     * relay config) — its one AI control ("Install AI model (.azp)") moved into the AI Analyzer tab
+     * alongside every other on-device model control, closing the split docs/TODO.md flagged.
      */
     restrictToTabs: List<Int>? = null,
 ) {
@@ -687,6 +687,27 @@ fun SettingsScreen(
                             "binary; heavy — best on desktop or a capable device.",
                         color = Neutral500, fontSize = 10.sp,
                     )
+
+                    // Was in Advanced (a mix of AI model install alongside non-AI backup/updater/crash-
+                    // relay controls — see docs/TODO.md) — moved here so every on-device AI model
+                    // control lives in one place instead of being split across two tabs.
+                    Text("Install AI model (.azp)", color = Neutral400, fontSize = 12.sp)
+                    Text(
+                        if (azpBusy) "Installing…" else "Install",
+                        color = if (azpBusy) Neutral500 else Red500,
+                        fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickableText {
+                            if (!azpBusy) azpLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                        },
+                    )
+                    if (azpBusy) LinearProgressIndicator(color = Red500, modifier = Modifier.fillMaxWidth())
+                    azpStatus?.let { Text(it, color = Neutral400, fontSize = 10.sp) }
+                    Text(
+                        "Install an on-device AI model shipped as an azphalt package (ONNX / TFLite / sherpa). " +
+                            "The package is integrity-checked; a remote model is verified against its checksum " +
+                            "before it's wired in. Press Save to keep the change.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
                 }
                 1 -> { // Generation (image / video / music)
                     Text(
@@ -820,24 +841,6 @@ fun SettingsScreen(
                         )
                     }
                     Text("Export saves all AI settings and user-defined tools to a file. Import restores them (overwriting current settings).", color = Neutral500, fontSize = 10.sp)
-
-                    Text("Install AI model (.azp)", color = Neutral400, fontSize = 12.sp)
-                    Text(
-                        if (azpBusy) "Installing…" else "Install",
-                        color = if (azpBusy) Neutral500 else Red500,
-                        fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickableText {
-                            if (!azpBusy) azpLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                        },
-                    )
-                    if (azpBusy) LinearProgressIndicator(color = Red500, modifier = Modifier.fillMaxWidth())
-                    azpStatus?.let { Text(it, color = Neutral400, fontSize = 10.sp) }
-                    Text(
-                        "Install an on-device AI model shipped as an azphalt package (ONNX / TFLite / sherpa). " +
-                            "The package is integrity-checked; a remote model is verified against its checksum " +
-                            "before it's wired in. Press Save to keep the change.",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
 
                     // Direct-download (github) build only: manual "check for updates" — the mounted
                     // UpdatePrompt (near the app root) watches UpdateSignals and shows the dialog.
