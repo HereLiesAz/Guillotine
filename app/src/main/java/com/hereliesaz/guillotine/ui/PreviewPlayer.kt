@@ -5,6 +5,7 @@ package com.hereliesaz.guillotine.ui
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -128,6 +129,17 @@ fun PreviewPlayer(
     // all plays. Video layers are muted (picture only) so preview audio only comes from here.
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
+
+    // Which clip the crop-tool gesture below actually targets — mirrors
+    // EditorViewModel.cropTargetClipId's own resolution exactly, so the wireframe drawn below always
+    // matches what transformSelectedClip acts on. Used to exempt that one clip from the frame-bounds
+    // clip (see VideoSlot) and outline its true rectangle, so it's visually unambiguous that only
+    // this clip — not the preview window itself — is what the gesture moves.
+    val cropTargetClipId = if (cropMode) {
+        (state.selectedClips.firstOrNull { it.type != ClipType.AUDIO } ?: state.selectedClips.firstOrNull())?.id
+    } else {
+        null
+    }
 
     // The frame's own shape must never depend on how the surrounding (resizable) pane happens to be
     // sized — that's exactly the "preview window gets modified by something that isn't the user
@@ -276,6 +288,7 @@ fun PreviewPlayer(
                     } else {
                         null
                     },
+                    cropTargetClipId = cropTargetClipId,
                 )
             }
         }
@@ -478,6 +491,8 @@ private fun VideoTrackLayer(
     projectFps: Int,
     /** Non-null only for the reference (topmost) track — see [PreviewPlayer]'s `referenceVideoAspect`. */
     onAspectChanged: ((Float) -> Unit)? = null,
+    /** The clip the crop tool is actively editing (see [PreviewPlayer]'s `cropTargetClipId`), or null. */
+    cropTargetClipId: String? = null,
 ) {
     val context = LocalContext.current
     val gainA = remember { LiveAudioProcessor() }
@@ -576,8 +591,8 @@ private fun VideoTrackLayer(
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
     }?.times(trackOpacity)?.times(xfade ?: 0f) ?: 0f
 
-    VideoSlot(outgoing, playerA, cutoutA, faceBlurA, opacityA, now, aspectMod, transparent = false)
-    VideoSlot(incoming, playerB, cutoutB, faceBlurB, opacityB, now, aspectMod, transparent = true)
+    VideoSlot(outgoing, playerA, cutoutA, faceBlurA, opacityA, now, aspectMod, transparent = false, cropTargetClipId)
+    VideoSlot(incoming, playerB, cutoutB, faceBlurB, opacityB, now, aspectMod, transparent = true, cropTargetClipId)
 }
 
 /** Compute a face-blur overlay for [clip], or null when the clip doesn't anonymize faces. */
@@ -621,56 +636,99 @@ private fun VideoSlot(
     now: Long,
     aspectMod: Modifier,
     transparent: Boolean,
+    cropTargetClipId: String? = null,
 ) {
     if (clip == null) return
-    val mod = aspectMod
-        // Clip BEFORE the transform below: a graphicsLayer scale/rotate doesn't clip its own content
-        // by default, so a crop-tool zoom/pan/rotation on this clip could paint past the frame's own
-        // rectangle — into the letterbox, over the zoom-control button, past where the picture is
-        // supposed to end. The frame's bounding box must stay the topmost visual limit for every
-        // layer; clipping at the pre-transform (aspectMod-sized) bounds enforces that regardless of
-        // how far the transform below pushes the content.
-        .clipToBounds()
-        .graphicsLayer {
-            this.alpha = alpha.coerceIn(0f, 1f)
-            // Keyframe-aware crop/placement (absolute; the clip's static value is the default).
-            val rel = now - clip.startTimeMs
-            val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, rel, clip.scale).coerceAtLeast(0f)
-            scaleX = s
-            scaleY = s
-            rotationZ = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, rel, clip.rotation)
-            translationX = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, rel, clip.offsetX) * size.width
-            translationY = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, rel, clip.offsetY) * size.height
-        }
-    // Picture + optional face-blur overlay share the same transformed box so blurred patches track
-    // the video. Fit is used for both so the overlay (frame-sized) aligns with the fitted picture.
-    Box(modifier = mod, contentAlignment = Alignment.Center) {
-        if (clip.filters.removeBackground) {
-            cutout?.let { cb ->
-                Image(bitmap = cb, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+    val rel = now - clip.startTimeMs
+    val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, rel, clip.scale).coerceAtLeast(0f)
+    val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, rel, clip.rotation)
+    val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, rel, clip.offsetX)
+    val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, rel, clip.offsetY)
+    // Clip to the frame BEFORE the transform below, for every clip except the one the crop tool is
+    // actively editing. A graphicsLayer scale/rotate doesn't clip its own content by default, so
+    // without this a transformed clip paints past the frame's own rectangle — into the letterbox,
+    // over the zoom controls — which for a resting (non-target) clip reads as "the preview moved"
+    // rather than "the clip overflowed," so it stays clipped there, matching export (which never
+    // shows what's outside the frame). The clip actively being cropped is deliberately exempted: the
+    // whole point of dragging/pinching/twisting it is to decide what ends up inside the frame vs. cut
+    // away, and that decision needs the overflowing part visible — the wireframe below marks where
+    // the frame boundary actually is, so "in frame" vs. "will be cropped" stays legible while this
+    // clip paints past that line and the frame itself visibly stays put.
+    val isCropTarget = clip.id == cropTargetClipId
+    // The outer box establishes the frame's own size (aspect-locked) and never moves; everything
+    // that can be transformed by the crop tool lives inside it as a fillMaxSize child so the frame's
+    // own rectangle stays a fixed, visible reference regardless of what the gesture does to the clip.
+    Box(modifier = aspectMod, contentAlignment = Alignment.Center) {
+        val mod = Modifier
+            .fillMaxSize()
+            // Clip BEFORE the transform below, for every clip except the one the crop tool is
+            // actively editing. A graphicsLayer scale/rotate doesn't clip its own content by default,
+            // so without this a transformed clip paints past the frame's own rectangle — into the
+            // letterbox, over the zoom controls — which for a resting (non-target) clip reads as "the
+            // preview moved" rather than "the clip overflowed," so it stays clipped there, matching
+            // export (which never shows what's outside the frame). The clip actively being cropped is
+            // deliberately exempted: the whole point of dragging/pinching/twisting it is to decide
+            // what ends up inside the frame vs. cut away, and that decision needs the overflowing part
+            // visible — the wireframe below marks where the frame boundary actually is, so "in frame"
+            // vs. "will be cropped" stays legible while this clip paints past that line and the
+            // frame's own box (this Box's fixed layout bounds) visibly stays put.
+            .then(if (isCropTarget) Modifier else Modifier.clipToBounds())
+            .graphicsLayer {
+                this.alpha = alpha.coerceIn(0f, 1f)
+                scaleX = s
+                scaleY = s
+                rotationZ = rotationDeg
+                translationX = offXFrac * size.width
+                translationY = offYFrac * size.height
             }
-        } else {
-            AndroidView(
-                // Inflated from XML so the surface is a TextureView (transformable by the zoom/pan
-                // graphicsLayer, and genuinely transparent for the crossfade overlay slot).
-                factory = { ctx ->
-                    (android.view.LayoutInflater.from(ctx)
-                        .inflate(com.hereliesaz.guillotine.R.layout.preview_player_view, null) as PlayerView).apply {
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        setBackgroundColor(
-                            if (transparent) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK,
-                        )
-                        this.player = player
+        // Picture + optional face-blur overlay share the same transformed box so blurred patches track
+        // the video. Fit is used for both so the overlay (frame-sized) aligns with the fitted picture.
+        Box(modifier = mod, contentAlignment = Alignment.Center) {
+            if (clip.filters.removeBackground) {
+                cutout?.let { cb ->
+                    Image(bitmap = cb, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                }
+            } else {
+                AndroidView(
+                    // Inflated from XML so the surface is a TextureView (transformable by the zoom/pan
+                    // graphicsLayer, and genuinely transparent for the crossfade overlay slot).
+                    factory = { ctx ->
+                        (android.view.LayoutInflater.from(ctx)
+                            .inflate(com.hereliesaz.guillotine.R.layout.preview_player_view, null) as PlayerView).apply {
+                            useController = false
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            setBackgroundColor(
+                                if (transparent) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK,
+                            )
+                            this.player = player
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (clip.filters.blurFaces) {
+                faceBlur?.let { fb ->
+                    Image(bitmap = fb, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                }
+            }
+        }
+        // Crop tool: a wireframe marking this clip's true frame boundary — the fixed rectangle the
+        // export will actually keep — so it's visually unambiguous that the gesture is moving this
+        // clip's content past/within that fixed line, not the preview window itself. Shares the
+        // clip's own scale/rotate/pan so it tracks exactly what the gesture is doing.
+        if (isCropTarget) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = s
+                        scaleY = s
+                        rotationZ = rotationDeg
+                        translationX = offXFrac * size.width
+                        translationY = offYFrac * size.height
                     }
-                },
-                modifier = Modifier.fillMaxSize(),
+                    .border(1.dp, Red500),
             )
-        }
-        if (clip.filters.blurFaces) {
-            faceBlur?.let { fb ->
-                Image(bitmap = fb, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-            }
         }
     }
 }
