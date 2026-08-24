@@ -238,6 +238,13 @@ fun PreviewPlayer(
               },
           contentAlignment = Alignment.Center,
       ) {
+        // Persistent frame boundary — the actual output canvas rectangle, drawn at the back of the
+        // stack regardless of whether any clip is active at the playhead. VideoSlot (below) only
+        // exists per-clip and bails out entirely when its clip is null, so without this the frame
+        // vanished completely on an empty project or when scrubbed to a gap — nothing distinguished
+        // the true canvas edge from the surrounding (same-colored) letterbox. Always visible so the
+        // output shape is legible before a single clip is ever added.
+        Box(modifier = aspectMod.border(1.dp, Neutral500))
         if (!anyActiveVideo) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
         }
