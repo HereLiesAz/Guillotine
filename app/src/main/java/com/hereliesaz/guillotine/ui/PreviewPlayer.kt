@@ -545,13 +545,21 @@ private fun VideoTrackLayer(
         .sortedBy { it.startTimeMs }
     val outgoing = active.getOrNull(0)
     val incoming = active.getOrNull(1)
-    // Crossfade progress 0..1 across the overlap [incoming.start, outgoing.end); null when not crossfading.
-    val xfade = if (outgoing != null && incoming != null) {
+    // Crossfade progress 0..1 across the overlap [incoming.start, outgoing.end); null when not
+    // crossfading. Only same-type pairs crossfade — a two-video sequential transition, or two
+    // overlapping captions. A different-type overlap (e.g. a short caption nested inside a much
+    // longer video clip on the same track) isn't a transition at all: the video keeps playing at
+    // full opacity underneath while the caption sits on top of it, also at full opacity, so both
+    // stay visible instead of one fading toward zero because the other happens to be "incoming."
+    val xfade = if (outgoing != null && incoming != null && outgoing.type == incoming.type) {
         val span = (outgoing.endTimeMs - incoming.startTimeMs).coerceAtLeast(1)
         ((now - incoming.startTimeMs).toFloat() / span).coerceIn(0f, 1f)
     } else {
         null
     }
+    // True when both slots are occupied but aren't crossfading (different types) — both render at
+    // full opacity rather than one of them fading toward zero because it's nominally "incoming."
+    val differentTypeOverlap = outgoing != null && incoming != null && outgoing.type != incoming.type
 
     // A bg-removed clip is drawn as a cutout (no player surface), so don't keep a decoder running for it.
     val playClipA = outgoing?.takeIf { !it.filters.removeBackground }
@@ -577,14 +585,15 @@ private fun VideoTrackLayer(
     }
 
     val trackOpacity = trackSettings.opacity
-    // Outgoing fades out as xfade 0 -> 1; a lone clip stays fully opaque.
+    // Outgoing fades out as xfade 0 -> 1; a lone clip stays fully opaque; a different-type overlap
+    // stays fully opaque too (not a transition — see differentTypeOverlap above).
     val opacityA = outgoing?.let {
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
-    }?.times(trackOpacity)?.times(1f - (xfade ?: 0f)) ?: 0f
+    }?.times(trackOpacity)?.times(if (differentTypeOverlap) 1f else 1f - (xfade ?: 0f)) ?: 0f
     // Incoming fades IN over the same overlap.
     val opacityB = incoming?.let {
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
-    }?.times(trackOpacity)?.times(xfade ?: 0f) ?: 0f
+    }?.times(trackOpacity)?.times(if (differentTypeOverlap) 1f else (xfade ?: 0f)) ?: 0f
 
     VideoSlot(outgoing, playerA, cutoutA, faceBlurA, opacityA, now, aspectMod, transparent = false, cropTargetClipId)
     VideoSlot(incoming, playerB, cutoutB, faceBlurB, opacityB, now, aspectMod, transparent = true, cropTargetClipId)

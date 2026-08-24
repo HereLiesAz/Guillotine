@@ -23,6 +23,54 @@ Not verified against a real build in this pass — no Android SDK in the sandbox
 by diffing before/after to confirm the moved block is byte-for-byte identical at its new location and
 nothing was dropped, and by confirming the state it references (`azpBusy`/`azpStatus`/`azpLauncher`/
 `installModelLauncher`) is composable-scoped and equally reachable from either `when` branch.
+## Two regressions from the "text folded into video-track compositor" change, caught by a
+## self-run adversarial audit before any human review (2026-08-24)
+
+Not user-reported: after merging the "Text clips folded into the video-track compositor" entry
+below, I dispatched an adversarial-audit pass over my own change (standard practice for
+non-trivial merged work) rather than waiting for a human to find these first. It found two real
+regressions, both stemming from the same root fact that entry didn't fully reckon with: folding
+TEXT into `VideoTrackLayer`'s shared active-clip list means a caption clip and its underlying
+video clip are now often two active clips on the *same* track at the *same* time — a shape the
+existing per-track logic had only ever seen as "a sequential transition between two clips of the
+same kind."
+
+- **Regression 1: captions rendered at near-zero opacity.** `VideoTrackLayer`'s crossfade math
+  treats any two simultaneously-active clips on a track as a crossfade pair — outgoing fades out,
+  incoming fades in, based on how far `now` sits inside their overlap window. That's correct for
+  two video clips genuinely transitioning into each other. It's wrong for a short caption nested
+  inside a much longer video clip on the same track (the common case for both
+  `addTextClipsFromTranscript`, which places captions on the source's own top track, and any
+  manually-placed text over an existing clip): the overlap window is nearly the caption's entire
+  duration, so `xfade` sits near 1 for almost all of it and the caption rendered at almost-zero
+  opacity instead of full opacity, and the video underneath was correspondingly dimmed.
+  **Fix:** both platforms' `VideoTrackLayer` now only compute a crossfade attenuation when
+  `outgoing.type == incoming.type`; a same-track overlap between a VIDEO and a TEXT clip renders
+  *both* at full opacity (native × track opacity, no attenuation) since it isn't a transition at
+  all — one clip is the background, the other is an overlay sitting on top of it.
+- **Regression 2: kinetic/animated captions rendered behind the video, not in front of it.**
+  `addAnimatedCaptionsFromTranscript` grows `videoTracks` by *appending* new track ids to the back
+  (`tracks.add("V${tracks.size + 1}")`) when it needs more tracks than exist for the syllable
+  count, and syllables landed on whichever tracks — new or pre-existing — the loop reached.
+  `Document.videoTracks` is ordered topmost-first (index 0 renders last/on top; see the type's own
+  doc comment), so appending to the back put every new caption track *underneath* the existing
+  video track instead of above it — the opposite of every other overlay in this app (manual text,
+  transcript captions, generated images all land on or above the top track). It also risked
+  reusing an existing track that happened to have room at that moment but held unrelated content
+  at a different time.
+  **Fix:** `addAnimatedCaptionsFromTranscript` now always allocates `maxSyllables` brand-new track
+  ids (continuing the existing max numeric suffix, matching `nextTrackId`'s own naming scheme) and
+  *prepends* them to the front of `videoTracks`, never reusing or appending. The per-syllable
+  `tracks[si]` indexing is unchanged — it now just indexes into the new, front-loaded tracks.
+
+`:shared:compileKotlin` and `:desktop:compileKotlin` both built clean against these changes.
+`:app:compileGithubDebugKotlin` could not be verified — this sandbox has no Android SDK
+(`local.properties`/`ANDROID_HOME` unset, same constraint as every other Android-side entry in
+this file) — but the Android edit mirrors the desktop one line-for-line in structure and types, so
+confidence is high without an actual compile. Not verified against device/desktop playback either
+— same sandbox constraint. The original same-type crossfade behavior (two video clips actually
+transitioning, or two overlapping captions) is unchanged: the type-equality check only narrows
+*when* the existing crossfade math applies, it doesn't change the math itself.
 
 ## Text clips folded into the video-track compositor — no more separate caption-overlay pass (2026-08-24)
 
