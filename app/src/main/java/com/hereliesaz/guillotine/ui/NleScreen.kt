@@ -716,8 +716,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 showSettings = false
             },
             // "AI Analyzer"/"Generation"/"Transcription" moved to their own menu entry (see showAiSettings
-            // below) — Settings keeps only "Advanced", which is still a mix of AI (model install) and
-            // non-AI controls (backup/restore, updater, crash relay) — see docs/TODO.md.
+            // below) — Settings keeps only "Advanced", now genuinely non-AI (backup/restore, updater,
+            // crash relay, MCP/relay config); its one AI control moved into AI Analyzer — see docs/TODO.md.
             restrictToTabs = listOf(3),
         )
     }
