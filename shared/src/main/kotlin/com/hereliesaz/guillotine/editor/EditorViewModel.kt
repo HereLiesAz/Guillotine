@@ -1794,9 +1794,14 @@ open class EditorViewModel {
 
             val maxSyllables = words.maxOf { it.syllables.size }
 
-            // Ensure we have enough video tracks for the syllables.
-            var tracks = doc.videoTracks.toMutableList()
-            while (tracks.size < maxSyllables) tracks.add("V${tracks.size + 1}")
+            // Kinetic captions always get their OWN dedicated tracks, never reusing an existing
+            // one (which might hold other content at a different time) — and those new tracks are
+            // PREPENDED to the front of videoTracks, not appended to the back, so they render on
+            // top of everything else (index 0 = topmost; see PreviewPlayer's "stacked bottom-to-top"
+            // doc comment on Document.videoTracks) instead of hidden behind the source video.
+            var maxN = doc.videoTracks.mapNotNull { it.removePrefix("V").toIntOrNull() }.maxOrNull() ?: 0
+            val newTracks = List(maxSyllables) { "V${++maxN}" }
+            val tracks = newTracks + doc.videoTracks
             var updatedDoc = doc.copy(videoTracks = tracks)
 
             val newClips = mutableListOf<TimelineClip>()
