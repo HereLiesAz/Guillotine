@@ -176,7 +176,8 @@ fun DesktopPreviewPlayer(
     val now = state.currentTimeMs
     val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
     val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
-    val anyActiveVideo = TimelineMath.activeClips(clips, ClipType.VIDEO, now).isNotEmpty()
+    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+    val anyActiveVideo = activeVideoClips.isNotEmpty()
     // Which clip the crop tool's drag/scroll gestures above actually target — mirrors
     // EditorViewModel.cropTargetClipId's own resolution exactly, so the outline drawn below always
     // matches what transformSelectedClip will act on. Used to outline that one clip's frame while
@@ -267,7 +268,6 @@ fun DesktopPreviewPlayer(
                     isPlaying = state.isPlaying,
                     frameDurationMs = state.document.settings.frameDurationMs,
                     cropTargetClipId = cropTargetClipId,
-                    onCropTransform = onCropTransform,
                 )
             }
         }
@@ -310,6 +310,53 @@ fun DesktopPreviewPlayer(
                     ),
             )
         }
+        }
+        // Persistent frame boundary — the actual output canvas rectangle. Drawn LAST (front of every
+        // video/caption layer above) so it stays visible however opaque or overflowing the content
+        // beneath it is, instead of being paintable-over by a clip that fills to the frame edge.
+        // Immovable: no per-clip graphicsLayer transform, just aspectMod's fixed sizing, so it never
+        // scales/pans/rotates with a clip's crop — only with the shared preview zoom (this whole box
+        // already sits inside that graphicsLayer). Deliberately outside the project-crop transform
+        // above (which only wraps the video tracks), so it stays the true full frame even when a
+        // project-level crop changes what's currently visible — matching Android's PreviewPlayer.
+        // Also covers the empty-project case: VideoSlot bails out entirely when its clip is null, so
+        // without a boundary independent of clip state the frame vanished completely with no clips.
+        Box(modifier = aspectMod.border(1.dp, Neutral500))
+        // Each active video clip's own true rectangle, drawn after (in front of) the frame boundary
+        // above — visible exactly where a clip's content is cut off by the frame. The crop tool's
+        // actual target gets the richer interactive CropWireframe (drag-to-resize handles); every
+        // other active clip gets a plain outline. Both share the clip's own scale/rotate/pan (minus
+        // rotation for the interactive one — see CropWireframe's own doc) so they track the clip
+        // exactly; a plain resting clip's outline just coincides with the frame.
+        activeVideoClips.forEach { clip ->
+            key(clip.id) {
+                val relMs = now - clip.startTimeMs
+                val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
+                val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
+                val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX)
+                val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY)
+                Box(modifier = aspectMod, contentAlignment = Alignment.Center) {
+                    if (clip.id == cropTargetClipId) {
+                        CropWireframe(
+                            scale = s, offsetXFrac = offXFrac, offsetYFrac = offYFrac,
+                            onCropTransform = onCropTransform,
+                        )
+                    } else {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    scaleX = s
+                                    scaleY = s
+                                    rotationZ = rotationDeg
+                                    translationX = offXFrac * size.width
+                                    translationY = offYFrac * size.height
+                                }
+                                .border(1.dp, Red500),
+                        )
+                    }
+                }
+            }
         }
       } // end zoomed frame
 
@@ -402,7 +449,6 @@ private fun VideoTrackLayer(
     isPlaying: Boolean,
     frameDurationMs: Double,
     cropTargetClipId: String? = null,
-    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
 ) {
     val active = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
         .filter { it.trackId == trackId }
@@ -425,8 +471,8 @@ private fun VideoTrackLayer(
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
     }?.times(trackOpacity)?.times(xfade ?: 0f) ?: 0f
 
-    VideoSlot(outgoing, mediaFor, opacityA, now, isPlaying, frameDurationMs, cropTargetClipId, onCropTransform)
-    VideoSlot(incoming, mediaFor, opacityB, now, isPlaying, frameDurationMs, cropTargetClipId, onCropTransform)
+    VideoSlot(outgoing, mediaFor, opacityA, now, isPlaying, frameDurationMs, cropTargetClipId)
+    VideoSlot(incoming, mediaFor, opacityB, now, isPlaying, frameDurationMs, cropTargetClipId)
 }
 
 @Composable
@@ -438,7 +484,6 @@ private fun VideoSlot(
     isPlaying: Boolean,
     frameDurationMs: Double,
     cropTargetClipId: String? = null,
-    onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit = { _, _, _, _ -> },
 ) {
     if (clip == null || alpha <= 0f) return
     val media = mediaFor(clip) ?: return
@@ -514,8 +559,9 @@ private fun VideoSlot(
     // which has always clipped, and export, which never shows what's outside the frame). But the
     // clip actively being cropped is deliberately exempted: the whole point of dragging/scaling it
     // is to decide what ends up inside the frame vs. cut away, and that decision needs the
-    // overflowing part visible, not hidden — the wireframe below marks where the frame boundary
-    // actually is so "in frame" vs. "will be cropped" stays legible while it paints past that line.
+    // overflowing part visible, not hidden — [DesktopPreviewPlayer]'s top-level outline pass (see
+    // there) marks where the frame boundary actually is so "in frame" vs. "will be cropped" stays
+    // legible while it paints past that line.
     val isCropTarget = clip.id == cropTargetClipId
     val mod = Modifier
         .fillMaxSize()
@@ -529,18 +575,8 @@ private fun VideoSlot(
             translationY = offYFrac * size.height
         }
 
-    Box(Modifier.fillMaxSize()) {
-        frame?.let { bmp ->
-            Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
-        }
-        // Crop tool: a wireframe marking this clip's frame boundary, so — now that this clip's own
-        // content is unclipped above and free to paint past that line — "in frame" vs. "will be
-        // cropped away" stays legible. Sharing the same scale/pan transform (but skipping rotation,
-        // for both simplicity and because a corner-drag resize is easiest to reason about
-        // axis-aligned) keeps the wireframe and its handles tracking the clip exactly.
-        if (isCropTarget) {
-            CropWireframe(scale = s, offsetXFrac = offXFrac, offsetYFrac = offYFrac, onCropTransform = onCropTransform)
-        }
+    frame?.let { bmp ->
+        Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
     }
 }
 

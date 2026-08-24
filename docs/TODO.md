@@ -24,14 +24,29 @@ visibly outlined, empty project or not.
   throwing through the agent loop — `describe()` now returns `""` on a load failure, which its only
   caller (`McpTools.captionFrame`) already renders as "The VLM returned no description."
 
-- **Preview frame invisible with no active clip.** `PreviewPlayer.kt`'s aspect-locked frame box only
-  ever gets created inside `VideoSlot`, which returns immediately when its `clip` is `null` — so on an
-  empty project, or scrubbed to a timeline gap, *no* element anywhere used `aspectMod` at all. The
-  frame didn't just lack a border, it didn't exist: the pane was just flat background + a "No video at
-  Xs" string, no indication of the actual output canvas shape/edges. Fixed by drawing a persistent
-  `Box(aspectMod.border(1.dp, Neutral500))` at the back of the composited stack in `PreviewPlayer`
-  itself, independent of clip state — the true output rectangle is now always visible, including
-  before a single clip is ever added.
+- **Preview frame invisible with no active clip; then revised per direct follow-up.** `PreviewPlayer.kt`'s
+  aspect-locked frame box only ever got created inside `VideoSlot`, which returns immediately when its
+  `clip` is `null` — so on an empty project, or scrubbed to a timeline gap, *no* element anywhere used
+  `aspectMod` at all. The frame didn't just lack a border, it didn't exist: flat background + a "No
+  video at Xs" string, no indication of the actual output canvas shape/edges. First fix drew a
+  persistent bordered `Box(aspectMod)` at the *back* of the stack, Android-only. Direct follow-up
+  corrected both: (1) the border needed to be in **front** of every video/caption/guide layer, so it
+  stays visible over content that fills right up to it, instead of being paintable-over — but still
+  **immovable** (no per-clip transform, only the shared preview zoom); (2) every active clip needed its
+  own red outline *in front of the border*, not just the crop tool's target — generalized the
+  crop-target-only wireframe (previously drawn inline inside `VideoSlot`, so it could never paint above
+  a sibling border box regardless of z-order tricks) into a top-level `ClipFrameOutline` pass run once
+  per active clip after the border, so red always wins over neutral. Also closed a real cross-platform
+  gap the first pass introduced: `DesktopPreviewPlayer.kt` never got the persistent border at all
+  despite being logged as done — brought to parity with the same front/immovable border plus per-clip
+  outlines, with desktop's actively-targeted clip keeping its richer interactive `CropWireframe`
+  (drag-to-resize handles) and every other active clip getting the plain outline. Known, accepted edge
+  case on both platforms: the border/outlines sit outside the project-level crop's own transform (which
+  only wraps the video tracks), so they track the *true* full frame rather than a currently-previewed
+  project crop — correct for the border, but a resting clip's outline can visually drift from its
+  (cropped-view) picture in that specific combination. Not worth chasing: the previous crop-target-only
+  wireframe never had to handle this case at all, since crop mode always suppressed the project crop
+  whenever it was showing.
 
 - **"No model set" errors were instructions with no link.** Per direct instruction: an error the user
   has to act on must always come with both instructions *and* a link to fix it. ~20 on-device-model/
