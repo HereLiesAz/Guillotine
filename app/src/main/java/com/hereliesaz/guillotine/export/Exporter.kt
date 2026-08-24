@@ -334,13 +334,23 @@ object Exporter {
         val textClips = document.clips
             .filter { it.type == ClipType.TEXT && it.trackId !in disabled && it.text.isNotBlank() }
 
+        // Best-effort expected output height, so CaptionOverlay can size its text proportionally to
+        // the actual frame instead of a fixed pixel count regardless of resolution. An explicit
+        // Quality target is exact; otherwise the geometry's height-only Presentation (see
+        // VideoEffects.geometry) leaves the source's own decoded height untouched, so the first video
+        // clip's own probed dimensions are the best available estimate. Falls back to 1080 (this
+        // overlay's own reference height, i.e. no scaling) for a genuinely undecodable/unprobed clip.
+        val refHeightPx = document.settings.quality.targetHeight
+            ?: videoClips.firstNotNullOfOrNull { document.mediaFor(it)?.heightPx?.takeIf { h -> h > 0 } }
+            ?: 1080
+
         // Overlays (matte + captions) are attached to EVERY base item with that item's timeline
         // start, so they stay aligned even after 'remove' ranges are physically cut.
         fun overlaysFor(timelineStartMs: Long): OverlayEffect? {
             val list = mutableListOf<TextureOverlay>()
             if (hasMatte) list += MatteOverlay(mattes, timelineStartMs)
             if (faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
-            textClips.forEach { list += CaptionOverlay(it, timelineStartMs) }
+            textClips.forEach { list += CaptionOverlay(it, timelineStartMs, refHeightPx) }
             return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
         }
 
