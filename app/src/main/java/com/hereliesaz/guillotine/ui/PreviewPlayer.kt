@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -352,8 +353,18 @@ fun PreviewPlayer(
 
         // Zoom + fullscreen controls — fixed size, OUTSIDE the zoomed layer so they never scale with
         // the preview.
+        //
+        // In the normal editor layout this Row already sits inside NleScreen's systemBarsPadding()
+        // column, so the status bar is accounted for there. In cinema/fullscreen mode (isFullscreen),
+        // PreviewPlayer is hosted directly in FullscreenPreviewOverlay's edge-to-edge Box with no
+        // ancestor inset padding — without systemBarsPadding() here, these buttons draw underneath the
+        // status bar (and, in landscape, a side-docked gesture/nav bar). Applied only when fullscreen so
+        // the normal layout isn't double-padded.
         Row(
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .then(if (isFullscreen) Modifier.systemBarsPadding() else Modifier)
+                .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             fun setZoom(z: Float) {
