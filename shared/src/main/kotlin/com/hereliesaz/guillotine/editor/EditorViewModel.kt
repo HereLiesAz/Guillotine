@@ -1789,26 +1789,53 @@ open class EditorViewModel {
                 val e = wc.endMs.coerceIn(clipStartSrc, clipEndSrc)
                 if (e <= s || wc.word.isBlank()) return@mapNotNull null
                 SyllableWord(com.hereliesaz.guillotine.ai.SyllableSplitter.split(wc.word), s, e)
-            }
+            }.sortedBy { it.startMs }
             if (words.isEmpty()) return@mutateDocument doc
 
-            val maxSyllables = words.maxOf { it.syllables.size }
-
-            // Kinetic captions always get their OWN dedicated tracks, never reusing an existing
-            // one (which might hold other content at a different time) — and those new tracks are
-            // PREPENDED to the front of videoTracks, not appended to the back, so they render on
-            // top of everything else (index 0 = topmost; see PreviewPlayer's "stacked bottom-to-top"
-            // doc comment on Document.videoTracks) instead of hidden behind the source video.
+            // A word's simultaneous syllables need that many tracks free for its exact time window —
+            // but a track is only reused (instead of creating a new one) if it's ALSO in front of
+            // (index <=) every other track that's busy in that window: reusing a track something in
+            // front of it will occlude is worse than not reusing at all, since a caption hidden behind
+            // the video defeats the point. So track a "safe" free prefix per word — front-to-back,
+            // stopping at the first track occupied in that window — and only fall back to allocating
+            // (and prepending) new tracks for whatever the prefix comes up short on. New tracks are
+            // trivially safe (nothing was ever on them), and go to the front so nothing can ever occlude
+            // them later either. Reused tracks are commonly ones an earlier, non-overlapping word in
+            // this same batch already created — the common case (one source-video track, always busy)
+            // still allocates fresh tracks for the first word, then reuses them for every later one.
             var maxN = doc.videoTracks.mapNotNull { it.removePrefix("V").toIntOrNull() }.maxOrNull() ?: 0
-            val newTracks = List(maxSyllables) { "V${++maxN}" }
-            val tracks = newTracks + doc.videoTracks
-            var updatedDoc = doc.copy(videoTracks = tracks)
+            var trackOrder = doc.videoTracks.toMutableList()
+            // Half-open [start, end) intervals per track — plain pairs, not LongRange, since
+            // LongRange's inclusive `last` doesn't line up with half-open overlap arithmetic.
+            val occupancy = mutableMapOf<String, MutableList<Pair<Long, Long>>>()
+            doc.clips.filter { it.type == ClipType.VIDEO || it.type == ClipType.TEXT }.forEach {
+                occupancy.getOrPut(it.trackId) { mutableListOf() } += it.startTimeMs to it.endTimeMs
+            }
+            fun isFree(track: String, start: Long, end: Long) =
+                occupancy[track].orEmpty().none { (s, e) -> s < end && start < e }
+            fun occupy(track: String, start: Long, end: Long) {
+                occupancy.getOrPut(track) { mutableListOf() } += start to end
+            }
 
             val newClips = mutableListOf<TimelineClip>()
             for (word in words) {
                 val wordDurMs = word.endMs - word.startMs
                 val timelineStart = source.startTimeMs + (word.startMs - clipStartSrc)
+                val timelineEnd = timelineStart + wordDurMs
                 val syllableCount = word.syllables.size
+
+                val safeFree = mutableListOf<String>()
+                for (t in trackOrder) {
+                    if (isFree(t, timelineStart, timelineEnd)) safeFree += t else break
+                }
+                val shortfall = syllableCount - safeFree.size
+                if (shortfall > 0) {
+                    val newTracks = List(shortfall) { "V${++maxN}" }
+                    trackOrder = (newTracks + trackOrder).toMutableList()
+                    safeFree.addAll(0, newTracks)
+                }
+                val tracksForWord = safeFree.take(syllableCount)
+                tracksForWord.forEach { occupy(it, timelineStart, timelineEnd) }
 
                 // Horizontal offset: spread syllables across the frame center.
                 // Each syllable gets a fraction of the width based on its character count.
@@ -1816,7 +1843,7 @@ open class EditorViewModel {
                 var charCursor = 0
 
                 for ((si, syllable) in word.syllables.withIndex()) {
-                    val track = tracks[si]
+                    val track = tracksForWord[si]
 
                     // Horizontal position: center the word, offset each syllable proportionally.
                     val charMid = charCursor + syllable.length / 2f
@@ -1851,10 +1878,10 @@ open class EditorViewModel {
                 }
             }
 
-            val withGroup = updatedDoc.clips.map {
+            val withGroup = doc.clips.map {
                 if (it.id == sourceClipId) it.copy(groupId = gid) else it
             }
-            updatedDoc.copy(clips = withGroup + newClips)
+            doc.copy(videoTracks = trackOrder, clips = withGroup + newClips)
         }
     }
 

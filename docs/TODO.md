@@ -2,6 +2,42 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Correction: kinetic-caption track allocation was needlessly wasteful, not just front/back wrong (2026-08-24)
+
+Direct feedback on the "Regression 2" fix in the entry further below ("Two regressions from the
+'text folded into video-track compositor' change..."): *"I think you took that a little too
+literally. text should be put onto a new track if all other video tracks contain content in that
+spot."* That fix corrected the z-order bug (new tracks landed behind the video instead of in front)
+by always allocating a fresh, dedicated set of tracks and prepending them — correct for z-order, but
+it over-corrected into never reusing anything, so every call spent a new batch of tracks even when
+idle capacity from an earlier batch was sitting right there unused.
+
+- **Fix.** `addAnimatedCaptionsFromTranscript` now tracks per-track occupancy (start/end intervals,
+  seeded from every existing `VIDEO`/`TEXT` clip) and, for each word's exact time window, only
+  allocates new tracks for whatever a "safe free prefix" of the existing track order comes up short
+  on. The prefix check matters, not just "is this track free": a track is only safely reusable if
+  every track *in front of it* (lower index — i.e., would render on top of it) is **also** free in
+  that window, since reusing an occluded slot would render the caption invisible behind whatever's
+  in front — worse than the regression this was meant to fix. Stopping at the first occupied track
+  while walking front-to-back gives exactly that guarantee. Any shortfall still gets brand-new
+  tracks prepended to the front (trivially safe, matching the original z-order fix).
+- **Net effect.** The common case (one source-video track, occupied for the whole document) is
+  unchanged: the first word still can't reuse anything and allocates fresh tracks. Every *later*
+  word in the same batch now reuses those same tracks instead of allocating another fresh set, since
+  they're already at the front and free again once the earlier word's clip ends. A project with
+  existing idle video tracks (from a prior `add_animated_captions` call, or any other empty gap that
+  happens to sit in a safely-visible position) reuses those too, instead of always growing.
+
+`words` is now explicitly sorted by start time before this runs — the occupancy bookkeeping depends
+on processing chronologically; the original code had no such guarantee (relied on `wordCues`
+already arriving in order).
+
+Not verified against a real build in this pass — no Android SDK in this sandbox; `:shared:compileKotlin`
+and `:desktop:compileKotlin` should be checked (this is a `:shared` module change, so both platforms
+pick it up identically). Verified by manual re-read of the interval-overlap arithmetic (half-open
+`[start, end)`, `Pair<Long, Long>` rather than `LongRange` specifically to avoid an off-by-one from
+`LongRange`'s inclusive `last`) and by re-tracing the single-track and multi-word cases by hand.
+
 ## New `add_shape_layer` MCP tool — the deferred "shape layer" from the text-transparency entry below (2026-08-24)
 
 Follow-up on the entry directly below this one, which deliberately left text clips fully transparent
@@ -97,10 +133,11 @@ same kind."
   transcript captions, generated images all land on or above the top track). It also risked
   reusing an existing track that happened to have room at that moment but held unrelated content
   at a different time.
-  **Fix:** `addAnimatedCaptionsFromTranscript` now always allocates `maxSyllables` brand-new track
-  ids (continuing the existing max numeric suffix, matching `nextTrackId`'s own naming scheme) and
-  *prepends* them to the front of `videoTracks`, never reusing or appending. The per-syllable
-  `tracks[si]` indexing is unchanged — it now just indexes into the new, front-loaded tracks.
+  **Fix (superseded — see the "Correction" entry near the top of this file):** allocated
+  `maxSyllables` brand-new track ids and prepended them to the front of `videoTracks`, never
+  reusing anything. Fixed the z-order bug, but always-allocate-never-reuse was needlessly wasteful
+  (a new set of dedicated tracks for every batch, even when idle capacity from an earlier batch was
+  sitting right there); replaced by a reuse-when-safe version, see the Correction entry.
 
 `:shared:compileKotlin` and `:desktop:compileKotlin` both built clean against these changes.
 `:app:compileGithubDebugKotlin` could not be verified — this sandbox has no Android SDK
