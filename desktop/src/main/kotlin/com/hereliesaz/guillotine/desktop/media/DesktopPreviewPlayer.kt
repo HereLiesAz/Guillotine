@@ -6,10 +6,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -30,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -41,7 +40,6 @@ import com.hereliesaz.guillotine.desktop.ui.HeldModifiers
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,7 +88,6 @@ fun DesktopPreviewPlayer(
     isFullscreen: Boolean = false,
     onToggleFullscreen: (() -> Unit)? = null,
 ) {
-    var previewSize by remember { mutableStateOf(IntSize.Zero) }
     // Persistent preview viewport (zoom + pan), loaded from / saved to PanelLayoutPrefs — same
     // behavior and persistence as the Android app's equivalent.
     val savedView = remember { PanelLayoutPrefs.loadPreview() }
@@ -175,8 +172,12 @@ fun DesktopPreviewPlayer(
 
     val now = state.currentTimeMs
     val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
-    val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
-    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+    // TEXT clips are "just a clip on a video track" (see Document.videoTracks' own doc comment) and
+    // render through the exact same VideoTrackLayer/VideoSlot pipeline as VIDEO clips — see there —
+    // so this list drives the empty-state check and the per-clip outline pass below uniformly for
+    // whichever type is actually on screen.
+    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now) +
+        TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val anyActiveVideo = activeVideoClips.isNotEmpty()
     // Which clip the crop tool's drag/scroll gestures above actually target — mirrors
     // EditorViewModel.cropTargetClipId's own resolution exactly, so the outline drawn below always
@@ -240,11 +241,10 @@ fun DesktopPreviewPlayer(
                 )
             }
         }
-        // The framed content box: carries the aspect ratio (the export frame), measures previewSize
-        // (so text offsets are relative to the frame, matching export), and applies the crop transform.
+        // The framed content box: carries the aspect ratio (the export frame) and applies the crop
+        // transform.
         Box(
             modifier = aspectMod
-                .onSizeChanged { previewSize = it }
                 .then(
                     if (cropped) Modifier.graphicsLayer {
                         clip = true
@@ -270,45 +270,6 @@ fun DesktopPreviewPlayer(
                     cropTargetClipId = cropTargetClipId,
                 )
             }
-        }
-        activeText.forEach { t ->
-            val relMs = (now - t.startTimeMs).coerceIn(0, t.durationMs)
-            val scale = TimelineMath.valueAt(t, KeyframeProperty.SCALE, relMs, t.scale)
-            val rotation = TimelineMath.valueAt(t, KeyframeProperty.ROTATION, relMs, t.rotation)
-            val ox = TimelineMath.valueAt(t, KeyframeProperty.OFFSET_X, relMs, t.offsetX)
-            val oy = TimelineMath.valueAt(t, KeyframeProperty.OFFSET_Y, relMs, t.offsetY)
-            val opacity = TimelineMath.valueAt(t, KeyframeProperty.OPACITY, relMs, 1f)
-            val trackOpacity = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)
-            Text(
-                t.text,
-                color = White.copy(alpha = (opacity * trackOpacity).coerceIn(0f, 1f)),
-                fontSize = 14.sp,
-                fontFamily = when (t.font) {
-                    com.hereliesaz.guillotine.model.TextFont.SANS -> androidx.compose.ui.text.font.FontFamily.SansSerif
-                    com.hereliesaz.guillotine.model.TextFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
-                    com.hereliesaz.guillotine.model.TextFont.MONO -> androidx.compose.ui.text.font.FontFamily.Monospace
-                    com.hereliesaz.guillotine.model.TextFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
-                },
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .offset {
-                        IntOffset(
-                            (ox * previewSize.width).roundToInt(),
-                            (oy * previewSize.height).roundToInt(),
-                        )
-                    }
-                    .graphicsLayer { scaleX = scale; scaleY = scale; rotationZ = rotation }
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                    .then(
-                        if (t.id == cropTargetClipId) {
-                            Modifier.border(1.dp, Red500)
-                        } else {
-                            Modifier
-                        },
-                    ),
-            )
         }
         }
         // Persistent frame boundary — the actual output canvas rectangle. Drawn LAST (front of every
@@ -450,7 +411,10 @@ private fun VideoTrackLayer(
     frameDurationMs: Double,
     cropTargetClipId: String? = null,
 ) {
-    val active = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+    // TEXT clips share this same track namespace ("just a clip on a video track") and are included
+    // here so a title/caption crossfades and frame-clips exactly like a video clip — see VideoSlot's
+    // ClipType.TEXT branch below.
+    val active = (TimelineMath.activeClips(clips, ClipType.VIDEO, now) + TimelineMath.activeClips(clips, ClipType.TEXT, now))
         .filter { it.trackId == trackId }
         .sortedBy { it.startTimeMs }
     val outgoing = active.getOrNull(0)
@@ -486,6 +450,60 @@ private fun VideoSlot(
     cropTargetClipId: String? = null,
 ) {
     if (clip == null || alpha <= 0f) return
+
+    val relMs = now - clip.startTimeMs
+    val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
+    val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
+    val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX)
+    val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY)
+
+    // Clip to the frame BEFORE the transform below, for every clip except the one the crop tool is
+    // actively editing. A graphicsLayer scale/rotate doesn't clip its own content by default, so
+    // without this a transformed clip paints past the frame's own rectangle — into the letterbox,
+    // over the zoom controls — which for a resting (non-target) clip reads as "the preview moved"
+    // rather than "the clip overflowed," so it stays clipped there (matching Android's VideoSlot,
+    // which has always clipped, and export, which never shows what's outside the frame). But the
+    // clip actively being cropped is deliberately exempted: the whole point of dragging/scaling it
+    // is to decide what ends up inside the frame vs. cut away, and that decision needs the
+    // overflowing part visible, not hidden — [DesktopPreviewPlayer]'s top-level outline pass (see
+    // there) marks where the frame boundary actually is so "in frame" vs. "will be cropped" stays
+    // legible while it paints past that line.
+    val isCropTarget = clip.id == cropTargetClipId
+    val mod = Modifier
+        .fillMaxSize()
+        .then(if (isCropTarget) Modifier else Modifier.clipToBounds())
+        .graphicsLayer {
+            this.alpha = alpha.coerceIn(0f, 1f)
+            scaleX = s
+            scaleY = s
+            rotationZ = rotationDeg
+            translationX = offXFrac * size.width
+            translationY = offYFrac * size.height
+        }
+
+    // A title/caption clip: transparent glyphs only — no baked-in scrim/background (a background, if
+    // wanted, is a separate shape-layer clip stacked underneath). Computed before the media lookup
+    // below since a TEXT clip has no backing MediaItem at all (mediaId is always ""); it shares this
+    // same `mod` transform so it clips to the frame, gets exempted while it's the crop target, and
+    // gets the same red outline as any other active clip — genuinely indistinguishable from a video
+    // layer, matching Android's PreviewPlayer.VideoSlot.
+    if (clip.type == ClipType.TEXT) {
+        Text(
+            clip.text,
+            color = White,
+            fontSize = 14.sp,
+            fontFamily = when (clip.font) {
+                com.hereliesaz.guillotine.model.TextFont.SANS -> androidx.compose.ui.text.font.FontFamily.SansSerif
+                com.hereliesaz.guillotine.model.TextFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
+                com.hereliesaz.guillotine.model.TextFont.MONO -> androidx.compose.ui.text.font.FontFamily.Monospace
+                com.hereliesaz.guillotine.model.TextFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
+            },
+            textAlign = TextAlign.Center,
+            modifier = mod.wrapContentSize().padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+        return
+    }
+
     val media = mediaFor(clip) ?: return
 
     // Frame decimation (frameStep): hold the same grabbed frame across `frameStep` output frames by
@@ -544,36 +562,6 @@ private fun VideoSlot(
             delay(33)
         }
     }
-
-    val relMs = now - clip.startTimeMs
-    val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
-    val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
-    val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX)
-    val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY)
-
-    // Clip to the frame BEFORE the transform below, for every clip except the one the crop tool is
-    // actively editing. A graphicsLayer scale/rotate doesn't clip its own content by default, so
-    // without this a transformed clip paints past the frame's own rectangle — into the letterbox,
-    // over the zoom controls — which for a resting (non-target) clip reads as "the preview moved"
-    // rather than "the clip overflowed," so it stays clipped there (matching Android's VideoSlot,
-    // which has always clipped, and export, which never shows what's outside the frame). But the
-    // clip actively being cropped is deliberately exempted: the whole point of dragging/scaling it
-    // is to decide what ends up inside the frame vs. cut away, and that decision needs the
-    // overflowing part visible, not hidden — [DesktopPreviewPlayer]'s top-level outline pass (see
-    // there) marks where the frame boundary actually is so "in frame" vs. "will be cropped" stays
-    // legible while it paints past that line.
-    val isCropTarget = clip.id == cropTargetClipId
-    val mod = Modifier
-        .fillMaxSize()
-        .then(if (isCropTarget) Modifier else Modifier.clipToBounds())
-        .graphicsLayer {
-            this.alpha = alpha.coerceIn(0f, 1f)
-            scaleX = s
-            scaleY = s
-            rotationZ = rotationDeg
-            translationX = offXFrac * size.width
-            translationY = offYFrac * size.height
-        }
 
     frame?.let { bmp ->
         Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
