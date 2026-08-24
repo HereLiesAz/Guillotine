@@ -2,6 +2,31 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Android crop tool: same "transforming the whole preview" illusion desktop already fixed (2026-08-24)
+
+Reported directly: with Crop & Transform active, dragging/pinching/twisting on the preview reads as
+moving/scaling/rotating the entire preview window, not just the selected video clip.
+
+- **Not actually a data bug** — `EditorViewModel.transformSelectedClip` (wired from `PreviewPlayer.kt`'s
+  `cropMode` gesture) already mutated only the selected clip's `scale`/`offsetX`/`offsetY`/`rotation`,
+  and `VideoSlot` already applied that transform to just the one clip's own box. The desktop app hit
+  the identical-looking complaint on 2026-08-13 (`Desktop crop tool: it really was transforming the
+  viewport` above) and root-caused it as an *illusion*, not a scoping bug: the clip's `graphicsLayer`
+  was unconditionally `clipToBounds()`'d to the frame, so it could never visibly overflow — and
+  because the frame has no drawn boundary of its own, a clip that fills the whole frame (the common
+  case: one video track, one clip) transforming *inside* that invisible boundary looks pixel-for-pixel
+  identical to the boundary itself moving. Android had never gotten that same fix.
+- **Fix, ported from desktop's `DesktopPreviewPlayer.kt`:** `VideoSlot` now takes a `cropTargetClipId`
+  (computed in `PreviewPlayer` with the same resolution rule as `EditorViewModel.cropTargetClipId` —
+  first non-`AUDIO` clip in the selection), threaded through `VideoTrackLayer`. The frame's own
+  aspect-locked box is now a fixed outer `Box` that never moves; the clip being actively cropped is
+  exempted from `clipToBounds()` inside it (every other clip, and this one once the tool moves on,
+  stays clipped exactly as export shows it) so its content can visibly pan/scale/rotate past the frame
+  edge, and a red 1dp wireframe — sharing the exact same scale/rotation/translation — is drawn as a
+  sibling so the true, fixed frame rectangle stays visible while the clip moves relative to it. Desktop
+  additionally draws corner resize handles on its wireframe; Android already resizes via the pinch
+  gesture, so the wireframe here is outline-only.
+
 ## Match project aspect to the first clip (Vegas B.4); hide store listings nothing can apply (2026-08-13)
 
 Two issues reported directly from screenshots: a clip letterboxed inside a mismatched project frame,
