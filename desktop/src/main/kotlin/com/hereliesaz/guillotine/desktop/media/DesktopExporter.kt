@@ -151,7 +151,6 @@ object DesktopExporter {
                     val cy = config.height / 2 + (oy * config.height).roundToInt()
                     val fm = g.fontMetrics
                     val lineH = fm.ascent + fm.descent
-                    val pad = (6 * scale).roundToInt().coerceAtLeast(0) // scale padding with the text
                     // Wrap long captions to ~90% of the frame width instead of running off-screen,
                     // then draw the lines as a vertically-centered block around the anchor.
                     val lines = wrapToWidth(t.text, fm, (config.width * 0.9f).toInt())
@@ -160,13 +159,10 @@ object DesktopExporter {
                         val lw = fm.stringWidth(line)
                         val lx = cx - lw / 2
                         val baseline = blockTop + i * lineH + fm.ascent
-                        // Dark scrim behind each line so captions stay legible over bright footage —
-                        // matches the app export and both previews. Clip opacity applied by the
-                        // composite above. ~55% black.
-                        g.color = scrimColor
-                        g.fillRect(lx - pad, baseline - fm.ascent - pad, lw + pad * 2, lineH + pad * 2)
-                        // Solid white — the composite already applies clip opacity once; encoding
-                        // alpha here too would fade the text quadratically vs. the scrim.
+                        // Transparent glyphs only — no baked-in background (matches the app export and
+                        // both previews). A background, if wanted, is a separate shape-layer clip
+                        // stacked underneath. Solid white — the composite above already applies clip
+                        // opacity once; encoding alpha here too would fade the text quadratically.
                         g.color = Color.WHITE
                         g.drawString(line, lx, baseline)
                     }
@@ -500,7 +496,6 @@ object DesktopExporter {
     }.getOrNull()
 
     // Reused across the per-frame export hot loop to avoid re-allocating on every line/frame.
-    private val scrimColor = Color(0, 0, 0, 140)
     private val whitespaceRegex = Regex("\\s+")
 
     /** Greedy word-wrap: pack words into lines no wider than [maxW] px for [fm]. A single word wider

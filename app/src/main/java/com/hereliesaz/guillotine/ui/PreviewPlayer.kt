@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
@@ -54,7 +53,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -127,8 +125,12 @@ fun PreviewPlayer(
     // Audio wiring is per-track (see AudioTrackLayer): each audio track owns its own ExoPlayer
     // and the tracks mix through Android's audio layer, so parallel audio (music + voiceover, etc.)
     // all plays. Video layers are muted (picture only) so preview audio only comes from here.
-    val activeText = TimelineMath.activeClips(clips, ClipType.TEXT, now)
-    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+    // TEXT clips are "just a clip on a video track" (see Document.videoTracks' own doc comment) and
+    // render through the exact same VideoTrackLayer/VideoSlot pipeline as VIDEO clips — see there —
+    // so this list drives both the empty-state check and the per-clip outline pass below uniformly
+    // for whichever type is actually on screen.
+    val activeVideoClips = TimelineMath.activeClips(clips, ClipType.VIDEO, now) +
+        TimelineMath.activeClips(clips, ClipType.TEXT, now)
     val anyActiveVideo = activeVideoClips.isNotEmpty()
 
     // Which clip the crop-tool gesture below actually targets — mirrors
@@ -309,36 +311,6 @@ fun PreviewPlayer(
                     playbackRate = state.playbackRate,
                 )
             }
-        }
-        // Caption/text overlay — each text clip positioned/scaled by its crop transform
-        // (offset from center as a fraction of the frame), rendered on top of every video layer.
-        // Keyframed properties are evaluated at the current playhead for animated captions.
-        activeText.forEach { t ->
-            val relMs = (now - t.startTimeMs).coerceIn(0, t.durationMs)
-            val scale = TimelineMath.valueAt(t, KeyframeProperty.SCALE, relMs, t.scale)
-            val rotation = TimelineMath.valueAt(t, KeyframeProperty.ROTATION, relMs, t.rotation)
-            val ox = TimelineMath.valueAt(t, KeyframeProperty.OFFSET_X, relMs, t.offsetX)
-            val oy = TimelineMath.valueAt(t, KeyframeProperty.OFFSET_Y, relMs, t.offsetY)
-            val opacity = TimelineMath.valueAt(t, KeyframeProperty.OPACITY, relMs, 1f)
-            val trackOpacity = state.document.trackSettingsFor(t.trackId).opacity.coerceIn(0f, 1f)
-            Text(
-                t.text,
-                color = White.copy(alpha = (opacity * trackOpacity).coerceIn(0f, 1f)),
-                fontSize = 14.sp,
-                fontFamily = t.font.fontFamily(),
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .offset {
-                        IntOffset(
-                            (ox * previewSize.width).roundToInt(),
-                            (oy * previewSize.height).roundToInt(),
-                        )
-                    }
-                    .graphicsLayer { scaleX = scale; scaleY = scale; rotationZ = rotation }
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
-            )
         }
         // Platform safe-zone guides: for vertical/square projects, show where TikTok/Reels/Shorts UI
         // (captions bottom, action icons right) covers the frame, so titles/subjects stay inside.
@@ -563,9 +535,12 @@ private fun VideoTrackLayer(
         playerB.trackSelectionParameters = params
     }
 
-    // This track's active clips, earliest first. Two overlapping = a crossfade region
-    // (outgoing fades out, incoming fades in across the overlap); >2 is degenerate, take the first two.
-    val active = TimelineMath.activeClips(clips, ClipType.VIDEO, now)
+    // This track's active clips, earliest first. TEXT clips share this same track namespace ("just a
+    // clip on a video track") and are included here so a title/caption crossfades and frame-clips
+    // exactly like a video clip — see VideoSlot's ClipType.TEXT branch below. Two overlapping = a
+    // crossfade region (outgoing fades out, incoming fades in across the overlap); >2 is degenerate,
+    // take the first two.
+    val active = (TimelineMath.activeClips(clips, ClipType.VIDEO, now) + TimelineMath.activeClips(clips, ClipType.TEXT, now))
         .filter { it.trackId == trackId }
         .sortedBy { it.startTimeMs }
     val outgoing = active.getOrNull(0)
@@ -642,9 +617,10 @@ private suspend fun cutoutFor(
 }
 
 /**
- * Render one clip's picture: a background-removed clip becomes a matte [cutout] [Image]
- * (transparent where the subject isn't), otherwise the [player]'s [PlayerView]. Keyframed
- * scale × crop transform and [alpha] are applied via a shared graphics layer.
+ * Render one clip's picture: a [ClipType.TEXT] clip becomes transparent glyphs, a background-removed
+ * clip becomes a matte [cutout] [Image] (transparent where the subject isn't), otherwise the
+ * [player]'s [PlayerView]. Keyframed scale × crop transform and [alpha] are applied via a shared
+ * graphics layer, identically regardless of which of those three this clip is.
  */
 @Composable
 private fun VideoSlot(
@@ -696,7 +672,23 @@ private fun VideoSlot(
         // Picture + optional face-blur overlay share the same transformed box so blurred patches track
         // the video. Fit is used for both so the overlay (frame-sized) aligns with the fitted picture.
         Box(modifier = mod, contentAlignment = Alignment.Center) {
-            if (clip.filters.removeBackground) {
+            if (clip.type == ClipType.TEXT) {
+                // A title/caption clip: transparent glyphs only — no baked-in scrim/background. If a
+                // background is wanted it's a separate shape-layer clip stacked underneath, same as any
+                // other layer; this clip stays exactly as "just a clip on a video track" as everything
+                // else here does. Sizing/positioning share this Box's own transform (above) instead of
+                // the old dedicated caption-overlay pass, so a title clips to the frame, gets exempted
+                // from that clip while it's the crop target, and gets the same red outline as any other
+                // active clip (see ClipFrameOutline) — genuinely indistinguishable from a video layer.
+                Text(
+                    clip.text,
+                    color = White,
+                    fontSize = 14.sp,
+                    fontFamily = clip.font.fontFamily(),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            } else if (clip.filters.removeBackground) {
                 cutout?.let { cb ->
                     Image(bitmap = cb, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
                 }

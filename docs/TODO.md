@@ -2,6 +2,66 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Text clips folded into the video-track compositor — no more separate caption-overlay pass (2026-08-24)
+
+Requested directly: text (title/caption clips, however they get created) should render as a real video
+layer, indistinguishable from any other, not through its own special code path.
+
+- **Root cause.** `ClipType.TEXT` clips have always been "just a clip on a video track" at the *data*
+  level (`Document.videoTracks`' own doc comment; `EditorViewModel`'s `trackListFor`/`addTrack`/move
+  logic already treat VIDEO and TEXT identically) — but *rendering* never matched that. Both preview
+  players ran text through a completely separate `activeText.forEach { Text(...) }` pass, floating on
+  top of everything with no aspect-locked box, no `clipToBounds`, no crop-target exemption, and (as of
+  the border/outline work above) no participation in the new per-clip outline. A resting text clip
+  could already paint past the frame edge (nothing ever clipped it); an actively-cropped one couldn't
+  be told apart from a resting one at all in the preview. Export mirrored this split: Android routed
+  TEXT clips through a dedicated `CaptionOverlay`/`OverlayEffect` pass instead of the video
+  `Composition` sequence builder; desktop had a separate `g.drawString` pass after all video
+  compositing. Neither export path needed to change *mechanically* — Media3's `TextOverlay` and AWT's
+  per-frame drawing already correctly transform- and alpha-composite text over video — only *preview*
+  needed the fix, plus destyling both platforms' baked-in caption scrim (below).
+- **Fix.** `VideoTrackLayer`'s active-clip selection (both platforms) now merges `ClipType.VIDEO` and
+  `ClipType.TEXT` before filtering by track, so a title clip crossfades, frame-clips, and gets
+  outlined exactly like a video clip. `VideoSlot` (both platforms) gained a `ClipType.TEXT` branch —
+  transparent glyphs sharing the exact same `mod` (fillMaxSize + clipToBounds-unless-crop-target +
+  scale/rotate/translate graphicsLayer) as the video/matte content, computed *before* the media lookup
+  since a TEXT clip has no backing `MediaItem` (`mediaId` is always `""`) and would otherwise hit the
+  existing early-return. The old dedicated caption-overlay passes (`PreviewPlayer`'s `activeText.forEach`,
+  `DesktopPreviewPlayer`'s twin) are gone entirely — text is no longer a special case anywhere in either
+  preview player. `PreviewPlayer`/`DesktopPreviewPlayer`'s top-level `activeVideoClips` (driving the
+  empty-state check and the per-clip red-outline pass from the entry above) now includes TEXT too, so
+  a title clip gets the same outline as any other layer, automatically.
+- **No baked-in background.** Per direct instruction: if a caption needs to read over bright footage,
+  that's a separate shape-layer clip stacked underneath, not something the text clip bakes in itself.
+  Removed the ~55%-black scrim from all four render paths that had one (Android `PreviewPlayer`'s old
+  overlay, `CaptionOverlay.kt`'s both static and keyframed-opacity spans, desktop's old overlay pass,
+  and `DesktopExporter.kt`'s per-line `fillRect`) — text is transparent glyphs only, everywhere, on
+  both platforms, in both preview and export.
+- **Deliberately unchanged: how text clips get created.** All four creation paths
+  (`addEmptyTextClip`/manual tool, `addTextClip`/agent `add_text` tool, `addTextClipsFromTranscript`,
+  `addAnimatedCaptionsFromTranscript`) already produced `ClipType.TEXT` clips on `document.videoTracks`
+  — the gap was entirely in rendering, so none of the four needed touching. This one rendering fix
+  covers agent-authored titles, manually-typed text, transcript captions, and kinetic per-syllable
+  captions uniformly, per direct confirmation that all should get this treatment.
+- **Not attempted, and why:** literally converting generated text into a rasterized image `MediaItem`
+  (matching how `generate_image` lands a real file via `addMedia`) was the first design considered and
+  explicitly ruled out — it would need transparency to avoid blacking out footage underneath, and this
+  app's export pipeline has no general mechanism for alpha-compositing an arbitrary image clip across
+  simultaneous video tracks (the only precedent, background-removal, needed a purpose-built
+  `OverlayEffect`/matte path that doesn't generalize to "any transparent image"). Keeping TEXT as its
+  own lightweight, non-`MediaItem` clip type and fixing only its *rendering* sidesteps that whole
+  problem — it reuses the already-working, already-transparent `CaptionOverlay`/AWT-text-draw export
+  paths verbatim, at a fraction of the risk. Generated *images* were separately confirmed to need no
+  changes at all: `generate_image`/`generate_video`/`generate_music` already land as plain
+  `ClipType.VIDEO`/`MediaKind.IMAGE` clips via the exact same `addMedia` path as any import — no
+  special type, no marking, no distinct rendering, on either platform.
+
+Not verified against a real build in this pass — no Android SDK in the sandbox this ran in. Verified by
+manual re-read of every edited file for type/control-flow correctness (in particular, desktop's
+`VideoSlot` needed its transform/`mod` computation hoisted above the media lookup, since the old code
+order would have hit `mediaFor(clip) ?: return` and skipped TEXT clips entirely before ever reaching
+it) and by confirming every call site each change touches.
+
 ## R8 broke on-device VLM captioning in release builds; preview frame vanished with no clips; "no model set" errors were dead-end text (2026-08-24)
 
 Reported directly from a screenshot: running "remove all frames with a smartphone" surfaced
