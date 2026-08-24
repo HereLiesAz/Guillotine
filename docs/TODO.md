@@ -2,6 +2,45 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Android caption export text size was a fixed 64px, unrelated to the actual output resolution (2026-08-24)
+
+Not user-reported: the last confirmed gap in the "Export parity follow-ups" audit list further
+below — self-picked up as a natural follow-on to this session's caption-rendering work, while that
+code was still fresh.
+
+- **Root cause.** `CaptionOverlay`'s `AbsoluteSizeSpan(64)` (both the static span and the
+  keyframed-opacity rebuild) set a fixed 64 raw pixels regardless of the export's actual output
+  resolution. Media3's `TextOverlay` rasterizes the `SpannableString` into a bitmap sized to the
+  *text's own measured extent* — not the frame — then that fixed-pixel bitmap is composited onto
+  whatever resolution the video actually exports at. A caption that reads fine at 1080p is
+  correspondingly oversized at 480p and too small to read at 4K. Desktop's equivalent
+  (`DesktopExporter`'s `g.drawString` pass) never had this bug: it already derives its font size
+  from the real output height (`config.height * (64f / 1080f)`), because AWT draws directly onto
+  the frame canvas at its own pixel size rather than through a separately-sized overlay bitmap.
+- **Fix.** `CaptionOverlay` now takes a `refHeightPx` constructor parameter and scales both
+  `AbsoluteSizeSpan` sites by `64 * refHeightPx / 1080` — the same reference baseline (64px at
+  1080p) desktop already uses, so a given caption reads the same relative size on both platforms
+  for the same source. `Exporter.buildComposition` resolves `refHeightPx` once per export: an
+  explicit `Quality` target height when set (`VideoEffects.geometry`'s height-only `Presentation`
+  makes that value exact); otherwise the first video clip's own probed `MediaItem.heightPx` — the
+  best available estimate, since `Quality.ORIGINAL` leaves the source's own decoded height
+  untouched and multi-clip Android exports don't expose a single authoritative pre-resolved output
+  height anywhere in this pipeline; falling back to 1080 (a no-op scale) only if that's also
+  unavailable.
+- **Deliberately not attempted further:** a fully exact output height for the `ORIGINAL`-quality,
+  mixed-native-resolution-clips case would need reading Media3 `Transformer`/`VideoFrameProcessor`
+  internals to confirm which input's resolution actually wins the composition — genuinely uncertain
+  without an on-device trace, which is presumably why the original audit left this gap open rather
+  than guessing. The single-clip and explicit-`Quality` cases (by far the common ones) are now
+  exact; the mixed-resolution-without-explicit-quality edge case is an estimate, same as before but
+  no longer *always* wrong.
+
+Not verified against a real build in this pass — no Android SDK in this sandbox, and `CaptionOverlay`/
+`Exporter.kt` are Android-only (not part of the `:shared`/`:desktop` modules this sandbox can compile).
+Verified by manual re-read of both edited files for type/control-flow correctness, confirming
+`GlobalSettings.quality`/`Quality.targetHeight`/`Document.mediaFor`/`MediaItem.heightPx` against their
+actual declarations rather than assuming, and confirming `CaptionOverlay` has exactly one call site.
+
 ## New `add_shape_layer` MCP tool — the deferred "shape layer" from the text-transparency entry below (2026-08-24)
 
 Follow-up on the entry directly below this one, which deliberately left text clips fully transparent
@@ -1516,8 +1555,8 @@ bundle the latter pair) — `:app:mergeGithubDebugNativeLibs` failed with a dupl
 Surfaced by a codebase audit comparing the preview and export pipelines in detail. All filters,
 all 12 keyframe properties, background removal, audio effects, multi-track compositing, and
 crossfade are at full parity. The following gaps remain:
-- **Caption text size differs:** preview uses `14.sp`; export uses `AbsoluteSizeSpan(64)`. The
-  relative proportions won't match unless compensated.
+- ~~**Caption text size differs**~~ — **Done (2026-08-24):** see the dated entry near the top of
+  this file ("Android caption export text size was a fixed 64px...").
 - ~~**Quality/FPS settings not wired into export**~~ — **Done (2026-08-01):** both are applied in
   `VideoEffects.geometry()`, which is where the other project-level settings (crop, aspect ratio) already
   land. `quality` becomes `Presentation.createForHeight(Quality.targetHeight)`, applied *after* the

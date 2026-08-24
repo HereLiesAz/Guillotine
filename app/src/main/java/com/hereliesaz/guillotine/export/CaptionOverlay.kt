@@ -14,6 +14,11 @@ import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.TextFont
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.TimelineMath
+import kotlin.math.roundToInt
+
+/** Baseline this overlay's caption size scales from: [REFERENCE_SIZE_PX] at a [REFERENCE_HEIGHT_PX]-tall frame. */
+private const val REFERENCE_SIZE_PX = 64
+private const val REFERENCE_HEIGHT_PX = 1080
 
 /**
  * Burns a text clip's caption into the export as a timed [TextOverlay]: the styled text
@@ -30,16 +35,26 @@ import com.hereliesaz.guillotine.model.TimelineMath
 class CaptionOverlay(
     private val clip: TimelineClip,
     private val timelineStartMs: Long,
+    /**
+     * The export's expected output height in pixels, so the caption is sized proportionally to the
+     * actual frame instead of a fixed pixel count (a 64px caption reads fine at 1080p but is
+     * oversized at 480p and illegibly small at 4K). Mirrors desktop's `DesktopExporter` reference
+     * scale (`config.height * (64f / 1080f)`) — [REFERENCE_SIZE_PX] at [REFERENCE_HEIGHT_PX] is the
+     * same baseline both platforms scale from, so the two exports read the same size for the same
+     * source. See [Exporter]'s call site for how this is resolved.
+     */
+    refHeightPx: Int,
 ) : TextOverlay() {
 
     private val empty = SpannableString("")
+    private val sizePx = (REFERENCE_SIZE_PX * refHeightPx / REFERENCE_HEIGHT_PX.toFloat()).roundToInt().coerceAtLeast(1)
     private val styled = SpannableString(clip.text).apply {
         if (isNotEmpty()) {
             // Transparent glyphs only — no baked-in background. Matches the preview (PreviewPlayer's
             // VideoSlot ClipType.TEXT branch), keeping export WYSIWYG. A background, if wanted, is a
             // separate shape-layer clip stacked underneath, not something this overlay bakes in itself.
             setSpan(ForegroundColorSpan(Color.WHITE), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
-            setSpan(AbsoluteSizeSpan(64), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+            setSpan(AbsoluteSizeSpan(sizePx), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             setSpan(TypefaceSpan(typefaceName(clip.font)), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
         }
     }
@@ -76,7 +91,7 @@ class CaptionOverlay(
             val alpha = (opacity * 255).toInt().coerceIn(0, 255)
             val s = SpannableString(clip.text)
             s.setSpan(ForegroundColorSpan(Color.argb(alpha, 255, 255, 255)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
-            s.setSpan(AbsoluteSizeSpan(64), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+            s.setSpan(AbsoluteSizeSpan(sizePx), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             s.setSpan(TypefaceSpan(typefaceName(clip.font)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             return s
         }
