@@ -2,6 +2,28 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Settings' "Advanced" tab is now genuinely non-AI — closes a gap flagged 2026-08-12 (2026-08-24)
+
+Picked up from the "AI settings moved out of Settings into their own menu entry" entry further below,
+which split "AI Analyzer"/"Generation"/"Transcription" into their own menu entry but explicitly left
+"Advanced" mixed (AI model install alongside non-AI backup/updater/crash-relay controls), noting the
+split "needs reading the tab's full content to separate safely, which this pass didn't have room for."
+
+Read both platforms' "Advanced" tab in full before touching anything, rather than guessing at scope —
+turned out much smaller than the wording implied: exactly **one** self-contained ~15-20 line section,
+"Install AI model (.azp)", was the AI content mixed into an otherwise fully non-AI tab (Android:
+crash reporting, MCP token, encrypted relay, backup/restore, app updates; desktop: MCP server info).
+Moved that one section to the end of the existing "AI Analyzer" tab on both platforms — where every
+other on-device model control already lives — rather than inventing a new tab or menu entry for it;
+no `restrictToTabs` index changes needed anywhere since the tab *count* didn't change, only what's in
+tab 0 vs. tab 3. Updated the two stale doc comments (`Sheets.kt`'s `restrictToTabs` KDoc on both
+platforms, `NleScreen.kt`'s `showSettings` call site) that described "Advanced" as still mixed.
+
+Not verified against a real build in this pass — no Android SDK in the sandbox this ran in. Verified
+by diffing before/after to confirm the moved block is byte-for-byte identical at its new location and
+nothing was dropped, and by confirming the state it references (`azpBusy`/`azpStatus`/`azpLauncher`/
+`installModelLauncher`) is composable-scoped and equally reachable from either `when` branch.
+
 ## Text clips folded into the video-track compositor — no more separate caption-overlay pass (2026-08-24)
 
 Requested directly: text (title/caption clips, however they get created) should render as a real video
