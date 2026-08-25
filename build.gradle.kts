@@ -11,8 +11,8 @@ buildscript {
             force("io.netty:netty-handler:4.2.17.Final")
             force("io.netty:netty-codec-http:4.2.17.Final")
             force("io.netty:netty-codec:4.2.17.Final")
-            force("org.bouncycastle:bcprov-jdk18on:1.85")
-            force("org.bouncycastle:bcpkix-jdk18on:1.85")
+            force("org.bouncycastle:bcprov-jdk18on:1.85.2")
+            force("org.bouncycastle:bcpkix-jdk18on:1.85.2")
             force("org.apache.commons:commons-lang3:3.20.0")
             force("org.bitbucket.b_c:jose4j:0.9.6")
         }
@@ -40,8 +40,8 @@ allprojects {
             force("io.netty:netty-handler:4.2.17.Final")
             force("io.netty:netty-codec-http:4.2.17.Final")
             force("io.netty:netty-codec:4.2.17.Final")
-            force("org.bouncycastle:bcprov-jdk18on:1.85")
-            force("org.bouncycastle:bcpkix-jdk18on:1.85")
+            force("org.bouncycastle:bcprov-jdk18on:1.85.2")
+            force("org.bouncycastle:bcpkix-jdk18on:1.85.2")
             force("org.apache.commons:commons-lang3:3.20.0")
             force("org.bitbucket.b_c:jose4j:0.9.6")
         }
@@ -68,7 +68,7 @@ allprojects {
                     useVersion("4.2.16.Final")
                 // Bouncy Castle — GOST CTR keystream reuse (critical), bcpkix broken algorithm, LDAP injection.
                 // Keep all *-jdk18on modules on one version (BC requires them to match).
-                g == "org.bouncycastle" && n.endsWith("-jdk18on") -> useVersion("1.85")
+                g == "org.bouncycastle" && n.endsWith("-jdk18on") -> useVersion("1.85.2")
                 g == "org.apache.httpcomponents" && n == "httpclient" -> useVersion("4.5.14")   // XSS
                 g == "org.apache.commons" && n == "commons-lang3" -> useVersion("3.20.0")       // uncontrolled recursion
                 g == "org.bitbucket.b_c" && n == "jose4j" -> useVersion("0.9.6")                // JWE decompression DoS
