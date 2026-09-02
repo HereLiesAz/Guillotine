@@ -104,7 +104,7 @@ jobs:
           rm private_key.pem certificate_chain.crt keystore.p12
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           java-version: '21'
           distribution: 'temurin'
@@ -138,6 +138,17 @@ jobs:
           name: release-aab
           path: app/build/outputs/bundle/playRelease/*.aab
           if-no-files-found: error
+
+      # Play Console deobfuscates Android vitals crashes automatically from the mapping metadata
+      # bundled into the AAB itself, so this isn't load-bearing the way it is for release-apk.yml's
+      # github-flavor APK — but keeping a copy here means a mapping.txt is available without going
+      # through the Play Console UI, and it's the same file for local `retrace` use.
+      - name: Upload mapping.txt artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-aab-mapping
+          path: app/build/outputs/mapping/playRelease/mapping.txt
+          if-no-files-found: warn
 
       # Publish runs by default (including on push) so a build that doesn't actually push FAILS the job —
       # a green check means it reached Play. Skip only by explicitly dispatching with publish: false.

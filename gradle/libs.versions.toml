@@ -53,13 +53,13 @@ billing = "9.1.0"
 # and bumps it like every other library in this catalog.
 androidxWork = "2.11.2"
 nanohttpd = "2.3.1"
-okhttp = "5.4.0"
+okhttp = "5.5.0"
 tensorflowLite = "2.17.0"
 sherpaOnnx = "v1.13.4"
 onnxruntime = "1.29.0"
 commonsCompress = "1.28.0"
 junit = "4.13.2"
-json = "20260719"
+json = "20260814"
 # Ed25519 that does not depend on the platform provider. See AzpCrypto: Android's default provider
 # resolves the algorithm name and then fails the operation, which made every signed package look forged.
 # Kept in step with the root build.gradle.kts resolutionStrategy force for the same coordinates — that
