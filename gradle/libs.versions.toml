@@ -64,7 +64,7 @@ json = "20260814"
 # resolves the algorithm name and then fails the operation, which made every signed package look forged.
 # Kept in step with the root build.gradle.kts resolutionStrategy force for the same coordinates — that
 # block pins the version the whole graph gets, so a different number here would simply be overridden.
-bouncycastle = "1.85"
+bouncycastle = "1.85.2"
 composeMultiplatform = "1.11.1"
 # Bytedeco tri-version pairing (JavaCV 1.5.13 → JavaCPP 1.5.13 → FFmpeg 8.0.1-1.5.13).
 # All three must move in lockstep — mixing versions produces UnsatisfiedLinkError at runtime.
