@@ -122,6 +122,22 @@ jobs:
           TARGET_NAME="${APP_NAME}-${VERSION_NAME}-release.apk"
           mv "$APK_ORIGINAL" "$TARGET_NAME"
 
+          # R8's mapping.txt is the only way to deobfuscate a crash stack trace from this APK
+          # (minifyEnabled/shrinkResources are on for release — see app/build.gradle.kts). Unlike
+          # the play flavor's AAB (release-aab.yml), which Play Console deobfuscates automatically
+          # from bundle metadata, this github-flavor APK has no such backend — so the mapping file
+          # has to be captured here or a real-device crash like "fi3.a" is unreadable. Uploaded to
+          # the same release tag as the APK (clobbered on every run, same as the APK itself) so the
+          # mapping always matches whatever build is currently live for self-updating installs.
+          MAPPING_ORIGINAL="app/build/outputs/mapping/githubRelease/mapping.txt"
+          MAPPING_TARGET=""
+          if [ -f "$MAPPING_ORIGINAL" ]; then
+            MAPPING_TARGET="${APP_NAME}-${VERSION_NAME}-mapping.txt"
+            cp "$MAPPING_ORIGINAL" "$MAPPING_TARGET"
+          else
+            echo "::warning::No mapping.txt found at $MAPPING_ORIGINAL — release APK crashes won't be deobfuscatable."
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
@@ -141,4 +157,8 @@ jobs:
             gh release create "$TAG_NAME" "$TARGET_NAME" \
               --title "Latest Release v${MAJOR}.${MINOR} (${VERSION_NAME})" \
               --notes "Release build from commit $GITHUB_SHA"
+          fi
+
+          if [ -n "$MAPPING_TARGET" ]; then
+            gh release upload "$TAG_NAME" "$MAPPING_TARGET" --clobber
           fi
