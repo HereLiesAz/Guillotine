@@ -7,9 +7,6 @@
     <!-- Voice-command editing: capture a spoken instruction, transcribe it on-device, run the agent. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- AdMob advertising identifier (app-open ad). -->
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
-
     <!-- Google Play Billing (Ad-Free). -->
     <uses-permission android:name="com.android.vending.BILLING" />
 
@@ -50,11 +47,6 @@
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
         <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
         <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
-
-        <!-- AdMob application id. -->
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-7304740804770627~9735202017" />
 
         <!-- Hosts long video operations in the background with a progress notification. -->
         <service
