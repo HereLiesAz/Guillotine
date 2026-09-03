@@ -1,7 +1,23 @@
 name: Compile and Release APK
 
+# Runs on every push to main (plus manual dispatch) so the self-updating github-flavor APK never
+# sits stale behind main again — it used to be workflow_dispatch-only, so real fixes on main (e.g.
+# the Aug 24 R8/protobuf keep-rule fix) could merge and never reach users until someone remembered
+# to trigger this by hand. Mirrors release-aab.yml's push-to-main trigger.
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - version.properties
   workflow_dispatch:
+
+# Serialize runs: each run force-moves the same "latest-release-vX.Y" tag and clobbers the same
+# release assets, so two overlapping runs (e.g. two pushes landing close together) would race on
+# the tag push and asset upload. Queue them rather than cancel-in-progress so every push's build
+# still gets published, just in order.
+concurrency:
+  group: release-apk-publish
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
