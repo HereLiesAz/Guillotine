@@ -43,14 +43,14 @@ Compose UI artifacts are pinned explicitly rather than via a BOM); see the notes
 The app ships in two flavors of the **same** app (same `applicationId` and signing key, so either can
 update the other in place):
 
-| Flavor   | Distributed as         | Ads          | Updates                        |
-| -------- | ---------------------- | ------------ | ------------------------------ |
-| `github` | direct-download `.apk` | **none**     | self-updates from GitHub Releases |
-| `play`   | Play Store `.aab`      | AdMob        | Google Play                    |
+| Flavor   | Distributed as         | Updates                        |
+| -------- | ---------------------- | ------------------------------ |
+| `github` | direct-download `.apk` | self-updates from GitHub Releases |
+| `play`   | Play Store `.aab`      | Google Play                    |
 
-The difference is a build-time `BuildConfig.ADS_ENABLED` / `UPDATER_ENABLED` flag; the ad and updater
-code paths are gated on it. Variant tasks are named `…Github…` / `…Play…` (e.g. `assembleGithubDebug`,
-`bundlePlayRelease`).
+The difference is a build-time `BuildConfig.UPDATER_ENABLED` flag; the updater code path is gated
+on it. Variant tasks are named `…Github…` / `…Play…` (e.g. `assembleGithubDebug`,
+`bundlePlayRelease`). Neither flavor contains an ad SDK.
 
 ## Build & run
 
@@ -59,7 +59,7 @@ variant, and Run (▶).
 
 From the command line:
 ```
-gradlew.bat :app:assembleGithubDebug   # build the ad-free (direct-download) debug APK
+gradlew.bat :app:assembleGithubDebug   # build the direct-download debug APK
 gradlew.bat :app:installGithubDebug    # install it on a connected device/emulator
 gradlew.bat test                       # run the JVM unit tests (no device needed)
 ```
@@ -70,7 +70,7 @@ The debug APK lands in `app/build/outputs/apk/github/debug/`.
 
 The Play Store takes an **Android App Bundle** (`.aab`), not an APK. This is a single-module app,
 so one bundle is all you need — Google generates the per-device density/ABI/language splits. Use the
-`play` flavor for Play (AdMob enabled, no self-updater — Play delivers updates):
+`play` flavor for Play (no self-updater — Play delivers updates):
 
 Build one locally (signed):
 ```
@@ -83,7 +83,7 @@ gradlew.bat bundlePlayRelease -PversionBuild=<code> ^
 ```
 or use Android Studio -> **Build -> Generate Signed App Bundle / APK -> Android App Bundle**.
 
-The **ad-free** direct-download APK is the `github` flavor — build it with
+The direct-download APK is the `github` flavor — build it with
 `gradlew.bat assembleGithubRelease` (-> `app/build/outputs/apk/github/release/`).
 
 `-PversionBuild=<code>` sets `versionCode` explicitly (CI uses the git commit count so it always

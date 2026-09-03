@@ -127,8 +127,6 @@ import com.hereliesaz.aznavrail.AzDropdownMenu
 import com.hereliesaz.aznavrail.bottomsheet.rememberAzSheetController
 import com.hereliesaz.aznavrail.model.AzDropdownDesign
 import com.hereliesaz.aznavrail.model.AzSheetDetent
-import com.hereliesaz.guillotine.GuillotineApplication
-import com.hereliesaz.guillotine.ads.BannerAd
 import com.hereliesaz.guillotine.ai.Transcription
 import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.data.ProjectAutosave
@@ -281,8 +279,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
     var transitionSwapBusy by remember { mutableStateOf(false) }
     
-    // UMP consent form state.
-    var canRequestAds by remember { mutableStateOf(false) }  
     val billingManager = remember { com.hereliesaz.guillotine.billing.BillingManager(context, scope).apply { initialize() } }
     
     var exporting by remember { mutableStateOf(false) }
@@ -693,9 +689,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onOpenSettings = { showSettings = true },
         )
         } // editor + sheet Box
-
-        // Bottom banner ad (renders only after ad consent is resolved).
-        BannerAd(Modifier.fillMaxWidth())
     }
 
 
@@ -847,10 +840,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             errorMessage = exportError,
             playbackRegion = state.playbackRegion,
             onStart = { name, regionOnly ->
-                // Show the "render" interstitial as the export begins; rendering continues underneath.
-                (context as? android.app.Activity)?.let { act ->
-                    (context.applicationContext as? GuillotineApplication)?.interstitialAdManager?.show(act)
-                }
                 val region = if (regionOnly) vm.uiState.value.playbackRegion else null
                 exporting = true; exportError = null; exportProgress = 0f
                 ActivityLog.info("Exporting \"$name\"…")

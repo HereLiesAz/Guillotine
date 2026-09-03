@@ -14,7 +14,6 @@ import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSiz
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import com.hereliesaz.guillotine.ads.ConsentManager
 import com.hereliesaz.guillotine.azphalt.AzpExternalOpen
 import com.hereliesaz.guillotine.azphalt.AzpInstallLink
 import com.hereliesaz.guillotine.editor.AndroidEditorViewModel
@@ -120,14 +119,6 @@ class MainActivity : ComponentActivity() {
         // re-offering it would re-run an install the user already dealt with.
         if (savedInstanceState == null) routeAzpOpen(intent)
 
-        // Ads exist only in the Play distribution. Gather UMP consent (AdMob Privacy & messaging),
-        // then start ads once allowed. The github build skips all of this (BuildConfig.ADS_ENABLED).
-        if (BuildConfig.ADS_ENABLED) {
-            val app = application as GuillotineApplication
-            val consent = ConsentManager(this)
-            consent.gatherConsent(this) { if (consent.canRequestAds) app.startAdsAfterConsent() }
-            if (consent.canRequestAds) app.startAdsAfterConsent() // already consented from a prior run
-        }
         setContent {
             val windowSizeClass = calculateWindowSizeClass(this)
             GuillotineTheme {

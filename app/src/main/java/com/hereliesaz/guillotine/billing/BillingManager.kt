@@ -13,11 +13,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Persisted "last known" Ad-Free entitlement, kept ONLY so a paying user's UI doesn't default to
- * `false` (and show an ad) on cold start while the async Play Billing connect+query round-trip is
- * still in flight and racing the independent, faster-starting ad-load pipeline. This is not a
- * substitute for verification: [BillingManager] re-queries Play on every connection and corrects
- * this flag (and the live [AdsState]) if it's since changed, e.g. a refund.
+ * Persisted "last known" Ad-Free entitlement, kept ONLY so a paying user's UI (the "Ad-Free" menu
+ * item) doesn't briefly show as unpurchased on cold start while the async Play Billing
+ * connect+query round-trip is still in flight. This is not a substitute for verification:
+ * [BillingManager] re-queries Play on every connection and corrects this flag (and the live
+ * [AdsState]) if it's since changed, e.g. a refund.
  *
  * NOTE: this does not perform cryptographic purchase verification (signature check against the
  * Play Console license key) — that requires a real key value only the app's maintainer has, and
@@ -52,10 +52,9 @@ class BillingManager(private val context: Context, private val coroutineScope: C
 
     fun initialize() {
         // Seed from the last-known entitlement immediately (before Play Billing's async
-        // connect+query round-trip completes) so a paying user isn't shown an ad on cold start
-        // just because AppOpenAdManager's independent ad-load chain started first and finished
-        // before this one did. queryPurchases() below re-verifies against Play on every
-        // connection and will correct this (see reconcileEntitlement) if it's since changed.
+        // connect+query round-trip completes) so the "Ad-Free" menu item stays hidden for an
+        // already-paying user on cold start. queryPurchases() below re-verifies against Play on
+        // every connection and will correct this (see reconcileEntitlement) if it's since changed.
         if (AdFreeEntitlement.read(context)) {
             AdsState.isAdFree.value = true
             AdsState.isAdFreePermanently.value = true

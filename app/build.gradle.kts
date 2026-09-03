@@ -124,23 +124,21 @@ android {
     }
 
     // Two distributions of the SAME app (same applicationId + signing key, so either can update the
-    // other in place): `play` ships to Google Play with AdMob; `github` is the direct-download build
-    // — no ads, and it self-updates from GitHub Releases (Play forbids self-updating APKs, so that
-    // path is github-only). The distinction is a build-time BuildConfig flag; the ad and updater code
-    // paths are gated on it. CI builds the AAB from `play` (bundlePlayRelease) and the APK from
-    // `github` (assembleGithubRelease). The `github` flavor's manifest additions (self-update install
+    // other in place): `play` ships to Google Play; `github` is the direct-download build that
+    // self-updates from GitHub Releases (Play forbids self-updating APKs, so that path is
+    // github-only). The distinction is a build-time BuildConfig flag the updater code path is gated
+    // on. CI builds the AAB from `play` (bundlePlayRelease) and the APK from `github`
+    // (assembleGithubRelease). The `github` flavor's manifest additions (self-update install
     // permission + FileProvider paths) live in app/src/github/.
     flavorDimensions += "distribution"
     productFlavors {
         create("play") {
             dimension = "distribution"
             isDefault = true
-            buildConfigField("boolean", "ADS_ENABLED", "true")
             buildConfigField("boolean", "UPDATER_ENABLED", "false")
         }
         create("github") {
             dimension = "distribution"
-            buildConfigField("boolean", "ADS_ENABLED", "false")
             buildConfigField("boolean", "UPDATER_ENABLED", "true")
         }
     }
@@ -214,7 +212,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
@@ -242,14 +239,7 @@ dependencies {
     implementation(libs.commons.compress)
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)
-    implementation(libs.play.services.ads)
-    // play-services-ads pulls in an old androidx.work:work-runtime:2.7.0 transitively (bundling
-    // Room 2.2.5), which nothing else in the graph outbids — that combo is known to crash on
-    // startup on modern Android ("Failed to create an instance of androidx.work.impl.WorkDatabase").
-    // Declared explicitly so it wins dependency resolution over the ads SDK's stale transitive pin.
-    implementation(libs.androidx.work.runtime)
     implementation(libs.billing.ktx)
-    implementation(libs.user.messaging.platform)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.nanohttpd)
