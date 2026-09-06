@@ -654,11 +654,13 @@ fun NleScreen(
                 vm.addMedia(listOf(MediaItem(newId(), url, name, MediaKind.IMAGE, 5_000)))
                 showGenerate = false
             },
-            onGenerateLeonardo = { prompt, _ ->
-                // TODO: Leonardo generation requires an Android-specific download path.
-                // The desktop build can reach the Leonardo API but cannot download + cache
-                // the result the same way. Stub until a desktop download helper is added.
-                ActivityLog.info("Leonardo generation is not yet available on desktop.")
+            onGenerateLeonardo = { prompt, modelId ->
+                val uri = com.hereliesaz.guillotine.desktop.platform.DesktopImageGen.Leonardo.generate(
+                    apiKey = settings.leonardoKey,
+                    modelId = modelId,
+                    prompt = prompt,
+                )
+                vm.addMedia(listOf(MediaItem(newId(), uri, "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000)))
             },
             onDismiss = { showGenerate = false },
         )
