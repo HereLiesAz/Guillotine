@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -40,6 +41,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -557,7 +562,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
  * [onOtherRoutes] opens the secondary dialog for the Azphalt Store app / web store — this browser is
  * the default now, not the fallback (see docs/TODO.md, 2026-08-12).
  */
-@Composable
+@Composable@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private fun CatalogBrowser(
     hostAppId: String,
     extensionsDirPath: String,
@@ -565,11 +570,13 @@ private fun CatalogBrowser(
     onOtherRoutes: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     var catalog by remember { mutableStateOf<List<AzphaltRegistry.CatalogEntry>?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var installedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var query by remember { mutableStateOf("") }
     var category by remember { mutableStateOf<String?>(null) }
+    var showGuide by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         installedIds = withContext(Dispatchers.IO) {
@@ -606,6 +613,9 @@ private fun CatalogBrowser(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("Extensions", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { showGuide = true }) {
+                        Icon(Icons.Filled.HelpOutline, contentDescription = "What's in the store")
+                    }
                     IconButton(onClick = onOtherRoutes) {
                         Icon(Icons.Filled.MoreVert, contentDescription = "Other ways to add extensions")
                     }
@@ -664,6 +674,10 @@ private fun CatalogBrowser(
                 }
             }
         }
+    }
+
+    if (showGuide) {
+        AzphaltStoreGuideDialog(onDismiss = { showGuide = false })
     }
 }
 
@@ -941,9 +955,102 @@ private fun openStoreAppListing(context: Context) {
  * plain browser tab; otherwise it opens normally, and the browser's own install prompt (from the
  * site's manifest + service worker) is how a first-time visitor gets that same shortcut.
  */
-private fun openWebStore(context: Context) {
-    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AzphaltTrust.STORE_WEB_URL))
-    AzphaltStoreHandoff.installedWebApkPackage(context.packageManager, AzphaltTrust.STORE_WEB_URL)
+private fun openWebStore(context: Context, categoryKey: String? = null) {
+    val url = if (categoryKey != null) "${AzphaltTrust.STORE_WEB_URL}?category=$categoryKey" else AzphaltTrust.STORE_WEB_URL
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    AzphaltStoreHandoff.installedWebApkPackage(context.packageManager, url)
         ?.let { intent.setPackage(it) }
     context.startActivity(intent)
+}
+private data class AzphaltCategoryInfo(
+    val key: String,
+    val displayName: String,
+    val description: String,
+    val example: String,
+)
+
+private val AZPHALT_CATEGORIES = listOf(
+    AzphaltCategoryInfo(
+        "layer-effects", "Layer FX",
+        "Color grades (LUTs), shaders, and filters that apply to a single clip or layer.",
+        "\"give this clip a teal and orange grade\"",
+    ),
+    AzphaltCategoryInfo(
+        "layer-effects-scenery", "Scenery",
+        "Background/backdrop effects and generated-scenery looks for composited layers.",
+        "\"put a generated sunset behind the subject\"",
+    ),
+    AzphaltCategoryInfo(
+        "kinetic-typography", "Kinetic Type",
+        "Animated caption and title styles — text that moves with the words being spoken.",
+        "\"make my captions animate like they're being typed\"",
+    ),
+    AzphaltCategoryInfo(
+        "kinetic-typography-smart", "Smart Type",
+        "Kinetic typography styles that react to the audio — beat- or syllable-driven text motion.",
+        "\"animate the captions to grow on each syllable\"",
+    ),
+    AzphaltCategoryInfo(
+        "companion-apps", "Apps",
+        "Standalone companion apps that work alongside Guillotine (not installed into the timeline).",
+        "an app you launch separately, listed here for discovery.",
+    ),
+    AzphaltCategoryInfo(
+        "mcp-servers", "MCP",
+        "Extra tools for the AI assistant to call — expands what you can ask it to do.",
+        "unlocks new commands the assistant can run for you.",
+    ),
+)
+
+@Composable
+private fun AzphaltStoreGuideDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("What's in the store") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "Everything here installs on-device and shows up as something you can ask the AI " +
+                        "assistant for. Browse by category, or just describe what you want:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                AZPHALT_CATEGORIES.forEachIndexed { index, info ->
+                    if (index > 0) HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Spacer(Modifier.height(if (index == 0) 12.dp else 0.dp))
+                    Text(
+                        info.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        info.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Try: " + info.example,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { openWebStore(context, info.key) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Browse " + info.displayName)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Got it") }
+        },
+    )
 }
