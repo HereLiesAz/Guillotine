@@ -143,12 +143,26 @@ fun SettingsScreen(
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var cloudVision by remember { mutableStateOf(current.cloudVision) }
+
+    var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
+    var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
+    var faceEmbedModelPath by remember { mutableStateOf(current.faceEmbedModelPath) }
+    var effectModelPaths by remember { mutableStateOf(current.effectModelPaths) }
+    var audioEventModelPath by remember { mutableStateOf(current.audioEventModelPath) }
+    var asrModelPath by remember { mutableStateOf(current.asrModelPath) }
+    var ttsModelPath by remember { mutableStateOf(current.ttsModelPath) }
+    var vlmModelPath by remember { mutableStateOf(current.vlmModelPath) }
+    var diarizeSegModelPath by remember { mutableStateOf(current.diarizeSegModelPath) }
+    var diarizeEmbedModelPath by remember { mutableStateOf(current.diarizeEmbedModelPath) }
+    var stemModelPath by remember { mutableStateOf(current.stemModelPath) }
+    var denoiseModelPath by remember { mutableStateOf(current.denoiseModelPath) }
+
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
 
     // Assemble settings from the current editable state — shared by Save and the .azp installer
     // (which folds newly-routed model paths into the visible fields first).
-    fun buildSettings(): AiSettings = AiSettings(
+    fun buildSettings(): AiSettings = current.copy(
         provider = provider,
         keys = keys,
         models = models,
@@ -156,6 +170,18 @@ fun SettingsScreen(
         leonardoModel = leonardoModel,
         cloudVision = cloudVision,
         frameAnalysisCacheSize = frameAnalysisCacheSize,
+        agentModelPath = agentModelPath,
+        idEmbedModelPath = idEmbedModelPath,
+        faceEmbedModelPath = faceEmbedModelPath,
+        effectModelPaths = effectModelPaths,
+        audioEventModelPath = audioEventModelPath,
+        asrModelPath = asrModelPath,
+        ttsModelPath = ttsModelPath,
+        vlmModelPath = vlmModelPath,
+        diarizeSegModelPath = diarizeSegModelPath,
+        diarizeEmbedModelPath = diarizeEmbedModelPath,
+        stemModelPath = stemModelPath,
+        denoiseModelPath = denoiseModelPath,
     )
 
     // --- Install an AI model from an azphalt .azp package ---------------------------------------
@@ -366,11 +392,127 @@ fun SettingsScreen(
                         color = Neutral500, fontSize = 10.sp,
                     )
 
-                    // Was in Advanced (mixed with the non-AI MCP-server section) — moved here so every
-                    // on-device AI model control lives in one place, matching Android's Sheets.kt.
+                                        // On-device model catalogs: a model-path field + a curated download picker per slot
+                    // Every download here runs and stays fully on-device — only the model *weights*
+                    // themselves are ever fetched over the network.
+                    
+                    
+                    
+                    Text("AI assistant — on-device model (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = agentModelPath, hint = "assistant .task/.litertlm model", isDirectory = false) { agentModelPath = it }
+                    Text("Run the assistant fully offline with no key. Blank = use the selected provider's key above.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=litert") }.padding(top = 2.dp)
+                        )
+
+                    Text("Recognition model — for \"teach a specific thing\" (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = idEmbedModelPath, hint = "recognition .tflite model", isDirectory = false) { idEmbedModelPath = it }
+                    Text("A stronger embedder sharpens \"is this the same thing?\" matching. Blank = the bundled MobileNet-V3-small.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
+                        )
+
+                    Text("Face model — for identifying a specific person (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = faceEmbedModelPath, hint = "face .tflite model", isDirectory = false) { faceEmbedModelPath = it }
+                    Text("When set, teaching a person uses face recognition. Blank = fall back to the general recognition model.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
+                        )
+
+                    Text("Image effects — on-device TFLite models (optional)", color = Neutral400, fontSize = 12.sp)
+                    listOf(
+                        Triple("depth", "Depth model path — depth map (e.g. bokeh)", "tflite"),
+                        Triple("superres", "Super-resolution model path — upscale a frame", "tflite"),
+                        Triple("lowlight", "Low-light model path — brighten a frame", "tflite"),
+                        Triple("style", "Style transfer path — apply an artistic style", "tflite")
+                    ).forEach { (kind, hint, cat) ->
+                        ModelPathField(value = effectModelPaths[kind].orEmpty(), hint = hint, isDirectory = false) { effectModelPaths = effectModelPaths + (kind to it) }
+                        Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=${cat}") }.padding(top = 2.dp)
+                        )
+                    }
+                    Text("Enables \"apply the image effect\" ... Commands run the matching model.", color = Neutral500, fontSize = 10.sp)
+
+                    Text("Audio-event model — highlight detection (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = audioEventModelPath, hint = "YAMNet .tflite model", isDirectory = false) { audioEventModelPath = it }
+                    Text("Enables \"find the highlights / best moments\". Blank = feature off.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
+                        )
+
+                    Text("Speech (ASR) — offline transcription (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = asrModelPath, hint = "sherpa-onnx ASR model directory", isDirectory = true) { asrModelPath = it }
+                    Text("Enables \"transcribe this accurately\" via offline Whisper (sherpa-onnx).", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
+                        )
+
+                    Text("Speech (TTS) — offline voiceover (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = ttsModelPath, hint = "sherpa-onnx TTS voice directory", isDirectory = true) { ttsModelPath = it }
+                    Text("Enables \"add a voiceover saying …\" via offline neural TTS (sherpa-onnx).", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
+                        )
+
+                    Text("Frame captioning (VLM) — multimodal model (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = vlmModelPath, hint = "Multimodal VLM model (.task)", isDirectory = false) { vlmModelPath = it }
+                    Text("Lets the assistant \"describe / understand this frame\" in rich language.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=litert") }.padding(top = 2.dp)
+                        )
+
+                    Text("Speaker diarization — who spoke when (optional, needs both models)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = diarizeSegModelPath, hint = "Diarization segmentation directory (pyannote)", isDirectory = true) { diarizeSegModelPath = it }
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
+                        )
+                    ModelPathField(value = diarizeEmbedModelPath, hint = "Speaker-embedding model (.onnx)", isDirectory = false) { diarizeEmbedModelPath = it }
+                    Text("Enables \"who speaks when?\" — set BOTH a segmentation and an embedding model.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
+                        )
+
+                    Text("Stem separation — vocals / instrumental (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = stemModelPath, hint = "Spleeter model directory (ONNX)", isDirectory = true) { stemModelPath = it }
+                    Text("Enables \"separate the stems / isolate the vocals\". Heavy — best on a capable device. Blank = feature off.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
+                        )
+
+                    Text("Noise reduction — clean up voice audio (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPathField(value = denoiseModelPath, hint = "Speech-denoiser model (.onnx)", isDirectory = false) { denoiseModelPath = it }
+                    Text("Enables \"remove background noise / clean up the audio\" — strips hiss, hum, and background noise from voice.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                            "Get from Azphalt Store  ↗",
+                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
+                        )
+                    
                     Text("Install AI model (.azp)", color = Neutral400, fontSize = 12.sp)
                     Text(
-                        if (azpBusy) "Installing…" else "Install",
+                        if (azpBusy) "Installing…" else "Install from file",
                         color = if (azpBusy) Neutral500 else Red500,
                         fontSize = 11.sp, fontWeight = FontWeight.Medium,
                         modifier = Modifier.clickable(enabled = !azpBusy) { installModelLauncher() },
