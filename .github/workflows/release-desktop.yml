@@ -1,21 +1,8 @@
-name: Release Desktop Installers
-
-# Normally piggy-backs on the existing Android release tags — `release-apk.yml` and
-# `merged-build.yml` force-push `latest-release-v<MAJOR>.<MINOR>` and
-# `latest-debug-v<MAJOR>.<MINOR>` respectively, each creating (or updating) a GitHub Release with
-# the APK/AAB. This workflow attaches the matching desktop installers to the SAME release, so a
-# v0.9 tag ends up with the Android artifacts + macOS DMG + Windows MSI + Linux DEB in one place.
-#
-# It's also self-sufficient when run on its own (workflow_dispatch with no `tag` input): the
-# `resolve-tag` job derives `latest-release-v<major>.<minor>` from version.properties and creates
-# that tag at the current commit if it doesn't exist yet, instead of requiring the caller to
-# already know (or another workflow to have already pushed) a matching tag.
-#
-# Force-pushing an existing tag still fires push:tags — softprops/action-gh-release@v3 upserts,
-# so re-runs cleanly replace the installers on the release.
-#
-# `v*` is kept for future proper semver releases; `latest-release-v*` is the current cadence.
-
+# centralized-by: HereLiesAz/workflows
+# central-source-path: .github/workflows/release-desktop.yml
+# central-source-sha256: c6251f2b6b5fe71bea894085048df9338151bc914505f23dbd5f8f37c4721190
+# This file intentionally contains no repository secrets.
+name: Release Desktop Installers [central proxy]
 on:
   push:
     tags:
@@ -28,114 +15,20 @@ on:
         description: 'Existing tag to attach installers to (leave blank to auto-derive latest-release-v<major>.<minor> from version.properties, creating it if it does not exist yet)'
         required: false
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
 permissions:
-  contents: write
-
+  contents: read
+  id-token: write
 jobs:
-  # Figures out which tag this run should attach installers to, once, so the three OS jobs below
-  # don't each race to create/push the same tag. Three cases:
-  #   1. Triggered by a tag push (the common case) → that tag, already real.
-  #   2. workflow_dispatch with an explicit `tag` input → that tag (must already exist).
-  #   3. workflow_dispatch with no input → derive `latest-release-v<major>.<minor>` from
-  #      version.properties (the same convention release-apk.yml's manual release uses) and create
-  #      it at the current commit if it doesn't exist yet, so this workflow is self-sufficient
-  #      instead of depending on another workflow having tagged first.
-  resolve-tag:
+  central-dispatch:
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.resolve.outputs.tag }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Resolve or create the release tag
-        id: resolve
+      - name: Dispatch to HereLiesAz/workflows
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_TAG: ${{ github.event.inputs.tag }}
-        run: |
-          if [ -n "$INPUT_TAG" ]; then
-            TAG_NAME="$INPUT_TAG"
-          elif [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG_NAME="${{ github.ref_name }}"
-          else
-            MAJOR=$(grep 'versionMajor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
-            MINOR=$(grep 'versionMinor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
-            TAG_NAME="latest-release-v${MAJOR}.${MINOR}"
-          fi
-
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" > /dev/null 2>&1; then
-            echo "Using existing tag $TAG_NAME"
-          else
-            echo "Tag $TAG_NAME doesn't exist yet — creating it at $GITHUB_SHA"
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG_NAME" -m "Desktop release" "$GITHUB_SHA"
-            git push origin "$TAG_NAME"
-          fi
-
-          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
-
-  release-desktop:
-    needs: resolve-tag
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            task: packageDeb
-            path: desktop/build/compose/binaries/main/deb/*.deb
-          - os: macos-latest
-            task: packageDmg
-            path: desktop/build/compose/binaries/main/dmg/*.dmg
-          - os: windows-latest
-            task: packageMsi
-            path: desktop/build/compose/binaries/main/msi/*.msi
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v6
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-read-only: false
-          dependency-graph: disabled
-
-      - name: Grant execute permission for gradlew
-        if: runner.os != 'Windows'
-        run: chmod +x gradlew
-
-      - name: ${{ matrix.task }}
+          WORKFLOWS_GATEWAY_URL: ${{ vars.WORKFLOWS_GATEWAY_URL }}
+          EVENT_JSON: ${{ toJSON(github.event) }}
+          INPUTS_JSON: ${{ toJSON(inputs) }}
+          VARS_JSON: ${{ toJSON(vars) }}
+          SOURCE_WORKFLOW_PATH: .github/workflows/release-desktop.yml
+          SOURCE_SHA256: c6251f2b6b5fe71bea894085048df9338151bc914505f23dbd5f8f37c4721190
         shell: bash
-        run: ./gradlew :desktop:${{ matrix.task }} --build-cache --stacktrace
-
-      # softprops/action-gh-release@v3 upserts assets on the release matching the tag ref
-      # (or the workflow_dispatch input). Unsigned installers show scary OS prompts on
-      # first launch — that's called out in the release body.
-      - name: Attach installer to release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.resolve-tag.outputs.tag }}
-          files: ${{ matrix.path }}
-          fail_on_unmatched_files: true
-          body: |
-            ## Guillotine desktop installers
-
-            Unsigned builds. First-launch instructions:
-
-            - **macOS**: Right-click the app in `/Applications` → **Open** → **Open** on the "unidentified developer" dialog.
-            - **Windows**: If SmartScreen blocks the installer, click **More info** → **Run anyway**.
-            - **Linux**: `sudo apt install ./guillotine_*.deb`.
+        run: "set -euo pipefail\n[[ -n \"${WORKFLOWS_GATEWAY_URL:-}\" ]] || { echo \"Repository variable WORKFLOWS_GATEWAY_URL is not configured.\" >&2; exit 1; }\noidc_response=\"$(curl --fail-with-body --silent --show-error -H \"Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}\" \"${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=hereliesaz-workflows\")\"\noidc_token=\"$(jq -r '.value // empty' <<<\"$oidc_response\")\"\n[[ -n \"$oidc_token\" ]] || { echo \"GitHub did not issue an OIDC token.\" >&2; exit 1; }\necho \"::add-mask::$oidc_token\"\npayload=\"$(jq -n   --arg repository \"$GITHUB_REPOSITORY\" --arg repository_id \"$GITHUB_REPOSITORY_ID\"   --arg repository_owner \"$GITHUB_REPOSITORY_OWNER\" --arg repository_owner_id \"$GITHUB_REPOSITORY_OWNER_ID\"   --arg sha \"$GITHUB_SHA\" --arg ref \"$GITHUB_REF\" --arg ref_name \"$GITHUB_REF_NAME\" --arg ref_type \"$GITHUB_REF_TYPE\"   --arg head_ref \"$GITHUB_HEAD_REF\" --arg base_ref \"$GITHUB_BASE_REF\" --arg actor \"$GITHUB_ACTOR\" --arg actor_id \"$GITHUB_ACTOR_ID\"   --arg event_name \"$GITHUB_EVENT_NAME\" --arg run_id \"$GITHUB_RUN_ID\" --arg run_number \"$GITHUB_RUN_NUMBER\" --arg run_attempt \"$GITHUB_RUN_ATTEMPT\"   --arg workflow_ref \"$GITHUB_WORKFLOW_REF\" --arg workflow_name \"$GITHUB_WORKFLOW\" --arg source_workflow_path \"$SOURCE_WORKFLOW_PATH\"   --arg source_sha256 \"$SOURCE_SHA256\" --argjson event \"$EVENT_JSON\" --argjson inputs \"$INPUTS_JSON\" --argjson vars \"$VARS_JSON\"   '{repository:$repository,repository_id:$repository_id,repository_owner:$repository_owner,repository_owner_id:$repository_owner_id,sha:$sha,check_sha:($event.pull_request.head.sha // $sha),ref:$ref,ref_name:$ref_name,ref_type:$ref_type,head_ref:$head_ref,base_ref:$base_ref,actor:$actor,actor_id:$actor_id,event_name:$event_name,event:$event,inputs:$inputs,vars:$vars,run_id:$run_id,run_number:$run_number,run_attempt:$run_attempt,workflow_ref:$workflow_ref,workflow_name:$workflow_name,source_workflow_path:$source_workflow_path,source_sha256:$source_sha256}')\"\ncurl --fail-with-body --silent --show-error -X POST \"${WORKFLOWS_GATEWAY_URL%/}/dispatch\" -H \"Authorization: Bearer ${oidc_token}\" -H \"Content-Type: application/json\" --data-binary \"$payload\""
