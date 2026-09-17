@@ -127,6 +127,21 @@ object PromptCoach {
             .take(limit.coerceAtLeast(0))
     }
 
+    /**
+     * Keep the model fallback for short, vague commands. Concrete/long prompts do not need a rewrite,
+     * and skipping them avoids waking the local model unnecessarily while the user is still typing.
+     */
+    fun shouldUseModel(input: String): Boolean {
+        val q = normalize(input)
+        if (q.length !in 4..180) return false
+        if (q.split(' ').count { it.isNotBlank() } > 12) return false
+        return containsAny(
+            q,
+            "make", "fix", "cut", "remove", "edit", "better", "good", "bad",
+            "interesting", "cool", "nice", "clean", "sound", "audio", "look", "feel",
+        )
+    }
+
     /** Prompt for the tiny on-device fallback used only when [suggest] has no confident match. */
     fun modelPrompt(input: String): String = """
         You are Guillotine's prompt coach, not the editor.
@@ -148,7 +163,7 @@ object PromptCoach {
             .map { it.trim().trimStart('-', '•', '*').trim() }
             .map { it.replace(Regex("^\\d+[.)]\\s*"), "").trim() }
             .filter { it.length in 8..180 }
-            .filterNot { it.contains("tool", ignoreCase = true) && it.contains("_") }
+            .filterNot { TOOL_NAME_REGEX.matches(it) }
             .distinctBy { normalize(it) }
             .take(limit.coerceAtLeast(0))
             .map { text ->
@@ -192,6 +207,8 @@ object PromptCoach {
 
     private fun containsAny(text: String, vararg needles: String): Boolean =
         needles.any(text::contains)
+
+    private val TOOL_NAME_REGEX = Regex("^[a-z0-9]+(?:_[a-z0-9]+)+$")
 
     private fun normalize(text: String): String =
         text.lowercase(Locale.ROOT)
