@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -1060,59 +1061,77 @@ private fun EditorToolStrip(
             // selected it holds the assistant input and the agent runs it.
             val hasClip = selected.isNotEmpty()
             val fieldValue = if (hasClip) (selected.firstOrNull()?.prompt ?: "") else assistant.input
-            Box(Modifier.weight(1f)) {
-                OutlinedTextField(
-                    value = fieldValue,
-                    // Enter submits instead of inserting a newline. Hardware Enter is caught by
-                    // onPreviewKeyEvent below.
-                    onValueChange = { v ->
-                        val submitNow = v.contains('\n')
-                        val text = v.replace("\n", "")
-                        if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
-                        if (submitNow) submit()
-                    },
-                    // `readOnly` (not `enabled=false`) while the agent is running: keeps the field
-                    // enabled and focusable while blocking mid-run keystrokes and accidental re-submits.
-                    // AssistantViewModel.run also guards overlaps (`if (running) return`).
-                    readOnly = assistant.running,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onFocusChanged { promptFocused = it.isFocused }
-                        .onPreviewKeyEvent { e ->
-                            if (e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
-                                submit(); true
-                            } else {
-                                false
-                            }
+            Column(Modifier.weight(1f)) {
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = fieldValue,
+                        // Enter submits instead of inserting a newline. Hardware Enter is caught by
+                        // onPreviewKeyEvent below.
+                        onValueChange = { v ->
+                            val submitNow = v.contains('\n')
+                            val text = v.replace("\n", "")
+                            if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
+                            if (submitNow) submit()
                         },
-                    placeholder = {
-                        val hint = if (hasClip) {
-                            state.lastPrompt.ifBlank { "e.g. \"keep shots with a face\" or \"cut clips with a car\"" }
-                        } else {
-                            "Tell the AI what to do -- e.g. \"cut the silences in clip 1\""
-                        }
-                        Text(hint, color = Neutral500, fontSize = 12.sp)
-                    },
-                    textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
-                    maxLines = 6,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { submit() }),
-                )
-                // Recent-prompts history: appears when the empty field is focused. Tapping one
-                // fills the field (tap-to-reuse). focusable=false keeps the keyboard up.
-                DropdownMenu(
-                    expanded = promptFocused && fieldValue.isBlank() && state.promptHistory.isNotEmpty(),
-                    onDismissRequest = { promptFocused = false },
-                    properties = PopupProperties(focusable = false),
-                ) {
-                    state.promptHistory.forEach { p ->
-                        DropdownMenuItem(
-                            text = { Text(p, color = White, fontSize = 12.sp, maxLines = 1) },
-                            onClick = {
-                                if (hasClip) vm.setPromptForSelected(p) else onAgentInput(p)
-                                promptFocused = false
+                        readOnly = assistant.running,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { promptFocused = it.isFocused }
+                            .onPreviewKeyEvent { e ->
+                                if (e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
+                                    submit(); true
+                                } else {
+                                    false
+                                }
                             },
-                        )
+                        placeholder = {
+                            val hint = if (hasClip) {
+                                state.lastPrompt.ifBlank { "e.g. \"keep shots with a face\" or \"cut clips with a car\"" }
+                            } else {
+                                "Tell the AI what you want -- try \"cut the boring parts\""
+                            }
+                            Text(hint, color = Neutral500, fontSize = 12.sp)
+                        },
+                        textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
+                        maxLines = 6,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { submit() }),
+                    )
+                    DropdownMenu(
+                        expanded = promptFocused && fieldValue.isBlank() && state.promptHistory.isNotEmpty(),
+                        onDismissRequest = { promptFocused = false },
+                        properties = PopupProperties(focusable = false),
+                    ) {
+                        state.promptHistory.forEach { p ->
+                            DropdownMenuItem(
+                                text = { Text(p, color = White, fontSize = 12.sp, maxLines = 1) },
+                                onClick = {
+                                    if (hasClip) vm.setPromptForSelected(p) else onAgentInput(p)
+                                    promptFocused = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                if (!hasClip && assistant.promptSuggestions.isNotEmpty() && !assistant.running) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        assistant.promptSuggestions.forEach { suggestion ->
+                            Text(
+                                suggestion.label,
+                                color = White,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .background(Neutral800, RoundedCornerShape(14.dp))
+                                    .clickable { onAgentInput(suggestion.prompt) }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
                     }
                 }
             }

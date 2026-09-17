@@ -2,6 +2,8 @@ package com.hereliesaz.guillotine.desktop.ui
 
 import com.hereliesaz.guillotine.ai.agent.AgentBackend
 import com.hereliesaz.guillotine.ai.agent.AgentEvent
+import com.hereliesaz.guillotine.ai.agent.PromptCoach
+import com.hereliesaz.guillotine.ai.agent.PromptSuggestion
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.ui.ActivityLog
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +23,7 @@ class AssistantViewModel {
         val running: Boolean = false,
         val isError: Boolean = false,
         val awaitingReply: Boolean = false,
+        val promptSuggestions: List<PromptSuggestion> = emptyList(),
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -31,7 +34,9 @@ class AssistantViewModel {
     private var originalPrompt: String = ""
     private var lastQuestion: String = ""
 
-    fun setInput(text: String) = _state.update { it.copy(input = text) }
+    fun setInput(text: String) {
+        _state.update { it.copy(input = text, promptSuggestions = PromptCoach.suggest(text)) }
+    }
 
     fun run(instruction: String, tools: McpToolsSurface, agent: AgentBackend?) =
         startRun(instruction, tools, agent, logAs = instruction, isReply = false)
@@ -107,7 +112,14 @@ class AssistantViewModel {
         lastAssistantText = ""
         lastQuestion = ""
         _state.update {
-            it.copy(running = true, isError = false, status = "Thinking…", input = "", awaitingReply = false)
+            it.copy(
+                running = true,
+                isError = false,
+                status = "Thinking…",
+                input = "",
+                awaitingReply = false,
+                promptSuggestions = emptyList(),
+            )
         }
         scope.launch {
             try {
