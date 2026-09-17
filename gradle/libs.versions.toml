@@ -64,7 +64,7 @@ composeMultiplatform = "1.11.1"
 # deps (Android uses Media3). See https://github.com/bytedeco/javacv/blob/master/CHANGELOG.md.
 javacv = "1.5.14"
 javacpp = "1.5.14"
-ffmpeg = "8.0.1-1.5.13"
+ffmpeg = "8.1.2-1.5.14"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
