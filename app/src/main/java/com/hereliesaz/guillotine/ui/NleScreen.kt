@@ -220,7 +220,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var promptCoachModelPath by remember { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(context) {
         promptCoachModelPath = withContext(Dispatchers.IO) {
-            com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.ensureExtracted(context)
+            runCatching {
+                com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.ensureExtracted(context)
+            }.getOrNull()
         }
     }
     val promptCoachCompleter: (suspend (String) -> String?)? =
