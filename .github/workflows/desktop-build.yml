@@ -35,41 +35,29 @@ jobs:
           [[ -n "$oidc_token" ]] || { echo "GitHub did not issue an OIDC token." >&2; exit 1; }
           echo "::add-mask::$oidc_token"
 
-          # GitHub's PR webhook repeats enormous repository/user/link objects several times.
-          # The central catalog only needs the semantic event fields, not a small telephone book
-          # of API URLs. Preserve useful fields while collapsing repeated identity objects.
-          event_json="$(jq -c '
-            def actor:
-              if type == "object" then {login, id, type} else . end;
-            def repo:
-              if type == "object" then
-                {id, name, full_name, private, fork, default_branch, owner: (.owner | actor)}
-              else . end;
-            def strip_noise:
-              if type == "object" then
-                with_entries(
-                  select(.key as $k | [
-                    "url", "html_url", "avatar_url", "followers_url", "following_url",
-                    "gists_url", "starred_url", "subscriptions_url", "organizations_url",
-                    "repos_url", "events_url", "received_events_url", "node_id", "_links"
-                  ] | index($k) | not)
-                ) | map_values(strip_noise)
-              elif type == "array" then map(strip_noise)
-              else . end;
-            strip_noise
-            | if .repository? then .repository |= repo else . end
-            | if .sender? then .sender |= actor else . end
-            | if .pull_request? then
-                .pull_request |= (
-                  if .head?.repo? then .head.repo |= repo else . end
-                  | if .base?.repo? then .base.repo |= repo else . end
-                  | if .user? then .user |= actor else . end
-                  | if .assignee? then .assignee |= actor else . end
-                  | if .assignees? then .assignees |= map(actor) else . end
-                  | if .requested_reviewers? then .requested_reviewers |= map(actor) else . end
-                )
-              else . end
-          ' <<<"$EVENT_JSON")"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" || "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
+            event_json="$(jq -c '{
+              action,
+              number,
+              pull_request: {
+                number: .pull_request.number,
+                base: {
+                  ref: .pull_request.base.ref,
+                  sha: .pull_request.base.sha
+                },
+                head: {
+                  ref: .pull_request.head.ref,
+                  sha: .pull_request.head.sha,
+                  repo: {
+                    full_name: .pull_request.head.repo.full_name,
+                    fork: (.pull_request.head.repo.fork // false)
+                  }
+                }
+              }
+            }' <<<"$EVENT_JSON")"
+          else
+            event_json="$EVENT_JSON"
+          fi
 
           payload="$(jq -n \
             --arg repository "$GITHUB_REPOSITORY" --arg repository_id "$GITHUB_REPOSITORY_ID" \
