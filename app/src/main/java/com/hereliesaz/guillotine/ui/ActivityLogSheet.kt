@@ -26,11 +26,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -48,6 +51,11 @@ import com.hereliesaz.guillotine.ui.theme.Neutral800
 import com.hereliesaz.guillotine.ui.theme.Neutral950
 import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
  * AzNavRail four-detent bottom sheet holding the integrated activity log: AI chat output, the
@@ -94,6 +102,7 @@ fun ActivityLogSheet(
             controller.snapTo(AzSheetDetent.HALF)
         }
     }
+    val scope = rememberCoroutineScope()
 
     AzBottomSheet(
         controller = controller,
@@ -112,8 +121,16 @@ fun ActivityLogSheet(
             AzSheetDetent.PEEK -> PeekTicker(entries, processLabel, processFraction, awaitingReply)
             AzSheetDetent.HALF, AzSheetDetent.FULL ->
                 ExpandedLog(
-                    entries, processLabel, processFraction, onClear, awaitingReply, onReply,
-                    onOpenAiSettings, onOpenSettings,
+                    entries = entries,
+                    processLabel = processLabel,
+                    processFraction = processFraction,
+                    onClear = onClear,
+                    awaitingReply = awaitingReply,
+                    onReply = onReply,
+                    onOpenAiSettings = onOpenAiSettings,
+                    onOpenSettings = onOpenSettings,
+                    isFull = controller.detent == AzSheetDetent.FULL,
+                    onFull = { scope.launch { controller.snapTo(AzSheetDetent.FULL) } },
                 )
         }
     }
@@ -175,7 +192,10 @@ private fun ExpandedLog(
     onReply: (String) -> Unit,
     onOpenAiSettings: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    isFull: Boolean,
+    onFull: () -> Unit,
 ) {
+    val clipboard = LocalClipboardManager.current
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
@@ -183,7 +203,21 @@ private fun ExpandedLog(
         ) {
             Text("Activity", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.weight(1f))
+            if (!isFull) {
+                Text(
+                    "Full", color = White, fontSize = 12.sp,
+                    modifier = Modifier.clickable(onClick = onFull).padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
             if (entries.isNotEmpty()) {
+                Text(
+                    "Copy", color = Neutral300, fontSize = 12.sp,
+                    modifier = Modifier
+                        .clickable {
+                            clipboard.setText(AnnotatedString(entries.joinToString("\n", transform = ::formatLogLine)))
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
                 Text(
                     "Clear", color = Neutral400, fontSize = 12.sp,
                     modifier = Modifier.clickable(onClick = onClear).padding(horizontal = 8.dp, vertical = 4.dp),
@@ -211,7 +245,7 @@ private fun ExpandedLog(
             }
         } else {
             val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-            
+
             // If the user is viewing the newest item (index 0 in reverseLayout), keep them
             // pinned there when a new item arrives. If they scrolled away to read history,
             // don't yank their scroll position.
@@ -233,7 +267,7 @@ private fun ExpandedLog(
                 items(entries.asReversed(), key = { it.id }) { entry ->
                     Column(Modifier.fillMaxWidth()) {
                         Text(
-                            prefix(entry.level) + entry.text,
+                            formatLogLine(entry),
                             color = levelColor(entry.level),
                             fontSize = 12.sp,
                             fontFamily = if (entry.level == ActivityLog.Level.USER) FontFamily.Default else FontFamily.Monospace,
@@ -321,6 +355,16 @@ private fun ReplyRow(onSend: (String) -> Unit) {
     }
 }
 
+private val logTimeFormatter: DateTimeFormatter = DateTimeFormatter
+    .ofPattern("HH:mm:ss.SSS", Locale.US)
+    .withZone(ZoneId.systemDefault())
+
+private fun formatLogTime(timestampMs: Long): String =
+    logTimeFormatter.format(Instant.ofEpochMilli(timestampMs))
+
+private fun formatLogLine(entry: ActivityLog.Entry): String =
+    "[${formatLogTime(entry.timestampMs)}] ${prefix(entry.level)}${entry.text}"
+
 private fun levelColor(level: ActivityLog.Level) = when (level) {
     ActivityLog.Level.USER -> White
     ActivityLog.Level.CHAT -> Neutral300
@@ -331,10 +375,10 @@ private fun levelColor(level: ActivityLog.Level) = when (level) {
 }
 
 private fun prefix(level: ActivityLog.Level) = when (level) {
-    ActivityLog.Level.USER -> "› "      // ›
+    ActivityLog.Level.USER -> "› "
     ActivityLog.Level.CHAT -> ""
     ActivityLog.Level.INFO -> ""
     ActivityLog.Level.PROGRESS -> ""
-    ActivityLog.Level.SUCCESS -> "✓ "    // ✓
-    ActivityLog.Level.ERROR -> "✗ "      // ✗
+    ActivityLog.Level.SUCCESS -> "✓ "
+    ActivityLog.Level.ERROR -> "✗ "
 }
