@@ -176,11 +176,14 @@ object PromptCoach {
     }
 
     private fun looksLikeBoring(q: String): Boolean =
-        containsAny(
-            q,
-            "bor", "boring", "dull", "dead air", "nothing happens", "low action",
-            "dragging", "drags", "too slow", "slow parts", "repetitive", "repetition",
-            "pacing", "make it interesting", "more interesting",
+        (
+            BORING_PREFIX_REGEX.containsMatchIn(q) ||
+                containsAny(
+                    q,
+                    "dull", "dead air", "nothing happens", "low action",
+                    "dragging", "drags", "too slow", "slow parts", "repetitive", "repetition",
+                    "pacing", "make it interesting", "more interesting",
+                )
         ) && !q.contains("slow motion")
 
     private fun looksLikeAudioFix(q: String): Boolean =
@@ -208,6 +211,7 @@ object PromptCoach {
     private fun containsAny(text: String, vararg needles: String): Boolean =
         needles.any(text::contains)
 
+    private val BORING_PREFIX_REGEX = Regex("\\bbor(?:$|i|e)")
     private val TOOL_NAME_REGEX = Regex("^[a-z0-9]+(?:_[a-z0-9]+)+$")
 
     private fun normalize(text: String): String =
