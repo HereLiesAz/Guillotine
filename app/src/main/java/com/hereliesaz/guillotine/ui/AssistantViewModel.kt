@@ -58,7 +58,7 @@ class AssistantViewModel : ViewModel() {
      * matcher has no confident answer, a tiny on-device [coach] may refine it after a short debounce.
      * The user's typing path never waits for model inference.
      */
-    fun setInput(text: String, coach: AgentBackend? = null) {
+    fun setInput(text: String, coach: (suspend (String) -> String?)? = null) {
         val instant = PromptCoach.suggest(text)
         _state.update { it.copy(input = text, promptSuggestions = instant) }
         promptCoachJob?.cancel()
@@ -72,7 +72,7 @@ class AssistantViewModel : ViewModel() {
         val expected = text
         promptCoachJob = viewModelScope.launch {
             delay(450)
-            val refined = PromptCoach.parseModelSuggestions(coach.complete(PromptCoach.modelPrompt(expected)))
+            val refined = PromptCoach.parseModelSuggestions(coach(PromptCoach.modelPrompt(expected)))
             if (_state.value.input == expected && !_state.value.running && refined.isNotEmpty()) {
                 _state.update { it.copy(promptSuggestions = refined) }
             }
