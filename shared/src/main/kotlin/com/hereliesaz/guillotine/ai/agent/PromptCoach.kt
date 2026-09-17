@@ -59,7 +59,7 @@ object PromptCoach {
             looksLikeCinematic(q) -> listOf(
                 PromptSuggestion(
                     "Cinematic grade",
-                    "Give the selected footage a cinematic color grade.",
+                    "Apply a cinematic color grade to the video clips in the timeline.",
                 ),
                 PromptSuggestion(
                     "Background blur",
@@ -74,11 +74,11 @@ object PromptCoach {
             looksLikeCleanup(q) -> listOf(
                 PromptSuggestion(
                     "Stabilize footage",
-                    "Stabilize shaky footage across the selected clips.",
+                    "Stabilize shaky video clips across the timeline.",
                 ),
                 PromptSuggestion(
                     "Clean video",
-                    "Denoise and lightly sharpen the selected footage.",
+                    "Denoise and lightly sharpen the video clips across the timeline.",
                 ),
                 PromptSuggestion(
                     "Tighten pacing",
