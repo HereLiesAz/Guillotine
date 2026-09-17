@@ -19,28 +19,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Fully on-device agent brain. Runs a BYO `.task` LLM (Gemma / Hammer / Llama) through the
- * MediaPipe LLM Inference API and drives the MCP tools with a plain-text JSON protocol — the
- * same prompt→JSON approach the app's cloud analyzers already use, so no extra SDK / proto
- * dependency is needed. Requires no key or network; pairs with the free on-device MLKit/Local
- * analyzers for a completely offline edit assistant.
- *
- * Unlike cloud backends, the local model has a small token/KV budget. Feeding it the complete cloud
- * system prompt plus every Guillotine MCP definition can exceed that budget before generation even
- * begins, which presents to the user as an endless "Thinking…". This backend therefore uses a compact
- * local prompt, a relevance-selected tool set, and a hard per-turn prompt budget. The cloud backends
- * still receive the full catalog and full system prompt.
- *
- * The model is asked to reply with exactly one JSON object per turn — either
- * `{"tool":"<name>","args":{…}}` to call a tool or `{"final":"<summary>"}` when finished.
- *
- * **Vision (on-device only).** When a [frames] source is supplied and the assistant `.task` is itself
- * multimodal (e.g. Gemma-3n), the model can emit `{"tool":"look_at_frame"}` to actually SEE the current
- * frame: the backend decodes the playhead frame and runs one vision turn through the assistant's own
- * weights, so a single multimodal model serves as both brain and eyes — no separate captioner download
- * needed, and (via [EngineCache]) only ONE copy of the model is ever resident. Pixels never leave the
- * device. Text-only models are unaffected: the vision turn is only attempted on an explicit look, and if
- * the model can't view images the backend says so and points it at `caption_frame` instead.
+ * Fully on-device agent brain. Local models have a much smaller context/KV budget than the cloud
+ * backends, so this backend deliberately does not feed them the full cloud system prompt plus every
+ * MCP definition. It selects request-relevant tools and keeps every turn under a hard prompt budget.
  */
 class OnDeviceAgentBackend(
     private val context: Context,
@@ -48,16 +29,8 @@ class OnDeviceAgentBackend(
     private val frames: FrameProvider? = null,
 ) : AgentBackend {
 
-    /** Intercepted, backend-native "see the frame" action (not dispatched to the MCP surface). */
     private val visionTool = "look_at_frame"
-
-    // Once a look fails because the loaded model can't accept images, stop offering/attempting vision for
-    // the rest of this backend's life so a text-only model doesn't repeatedly hit the same wall.
     private var visionUnsupported = false
-
-    // True once the single engine has been (re)loaded in vision mode for a look. The SAME engine then
-    // serves text turns too (generateResponse works on a vision engine) — so only ONE multi-GB model is
-    // ever resident, never the brain + a separate captioner at once. See [EngineCache].
     private var visionEngaged = false
 
     override suspend fun run(
@@ -69,21 +42,14 @@ class OnDeviceAgentBackend(
             val modelName = File(modelPath).name.ifBlank { "on-device model" }
             ActivityLog.progress("AI · loading $modelName…")
             val loadStarted = SystemClock.elapsedRealtime()
-
-            // Warm the engine up front (text mode unless a prior look already upgraded it). Loading a
-            // multi-GB model takes seconds, so it's cached and reused across instructions.
             EngineCache.get(context, modelPath, wantVision = visionEngaged)
             ActivityLog.info("AI · model ready in ${elapsedMs(loadStarted)} ms")
 
-            // Only advertise looking when we have a frame source AND haven't already learned this model
-            // can't see — otherwise the model wastes a turn calling it just to be told no.
             val canLook = frames != null && !visionUnsupported
-
             val allTools = tools.definitions()
             val selectedTools = selectToolDefinitions(allTools, instruction)
-            val selectedNames = toolNames(selectedTools)
             ActivityLog.info(
-                "AI · tools ${selectedTools.length()}/${allTools.length()}: ${selectedNames.joinToString(", ")}",
+                "AI · tools ${selectedTools.length()}/${allTools.length()}: ${toolNames(selectedTools).joinToString(", ")}",
             )
 
             val preamble = buildString {
@@ -91,42 +57,28 @@ class OnDeviceAgentBackend(
                 appendLine()
                 appendLine("Available tools:")
                 append(compactToolCatalog(selectedTools))
-                if (canLook) {
-                    appendLine(
-                        "- $visionTool(prompt): inspect the current frame with this model's vision.",
-                    )
-                }
+                if (canLook) appendLine("- $visionTool(prompt): inspect the current frame with this model's vision.")
             }.trimEnd()
 
-            // Keep only recent tool traffic. The original instruction is injected separately on every
-            // turn, so trimming old observations never makes the local model forget the task itself.
             val history = ArrayDeque<String>()
             val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
-                ensureActive() // honor cancellation between turns — stop mutating the document once cancelled
+                ensureActive()
                 val prompt = buildTurnPrompt(preamble, instruction, history)
                 ActivityLog.progress("AI · turn $iterations: generating (${prompt.length} chars)…")
                 val generationStarted = SystemClock.elapsedRealtime()
 
-                // Fetch each turn: a look may have upgraded the single engine to vision mode; text turns
-                // run on that same engine (generateResponse works on a vision engine too).
                 val llm = EngineCache.get(context, modelPath, wantVision = visionEngaged)
                 val raw = llm.generateResponse(prompt).orEmpty().trim()
-                ActivityLog.info(
-                    "AI · turn $iterations: ${raw.length} chars in ${elapsedMs(generationStarted)} ms",
-                )
+                ActivityLog.info("AI · turn $iterations: ${raw.length} chars in ${elapsedMs(generationStarted)} ms")
                 val obj = extractJsonObject(raw)
 
                 if (obj == null || obj.has("final") || !obj.has("tool")) {
                     if (obj == null && raw.isNotBlank()) {
-                        // A malformed local-model reply is exactly the sort of thing a copied Activity log
-                        // needs to expose. Cap it so one hallucinated essay can't consume the whole feed.
                         ActivityLog.info("AI · unstructured reply: ${raw.take(MAX_DIAGNOSTIC_REPLY_CHARS)}")
                     }
-                    val summary = obj?.optString("final").orEmpty().ifBlank {
-                        raw.ifBlank { "Done." }
-                    }
+                    val summary = obj?.optString("final").orEmpty().ifBlank { raw.ifBlank { "Done." } }
                     onEvent(AgentEvent.Done(summary.trim()))
                     return@withContext
                 }
@@ -134,7 +86,6 @@ class OnDeviceAgentBackend(
                 val name = obj.optString("tool")
                 val args = obj.optJSONObject("args") ?: JSONObject()
 
-                // Intercept the vision action: it's served by the model's own eyes, not the MCP tools.
                 if (name == visionTool) {
                     onEvent(AgentEvent.ToolStarted(name))
                     val (observation, isError) = lookAtFrame(args.optString("prompt"))
@@ -143,7 +94,7 @@ class OnDeviceAgentBackend(
                         onEvent(AgentEvent.Failed(stop))
                         return@withContext
                     }
-                    addHistory(history, "ASSISTANT: ${obj}")
+                    addHistory(history, "ASSISTANT: $obj")
                     addHistory(history, "OBSERVATION: ${observation.take(MAX_OBSERVATION_CHARS)}")
                     continue
                 }
@@ -155,24 +106,17 @@ class OnDeviceAgentBackend(
                     onEvent(AgentEvent.Failed(stop))
                     return@withContext
                 }
-
-                addHistory(history, "ASSISTANT: ${obj}")
+                addHistory(history, "ASSISTANT: $obj")
                 addHistory(history, "OBSERVATION: ${outcome.content().take(MAX_OBSERVATION_CHARS)}")
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
         } catch (e: CancellationException) {
-            throw e // preserve structured concurrency — a cancel is not a failure
+            throw e
         } catch (e: Throwable) {
-            // Throwable: model load can fail with errors/UnsatisfiedLinkError on unsupported devices.
             onEvent(AgentEvent.Failed(e.message ?: "On-device model failed (check the model path)."))
         }
     }
 
-    /**
-     * Choose only the tools relevant to this request. Six basic editor tools are always present; up to
-     * [MAX_ON_DEVICE_TOOLS] are added by explicit intent hints and word overlap with each tool's name /
-     * description. This keeps the local prompt well below the MediaPipe model's small context budget.
-     */
     private fun selectToolDefinitions(defs: JSONArray, instruction: String): JSONArray {
         data class Candidate(val index: Int, val definition: JSONObject, val name: String, val score: Int)
 
@@ -197,8 +141,7 @@ class OnDeviceAgentBackend(
 
         CORE_TOOL_NAMES.forEach(::addNamed)
         hinted.forEach(::addNamed)
-        candidates
-            .asSequence()
+        candidates.asSequence()
             .filter { it.score > 0 && it.name !in chosen }
             .sortedWith(compareByDescending<Candidate> { it.score }.thenBy { it.index })
             .forEach {
@@ -206,7 +149,7 @@ class OnDeviceAgentBackend(
             }
 
         return JSONArray().apply {
-            chosen.values.take(MAX_ON_DEVICE_TOOLS).forEach(::put)
+            chosen.values.take(MAX_ON_DEVICE_TOOLS).forEach { definition -> put(definition) }
         }
     }
 
@@ -216,7 +159,6 @@ class OnDeviceAgentBackend(
             .filter { it.length >= 3 && it !in STOP_WORDS }
             .toSet()
 
-    /** Intent words whose corresponding tool may not literally repeat the user's phrasing. */
     private fun hintedTools(text: String): Set<String> {
         val t = text.lowercase(Locale.ROOT)
         return buildSet {
@@ -243,12 +185,11 @@ class OnDeviceAgentBackend(
         }
     }
 
-    /** Compact, model-readable list of selected tools and their argument names. */
     private fun compactToolCatalog(defs: JSONArray): String = buildString {
         for (i in 0 until defs.length()) {
             val d = defs.getJSONObject(i)
             val props = d.optJSONObject("inputSchema")?.optJSONObject("properties")
-            val argNames = props?.keys()?.asSequence()?.joinToString(", ").orEmpty()
+            val argNames = props?.keys()?.asSequence()?.joinToString(", ").orEmpty().take(MAX_TOOL_ARGS_CHARS)
             val description = d.optString("description")
                 .replace(WHITESPACE_REGEX, " ")
                 .trim()
@@ -262,15 +203,11 @@ class OnDeviceAgentBackend(
 
     private fun toolNames(defs: JSONArray): List<String> = buildList {
         for (i in 0 until defs.length()) {
-            defs.optJSONObject(i)?.optString("name")?.takeIf { it.isNotBlank() }?.let(::add)
+            val name = defs.optJSONObject(i)?.optString("name").orEmpty()
+            if (name.isNotBlank()) add(name)
         }
     }
 
-    /**
-     * Build one turn under a hard character ceiling. The ceiling is deliberately conservative relative
-     * to the 1024-token MediaPipe engine setting: exact tokenization varies by downloaded model, and a
-     * little unused context is much cheaper than a phone apparently freezing during prompt prefill.
-     */
     private fun buildTurnPrompt(
         preamble: String,
         instruction: String,
@@ -317,54 +254,30 @@ class OnDeviceAgentBackend(
 
     private fun elapsedMs(started: Long): Long = SystemClock.elapsedRealtime() - started
 
-    /**
-     * Feed the current playhead frame into the assistant's own multimodal weights and return what it
-     * sees, as one OBSERVATION line. Vision runs on THIS backend's [modelPath] — the same model the user
-     * chose as their brain — by upgrading the single cached engine to vision mode (which evicts the text
-     * engine first, so only one model is ever resident). Pixels stay on-device. Any failure (no frame, or
-     * a text-only model that can't accept images) degrades gracefully into guidance rather than crashing
-     * the run, and a "can't view" failure disables further look attempts for this run.
-     *
-     * Returns (observation, isError): isError is true for every failure path (no frame, model can't see)
-     * so the caller feeds the real status to [LoopGuard] — otherwise a model spinning on failing looks
-     * would never trip the error streak.
-     */
     private fun lookAtFrame(prompt: String): Pair<String, Boolean> {
         val fp = frames ?: return "Vision isn't available here." to true
         if (visionUnsupported) {
-            return ("This model can't view images directly. Use caption_frame (a separate vision model) " +
-                "instead.") to true
+            return "This model can't view images directly. Use caption_frame (a separate vision model) instead." to true
         }
         val frame = fp.currentFrame()
-            ?: return ("There's no video frame under the playhead to look at — scrub onto a video clip " +
-                "first.") to true
+            ?: return "There's no video frame under the playhead to look at — scrub onto a video clip first." to true
         val question = prompt.ifBlank { "Describe what is happening in this frame in detail." }
         return try {
-            // Upgrade the one engine to vision mode (closes the text engine → single-model residency).
             val llm = EngineCache.get(context, modelPath, wantVision = true)
             visionEngaged = true
-            generateVision(llm, question, frame)
-                .ifBlank { "The frame looks empty or couldn't be described." } to false
+            generateVision(llm, question, frame).ifBlank { "The frame looks empty or couldn't be described." } to false
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            // The assistant model isn't multimodal (or vision failed) — don't retry; restore the text
-            // engine so the run continues, and point the model at caption_frame instead.
             visionUnsupported = true
             visionEngaged = false
             runCatching { EngineCache.get(context, modelPath, wantVision = false) }
-            ("This on-device model can't view images directly. Use caption_frame (a separate vision " +
-                "model set in Settings) to describe the frame instead.") to true
+            "This on-device model can't view images directly. Use caption_frame (a separate vision model set in Settings) to describe the frame instead." to true
         } finally {
             runCatching { frame.recycle() }
         }
     }
 
-    /**
-     * One multimodal turn: run [prompt] over [frame] through a vision-enabled session on the (already
-     * vision-mode) [llm]. Mirrors the [com.hereliesaz.guillotine.ai.VlmCaptioner] session shape. The
-     * MPImage holds native memory and is released explicitly.
-     */
     private fun generateVision(llm: LlmInference, prompt: String, frame: Bitmap): String {
         val session = LlmInferenceSession.createFromOptions(
             llm,
@@ -385,10 +298,6 @@ class OnDeviceAgentBackend(
         }
     }
 
-    /**
-     * Pull the first balanced {…} object out of model text (tolerates code fences / prose).
-     * String-aware: braces inside JSON string literals don't affect nesting depth.
-     */
     private fun extractJsonObject(text: String): JSONObject? {
         val start = text.indexOf('{')
         if (start < 0) return null
@@ -416,14 +325,6 @@ class OnDeviceAgentBackend(
         return null
     }
 
-    /**
-     * Process-level cache of the loaded model. Model load is expensive and the native handle holds a lot
-     * of memory, so exactly ONE engine is kept alive and reused. It's keyed by both path AND vision mode:
-     * changing either closes the previous engine BEFORE creating the new one, so the brain and a vision
-     * engine for the same model can never be resident simultaneously (which would double memory and OOM).
-     * A text-only turn runs fine on a vision-mode engine, so once a look upgrades it we keep using it.
-     * Guarded because callers could (in theory) overlap.
-     */
     private object EngineCache {
         private var path: String? = null
         private var vision = false
@@ -432,14 +333,13 @@ class OnDeviceAgentBackend(
         @Synchronized
         fun get(context: Context, modelPath: String, wantVision: Boolean): LlmInference {
             instance?.let { if (path == modelPath && vision == wantVision) return it }
-            // Close the old engine FIRST — never hold two multi-GB models at once.
             runCatching { instance?.close() }
             instance = null
             path = null
             val builder = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(1024)
-            if (wantVision) builder.setMaxNumImages(1) // enable image input for this engine
+            if (wantVision) builder.setMaxNumImages(1)
             instance = LlmInference.createFromOptions(context.applicationContext, builder.build())
             path = modelPath
             vision = wantVision
@@ -450,6 +350,7 @@ class OnDeviceAgentBackend(
     private companion object {
         private const val MAX_ON_DEVICE_TOOLS = 10
         private const val MAX_TOOL_DESCRIPTION_CHARS = 96
+        private const val MAX_TOOL_ARGS_CHARS = 96
         private const val MAX_PROMPT_CHARS = 2_800
         private const val MAX_INSTRUCTION_CHARS = 1_000
         private const val MAX_HISTORY_CHARS = 1_200
