@@ -215,22 +215,17 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val assistantState by assistantVm.state.collectAsState()
 
     // Prompt coaching is deliberately independent from the configured editing brain. Common intents
-    // are synchronous; only an unknown short/vague request wakes the bundled 135M model after debounce.
-    // Its engine is isolated so prompt inference can never swap/close the editor agent's native model.
-    var promptCoachModelPath by remember { mutableStateOf<String?>(null) }
-    androidx.compose.runtime.LaunchedEffect(context) {
-        promptCoachModelPath = withContext(Dispatchers.IO) {
+    // are synchronous. Do NOT touch/copy the bundled 166 MB model just because the editor opened:
+    // extract it lazily only if a short vague prompt actually reaches the model fallback after debounce.
+    val promptCoachCompleter: suspend (String) -> String? = { prompt ->
+        val path = withContext(Dispatchers.IO) {
             runCatching {
                 com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.ensureExtracted(context)
             }.getOrNull()
         }
+        if (path == null) null
+        else com.hereliesaz.guillotine.ai.agent.PromptCoachLocalModel.complete(context, path, prompt)
     }
-    val promptCoachCompleter: (suspend (String) -> String?)? =
-        promptCoachModelPath?.let { path ->
-            { prompt: String ->
-                com.hereliesaz.guillotine.ai.agent.PromptCoachLocalModel.complete(context, path, prompt)
-            }
-        }
     // Give the assistant a disk cache so the one-time LLM vocabulary expansion persists across launches.
     androidx.compose.runtime.LaunchedEffect(context) {
         assistantVm.vocabCache = com.hereliesaz.guillotine.platform.AndroidVocabularyCache(context)
