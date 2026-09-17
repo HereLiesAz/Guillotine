@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem as ExoMediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -84,6 +85,8 @@ import kotlin.math.roundToInt
 
 private const val SCRUB_SEEK_TOLERANCE_MS = 60L
 private const val PLAY_DRIFT_TOLERANCE_MS = 300L
+/** Release MediaCodec/audio decoder resources after the paused preview has been untouched for a moment. */
+private const val PAUSED_DECODER_IDLE_MS = 3_000L
 
 /**
  * The video preview surface. It is slaved to the editor's timeline clock
@@ -710,6 +713,9 @@ private fun VideoSlot(
                             .inflate(com.hereliesaz.guillotine.R.layout.preview_player_view, null) as PlayerView).apply {
                             useController = false
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            // idleStopPlayer() intentionally releases decoders while paused. Keep the
+                            // last rendered frame visible instead of flashing the shutter/black.
+                            setKeepContentOnPlayerReset(true)
                             setBackgroundColor(
                                 if (transparent) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK,
                             )
@@ -795,9 +801,15 @@ private fun wireVideoPlayer(
     LaunchedEffect(Unit) { player.volume = 0f; gain.gain = 0f }
     LaunchedEffect(playbackRate) { player.setPlaybackSpeed(playbackRate) }
     LaunchedEffect(isPlaying, media?.id) {
+        // idleStopPlayer() can put a paused player back in STATE_IDLE while retaining its media item.
+        // Re-prepare only when playback actually resumes.
+        if (isPlaying && media != null && player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) {
+            player.prepare()
+        }
         player.playWhenReady = isPlaying && media != null
     }
     syncPosition(player, clip, now, isPlaying)
+    idleStopPlayer(player, media != null && clip != null, now, isPlaying)
 }
 
 /** Build a Media3 item; images become timed image items so one path handles all kinds. */
@@ -872,9 +884,13 @@ private fun AudioTrackLayer(
     }
     LaunchedEffect(playbackRate) { player.setPlaybackSpeed(playbackRate) }
     LaunchedEffect(isPlaying, media?.id) {
+        if (isPlaying && media != null && player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) {
+            player.prepare()
+        }
         player.playWhenReady = isPlaying && media != null
     }
     syncPosition(player, active, now, isPlaying)
+    idleStopPlayer(player, media != null && active != null, now, isPlaying)
 }
 
 private fun buildExoItem(uri: String, kind: MediaKind, durationMs: Long): ExoMediaItem {
@@ -890,12 +906,32 @@ private fun buildExoItem(uri: String, kind: MediaKind, durationMs: Long): ExoMed
  * playhead change scrubs the player; while playing, drift is corrected lazily so
  * we don't seek every frame.
  */
+/**
+ * A paused NLE preview should not hold MediaCodec/audio decoders indefinitely. After the playhead has
+ * been still for [PAUSED_DECODER_IDLE_MS], stop the player WITHOUT clearing its media item. PlayerView
+ * is configured to retain the last frame, and [syncPosition] / the play effect re-prepare on demand.
+ */
+@Composable
+private fun idleStopPlayer(player: ExoPlayer, hasMedia: Boolean, now: Long, isPlaying: Boolean) {
+    LaunchedEffect(player, hasMedia, now, isPlaying) {
+        if (!hasMedia || isPlaying) return@LaunchedEffect
+        delay(PAUSED_DECODER_IDLE_MS)
+        if (!isPlaying && player.mediaItemCount > 0 && player.playbackState != Player.STATE_IDLE) {
+            player.pause()
+            player.stop()
+        }
+    }
+}
+
 @Composable
 private fun syncPosition(player: ExoPlayer, clip: TimelineClip?, now: Long, isPlaying: Boolean) {
     val current by rememberUpdatedState(now)
     // Scrub when paused.
     LaunchedEffect(now, isPlaying, clip?.id) {
         if (clip != null && !isPlaying) {
+            // A long-idle preview deliberately stops the decoder to save power. The first scrub after
+            // that wakes it back up; until then PlayerView keeps the last rendered frame on screen.
+            if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) player.prepare()
             // previewSourceTimeMs, not sourceTimeMs: an AI-edit REMOVE is cut from the export, so the
             // preview must skip it too rather than showing footage the rendered file won't contain.
             val src = TimelineMath.previewSourceTimeMs(clip, current).coerceAtLeast(0)
