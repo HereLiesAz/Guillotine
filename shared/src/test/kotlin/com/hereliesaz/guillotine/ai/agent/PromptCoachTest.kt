@@ -20,6 +20,11 @@ class PromptCoachTest {
     }
 
     @Test
+    fun borderDoesNotTriggerBoringGuidance() {
+        assertTrue(PromptCoach.suggest("add a border").isEmpty())
+    }
+
+    @Test
     fun audioAndCinematicPromptsRouteToDifferentGuidance() {
         assertTrue(PromptCoach.suggest("fix the sound").any { it.label == "Clean dialogue" })
         assertTrue(PromptCoach.suggest("make it cinematic").any { it.label == "Cinematic grade" })
