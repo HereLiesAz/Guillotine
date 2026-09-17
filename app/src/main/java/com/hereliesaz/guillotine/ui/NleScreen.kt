@@ -1446,11 +1446,11 @@ private fun EditorToolStrip(
                 Box(Modifier.fillMaxWidth()) {
                     OutlinedTextField(
                         value = fieldValue,
-                        // Enter submits instead of inserting a newline. Soft keyboards send a '\\n'
+                        // Enter submits instead of inserting a newline. Soft keyboards send a '\n'
                         // through onValueChange; hardware Enter is caught by onPreviewKeyEvent below.
                         onValueChange = { v ->
-                            val submitNow = v.contains('\\n')
-                            val text = v.replace("\\n", "")
+                            val submitNow = v.contains('\n')
+                            val text = v.replace("\n", "")
                             if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
                             if (submitNow) submit()
                         },
