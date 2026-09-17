@@ -1068,8 +1068,8 @@ private fun EditorToolStrip(
                         // Enter submits instead of inserting a newline. Hardware Enter is caught by
                         // onPreviewKeyEvent below.
                         onValueChange = { v ->
-                            val submitNow = v.contains('\\n')
-                            val text = v.replace("\\n", "")
+                            val submitNow = v.contains('\n')
+                            val text = v.replace("\n", "")
                             if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
                             if (submitNow) submit()
                         },
