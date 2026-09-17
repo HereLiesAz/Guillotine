@@ -214,17 +214,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val assistantVm: AssistantViewModel = viewModel()
     val assistantState by assistantVm.state.collectAsState()
 
-    // Prompt coaching is deliberately independent from the configured editing brain. The bundled
-    // SmolLM is always local and only gets a tiny rewrite prompt after the instant matcher has no
-    // confident suggestion; common requests (including "cut the boring parts") never wait on it.
-    var promptCoachBackend by remember {
-        mutableStateOf<com.hereliesaz.guillotine.ai.agent.AgentBackend?>(null)
-    }
+    // Prompt coaching is deliberately independent from the configured editing brain. Common intents
+    // are synchronous; only an unknown short/vague request wakes the bundled 135M model after debounce.
+    // Its engine is isolated so prompt inference can never swap/close the editor agent's native model.
+    var promptCoachModelPath by remember { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(context) {
-        val coachPath = withContext(Dispatchers.IO) {
+        promptCoachModelPath = withContext(Dispatchers.IO) {
             com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.ensureExtracted(context)
         }
-        promptCoachBackend = com.hereliesaz.guillotine.ai.agent.OnDeviceAgentBackend(context, coachPath)
+    }
+    val promptCoachCompleter: (suspend (String) -> String?)? = remember(promptCoachModelPath) {
+        promptCoachModelPath?.let { path ->
+            { prompt: String ->
+                com.hereliesaz.guillotine.ai.agent.PromptCoachLocalModel.complete(context, path, prompt)
+            }
+        }
     }
     // Give the assistant a disk cache so the one-time LLM vocabulary expansion persists across launches.
     androidx.compose.runtime.LaunchedEffect(context) {
@@ -670,7 +674,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 .weight(timelineWeight)
                 .fillMaxWidth()
         ) {
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = { text -> assistantVm.setInput(text, promptCoachBackend) }, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = { text -> assistantVm.setInput(text, promptCoachCompleter) }, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
             
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack,
