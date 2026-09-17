@@ -223,13 +223,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.ensureExtracted(context)
         }
     }
-    val promptCoachCompleter: (suspend (String) -> String?)? = remember(promptCoachModelPath) {
+    val promptCoachCompleter: (suspend (String) -> String?)? =
         promptCoachModelPath?.let { path ->
             { prompt: String ->
                 com.hereliesaz.guillotine.ai.agent.PromptCoachLocalModel.complete(context, path, prompt)
             }
         }
-    }
     // Give the assistant a disk cache so the one-time LLM vocabulary expansion persists across launches.
     androidx.compose.runtime.LaunchedEffect(context) {
         assistantVm.vocabCache = com.hereliesaz.guillotine.platform.AndroidVocabularyCache(context)
