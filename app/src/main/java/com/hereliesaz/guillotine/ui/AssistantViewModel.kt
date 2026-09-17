@@ -4,8 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hereliesaz.guillotine.ai.agent.AgentBackend
 import com.hereliesaz.guillotine.ai.agent.AgentEvent
+import com.hereliesaz.guillotine.ai.agent.PromptCoach
+import com.hereliesaz.guillotine.ai.agent.PromptSuggestion
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,6 +38,8 @@ class AssistantViewModel : ViewModel() {
          * kicks off a new run that carries the original prompt + question + reply as context.
          */
         val awaitingReply: Boolean = false,
+        /** Live prompt-coach options shown under the command box. */
+        val promptSuggestions: List<PromptSuggestion> = emptyList(),
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -45,7 +51,28 @@ class AssistantViewModel : ViewModel() {
     private var originalPrompt: String = ""
     private var lastQuestion: String = ""
 
-    fun setInput(text: String) = _state.update { it.copy(input = text) }
+    private var promptCoachJob: Job? = null
+
+    /**
+     * Update the command box and publish deterministic suggestions synchronously. If the instant
+     * matcher has no confident answer, a tiny on-device [coach] may refine it after a short debounce.
+     * The user's typing path never waits for model inference.
+     */
+    fun setInput(text: String, coach: AgentBackend? = null) {
+        val instant = PromptCoach.suggest(text)
+        _state.update { it.copy(input = text, promptSuggestions = instant) }
+        promptCoachJob?.cancel()
+        if (coach == null || instant.isNotEmpty() || text.trim().length < 4 || _state.value.running) return
+
+        val expected = text
+        promptCoachJob = viewModelScope.launch {
+            delay(350)
+            val refined = PromptCoach.parseModelSuggestions(coach.complete(PromptCoach.modelPrompt(expected)))
+            if (_state.value.input == expected && !_state.value.running && refined.isNotEmpty()) {
+                _state.update { it.copy(promptSuggestions = refined) }
+            }
+        }
+    }
 
     /**
      * Run [instruction] with [agent], reporting progress on the status line. A null [agent] means
@@ -135,7 +162,14 @@ class AssistantViewModel : ViewModel() {
         lastAssistantText = ""
         lastQuestion = ""
         _state.update {
-            it.copy(running = true, isError = false, status = "Thinking…", input = "", awaitingReply = false)
+            it.copy(
+                running = true,
+                isError = false,
+                status = "Thinking…",
+                input = "",
+                awaitingReply = false,
+                promptSuggestions = emptyList(),
+            )
         }
         viewModelScope.launch {
             try {
