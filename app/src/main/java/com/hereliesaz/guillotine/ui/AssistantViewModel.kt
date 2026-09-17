@@ -147,6 +147,8 @@ class AssistantViewModel : ViewModel() {
         isReply: Boolean,
     ) {
         if (instruction.isBlank() || _state.value.running) return
+        promptCoachJob?.cancel()
+        promptCoachJob = null
         if (agent == null) {
             val msg = "Add an API key, or set an on-device model path, in Settings to use the assistant."
             _state.update { it.copy(status = msg, isError = true) }
