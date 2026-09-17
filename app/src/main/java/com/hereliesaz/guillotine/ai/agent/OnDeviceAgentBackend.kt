@@ -43,10 +43,12 @@ class OnDeviceAgentBackend(
                 .generateResponse(prompt.take(MAX_PLAIN_COMPLETION_CHARS))
                 .orEmpty()
                 .trim()
-                .ifBlank { null }
+                .takeIf { it.isNotBlank() }
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
+            null
+        } catch (_: LinkageError) {
             null
         }
     }
