@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -212,6 +213,19 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // through this when nothing is selected, and shows its status inline.
     val assistantVm: AssistantViewModel = viewModel()
     val assistantState by assistantVm.state.collectAsState()
+
+    // Prompt coaching is deliberately independent from the configured editing brain. The bundled
+    // SmolLM is always local and only gets a tiny rewrite prompt after the instant matcher has no
+    // confident suggestion; common requests (including "cut the boring parts") never wait on it.
+    var promptCoachBackend by remember {
+        mutableStateOf<com.hereliesaz.guillotine.ai.agent.AgentBackend?>(null)
+    }
+    androidx.compose.runtime.LaunchedEffect(context) {
+        val coachPath = withContext(Dispatchers.IO) {
+            com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.ensureExtracted(context)
+        }
+        promptCoachBackend = com.hereliesaz.guillotine.ai.agent.OnDeviceAgentBackend(context, coachPath)
+    }
     // Give the assistant a disk cache so the one-time LLM vocabulary expansion persists across launches.
     androidx.compose.runtime.LaunchedEffect(context) {
         assistantVm.vocabCache = com.hereliesaz.guillotine.platform.AndroidVocabularyCache(context)
@@ -656,7 +670,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 .weight(timelineWeight)
                 .fillMaxWidth()
         ) {
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = assistantVm::setInput, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = { text -> assistantVm.setInput(text, promptCoachBackend) }, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
             
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack,
@@ -1423,58 +1437,81 @@ private fun EditorToolStrip(
             // selected it holds the assistant input and the agent runs it.
             val hasClip = selected.isNotEmpty()
             val fieldValue = if (hasClip) (selected.firstOrNull()?.prompt ?: "") else assistant.input
-            Box(Modifier.weight(1f)) {
-                OutlinedTextField(
-                    value = fieldValue,
-                    // Enter submits instead of inserting a newline. Soft keyboards send a '\n'
-                    // through onValueChange; hardware Enter is caught by onPreviewKeyEvent below.
-                    onValueChange = { v ->
-                        val submitNow = v.contains('\n')
-                        val text = v.replace("\n", "")
-                        if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
-                        if (submitNow) submit()
-                    },
-                    // `readOnly` (not `enabled=false`) while the agent is running: keeps the field
-                    // enabled and focusable so the IME stays owned by it — disabling a focused
-                    // TextField orphans the keyboard and back-press can't dismiss it (feels like a
-                    // freeze) — while still blocking mid-run keystrokes and accidental re-submits.
-                    // AssistantViewModel.run also guards overlaps (`if (running) return`).
-                    readOnly = assistant.running,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onFocusChanged { promptFocused = it.isFocused }
-                        .onPreviewKeyEvent { e ->
-                            if (e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
-                                submit(); true
-                            } else {
-                                false
-                            }
+            Column(Modifier.weight(1f)) {
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = fieldValue,
+                        // Enter submits instead of inserting a newline. Soft keyboards send a '\\n'
+                        // through onValueChange; hardware Enter is caught by onPreviewKeyEvent below.
+                        onValueChange = { v ->
+                            val submitNow = v.contains('\\n')
+                            val text = v.replace("\\n", "")
+                            if (hasClip) vm.setPromptForSelected(text) else onAgentInput(text)
+                            if (submitNow) submit()
                         },
-                    placeholder = {
-                        val hint = if (hasClip) {
-                            state.lastPrompt.ifBlank { "e.g. \"keep shots with a face\" or \"cut clips with a car\"" }
-                        } else {
-                            "Tell the AI what to do — e.g. \"cut the silences in clip 1\""
+                        // Keep the field focusable while the agent runs so Android never strands the IME.
+                        readOnly = assistant.running,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { promptFocused = it.isFocused }
+                            .onPreviewKeyEvent { e ->
+                                if (e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
+                                    submit(); true
+                                } else {
+                                    false
+                                }
+                            },
+                        placeholder = {
+                            val hint = if (hasClip) {
+                                state.lastPrompt.ifBlank { "e.g. \"keep shots with a face\" or \"cut clips with a car\"" }
+                            } else {
+                                "Tell the AI what you want — try \"cut the boring parts\""
+                            }
+                            Text(hint, color = Neutral500, fontSize = 12.sp)
+                        },
+                        textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
+                        maxLines = 6,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { submit() }),
+                    )
+                    // Recent-prompts history: appears only for an empty focused field.
+                    DropdownMenu(
+                        expanded = promptFocused && fieldValue.isBlank() && state.promptHistory.isNotEmpty(),
+                        onDismissRequest = { promptFocused = false },
+                        properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                    ) {
+                        state.promptHistory.forEach { p ->
+                            DropdownMenuItem(
+                                text = { Text(p, color = White, fontSize = 12.sp, maxLines = 1) },
+                                onClick = {
+                                    if (hasClip) vm.setPromptForSelected(p) else onAgentInput(p)
+                                    promptFocused = false
+                                },
+                            )
                         }
-                        Text(hint, color = Neutral500, fontSize = 12.sp)
-                    },
-                    textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 12.sp),
-                    maxLines = 6,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { submit() }),
-                )
-                // Recent-prompts history: appears when the empty field is focused. Tapping one
-                // fills the field (tap-to-reuse). focusable=false keeps the keyboard up.
-                DropdownMenu(
-                    expanded = promptFocused && fieldValue.isBlank() && state.promptHistory.isNotEmpty(),
-                    onDismissRequest = { promptFocused = false },
-                    properties = androidx.compose.ui.window.PopupProperties(focusable = false),
-                ) {
-                    state.promptHistory.forEach { p ->
-                        DropdownMenuItem(
-                            text = { Text(p, color = White, fontSize = 12.sp, maxLines = 1) },
-                            onClick = { if (hasClip) vm.setPromptForSelected(p) else onAgentInput(p); promptFocused = false },
-                        )
+                    }
+                }
+
+                // Prompt Coach: synchronous intent matches appear on the same keystroke. The optional
+                // bundled-model fallback may replace these only when the instant matcher had no answer.
+                if (!hasClip && assistant.promptSuggestions.isNotEmpty() && !assistant.running) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        assistant.promptSuggestions.forEach { suggestion ->
+                            Text(
+                                suggestion.label,
+                                color = White,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .background(Neutral800, RoundedCornerShape(14.dp))
+                                    .clickable { onAgentInput(suggestion.prompt) }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
                     }
                 }
             }
