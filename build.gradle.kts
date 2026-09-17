@@ -139,12 +139,16 @@ run {
     // used" on a later, unrelated build, because the committed baseline (205921442) sits ~759
     // commits ahead of gitFloor and won't be overtaken by it for a very long time.
     //
-    // GITHUB_RUN_NUMBER fixes this with no repo push needed: GitHub Actions sets it automatically,
-    // it's a per-workflow-file counter, and it strictly increases forever with zero persistence —
-    // so every CI build of a given workflow gets a build number higher than that workflow's last,
-    // permanently, regardless of how stale the committed file is. Local (non-CI) builds have no
-    // such env var, so they keep the original "+1 per invocation" behavior unchanged.
-    val ciBuildIncrement = System.getenv("GITHUB_RUN_NUMBER")?.trim()?.toIntOrNull() ?: 1
+    // In centralized runs GITHUB_RUN_NUMBER belongs to HereLiesAz/workflows, not this app's
+    // release-aab workflow, so centralization reset the effective counter and produced a versionCode
+    // lower than one already live in Play. The proxy preserves the target workflow's original run
+    // number as TARGET_RUN_NUMBER; prefer that and retain GITHUB_RUN_NUMBER only as a fallback for
+    // non-central CI. Local builds still use +1.
+    val ciBuildIncrement = (
+        System.getenv("TARGET_RUN_NUMBER")?.trim()?.toIntOrNull()
+            ?: System.getenv("GITHUB_RUN_NUMBER")?.trim()?.toIntOrNull()
+            ?: 1
+    )
 
     // Increment BOTH counters on every configuration. Persisted + monotonic.
     val verPatch = (versionProps.getProperty("versionPatch")?.trim()?.toIntOrNull() ?: patchSeed) + 1
