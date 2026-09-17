@@ -33,6 +33,24 @@ class OnDeviceAgentBackend(
     private var visionUnsupported = false
     private var visionEngaged = false
 
+    /**
+     * Bare completion for lightweight language helpers (PromptCoach, vocabulary expansion).
+     * No editor tools or agent system prompt are involved; callers own their own tiny prompt.
+     */
+    override suspend fun complete(prompt: String): String? = withContext(Dispatchers.IO) {
+        try {
+            EngineCache.get(context, modelPath, wantVision = false)
+                .generateResponse(prompt.take(MAX_PLAIN_COMPLETION_CHARS))
+                .orEmpty()
+                .trim()
+                .ifBlank { null }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     override suspend fun run(
         instruction: String,
         tools: McpToolsSurface,
@@ -356,6 +374,7 @@ class OnDeviceAgentBackend(
         private const val MAX_HISTORY_CHARS = 1_200
         private const val MAX_OBSERVATION_CHARS = 360
         private const val MAX_DIAGNOSTIC_REPLY_CHARS = 600
+        private const val MAX_PLAIN_COMPLETION_CHARS = 1_800
 
         private val CORE_TOOL_NAMES = listOf(
             "get_timeline",
