@@ -62,11 +62,16 @@ class AssistantViewModel : ViewModel() {
         val instant = PromptCoach.suggest(text)
         _state.update { it.copy(input = text, promptSuggestions = instant) }
         promptCoachJob?.cancel()
-        if (coach == null || instant.isNotEmpty() || text.trim().length < 4 || _state.value.running) return
+        if (
+            coach == null ||
+            instant.isNotEmpty() ||
+            !PromptCoach.shouldUseModel(text) ||
+            _state.value.running
+        ) return
 
         val expected = text
         promptCoachJob = viewModelScope.launch {
-            delay(350)
+            delay(450)
             val refined = PromptCoach.parseModelSuggestions(coach.complete(PromptCoach.modelPrompt(expected)))
             if (_state.value.input == expected && !_state.value.running && refined.isNotEmpty()) {
                 _state.update { it.copy(promptSuggestions = refined) }
