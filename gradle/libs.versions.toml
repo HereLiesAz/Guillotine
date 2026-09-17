@@ -55,7 +55,7 @@ json = "20260814"
 # Kept in step with the root build.gradle.kts resolutionStrategy force for the same coordinates — that
 # block pins the version the whole graph gets, so a different number here would simply be overridden.
 bouncycastle = "1.85.2"
-composeMultiplatform = "1.11.1"
+composeMultiplatform = "1.12.0"
 # Bytedeco tri-version pairing (JavaCV 1.5.13 → JavaCPP 1.5.13 → FFmpeg 8.0.1-1.5.13).
 # All three must move in lockstep — mixing versions produces UnsatisfiedLinkError at runtime.
 # The FFmpeg artifact version is <ffmpeg>-<javacpp>, so its JavaCPP suffix MUST equal `javacpp`
@@ -64,7 +64,7 @@ composeMultiplatform = "1.11.1"
 # deps (Android uses Media3). See https://github.com/bytedeco/javacv/blob/master/CHANGELOG.md.
 javacv = "1.5.14"
 javacpp = "1.5.14"
-ffmpeg = "8.0.1-1.5.13"
+ffmpeg = "8.1.2-1.5.14"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
