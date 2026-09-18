@@ -69,6 +69,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun OnboardingDialog(onComplete: (selectedModelPath: String) -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var step by remember { mutableIntStateOf(0) }
 
     // Path of the bundled model once extracted (null while extracting).
@@ -78,11 +79,23 @@ fun OnboardingDialog(onComplete: (selectedModelPath: String) -> Unit) {
     // Which model the user wants to download (null if they picked an installed one).
     var downloadModel by remember { mutableStateOf<OnDeviceModel?>(null) }
 
-    // Extract bundled model in background.
+    // Do not force a 167 MB extraction during onboarding. NleScreen is already prewarming the
+    // bundled model in paced slices; choosing the starter model explicitly finishes it immediately.
     LaunchedEffect(Unit) {
-        val path = withContext(Dispatchers.IO) { BundledModelExtractor.ensureExtracted(context) }
-        bundledPath = path
-        if (selectedModelPath.isBlank()) selectedModelPath = path
+        bundledPath = withContext(Dispatchers.IO) { BundledModelExtractor.installedPath(context) }
+        if (selectedModelPath.isBlank() && bundledPath != null) selectedModelPath = bundledPath.orEmpty()
+    }
+
+    fun useBundledNow(completeAfter: Boolean = false) {
+        scope.launch {
+            val path = withContext(Dispatchers.IO) {
+                runCatching { BundledModelExtractor.ensureExtracted(context) }.getOrNull()
+            } ?: return@launch
+            bundledPath = path
+            selectedModelPath = path
+            downloadModel = null
+            if (completeAfter) onComplete(path)
+        }
     }
 
     Dialog(
@@ -110,6 +123,7 @@ fun OnboardingDialog(onComplete: (selectedModelPath: String) -> Unit) {
                     1 -> ModelSelectionStep(
                         bundledPath = bundledPath,
                         selectedModelPath = selectedModelPath,
+                        onUseBundledNow = { useBundledNow() },
                         onSelect = { path, model ->
                             selectedModelPath = path
                             downloadModel = model
@@ -136,7 +150,7 @@ fun OnboardingDialog(onComplete: (selectedModelPath: String) -> Unit) {
                     downloadModel = downloadModel,
                     selectedModelPath = selectedModelPath,
                     bundledPath = bundledPath,
-                    onUseBundled = { onComplete(bundledPath.orEmpty()) },
+                    onUseBundled = { useBundledNow(completeAfter = true) },
                     onDownload = { step = 2 },
                     onContinue = { onComplete(selectedModelPath) },
                 )
@@ -204,6 +218,7 @@ private fun PermissionsStep(onNext: () -> Unit) {
 private fun ModelSelectionStep(
     bundledPath: String?,
     selectedModelPath: String,
+    onUseBundledNow: () -> Unit,
     onSelect: (path: String, downloadModel: OnDeviceModel?) -> Unit,
 ) {
     val context = LocalContext.current
@@ -211,8 +226,8 @@ private fun ModelSelectionStep(
 
     Text("Choose your AI model", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
     Text(
-        "A starter model is already installed so you can begin right away. " +
-            "Download a larger model for better results, or change your mind later in Settings.",
+        "A starter model is included and prepares quietly while you use the app. " +
+            "Choose it now to finish preparing it immediately, or download a larger model for better results.",
         color = Neutral400, fontSize = 12.sp,
     )
     Spacer(Modifier.height(4.dp))
@@ -229,6 +244,7 @@ private fun ModelSelectionStep(
             onClick = {
                 when {
                     isInstalled -> onSelect(installed.orEmpty(), null)
+                    model.bundled -> onUseBundledNow()
                     model.gated -> uriHandler.openUri(model.repoUrl)
                     else -> onSelect("", model)  // needs download
                 }
@@ -252,15 +268,15 @@ private fun ModelSelectionButtons(
     )
     Spacer(Modifier.height(4.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-        if (bundledPath != null) {
-            Text(
-                "Use starter model", color = Neutral400, fontSize = 12.sp,
-                modifier = Modifier
-                    .clickable { onUseBundled() }
-                    .padding(12.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-        }
+        Text(
+            if (bundledPath != null) "Use starter model" else "Use starter model now",
+            color = Neutral400,
+            fontSize = 12.sp,
+            modifier = Modifier
+                .clickable { onUseBundled() }
+                .padding(12.dp),
+        )
+        Spacer(Modifier.width(8.dp))
         if (downloadModel != null) {
             Button(
                 onClick = onDownload,
