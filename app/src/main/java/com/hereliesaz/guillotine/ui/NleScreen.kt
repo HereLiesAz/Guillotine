@@ -230,16 +230,25 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
 
     // Quietly materialize the bundled starter model in ~8 MB bursts over the first ~20 minutes.
-    // The prewarmer yields while playback/analysis/export/the assistant is active, so editing work
-    // takes priority. PromptCoach's on-demand path above can finish the partial file at any time.
-    androidx.compose.runtime.LaunchedEffect(context) {
+    // The prewarmer yields to foreground work and stops advancing while the app is backgrounded.
+    // PromptCoach's on-demand path above can finish the partial file at any time.
+    val modelPrewarmLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.LaunchedEffect(context, modelPrewarmLifecycleOwner) {
         runCatching {
             com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.prewarmOverFirstOpen(context) {
                 val editor = vm.uiState.value
-                !editor.isPlaying &&
+                val foreground = modelPrewarmLifecycleOwner.lifecycle.currentState.isAtLeast(
+                    androidx.lifecycle.Lifecycle.State.RESUMED,
+                )
+                val modelDownloadBusy =
+                    com.hereliesaz.guillotine.ai.agent.ModelDownloadManager.state.value is
+                        com.hereliesaz.guillotine.ai.agent.ModelDownloadManager.DownloadState.Downloading
+                foreground &&
+                    !editor.isPlaying &&
                     !editor.isProcessing &&
                     editor.exportPhase == null &&
-                    !assistantVm.state.value.running
+                    !assistantVm.state.value.running &&
+                    !modelDownloadBusy
             }
         }
     }
