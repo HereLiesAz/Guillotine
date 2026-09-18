@@ -220,11 +220,28 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val promptCoachCompleter: suspend (String) -> String? = { prompt ->
         val path = withContext(Dispatchers.IO) {
             runCatching {
+                // Prompt input always wins: if the 20-minute prewarm has not finished yet, complete
+                // the remaining bytes immediately and continue straight into local inference.
                 com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.ensureExtracted(context)
             }.getOrNull()
         }
         if (path == null) null
         else com.hereliesaz.guillotine.ai.agent.PromptCoachLocalModel.complete(context, path, prompt)
+    }
+
+    // Quietly materialize the bundled starter model in ~8 MB bursts over the first ~20 minutes.
+    // The prewarmer yields while playback/analysis/export/the assistant is active, so editing work
+    // takes priority. PromptCoach's on-demand path above can finish the partial file at any time.
+    androidx.compose.runtime.LaunchedEffect(context) {
+        runCatching {
+            com.hereliesaz.guillotine.ai.agent.BundledModelExtractor.prewarmOverFirstOpen(context) {
+                val editor = vm.uiState.value
+                !editor.isPlaying &&
+                    !editor.isProcessing &&
+                    editor.exportPhase == null &&
+                    !assistantVm.state.value.running
+            }
+        }
     }
     // Give the assistant a disk cache so the one-time LLM vocabulary expansion persists across launches.
     androidx.compose.runtime.LaunchedEffect(context) {
