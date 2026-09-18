@@ -949,18 +949,10 @@ private fun ModelPicker(
     if (models.isEmpty()) return
     val state by ModelDownloadManager.state.collectAsState()
     val uriHandler = LocalUriHandler.current
+    val scope = rememberCoroutineScope()
 
-    // Ensure the bundled model is extracted so installedPath picks it up (only relevant when this
-    // group actually contains a bundled model).
-    var bundledReady by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        if (models.any { it.bundled }) {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                BundledModelExtractor.ensureExtracted(context)
-            }
-        }
-        bundledReady = true
-    }
+    // Merely opening Settings must not force the ~167 MB bundled model to finish extracting.
+    // The editor prewarms it gradually; an explicit "Use now" below is allowed to finish it at once.
 
     Text(title, color = Neutral400, fontSize = 12.sp)
     // Gemma redistribution notice: shown whenever this group offers a Gemma model. We re-host the
@@ -974,17 +966,19 @@ private fun ModelPicker(
         )
     }
     models.forEach { model ->
-        // Keyed on bundledReady so the bundled model flips to "Installed" once extraction finishes
-        // (without this the row never refreshes after the LaunchedEffect completes).
-        val installed = remember(state, bundledReady, model.id) {
-            ModelDownloadManager.installedPath(context, model)
+        val installed = remember(state, model.id) {
+            if (model.bundled) BundledModelExtractor.installedPath(context)
+            else ModelDownloadManager.installedPath(context, model)
         }
         val downloading = (state as? ModelDownloadManager.DownloadState.Downloading)
             ?.takeIf { it.modelId == model.id }
         val failed = (state as? ModelDownloadManager.DownloadState.Failed)
             ?.takeIf { it.modelId == model.id }
-        // Recompute on every state change so a cancel/finish refreshes the resume offset.
-        val partial = remember(state, model.id) { ModelDownloadManager.partialBytes(context, model) }
+        // The bundled model's .part file belongs to the paced prewarmer rather than the downloader.
+        val partial = remember(state, model.id) {
+            if (model.bundled) BundledModelExtractor.partialBytes(context)
+            else ModelDownloadManager.partialBytes(context, model)
+        }
         val inUse = installed != null && installed == selectedPath
 
         Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -1002,7 +996,14 @@ private fun ModelPicker(
                         inUse -> Text("In use", color = Neutral500, fontSize = 11.sp)
                         installed != null -> ActionText("✓ Use") { onUse(installed) }
                         downloading != null -> ActionText("Cancel") { ModelDownloadManager.cancel() }
-                        model.bundled -> {} // bundled but not yet extracted; will appear once ready
+                        model.bundled -> ActionText("Use now") {
+                            scope.launch {
+                                val path = withContext(Dispatchers.IO) {
+                                    runCatching { BundledModelExtractor.ensureExtracted(context) }.getOrNull()
+                                }
+                                if (path != null) onUse(path)
+                            }
+                        }
                         model.gated -> ActionText("Get ↗") { uriHandler.openUri(model.repoUrl) }
                         partial > 0 -> ActionText("Resume") { ModelDownloadManager.start(context, model) }
                         else -> ActionText("Download") { ModelDownloadManager.start(context, model) }
