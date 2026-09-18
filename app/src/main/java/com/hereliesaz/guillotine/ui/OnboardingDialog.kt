@@ -61,6 +61,7 @@ import com.hereliesaz.guillotine.ui.theme.Red500
 import com.hereliesaz.guillotine.ui.theme.White
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 
 /**
  * Full-screen, non-dismissable onboarding dialog shown on first launch. Three steps:
