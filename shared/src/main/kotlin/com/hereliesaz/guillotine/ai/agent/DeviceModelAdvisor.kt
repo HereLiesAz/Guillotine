@@ -14,6 +14,8 @@ data class DeviceModelProfile(
     val lowRam: Boolean,
     val osLabel: String,
     val primaryAbi: String = "",
+    /** Optional accelerator/GPU label when the platform can identify one cheaply and reliably. */
+    val acceleratorLabel: String = "",
 ) {
     val shortSummary: String
         get() = buildString {
@@ -23,6 +25,7 @@ data class DeviceModelProfile(
             append(if (is64Bit) " · 64-bit" else " · 32-bit")
             if (freeStorageBytes > 0) append(" · ").append(formatGb(freeStorageBytes)).append(" free")
             if (primaryAbi.isNotBlank()) append(" · ").append(primaryAbi)
+            if (acceleratorLabel.isNotBlank()) append(" · ").append(acceleratorLabel)
         }
 
     companion object {
@@ -199,6 +202,7 @@ object DeviceModelAdvisor {
         }
         if (profile.cpuCores >= 8) parts += "${profile.cpuCores} cores give it useful compute headroom"
         else if (profile.cpuCores in 5..7) parts += "${profile.cpuCores} cores are a reasonable fit"
+        if (profile.acceleratorLabel.isNotBlank()) parts += "${profile.acceleratorLabel} can help local inference"
         if (model.category == ModelCategory.ASSISTANT_LLM) {
             parts += when (model.capabilityTier.coerceIn(1, 5)) {
                 5 -> "it is the strongest local assistant in the catalog"
