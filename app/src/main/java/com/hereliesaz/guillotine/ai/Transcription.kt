@@ -55,6 +55,70 @@ object Transcription {
         return whisper(context, key, uri)
     }
 
+    /**
+     * Cloud fallback for voice-command dictation after local/system speech recognition fails.
+     * Reuses the already-recorded 16 kHz mono float PCM, so the user does not have to repeat
+     * themselves merely because a native ASR runtime refused to load on this device.
+     *
+     * Returns null when no OpenAI key is configured or when Whisper returns no text.
+     */
+    suspend fun transcribeVoicePcmCloud(
+        context: Context,
+        settings: AiSettings,
+        pcm: FloatArray,
+    ): String? {
+        if (pcm.isEmpty()) return null
+        val key = settings.keyFor(AiProviderType.OPENAI)
+        if (key.isBlank()) return null
+
+        val wav = withContext(Dispatchers.IO) {
+            File.createTempFile("guillotine_voice_", ".wav", context.cacheDir).also { file ->
+                writeMonoPcm16Wav(file, pcm, VoiceCapture.SAMPLE_RATE)
+            }
+        }
+        return try {
+            whisper(context, key, Uri.fromFile(wav))
+                .joinToString(" ") { it.text.trim() }
+                .trim()
+                .ifBlank { null }
+        } finally {
+            withContext(Dispatchers.IO) { runCatching { wav.delete() } }
+        }
+    }
+
+    private fun writeMonoPcm16Wav(file: File, pcm: FloatArray, sampleRate: Int) {
+        val dataBytes = pcm.size * 2
+        java.io.BufferedOutputStream(java.io.FileOutputStream(file)).use { out ->
+            fun le16(value: Int) {
+                out.write(value and 0xff)
+                out.write((value ushr 8) and 0xff)
+            }
+            fun le32(value: Int) {
+                out.write(value and 0xff)
+                out.write((value ushr 8) and 0xff)
+                out.write((value ushr 16) and 0xff)
+                out.write((value ushr 24) and 0xff)
+            }
+            out.write("RIFF".toByteArray(Charsets.US_ASCII))
+            le32(36 + dataBytes)
+            out.write("WAVE".toByteArray(Charsets.US_ASCII))
+            out.write("fmt ".toByteArray(Charsets.US_ASCII))
+            le32(16)          // PCM fmt chunk size
+            le16(1)           // PCM
+            le16(1)           // mono
+            le32(sampleRate)
+            le32(sampleRate * 2) // byte rate, mono 16-bit
+            le16(2)           // block align
+            le16(16)          // bits/sample
+            out.write("data".toByteArray(Charsets.US_ASCII))
+            le32(dataBytes)
+            pcm.forEach { sample ->
+                val s = (sample.coerceIn(-1f, 1f) * 32767f).toInt()
+                le16(s and 0xffff)
+            }
+        }
+    }
+
     /** Null (not empty) if [uri] has no audio track at all, so the caller still falls through to cloud. */
     private fun transcribeSherpa(context: Context, modelDir: String, uri: Uri): List<TranscriptCue>? {
         val pcm = PcmDecoder.decode(context, uri, com.hereliesaz.guillotine.ai.tflite.YamnetClassifier.SAMPLE_RATE) ?: return null

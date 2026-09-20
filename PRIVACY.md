@@ -124,13 +124,15 @@ enable it, the app makes no such connection.
   generative removal, or export) running with a progress notification while the app is in the
   background. These are purely local; nothing is transmitted.
 
-- **Microphone (`RECORD_AUDIO`)** — used only for voice-command dictation: tap the mic button to
-  start recording, tap again to stop; the captured audio is transcribed **on-device** (an offline
-  speech-recognition model you configure) and dropped into the prompt box for you to review before
-  it's sent anywhere. The mic only records between those two taps, and the captured audio itself
-  is never uploaded or stored — only the transcribed text is kept (as part of your prompt/project
-  data, per "Information stored on your device" above). This feature is unused, and the app never
-  touches the mic, until you configure an offline speech model and use it.
+- **Microphone (`RECORD_AUDIO`)** — used only for voice-command dictation. Guillotine first tries
+  the configured offline speech model. If that engine cannot run, the app may use Android's installed
+  **system speech-recognition service**; whether that service processes speech locally or over the
+  network depends on the device and recognition provider. If system recognition also fails and you
+  have configured an **OpenAI API key**, Guillotine may upload that command recording to OpenAI
+  Whisper as the final speech-to-text fallback. The UI announces each fallback before it is used.
+  Guillotine does not keep the recording after transcription; only the resulting text is placed in
+  the prompt/project data. Without a configured cloud key, Guillotine itself does not upload the
+  command recording.
 
 The app does not request location, contacts, or the camera; it only works with media you
 explicitly import.

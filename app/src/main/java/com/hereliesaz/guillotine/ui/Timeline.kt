@@ -331,10 +331,13 @@ private fun TimelineLanes(
                 // it still falls through to tap-to-seek above. This surface is the (stationary) scrolled
                 // content, so a pointer's x maps straight to time (x / pps).
                 .pointerInput(pps) {
-                    val grabRadiusPx = 12.dp.toPx()
+                    val grabRadiusPx = 24.dp.toPx()
                     awaitPointerEventScope {
                         while (true) {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            // The ruler owns its own gestures: tap seeks, drag creates the playback region.
+                            // Never let the full-height playhead scrubber steal a ruler gesture.
+                            if (down.position.y < RULER_HEIGHT.toPx()) continue
                             val startMs = vm.uiState.value.currentTimeMs
                             val playheadPx = startMs / 1000f * pps
                             if (kotlin.math.abs(down.position.x - playheadPx) > grabRadiusPx) continue
