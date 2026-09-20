@@ -15,9 +15,13 @@ interpreters (`.tflite`), **sherpa-onnx** offline speech (`.tar.bz2` bundles and
 files), and **ONNX Runtime** (Spleeter stem separation).
 
 You manage everything from **Settings → the Model Manager** (see [SETTINGS.md](SETTINGS.md)). Each
-category has a text field for a model *path* plus a picker listing the recommended models, where each
-row offers **Download**, **Resume**, **Cancel**, **✓ Use**, **In use**, or **Remove** (gated repos
-show **Get ↗** instead — a link out). For how these models power specific assistant commands
+category has a text field for a model *path* plus a picker listing the recommended models. Guillotine
+reads permission-free local device facts (RAM, free app storage, CPU core count, 32/64-bit runtime and
+Android's low-RAM flag), sorts models by device fit, and explains **Best fit / Recommended / Use with
+caution / Not recommended** directly under each row. This is an estimate, not a benchmark: chipset
+accelerators and thermals still vary by device. Each row offers **Download**, **Resume**, **Cancel**,
+**✓ Use**, **In use**, or **Remove** (gated repos show **Get ↗** instead — a link out). For how these
+models power specific assistant commands
 (`caption_frame`, `transcribe_precise`, `separate_stems`, `find_highlights`, …), see
 [TOOLS.md](TOOLS.md); for the day-to-day workflow, see [MANUAL.md](MANUAL.md); for the *cloud*
 bring-your-own-key generation providers (a separate, opt-in system), see [PROVIDERS.md](PROVIDERS.md).
@@ -46,8 +50,14 @@ bring-your-own-key generation providers (a separate, opt-in system), see [PROVID
   a per-model directory (the top-level folder is stripped), and "Use" wires that *directory* path;
   install is confirmed by a marker file inside it.
 - **The bundled starter.** One model — **SmolLM 135M Instruct (q8)** — ships *inside the APK* and is
-  extracted to `llm-models` on first launch, so the assistant works offline out of the box with no
-  download. It cannot be removed.
+  extracted to `llm-models` progressively after launch, so the assistant works offline with no
+  download. If a prompt needs it before prewarming finishes, extraction completes immediately. It
+  cannot be removed.
+- **Dedicated router role.** The same bundled 135M *weights* are also opened in an isolated routing
+  engine whose only job is delegation: it reads the live MCP capability catalog plus which specialist
+  model roles are configured, selects the smallest relevant set, then hands that narrowed catalog to
+  the real planner. It does **not** edit or answer the user. Reusing the weights avoids shipping a
+  second ~167 MB copy.
 - **Picking one.** Tapping **✓ Use** sets that category's `…ModelPath` setting to the installed path;
   a freshly finished download is auto-adopted for its own category. These paths are persisted and
   travel in the Settings backup bundle.
