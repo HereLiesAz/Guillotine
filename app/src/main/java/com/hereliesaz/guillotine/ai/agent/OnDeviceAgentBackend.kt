@@ -165,6 +165,7 @@ class OnDeviceAgentBackend(
         }
 
         var completed = 0
+        var cutClips = 0
         var failed = 0
         for (id in ids) {
             val setPrompt = execute(
@@ -179,16 +180,27 @@ class OnDeviceAgentBackend(
             }
 
             val analyzed = execute("analyze_clip", JSONObject().put("clip_id", id))
-            if (analyzed.isError) failed++ else completed++
+            if (analyzed.isError) {
+                failed++
+            } else {
+                completed++
+                if (analyzed.json.optBoolean("cutApplied", false)) cutClips++
+            }
         }
 
         when {
-            failed == 0 ->
-                onEvent(AgentEvent.Done("Tightened pacing on $completed video clip(s) by cutting pauses and dead air."))
-            completed > 0 ->
-                onEvent(AgentEvent.Done("Tightened $completed video clip(s); $failed clip(s) could not be analyzed."))
-            else ->
+            completed == 0 ->
                 onEvent(AgentEvent.Failed("The pacing analysis could not run on the video clips."))
+            cutClips == 0 && failed == 0 ->
+                onEvent(AgentEvent.Done("Analyzed $completed video clip(s); no removable pauses or dead air were found."))
+            failed == 0 ->
+                onEvent(AgentEvent.Done("Cut pauses and dead air from $cutClips of $completed analyzed video clip(s)."))
+            else ->
+                onEvent(
+                    AgentEvent.Done(
+                        "Analyzed $completed video clip(s), cut dead air from $cutClips; $failed clip(s) could not be analyzed.",
+                    ),
+                )
         }
     }
 
