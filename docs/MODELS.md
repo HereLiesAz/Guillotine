@@ -120,7 +120,7 @@ downloadable model — see [the note below](#a-note-on-reserved-categories).
 | `STEM` | "Separate the stems / isolate vocals" | ONNX Runtime (Spleeter) · `.tar.bz2` dir | `stemModelPath` | 1 |
 | `DENOISE` | "Clean up the audio" (speech denoise) | sherpa-onnx GTCRN · `.onnx` | `denoiseModelPath` | 1 |
 
-Total: **22 recommended models** across 14 catalogs.
+Total: **36 recommended models** across 15 catalogs (including the separate desktop-assistant catalog).
 
 ---
 
