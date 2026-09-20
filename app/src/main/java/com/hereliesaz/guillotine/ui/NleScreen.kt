@@ -779,7 +779,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 .weight(timelineWeight)
                 .fillMaxWidth()
         ) {
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = { text -> assistantVm.setInput(text, promptCoachCompleter) }, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = { text -> assistantVm.setInput(text, promptCoachCompleter) }, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, aiSettings = settings, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
             
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack,
@@ -1350,7 +1350,8 @@ private fun EditorToolStrip(
     onAgentRun: (String) -> Unit,
     onImport: () -> Unit,
     onHelp: () -> Unit,
-    /** Offline ASR model dir for voice-command dictation; blank hides the mic button. */
+    aiSettings: AiSettings,
+    /** Offline ASR model dir for voice-command dictation; system/cloud fallbacks work without it. */
     asrModelPath: String = "",
 ) {
     val selected = state.selectedClips
