@@ -16,7 +16,7 @@ import org.json.JSONObject
 /**
  * Desktop counterpart to Android's delegating front controller.
  *
- * qwen3:0.6b has ONE role here: routing. It never edits or answers the user. The selected desktop
+ * qwen3.5:0.8b has ONE role here: routing. It never edits or answers the user. The selected desktop
  * planner (or cloud brain) receives only the routed MCP subset. If the router is missing or uncertain,
  * the planner gets the full catalog and nothing is blocked.
  */
