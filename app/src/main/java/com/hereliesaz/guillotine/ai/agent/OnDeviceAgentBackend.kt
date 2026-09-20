@@ -51,10 +51,12 @@ class OnDeviceAgentBackend(
             val modelName = File(modelPath).name.ifBlank { "on-device model" }
             ActivityLog.progress("AI · loading $modelName…")
             val loadStarted = SystemClock.elapsedRealtime()
-            EngineCache.get(context, modelPath, wantVision = visionEngaged)
-            ActivityLog.info("AI · model ready in ${elapsedMs(loadStarted)} ms")
+            val runtime = prepareTextModel()
+            ActivityLog.info("AI · model ready in ${elapsedMs(loadStarted)} ms · $runtime")
 
-            val canLook = frames != null && !visionUnsupported
+            // Modern .litertlm assistant models are intentionally text-only here. Rich frame vision is
+            // delegated to caption_frame/VLM instead of reopening them through MediaPipe's legacy API.
+            val canLook = frames != null && !visionUnsupported && !isLiteRtLmModel
             val allTools = tools.definitions()
             val selectedTools = selectToolDefinitions(allTools, instruction)
             ActivityLog.info(
@@ -78,8 +80,7 @@ class OnDeviceAgentBackend(
                 ActivityLog.progress("AI · turn $iterations: generating (${prompt.length} chars)…")
                 val generationStarted = SystemClock.elapsedRealtime()
 
-                val llm = EngineCache.get(context, modelPath, wantVision = visionEngaged)
-                val raw = llm.generateResponse(prompt).orEmpty().trim()
+                val raw = generateText(prompt)
                 ActivityLog.info("AI · turn $iterations: ${raw.length} chars in ${elapsedMs(generationStarted)} ms")
                 val obj = extractJsonObject(raw)
 
@@ -350,7 +351,31 @@ class OnDeviceAgentBackend(
 
     private fun elapsedMs(started: Long): Long = SystemClock.elapsedRealtime() - started
 
+    private val isLiteRtLmModel: Boolean
+        get() = modelPath.endsWith(".litertlm", ignoreCase = true)
+
+    private suspend fun prepareTextModel(): String =
+        if (isLiteRtLmModel) {
+            LiteRtLmTextEngine.prepare(context, modelPath)
+        } else {
+            EngineCache.get(context, modelPath, wantVision = visionEngaged)
+            "MediaPipe LLM"
+        }
+
+    private suspend fun generateText(prompt: String): String =
+        if (isLiteRtLmModel) {
+            LiteRtLmTextEngine.generate(context, modelPath, prompt)
+        } else {
+            EngineCache.get(context, modelPath, wantVision = visionEngaged)
+                .generateResponse(prompt)
+                .orEmpty()
+                .trim()
+        }
+
     private fun lookAtFrame(prompt: String): Pair<String, Boolean> {
+        if (isLiteRtLmModel) {
+            return "This assistant model is text-only. Use caption_frame (the configured VLM/vision model) instead." to true
+        }
         val fp = frames ?: return "Vision isn't available here." to true
         if (visionUnsupported) {
             return "This model can't view images directly. Use caption_frame (a separate vision model) instead." to true
