@@ -126,23 +126,26 @@ Total: **22 recommended models** across 14 catalogs.
 
 ## `ASSISTANT_LLM` — the assistant brain
 
-MediaPipe `LlmInference` models (`.task`, or the newer `.litertlm`) that let the AI editor plan and
-run edits **fully offline, with no API key**. If `agentModelPath` is blank the command bar falls back
-to whichever cloud provider key you've configured (see [PROVIDERS.md](PROVIDERS.md)); set a local
-model here to stay offline. The bundled SmolLM starter is always present.
+Assistant models use two local runtimes: legacy `.task` files stay on MediaPipe `LlmInference`,
+while modern `.litertlm` files use the official **LiteRT-LM 0.17.1** Kotlin runtime with GPU-first,
+CPU-fallback loading. Both paths are fully offline. If `agentModelPath` is blank the command bar
+falls back to whichever cloud provider key you've configured (see [PROVIDERS.md](PROVIDERS.md)); set
+a local model here to stay offline. The bundled SmolLM starter is always present.
 
 | Model (`id`) | Purpose | Size | Format | License | Source |
 |---|---|---|---|---|---|
-| SmolLM 135M Instruct q8 (`smollm-135m-q8`) | Bundled starter. Instant startup, basic completion & simple tool calls; very limited reasoning. | 166 MB | `.task` | Apache-2.0 | **Bundled in APK** (no download) |
-| Qwen2.5 0.5B Instruct q8 (`qwen2.5-0.5b-q8`) | Good reasoning for its size; handles tool calls and editing context. | 546 MB | `.task` | Apache-2.0 | HF `litert-community/Qwen2.5-0.5B-Instruct` |
-| Qwen2.5 1.5B Instruct q8 (`qwen2.5-1.5b-q8`) | Strong reasoning & tool use; best quality/size balance. | 1.57 GB | `.task` | Apache-2.0 | HF `litert-community/Qwen2.5-1.5B-Instruct` |
-| Phi-4 mini Instruct q8 (`phi4-mini-q8`) | Most capable on-device model; excellent reasoning. Needs a high-end device. | 3.94 GB | `.task` | MIT | HF `litert-community/Phi-4-mini-instruct` |
-| Gemma 3 1B Instruct int4 (`gemma3-1b-int4`) | Compact & fast with good reasoning; smallest of the full-capability models. | 554 MB | `.task` | Gemma | HF `HereLiesAz/gemma3-1b-it` (mirrored) |
-| DeepSeek-R1 Distill Qwen 1.5B q8 (`deepseek-r1-qwen-1.5b-q8`) | Strong step-by-step reasoning (distilled R1); good for multi-step edits. Verbose traces. | 1.86 GB | `.task` | MIT | HF `litert-community/DeepSeek-R1-Distill-Qwen-1.5B` |
-| Qwen3 0.6B int4 (`qwen3-0.6b-int4`) | Small, fast, up-to-date lightweight default; ships as LiteRT-LM. | 497 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3-0.6B` |
+| SmolLM 135M Instruct q8 (`smollm-135m-q8`) | Bundled starter plus routing/coach weight. Tiny and fast; intentionally not the main complex planner. | 166 MB | `.task` | Apache-2.0 | **Bundled in APK** (no download) |
+| SmolLM2 360M Instruct (`smollm2-360m`) | Ultra-light modern planner for constrained devices; replaces the older Qwen2.5 0.5B q8 tier with a smaller footprint. | 373 MB | `.litertlm` | Apache-2.0 | HF `litert-community/SmolLM2-360M-Instruct` |
+| Qwen3 0.6B int4 (`qwen3-0.6b-int4`) | Fast modern Qwen3 planner under 0.5 GB; good default on modest phones. | 497 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3-0.6B` |
+| Gemma 3 1B Instruct int4 (`gemma3-1b-int4`) | Compact 1B assistant with strong instruction following; retained as the proven `.task` option. | 554 MB | `.task` | Gemma | HF `HereLiesAz/gemma3-1b-it` (mirrored) |
+| MiniCPM5 1B mixed int4/int8 (`minicpm5-1b-int4`) | On-device-first 1B model with particularly strong tool use, code and difficult reasoning for its class. | 793 MB | `.litertlm` | Apache-2.0 | HF `litert-community/MiniCPM5-1B` |
+| Qwen3 1.7B int4 (`qwen3-1.7b-int4`) | Strong mobile planner in under 1 GB; GPU-optimized. Replaces the older 1.5B q8 assistant tier. | 977 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3-1.7B` |
+| MiniCPM5 2B int4 (`minicpm5-2b-int4`) | Heavy phone tier with hybrid reasoning and tool-oriented behavior. Replaces the 3.94 GB Phi-4 / 1.86 GB R1 entries with a much smaller modern option. | ~1.55 GB | `.litertlm` | Apache-2.0 | HF `litert-community/MiniCPM5-2B` |
 
-Notes: the `.litertlm` Qwen3 model loads directly on the current MediaPipe runtime (0.10.35). The
-Gemma 3 1B entry is served from the [Gemma mirror](#the-gemma-mirror) (Gemma Terms of Use apply).
+The retired catalog entries are **Qwen2.5 0.5B q8, Qwen2.5 1.5B q8, DeepSeek-R1 Distill Qwen 1.5B q8,
+and Phi-4 mini q8**. Existing files are not deleted from a user's storage automatically; they simply
+stop being offered as recommended downloads. Gemma 3 1B remains served from the
+[Gemma mirror](#the-gemma-mirror) (Gemma Terms of Use apply).
 
 ---
 
