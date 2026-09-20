@@ -119,6 +119,7 @@ The transport bar sits directly under the preview:
 | **Play / Pause** | Toggle playback. (Keyboard: **Space**.) |
 | **Forward 1 frame** | Step forward one frame. |
 | **End** | Jump the playhead to the end. |
+| **Render preview** | With a playback region selected, render that span to a disposable **720p / max-24fps** cache buffer. Playback inside the region then uses the single rendered stream; any edit or region change invalidates it. |
 | **Loop** | When on, playback restarts at the start of the loop region (or the timeline) instead of stopping at the end. |
 | **Speed** | Tap to cycle playback rate: **0.5× → 1× → 1.5× → 2×**. |
 
@@ -175,7 +176,7 @@ A muted or hidden track shows a small red icon in its header.
 | Hold a clip past the top/bottom track edge (~1s) | Create a new track there and drop the clip onto it. |
 | **Long-press a clip edge, then drag** | **Edge-trim** that in/out point (see below). |
 | Long-press a clip's middle | Range-select from the current selection to this clip (across tracks). |
-| Grab the red playhead line and drag | Scrub the playhead from anywhere along its height. |
+| Grab near the red playhead line and drag | Scrub the playhead from anywhere along its height; the invisible grab target is wider than the 2dp line. |
 | Pinch horizontally | Zoom **time** (pixels per second). |
 | Pinch vertically | Zoom **track height**. |
 | **Ctrl + scroll** (mouse/trackpad) | Zoom the timeline in/out. |
