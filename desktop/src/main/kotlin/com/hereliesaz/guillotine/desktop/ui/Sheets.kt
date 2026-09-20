@@ -442,14 +442,120 @@ fun SettingsScreen(
                     
                     
                     
-                    Text("AI assistant — on-device model (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = agentModelPath, hint = "assistant .task/.litertlm model", isDirectory = false) { agentModelPath = it }
-                    Text("Run the assistant fully offline with no key. Blank = use the selected provider's key above.", color = Neutral500, fontSize = 10.sp)
+                    Text("AI assistant — desktop local model (optional)", color = Neutral400, fontSize = 12.sp)
                     Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=litert") }.padding(top = 2.dp)
+                        "Desktop uses its own larger local-model catalog through Ollama; phone/tablet LiteRT " +
+                            "weights are not offered here. Selecting a local model switches the analyzer to Local.",
+                        color = Neutral500,
+                        fontSize = 10.sp,
+                    )
+
+                    desktopProfile?.let { profile ->
+                        Text(profile.shortSummary, color = White, fontSize = 10.sp)
+                        Text(
+                            "Fit is estimated locally from RAM, free storage, CPU cores, architecture and any " +
+                                "accelerator Guillotine can identify. Ollama chooses the actual CPU/GPU backend.",
+                            color = Neutral500,
+                            fontSize = 10.sp,
                         )
+                        val recommendations = remember(profile) {
+                            DeviceModelAdvisor.advise(profile, RECOMMENDED_DESKTOP_ASSISTANT_MODELS)
+                        }
+                        val installed = ollamaStatus?.installedModels.orEmpty()
+                        val ollamaAvailable = ollamaStatus?.executableAvailable == true
+
+                        recommendations.forEach { recommendation ->
+                            val model = recommendation.model
+                            val tag = model.fileName.removePrefix("ollama:")
+                            val selected = agentModelPath == model.fileName
+                            val isInstalled = tag in installed
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Neutral800)
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(model.label, color = White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                        Text("${model.sizeLabel} · ${model.license}", color = Neutral500, fontSize = 10.sp)
+                                    }
+                                    Text(
+                                        recommendation.badge,
+                                        color = when (recommendation.fit) {
+                                            DeviceModelFit.BEST_FIT -> Red500
+                                            DeviceModelFit.RECOMMENDED -> White
+                                            DeviceModelFit.CAUTION -> Neutral400
+                                            DeviceModelFit.NOT_RECOMMENDED -> Red500
+                                        },
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+                                Text(model.abilities, color = Neutral400, fontSize = 10.sp)
+                                Text(
+                                    recommendation.reason,
+                                    color = if (recommendation.fit == DeviceModelFit.NOT_RECOMMENDED) Red500 else Neutral500,
+                                    fontSize = 10.sp,
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    when {
+                                        selected -> Text("In use", color = Red500, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                                        ollamaBusyModel == tag -> Text("Installing…", color = Neutral400, fontSize = 10.sp)
+                                        isInstalled -> Text(
+                                            "Use",
+                                            color = Red500,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.clickable {
+                                                agentModelPath = model.fileName
+                                                provider = AiProviderType.LOCAL
+                                            },
+                                        )
+                                        ollamaAvailable -> Text(
+                                            "Install & use",
+                                            color = Red500,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.clickable { installAndUseDesktopModel(model.fileName) },
+                                        )
+                                        else -> Text(
+                                            "Install Ollama ↗",
+                                            color = Red500,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.clickable { uriHandler.openUri("https://ollama.com/download") },
+                                        )
+                                    }
+                                    Text(
+                                        "Model details ↗",
+                                        color = Neutral400,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.clickable { uriHandler.openUri(model.repoUrl) },
+                                    )
+                                }
+                            }
+                        }
+                    } ?: Text("Reading desktop hardware…", color = Neutral500, fontSize = 10.sp)
+
+                    ollamaMessage?.let { Text(it, color = Neutral400, fontSize = 10.sp) }
+                    ModelPathField(
+                        value = agentModelPath,
+                        hint = "advanced: ollama:<tag> or custom desktop local selector",
+                        isDirectory = false,
+                    ) { agentModelPath = it }
+                    Text(
+                        "Blank = use the selected cloud provider. Desktop-local models stay on this machine; " +
+                            "Guillotine connects only to Ollama on 127.0.0.1.",
+                        color = Neutral500,
+                        fontSize = 10.sp,
+                    )
 
                     Text("Recognition model — for \"teach a specific thing\" (optional)", color = Neutral400, fontSize = 12.sp)
                     ModelPathField(value = idEmbedModelPath, hint = "recognition .tflite model", isDirectory = false) { idEmbedModelPath = it }
