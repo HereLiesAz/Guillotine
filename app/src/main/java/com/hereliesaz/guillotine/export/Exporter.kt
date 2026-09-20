@@ -34,6 +34,7 @@ import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.Document
 import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaKind
+import com.hereliesaz.guillotine.model.Quality
 import com.hereliesaz.guillotine.model.TimelineClip
 import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.ui.ActivityLog
@@ -209,6 +210,123 @@ object Exporter {
             mattes.values.forEach { runCatching { it.recycle() } }
             // Free the precomputed face-blur patch bitmaps too — a 60s face-blur clip can hold
             // hundreds of MB across ~600 bitmaps (one per 100ms bucket, up to 720x720 ARGB_8888).
+            faceBlur.values.forEach { runCatching { it.recycle() } }
+        }
+    }
+
+    /**
+     * Render the current playback region to an expendable, low-resolution cache file for smooth
+     * timeline playback (Vegas-style "render preview"). Nothing is written to MediaStore/gallery.
+     *
+     * The render uses the exact export composition/effects path, but clamps to [region], caps the
+     * frame rate at 24fps, and downsizes to 720p. The caller owns/deletes the returned cache file.
+     */
+    suspend fun renderPreviewBuffer(
+        context: Context,
+        document: Document,
+        region: LongRange,
+        onProgress: (Float) -> Unit = {},
+    ): File = withContext(Dispatchers.Main) {
+        require(region.last > region.first) { "Playback region must have positive duration." }
+        val previewDocument = document
+            .clampedToRegion(region.first, region.last)
+            .copy(
+                settings = document.settings.copy(
+                    quality = Quality.HD_720P,
+                    fps = minOf(document.settings.fps, 24).coerceAtLeast(1),
+                ),
+            )
+
+        val normalizeGains = withContext(Dispatchers.IO) {
+            try {
+                computeNormalizeGains(context, previewDocument)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Throwable) {
+                ActivityLog.error("Preview normalize scan failed (continuing without): ${describeCauseChain(e)}")
+                emptyMap()
+            }
+        }
+        val mattes = withContext(Dispatchers.IO) {
+            try {
+                precomputeMattes(context, previewDocument)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Throwable) {
+                ActivityLog.error("Preview matte precompute failed (continuing without): ${describeCauseChain(e)}")
+                emptyMap()
+            }
+        }
+        val faceBlur = withContext(Dispatchers.IO) {
+            try {
+                precomputeFaceBlur(context, previewDocument)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Throwable) {
+                ActivityLog.error("Preview face-blur precompute failed (continuing without): ${describeCauseChain(e)}")
+                emptyMap()
+            }
+        }
+
+        try {
+            val composition = buildComposition(previewDocument, normalizeGains, mattes, faceBlur)
+            require(composition != null) { "Nothing to preview in this playback region." }
+
+            val disabled = previewDocument.disabledTrackIds
+            val hasAudio = previewDocument.clips.any { clip ->
+                if (clip.trackId in disabled) return@any false
+                when (clip.type) {
+                    ClipType.AUDIO -> true
+                    ClipType.VIDEO -> previewDocument.mediaFor(clip)?.hasAudio == true
+                    else -> false
+                }
+            }
+
+            val outFile = File(
+                context.cacheDir,
+                "guillotine_preview_${System.currentTimeMillis()}.mp4",
+            )
+            coroutineScope {
+                var poller: Job? = null
+                try {
+                    suspendCancellableCoroutine { cont ->
+                        val builder = Transformer.Builder(context)
+                            .setVideoMimeType(MimeTypes.VIDEO_H264)
+                        if (hasAudio) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        val transformer = builder
+                            .addListener(object : Transformer.Listener {
+                                override fun onCompleted(c: Composition, result: ExportResult) {
+                                    if (cont.isActive) cont.resume(Unit)
+                                }
+
+                                override fun onError(c: Composition, result: ExportResult, e: ExportException) {
+                                    if (cont.isActive) cont.resumeWithException(e)
+                                }
+                            })
+                            .build()
+
+                        poller = launch {
+                            val holder = ProgressHolder()
+                            while (isActive) {
+                                transformer.getProgress(holder)
+                                onProgress((holder.progress / 100f).coerceIn(0f, 1f))
+                                delay(150)
+                            }
+                        }
+                        cont.invokeOnCancellation {
+                            runCatching { transformer.cancel() }
+                            runCatching { outFile.delete() }
+                        }
+                        transformer.start(composition, outFile.absolutePath)
+                    }
+                } finally {
+                    poller?.cancel()
+                }
+            }
+            onProgress(1f)
+            outFile
+        } finally {
+            mattes.values.forEach { runCatching { it.recycle() } }
             faceBlur.values.forEach { runCatching { it.recycle() } }
         }
     }

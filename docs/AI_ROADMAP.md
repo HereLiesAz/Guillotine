@@ -195,9 +195,10 @@ Each item is feasible on the current stack or a model listed above.
    offline Piper/sherpa-onnx)**
 10. Speaker diarization → auto podcast multicam switching between speakers. **(shipped —
     `diarize_clip` via sherpa-onnx pyannote segmentation + speaker embedding)**
-11. Voice-command editing — speak the instruction; ASR feeds the agent. **(shipped — a mic button
-    on the assistant field records on-device, transcribes via offline Whisper, and drops the text into
-    the prompt for review/send; needs the ASR model configured)**
+11. Voice-command editing — speak the instruction; ASR feeds the agent. **(shipped — the mic records
+    a command, tries the configured offline ASR first, falls back to Android system recognition when
+    the local runtime is incompatible, then to cloud Whisper when an OpenAI key is configured, and
+    drops the resulting text into the prompt for review/send)**
 
 **Vision & generation**
 12. Smart auto-reframe landscape→9:16/1:1 following the subject (AutoFlip). **(shipped —

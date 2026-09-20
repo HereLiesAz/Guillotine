@@ -186,6 +186,73 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val settings by keyStore.settings.collectAsState(initial = AiSettings())
     val scope = rememberCoroutineScope()
 
+    // Vegas-style rendered preview buffer for the selected ruler/playback region. It is deliberately
+    // transient: any edit or region change invalidates it, and the file lives only in app cache.
+    var bufferedPreview by remember { mutableStateOf<BufferedPreview?>(null) }
+    var previewBufferRendering by remember { mutableStateOf(false) }
+    var previewBufferProgress by remember { mutableFloatStateOf(0f) }
+
+    androidx.compose.runtime.LaunchedEffect(state.document, state.playbackRegion) {
+        val existing = bufferedPreview
+        if (existing != null) {
+            val sameRegion = state.playbackRegion?.let {
+                it.first == existing.startMs && it.last == existing.endMs
+            } == true
+            val renderHash = state.document.copy(
+                name = "",
+                promptHistory = emptyList(),
+                pixelsPerSecond = null,
+            ).hashCode()
+            if (!sameRegion || existing.documentHash != renderHash) {
+                runCatching { java.io.File(existing.path).delete() }
+                bufferedPreview = null
+                previewBufferProgress = 0f
+            }
+        }
+    }
+
+    val renderBufferedPreview: () -> Unit = {
+        val region = state.playbackRegion
+        if (region != null && !previewBufferRendering) {
+            val snapshot = state.document
+            previewBufferRendering = true
+            previewBufferProgress = 0f
+            scope.launch {
+                try {
+                    val file = Exporter.renderPreviewBuffer(
+                        context = context,
+                        document = snapshot,
+                        region = region,
+                        onProgress = { previewBufferProgress = it },
+                    )
+                    bufferedPreview?.let { old -> runCatching { java.io.File(old.path).delete() } }
+                    bufferedPreview = BufferedPreview(
+                        path = file.absolutePath,
+                        startMs = region.first,
+                        endMs = region.last,
+                        documentHash = snapshot.copy(
+                            name = "",
+                            promptHistory = emptyList(),
+                            pixelsPerSecond = null,
+                        ).hashCode(),
+                    )
+                    ActivityLog.info("Preview buffer ready: ${"%.1f".format((region.last - region.first) / 1000f)}s at 720p/24fps.")
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
+                } catch (e: Throwable) {
+                    ActivityLog.error("Preview render failed: ${Exporter.describeExportError(e)}")
+                    android.widget.Toast.makeText(
+                        context,
+                        "Preview render failed.",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } finally {
+                    previewBufferRendering = false
+                }
+            }
+        }
+    }
+
     // One shared MCP tool surface: the embedded server, the optional relay, and the in-app AI
     // assistant all drive the editor through this same object ({ settings } reads live).
     val sharedMcpTools = remember { com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings } }
@@ -619,12 +686,20 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         PreviewPlayer(
                             state,
                             androidx.compose.ui.Modifier.weight(1f).fillMaxWidth(),
+                            bufferedPreview = bufferedPreview,
                             cropMode = state.tool == EditorTool.CROP,
                             showSafeZones = state.tool == EditorTool.CROP,
                             onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
                             onToggleFullscreen = { fullscreenPreview = true },
                         )
-                        TransportControls(vm, state)
+                        TransportControls(
+                            vm = vm,
+                            state = state,
+                            onRenderPreview = renderBufferedPreview,
+                            previewRendering = previewBufferRendering,
+                            previewProgress = previewBufferProgress,
+                            previewBuffered = bufferedPreview != null,
+                        )
                     }
                     DraggableVerticalDivider(
                         onDoubleTap = toggleOrientation,
@@ -654,12 +729,20 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         PreviewPlayer(
                             state,
                             androidx.compose.ui.Modifier.weight(1f).fillMaxWidth(),
+                            bufferedPreview = bufferedPreview,
                             cropMode = state.tool == EditorTool.CROP,
                             showSafeZones = state.tool == EditorTool.CROP,
                             onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
                             onToggleFullscreen = { fullscreenPreview = true },
                         )
-                        TransportControls(vm, state)
+                        TransportControls(
+                            vm = vm,
+                            state = state,
+                            onRenderPreview = renderBufferedPreview,
+                            previewRendering = previewBufferRendering,
+                            previewProgress = previewBufferProgress,
+                            previewBuffered = bufferedPreview != null,
+                        )
                     }
                     DraggableTimelineDivider(
                         onDoubleTap = toggleOrientation,
@@ -696,7 +779,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 .weight(timelineWeight)
                 .fillMaxWidth()
         ) {
-            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = { text -> assistantVm.setInput(text, promptCoachCompleter) }, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
+            EditorToolStrip(vm, state, onAnalyze, onTranscribe, providerLabel, { showSettings = true }, assistant = assistantState, onAgentInput = { text -> assistantVm.setInput(text, promptCoachCompleter) }, onAgentRun = { t -> assistantVm.run(t, sharedMcpTools, agentBackend) }, onImport = { importTargetTrack = null; importLauncher() }, onHelp = { showHelp = true }, aiSettings = settings, asrModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settings, "asrModelPath"))
             
             TimelinePanel(
                 vm, state, onImportToTrack, onCreateOnTrack,
@@ -1166,7 +1249,14 @@ private fun NameProjectDialog(current: String, onConfirm: (String) -> Unit, onDi
 
 
 @Composable
-private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
+private fun TransportControls(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    onRenderPreview: () -> Unit,
+    previewRendering: Boolean,
+    previewProgress: Float,
+    previewBuffered: Boolean,
+) {
     val total = state.document.totalDurationMs
     Row(
         Modifier.fillMaxWidth().height(48.dp).background(Neutral950).padding(horizontal = 12.dp),
@@ -1193,6 +1283,27 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
             IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
         }
         Spacer(Modifier.weight(1f))
+        // Render the selected ruler region to a disposable low-quality cache file, then play that
+        // single stream instead of decoding/compositing every source clip live.
+        IconToolButton(
+            Icons.Filled.Bolt,
+            when {
+                previewRendering -> "Rendering preview ${(previewProgress * 100).toInt()}%"
+                previewBuffered -> "Rendered preview ready"
+                else -> "Render playback region preview"
+            },
+            active = previewBuffered,
+            enabled = state.playbackRegion != null && !previewRendering,
+            onClick = onRenderPreview,
+        )
+        if (previewRendering) {
+            Text(
+                "${(previewProgress * 100).toInt()}%",
+                color = Neutral500,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
         // Loop toggle (right, before the speed control): restart at the region/timeline start instead
         // of stopping at its end.
         IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
@@ -1239,7 +1350,8 @@ private fun EditorToolStrip(
     onAgentRun: (String) -> Unit,
     onImport: () -> Unit,
     onHelp: () -> Unit,
-    /** Offline ASR model dir for voice-command dictation; blank hides the mic button. */
+    aiSettings: AiSettings,
+    /** Offline ASR model dir for voice-command dictation; system/cloud fallbacks work without it. */
     asrModelPath: String = "",
 ) {
     val selected = state.selectedClips
@@ -1278,18 +1390,61 @@ private fun EditorToolStrip(
     // Whether the prompt field has focus — drives the recent-prompts history dropdown.
     var promptFocused by remember { mutableStateOf(false) }
 
-    // ---- Voice-command dictation (offline ASR) --------------------------------------------------
-    // Tap the mic → record → tap again → transcribe on-device → drop the text into the prompt field
-    // (the user reviews, then hits send). Only offered when an offline ASR model is configured.
+    // ---- Voice-command dictation ---------------------------------------------------------------
+    // Preferred order: Guillotine's local ASR -> Android system speech recognition -> configured
+    // cloud Whisper -> typing. The system recognizer cannot consume our already-recorded PCM, so if
+    // the local engine fails the user is asked to say the command once more; cloud fallback can reuse
+    // the original recording and does not require a third attempt.
     val voiceCtx = LocalContext.current
     val voiceScope = rememberCoroutineScope()
     var capture by remember { mutableStateOf<com.hereliesaz.guillotine.ai.VoiceCapture?>(null) }
     var listening by remember { mutableStateOf(false) }
     var transcribing by remember { mutableStateOf(false) }
+    var localAsrBroken by remember(asrModelPath) { mutableStateOf(false) }
+
+    val appendVoiceText: (String) -> Unit = { spoken ->
+        val clean = spoken.trim()
+        if (clean.isNotEmpty()) {
+            val existing = assistant.input
+            onAgentInput(if (existing.isBlank()) clean else "${existing.trim()} $clean")
+        }
+    }
+
+    val hasCloudSpeech =
+        aiSettings.keyFor(com.hereliesaz.guillotine.ai.AiProviderType.OPENAI).isNotBlank()
+    val systemSpeechAvailable = remember(voiceCtx) {
+        com.hereliesaz.guillotine.ai.SystemSpeechRecognizer.isAvailable(voiceCtx)
+    }
+
+    fun finishVoiceFailure(message: String) {
+        transcribing = false
+        android.widget.Toast.makeText(
+            voiceCtx,
+            message,
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+
+    suspend fun cloudFallback(pcm: FloatArray): String? {
+        if (!hasCloudSpeech || pcm.isEmpty()) return null
+        withContext(Dispatchers.Main) {
+            android.widget.Toast.makeText(
+                voiceCtx,
+                "System speech recognition failed — trying configured cloud transcription.",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+        return try {
+            Transcription.transcribeVoicePcmCloud(voiceCtx, aiSettings, pcm)
+        } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            ActivityLog.error("Voice cloud fallback failed: ${t.message ?: t.javaClass.simpleName}")
+            null
+        }
+    }
+
     val beginListening: () -> Unit = {
-        // Assign capture from start()'s result directly: a prior `VoiceCapture().also { …capture = null }`
-        // form was buggy — .also returns the receiver, so the outer assignment overwrote the null and
-        // capture was never null on failure (listening stuck true, no error shown).
         val cap = com.hereliesaz.guillotine.ai.VoiceCapture()
         if (cap.start()) {
             capture = cap
@@ -1297,29 +1452,44 @@ private fun EditorToolStrip(
         } else {
             capture = null
             listening = false
-            android.widget.Toast.makeText(voiceCtx, "Couldn't start the mic — it may be in use.", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(
+                voiceCtx,
+                "Couldn't start the mic — it may be in use.",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
         }
     }
+
     val micPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) beginListening()
-        else android.widget.Toast.makeText(voiceCtx, "Mic permission is needed for voice commands.", android.widget.Toast.LENGTH_SHORT).show()
+        else android.widget.Toast.makeText(
+            voiceCtx,
+            "Mic permission is needed for voice commands.",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
     }
+
     val toggleVoice: () -> Unit = {
         if (listening) {
-            val cap = capture; capture = null; listening = false
+            val cap = capture
+            capture = null
+            listening = false
             if (cap != null) {
                 transcribing = true
                 voiceScope.launch(Dispatchers.Default) {
                     val pcm = cap.stop()
-                    // Distinguish the failure modes so the mic never fails silently: engine couldn't
-                    // run (e.g. the ASR native lib/runtime is incompatible on this device) vs. no audio
-                    // captured vs. audio heard but no words recognized.
-                    val result = if (asrModelPath.isNotBlank() && pcm.isNotEmpty()) {
-                        // Catch Exception + LinkageError (native ASR lib/ABI faults), rethrow
-                        // CancellationException; don't swallow fatal VM errors (OOM) — transcription is
-                        // memory-heavy, and a swallowed OutOfMemoryError leaves the process unstable.
+                    if (pcm.isEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            finishVoiceFailure("No audio captured — check the mic permission.")
+                        }
+                        return@launch
+                    }
+
+                    val localResult = if (asrModelPath.isNotBlank() && !localAsrBroken) {
                         try {
-                            Result.success(com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm))
+                            Result.success(
+                                com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm),
+                            )
                         } catch (c: kotlin.coroutines.cancellation.CancellationException) {
                             throw c
                         } catch (e: Exception) {
@@ -1328,19 +1498,56 @@ private fun EditorToolStrip(
                             Result.failure(l)
                         }
                     } else null
-                    val text = result?.getOrNull()
+
+                    val localText = localResult?.getOrNull()?.trim().orEmpty()
+                    if (localText.isNotEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            transcribing = false
+                            appendVoiceText(localText)
+                        }
+                        return@launch
+                    }
+
+                    if (localResult?.isFailure == true) {
+                        withContext(Dispatchers.Main) { localAsrBroken = true }
+                    }
+
+                    val systemText = if (systemSpeechAvailable) {
+                        withContext(Dispatchers.Main) {
+                            android.widget.Toast.makeText(
+                                voiceCtx,
+                                if (localResult?.isFailure == true) {
+                                    "Local speech engine can't run here — using system speech recognition. Say it again."
+                                } else {
+                                    "Using system speech recognition — say it again."
+                                },
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                        com.hereliesaz.guillotine.ai.SystemSpeechRecognizer.recognizeOnce(voiceCtx)
+                    } else null
+
+                    if (!systemText.isNullOrBlank()) {
+                        withContext(Dispatchers.Main) {
+                            transcribing = false
+                            appendVoiceText(systemText)
+                        }
+                        return@launch
+                    }
+
+                    val cloudText = cloudFallback(pcm)
                     withContext(Dispatchers.Main) {
-                        transcribing = false
-                        if (!text.isNullOrBlank()) {
-                            val existing = assistant.input
-                            onAgentInput(if (existing.isBlank()) text.trim() else "${existing.trim()} ${text.trim()}")
+                        if (!cloudText.isNullOrBlank()) {
+                            transcribing = false
+                            appendVoiceText(cloudText)
                         } else {
-                            val msg = when {
-                                pcm.isEmpty() -> "No audio captured — check the mic permission."
-                                result?.isFailure == true -> "The speech engine couldn't run on this device."
-                                else -> "Didn't catch any speech — try again."
-                            }
-                            android.widget.Toast.makeText(voiceCtx, msg, android.widget.Toast.LENGTH_SHORT).show()
+                            finishVoiceFailure(
+                                if (hasCloudSpeech) {
+                                    "Speech recognition failed. Type the command instead."
+                                } else {
+                                    "Speech recognition unavailable. Type the command, or configure cloud transcription in Settings."
+                                },
+                            )
                         }
                     }
                 }
@@ -1546,9 +1753,9 @@ private fun EditorToolStrip(
                     }
                 }
             }
-            // Voice-command mic: dictate an instruction on-device. Only when ASR is configured and no
-            // clip is selected (the field is an AI instruction, not a per-clip analysis prompt).
-            if (!hasClip && asrModelPath.isNotBlank()) {
+            // Voice-command mic: local ASR first, then Android system recognition, then configured
+            // cloud transcription. Keep it available whenever at least one speech path exists.
+            if (!hasClip && (asrModelPath.isNotBlank() || systemSpeechAvailable || hasCloudSpeech)) {
                 Spacer(Modifier.width(4.dp))
                 if (transcribing) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Red500)
