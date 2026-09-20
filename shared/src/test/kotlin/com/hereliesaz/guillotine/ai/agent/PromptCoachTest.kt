@@ -25,6 +25,16 @@ class PromptCoachTest {
     }
 
     @Test
+    fun submittedBoringCutCanUseInstantEditButPacingMentionsCannot() {
+        assertTrue(PromptCoach.isBoringCutRequest("cut the boring parts"))
+        assertTrue(PromptCoach.isBoringCutRequest("remove the dead air"))
+        assertTrue(PromptCoach.isBoringCutRequest("tighten the slow parts"))
+        assertTrue(!PromptCoach.isBoringCutRequest("make the pacing slower"))
+        assertTrue(!PromptCoach.isBoringCutRequest("add a border"))
+        assertTrue(!PromptCoach.isBoringCutRequest("what do you think of the pacing?"))
+    }
+
+    @Test
     fun audioAndCinematicPromptsRouteToDifferentGuidance() {
         assertTrue(PromptCoach.suggest("fix the sound").any { it.label == "Clean dialogue" })
         assertTrue(PromptCoach.suggest("make it cinematic").any { it.label == "Cinematic grade" })
