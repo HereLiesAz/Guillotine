@@ -32,6 +32,22 @@ class TaskDelegationRouterTest {
     }
 
     @Test
+    fun productionBatchesCoverLateNonLexicalToolsInsteadOfDroppingThem() {
+        val defs = JSONArray()
+        repeat(60) { i -> defs.put(tool("tool_$i", "Capability number $i")) }
+        defs.put(tool("denoise_clip", "Remove hiss hum and background noise from speech"))
+
+        val batches = TaskDelegationRouter.definitionBatches(defs, batchSize = 16)
+        val names = batches.flatMap { batch ->
+            (0 until batch.length()).map { batch.getJSONObject(it).getString("name") }
+        }
+
+        assertEquals(defs.length(), names.size)
+        assertTrue("denoise_clip" in names)
+        assertEquals(names.size, names.toSet().size)
+    }
+
+    @Test
     fun parserDropsHallucinatedToolsAndKeepsModelRoles() {
         val defs = JSONArray()
             .put(tool("get_timeline", "Read timeline"))
