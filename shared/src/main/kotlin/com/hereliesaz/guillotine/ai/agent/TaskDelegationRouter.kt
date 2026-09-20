@@ -121,7 +121,7 @@ object TaskDelegationRouter {
                 .take(limit - chosen.size)
                 .forEach { chosen[it.definition.optString("name")] = it.definition }
         }
-        return JSONArray().apply { chosen.values.forEach(::put) }
+        return JSONArray().apply { chosen.values.forEach { put(it) } }
     }
 
     private fun extractObject(raw: String): JSONObject? {
