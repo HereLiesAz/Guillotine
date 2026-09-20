@@ -190,13 +190,21 @@ fun SettingsScreen(
         if (tag.isBlank() || ollamaBusyModel != null) return
         scope.launch {
             ollamaBusyModel = tag
-            ollamaMessage = "Installing $tag with Ollama…"
-            val result = withContext(Dispatchers.IO) { DesktopOllama.pull(tag) }
+            ollamaMessage = "Preparing the dedicated router (${DesktopOllama.ROUTER_MODEL})…"
+            val result = withContext(Dispatchers.IO) {
+                val installed = if (DesktopOllama.ensureRunning()) DesktopOllama.listModels() else emptySet()
+                val routerResult = if (DesktopOllama.ROUTER_MODEL in installed) {
+                    Result.success(Unit)
+                } else {
+                    DesktopOllama.pull(DesktopOllama.ROUTER_MODEL)
+                }
+                if (routerResult.isFailure) routerResult else DesktopOllama.pull(tag)
+            }
             ollamaBusyModel = null
             if (result.isSuccess) {
                 agentModelPath = "ollama:$tag"
                 provider = AiProviderType.LOCAL
-                ollamaMessage = "Installed and selected $tag."
+                ollamaMessage = "Installed and selected $tag. Router: ${DesktopOllama.ROUTER_MODEL}."
                 refreshDesktopModelState()
             } else {
                 ollamaMessage = "Ollama install failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"
@@ -463,6 +471,16 @@ fun SettingsScreen(
                         }
                         val installed = ollamaStatus?.installedModels.orEmpty()
                         val ollamaAvailable = ollamaStatus?.executableAvailable == true
+                        val routerInstalled = DesktopOllama.ROUTER_MODEL in installed
+                        Text(
+                            if (routerInstalled) {
+                                "Dedicated router: ${DesktopOllama.ROUTER_MODEL} · ready"
+                            } else {
+                                "Dedicated router: ${DesktopOllama.ROUTER_MODEL} · installs with the first desktop-local planner"
+                            },
+                            color = if (routerInstalled) White else Neutral500,
+                            fontSize = 10.sp,
+                        )
 
                         recommendations.forEach { recommendation ->
                             val model = recommendation.model
