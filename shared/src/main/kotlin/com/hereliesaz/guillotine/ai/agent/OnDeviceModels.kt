@@ -325,6 +325,22 @@ val RECOMMENDED_AUDIO_EVENT_MODELS: List<OnDeviceModel> = listOf(
  */
 val RECOMMENDED_ASR_MODELS: List<OnDeviceModel> = listOf(
     OnDeviceModel(
+        id = "sherpa-moonshine-tiny-en-2026",
+        label = "Moonshine v2 Tiny (English) — fast & tiny",
+        fileName = "sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27.tar.bz2",
+        sizeBytes = 45_000_000L, // extracted model files total ~44.4 MB
+        license = "MIT (English Moonshine models)",
+        gated = false,
+        repoUrl = hfRepo("csukuangfj2/sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27"),
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27.tar.bz2",
+        abilities = "Very small, fast English ASR designed for on-device/real-time transcription; a strong default on phones.",
+        limitations = "English only. Whisper remains available when its token-timing behavior is preferable for editing.",
+        isArchive = true,
+        archiveMarker = "encoder_model.ort",
+        category = ModelCategory.ASR,
+        capabilityTier = 4,
+    ),
+    OnDeviceModel(
         id = "sherpa-whisper-tiny-en",
         label = "Whisper tiny.en — accurate captions",
         fileName = "sherpa-onnx-whisper-tiny.en.tar.bz2",
@@ -338,6 +354,7 @@ val RECOMMENDED_ASR_MODELS: List<OnDeviceModel> = listOf(
         isArchive = true,
         archiveMarker = "tiny.en-encoder.int8.onnx",
         category = ModelCategory.ASR,
+        capabilityTier = 4,
     ),
 )
 
