@@ -95,6 +95,36 @@ private fun SheetCard(content: @Composable () -> Unit) {
     )
 }
 
+@Composable
+private fun DesktopModelSlotStatus(
+    title: String,
+    slot: String,
+    description: String,
+    storeCategory: String,
+) {
+    val resolved = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve(slot)
+    val uriHandler = LocalUriHandler.current
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, color = Neutral400, fontSize = 12.sp)
+        Text(description, color = Neutral500, fontSize = 10.sp)
+        Text(
+            if (resolved.isBlank()) "Not installed" else "Installed · ${java.io.File(resolved).name}",
+            color = if (resolved.isBlank()) Neutral500 else White,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+        Text(
+            "Get desktop model from Azphalt Store ↗",
+            color = Red500,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clickable { uriHandler.openUri("https://azphalt.store/browse?category=$storeCategory") }
+                .padding(top = 2.dp),
+        )
+    }
+}
+
 /** Desktop mirror of the app side's `AiCapabilitySummary` (`app/.../ui/Sheets.kt`) — see its doc. */
 @Composable
 private fun DesktopAiCapabilitySummary(settings: AiSettings) {
@@ -582,109 +612,131 @@ fun SettingsScreen(
                         fontSize = 10.sp,
                     )
 
-                    Text("Recognition model — for \"teach a specific thing\" (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = idEmbedModelPath, hint = "recognition .tflite model", isDirectory = false) { idEmbedModelPath = it }
-                    Text("A stronger embedder sharpens \"is this the same thing?\" matching. Blank = the bundled MobileNet-V3-small.", color = Neutral500, fontSize = 10.sp)
                     Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
-                        )
-
-                    Text("Face model — for identifying a specific person (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = faceEmbedModelPath, hint = "face .tflite model", isDirectory = false) { faceEmbedModelPath = it }
-                    Text("When set, teaching a person uses face recognition. Blank = fall back to the general recognition model.", color = Neutral500, fontSize = 10.sp)
+                        "Desktop specialist models",
+                        color = White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
                     Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
-                        )
+                        "Desktop specialists use ONNX/Vosk packages from the local Azphalt registry — not the " +
+                            "Android TFLite/sherpa bundles. Only models that have a working desktop executor are shown.",
+                        color = Neutral500,
+                        fontSize = 10.sp,
+                    )
 
-                    Text("Image effects — on-device TFLite models (optional)", color = Neutral400, fontSize = 12.sp)
+                    DesktopModelSlotStatus(
+                        "Footage search / image labeling",
+                        "labelModelPath",
+                        "Desktop ONNX image classifier used by frame description, prompt-driven analysis and clip search.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Concept recognition / teach a specific thing",
+                        "idEmbedModelPath",
+                        "Desktop ONNX image embedder for learned visual concepts.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Face detection / tracking",
+                        "faceDetectModelPath",
+                        "Desktop ONNX face detector used for blur and auto-reframe.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Face recognition",
+                        "faceEmbedModelPath",
+                        "Desktop ONNX face embedding model for identifying a taught person.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Background segmentation",
+                        "segModelPath",
+                        "Desktop ONNX segmentation model for background replacement and portrait bokeh.",
+                        "onnx",
+                    )
+
+                    Text("Image effects — desktop ONNX", color = Neutral400, fontSize = 12.sp)
                     listOf(
-                        Triple("depth", "Depth model path — depth map (e.g. bokeh)", "tflite"),
-                        Triple("superres", "Super-resolution model path — upscale a frame", "tflite"),
-                        Triple("lowlight", "Low-light model path — brighten a frame", "tflite"),
-                        Triple("style", "Style transfer path — apply an artistic style", "tflite")
-                    ).forEach { (kind, hint, cat) ->
-                        ModelPathField(value = effectModelPaths[kind].orEmpty(), hint = hint, isDirectory = false) { effectModelPaths = effectModelPaths + (kind to it) }
+                        Triple("effect_depth", "Depth", "Monocular depth / parallax effects."),
+                        Triple("effect_superres", "Super-resolution", "Frame upscaling / enhancement."),
+                        Triple("effect_lowlight", "Low-light", "Dark-frame enhancement."),
+                        Triple("effect_style", "Style", "Single-model style transformation."),
+                    ).forEach { (slot, label, description) ->
+                        val path = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve(slot)
                         Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=${cat}") }.padding(top = 2.dp)
+                            "$label · " + if (path.isBlank()) "not installed" else "installed (${java.io.File(path).name})",
+                            color = if (path.isBlank()) Neutral500 else White,
+                            fontSize = 10.sp,
                         )
+                        Text(description, color = Neutral500, fontSize = 10.sp)
                     }
-                    Text("Enables \"apply the image effect\" ... Commands run the matching model.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                        "Browse desktop ONNX effects ↗",
+                        color = Red500,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }
+                            .padding(top = 2.dp),
+                    )
 
-                    Text("Audio-event model — highlight detection (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = audioEventModelPath, hint = "YAMNet .tflite model", isDirectory = false) { audioEventModelPath = it }
-                    Text("Enables \"find the highlights / best moments\". Blank = feature off.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
-                        )
+                    DesktopModelSlotStatus(
+                        "Audio-event highlights",
+                        "audioEventModelPath",
+                        "Desktop YAMNet ONNX classifier used to find applause, cheering, laughter and other highlight events.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Transcription / captions",
+                        "speechModelPath",
+                        "Desktop uses a Vosk model directory for local captions, animated captions and filler-word timing.",
+                        "vosk",
+                    )
+                    DesktopModelSlotStatus(
+                        "Text-to-speech / voiceover",
+                        "ttsModelPath",
+                        "Desktop uses a VITS/Piper-compatible ONNX voice model — not the Android sherpa TTS bundle.",
+                        "onnx",
+                    )
 
-                    Text("Speech (ASR) — offline transcription (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = asrModelPath, hint = "sherpa-onnx ASR model directory", isDirectory = true) { asrModelPath = it }
-                    Text("Enables \"transcribe this accurately\" via offline Whisper (sherpa-onnx).", color = Neutral500, fontSize = 10.sp)
+                    val localPlannerTag = agentModelPath.removePrefix("ollama:")
+                    val localPlannerVision =
+                        localPlannerTag.startsWith("qwen3.5", ignoreCase = true) ||
+                            localPlannerTag.startsWith("gemma4", ignoreCase = true)
+                    Text("Frame understanding", color = Neutral400, fontSize = 12.sp)
                     Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
+                        if (localPlannerVision) {
+                            "The selected desktop planner ($localPlannerTag) can inspect the current frame locally through Ollama."
+                        } else {
+                            "Text-only planners use the installed ONNX image labeler for frame descriptions. " +
+                                "Choose Qwen3.5 or Gemma 4 for richer local frame understanding."
+                        },
+                        color = if (localPlannerVision) White else Neutral500,
+                        fontSize = 10.sp,
+                    )
 
-                    Text("Speech (TTS) — offline voiceover (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = ttsModelPath, hint = "sherpa-onnx TTS voice directory", isDirectory = true) { ttsModelPath = it }
-                    Text("Enables \"add a voiceover saying …\" via offline neural TTS (sherpa-onnx).", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
+                    DesktopModelSlotStatus(
+                        "Speaker diarization",
+                        "diarizeEmbedModelPath",
+                        "Desktop uses energy VAD plus an ONNX speaker embedder; it does not need Android's separate segmentation bundle.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Stem separation",
+                        "stemModelPath",
+                        "Desktop runs the Spleeter ONNX pair through ONNX Runtime for vocals + accompaniment.",
+                        "onnx",
+                    )
 
-                    Text("Frame captioning (VLM) — multimodal model (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = vlmModelPath, hint = "Multimodal VLM model (.task)", isDirectory = false) { vlmModelPath = it }
-                    Text("Lets the assistant \"describe / understand this frame\" in rich language.", color = Neutral500, fontSize = 10.sp)
+                    Text("Speech denoise", color = Neutral400, fontSize = 12.sp)
                     Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=litert") }.padding(top = 2.dp)
-                        )
+                        "No desktop denoiser is recommended yet: the existing GTCRN slot has no desktop executor. " +
+                            "Guillotine will not pretend an installed model makes denoise_clip available.",
+                        color = Neutral500,
+                        fontSize = 10.sp,
+                    )
 
-                    Text("Speaker diarization — who spoke when (optional, needs both models)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = diarizeSegModelPath, hint = "Diarization segmentation directory (pyannote)", isDirectory = true) { diarizeSegModelPath = it }
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
-                    ModelPathField(value = diarizeEmbedModelPath, hint = "Speaker-embedding model (.onnx)", isDirectory = false) { diarizeEmbedModelPath = it }
-                    Text("Enables \"who speaks when?\" — set BOTH a segmentation and an embedding model.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
-
-                    Text("Stem separation — vocals / instrumental (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = stemModelPath, hint = "Spleeter model directory (ONNX)", isDirectory = true) { stemModelPath = it }
-                    Text("Enables \"separate the stems / isolate the vocals\". Heavy — best on a capable device. Blank = feature off.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
-
-                    Text("Noise reduction — clean up voice audio (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = denoiseModelPath, hint = "Speech-denoiser model (.onnx)", isDirectory = false) { denoiseModelPath = it }
-                    Text("Enables \"remove background noise / clean up the audio\" — strips hiss, hum, and background noise from voice.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
-                    
                     Text("Install AI model (.azp)", color = Neutral400, fontSize = 12.sp)
                     Text(
                         if (azpBusy) "Installing…" else "Install from file",
