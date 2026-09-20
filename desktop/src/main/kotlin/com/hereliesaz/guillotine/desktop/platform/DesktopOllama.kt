@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
  */
 object DesktopOllama {
     /** Dedicated desktop routing model. It is never used as the editing planner. */
-    const val ROUTER_MODEL = "qwen3:0.6b"
+    const val ROUTER_MODEL = "qwen3.5:0.8b"
 
     data class Status(
         val executableAvailable: Boolean,
