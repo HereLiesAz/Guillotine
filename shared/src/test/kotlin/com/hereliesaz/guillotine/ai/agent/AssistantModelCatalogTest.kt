@@ -37,4 +37,17 @@ class AssistantModelCatalogTest {
         assertTrue(modern.all { it.fileName.endsWith(".litertlm") })
         assertTrue(modern.all { it.downloadUrl?.contains("huggingface.co/litert-community/") == true })
     }
+
+
+    @Test
+    fun desktopCatalogIsSeparateFromPhoneLiteRtCatalog() {
+        val mobileIds = RECOMMENDED_ON_DEVICE_MODELS.map { it.id }.toSet()
+        val desktop = RECOMMENDED_DESKTOP_ASSISTANT_MODELS
+
+        assertTrue(desktop.isNotEmpty())
+        assertTrue(desktop.none { it.id in mobileIds })
+        assertTrue(desktop.all { it.fileName.startsWith("ollama:") })
+        assertTrue(desktop.any { it.id == "desktop-qwen3-8b" })
+        assertTrue(desktop.any { it.id == "desktop-gpt-oss-20b" })
+    }
 }
