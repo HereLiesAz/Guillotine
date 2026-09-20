@@ -4,6 +4,7 @@ import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import java.io.File
@@ -82,38 +83,56 @@ object SherpaAsr {
     /** Build an [OfflineRecognizer] by auto-discovering the model files in [modelDir]. */
     private fun buildRecognizer(modelDir: String): OfflineRecognizer {
         val dir = File(modelDir)
-        val onnx = dir.listFiles { f -> f.isFile && f.name.endsWith(".onnx") }?.toList() ?: emptyList()
-        val encoder = onnx.firstOrNull { it.name.contains("encoder") }
-            ?: throw IllegalStateException("ASR model directory has no encoder .onnx.")
-        val decoder = onnx.firstOrNull { it.name.contains("decoder") }
-            ?: throw IllegalStateException("ASR model directory has no decoder .onnx.")
-        val joiner = onnx.firstOrNull { it.name.contains("joiner") }
         val tokens = (File(dir, "tokens.txt").takeIf { it.isFile }
             ?: dir.listFiles { f -> f.name.endsWith("tokens.txt") }?.firstOrNull())
             ?: throw IllegalStateException("ASR model directory has no tokens.txt.")
 
-        // Transducer bundles ship a joiner; Whisper bundles are just encoder+decoder.
-        val modelConfig = if (joiner != null) {
+        // Moonshine v2 ships ORT-format encoder + merged decoder files rather than .onnx. Check it
+        // first so this tiny 2026 model is a real drop-in option alongside Whisper/transducers.
+        val moonshineEncoder = File(dir, "encoder_model.ort").takeIf { it.isFile }
+        val moonshineDecoder = File(dir, "decoder_model_merged.ort").takeIf { it.isFile }
+
+        val modelConfig = if (moonshineEncoder != null && moonshineDecoder != null) {
             OfflineModelConfig(
-                transducer = OfflineTransducerModelConfig(
-                    encoder = encoder.absolutePath,
-                    decoder = decoder.absolutePath,
-                    joiner = joiner.absolutePath,
+                moonshine = OfflineMoonshineModelConfig(
+                    encoder = moonshineEncoder.absolutePath,
+                    mergedDecoder = moonshineDecoder.absolutePath,
                 ),
                 tokens = tokens.absolutePath,
-                modelType = "transducer",
-                numThreads = 2,
+                // sherpa-onnx 1.13.8 auto-detects Moonshine; modelType has no moonshine shortcut.
+                numThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4),
             )
         } else {
-            OfflineModelConfig(
-                whisper = OfflineWhisperModelConfig(
-                    encoder = encoder.absolutePath,
-                    decoder = decoder.absolutePath,
-                ),
-                tokens = tokens.absolutePath,
-                modelType = "whisper",
-                numThreads = 2,
-            )
+            val onnx = dir.listFiles { f -> f.isFile && f.name.endsWith(".onnx") }?.toList() ?: emptyList()
+            val encoder = onnx.firstOrNull { it.name.contains("encoder") }
+                ?: throw IllegalStateException("ASR model directory has no supported encoder model.")
+            val decoder = onnx.firstOrNull { it.name.contains("decoder") }
+                ?: throw IllegalStateException("ASR model directory has no supported decoder model.")
+            val joiner = onnx.firstOrNull { it.name.contains("joiner") }
+
+            // Transducer bundles ship a joiner; Whisper bundles are just encoder+decoder.
+            if (joiner != null) {
+                OfflineModelConfig(
+                    transducer = OfflineTransducerModelConfig(
+                        encoder = encoder.absolutePath,
+                        decoder = decoder.absolutePath,
+                        joiner = joiner.absolutePath,
+                    ),
+                    tokens = tokens.absolutePath,
+                    modelType = "transducer",
+                    numThreads = 2,
+                )
+            } else {
+                OfflineModelConfig(
+                    whisper = OfflineWhisperModelConfig(
+                        encoder = encoder.absolutePath,
+                        decoder = decoder.absolutePath,
+                    ),
+                    tokens = tokens.absolutePath,
+                    modelType = "whisper",
+                    numThreads = 2,
+                )
+            }
         }
         val config = OfflineRecognizerConfig(
             featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
