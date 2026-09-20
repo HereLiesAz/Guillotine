@@ -19,7 +19,7 @@ class DeviceModelAdvisorTest {
         )
 
         val advice = DeviceModelAdvisor.advise(profile, RECOMMENDED_ON_DEVICE_MODELS)
-        assertEquals("qwen3-1.7b-int4", advice.first { it.fit == DeviceModelFit.BEST_FIT }.model.id)
+        assertEquals("qwen3.5-4b-int4", advice.first { it.fit == DeviceModelFit.BEST_FIT }.model.id)
         assertTrue(advice.first().reason.startsWith("Best fit:"))
     }
 
@@ -36,10 +36,10 @@ class DeviceModelAdvisorTest {
         )
 
         val advice = DeviceModelAdvisor.advise(profile, RECOMMENDED_ON_DEVICE_MODELS)
-        val phi = advice.first { it.model.id == "phi4-mini-q8" }
-        assertEquals(DeviceModelFit.NOT_RECOMMENDED, phi.fit)
-        assertTrue(phi.reason.contains("Not recommended"))
-        assertTrue(phi.reason.contains("storage") || phi.reason.contains("RAM"))
+        val flagship = advice.first { it.model.id == "qwen3.5-4b-int4" }
+        assertEquals(DeviceModelFit.NOT_RECOMMENDED, flagship.fit)
+        assertTrue(flagship.reason.contains("Not recommended"))
+        assertTrue(flagship.reason.contains("storage") || flagship.reason.contains("RAM"))
     }
 
     @Test
@@ -92,8 +92,8 @@ class DeviceModelAdvisorTest {
         val best64 = DeviceModelAdvisor.advise(desktop64, RECOMMENDED_DESKTOP_ASSISTANT_MODELS)
             .first { it.fit == DeviceModelFit.BEST_FIT }
 
-        assertEquals("desktop-qwen3-8b", best32.model.id)
-        assertEquals("desktop-qwen3-14b", best64.model.id)
+        assertEquals("desktop-gemma4-12b", best32.model.id)
+        assertEquals("desktop-qwen3.5-27b", best64.model.id)
         assertTrue(best32.reason.contains("GPU"))
     }
 }
