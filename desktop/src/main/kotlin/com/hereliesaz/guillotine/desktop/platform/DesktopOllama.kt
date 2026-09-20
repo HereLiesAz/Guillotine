@@ -11,6 +11,9 @@ import java.util.concurrent.TimeUnit
  * recommended model, and make sure its local HTTP server is available before an agent turn.
  */
 object DesktopOllama {
+    /** Dedicated desktop routing model. It is never used as the editing planner. */
+    const val ROUTER_MODEL = "qwen3:0.6b"
+
     data class Status(
         val executableAvailable: Boolean,
         val serverRunning: Boolean,
