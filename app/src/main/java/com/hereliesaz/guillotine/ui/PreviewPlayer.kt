@@ -88,6 +88,14 @@ private const val PLAY_DRIFT_TOLERANCE_MS = 300L
 /** Release MediaCodec/audio decoder resources after the paused preview has been untouched for a moment. */
 private const val PAUSED_DECODER_IDLE_MS = 3_000L
 
+/** A disposable pre-rendered playback-region preview stored in app cache. */
+data class BufferedPreview(
+    val path: String,
+    val startMs: Long,
+    val endMs: Long,
+    val documentHash: Int,
+)
+
 /**
  * The video preview surface. It is slaved to the editor's timeline clock
  * (`state.currentTimeMs`).
@@ -107,6 +115,7 @@ private const val PAUSED_DECODER_IDLE_MS = 3_000L
 fun PreviewPlayer(
     state: EditorUiState,
     modifier: Modifier = Modifier,
+    bufferedPreview: BufferedPreview? = null,
     cropMode: Boolean = false,
     /** Draw platform safe-zone guides (caption/UI areas) over vertical/square projects. */
     showSafeZones: Boolean = false,
@@ -122,6 +131,8 @@ fun PreviewPlayer(
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
 
     val now = state.currentTimeMs
+    val useBufferedPreview = bufferedPreview != null &&
+        now >= bufferedPreview.startMs && now <= bufferedPreview.endMs
     // Disabled/hidden tracks drop out entirely.
     val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
 
@@ -244,6 +255,14 @@ fun PreviewPlayer(
               },
           contentAlignment = Alignment.Center,
       ) {
+        if (useBufferedPreview && bufferedPreview != null) {
+            BufferedPreviewLayer(
+                buffer = bufferedPreview,
+                now = now,
+                isPlaying = state.isPlaying,
+                playbackRate = state.playbackRate,
+            )
+        } else {
         if (!anyActiveVideo) {
             Text("No video at ${"%.2f".format(now / 1000f)}s", color = Neutral500, fontSize = 12.sp)
         }
@@ -315,6 +334,7 @@ fun PreviewPlayer(
                 )
             }
         }
+        } // end live source layers; buffered preview already contains the composited picture + audio
         // Platform safe-zone guides: for vertical/square projects, show where TikTok/Reels/Shorts UI
         // (captions bottom, action icons right) covers the frame, so titles/subjects stay inside.
         val aspect = state.document.settings.aspectRatio
@@ -354,8 +374,10 @@ fun PreviewPlayer(
         // crop tool's target, which alone is exempted from clipToBounds in VideoSlot) traces the
         // overflowing picture past the frame edge. Shares the clip's own scale/rotate/pan so it tracks
         // exactly what the clip is doing; a plain resting clip's outline just coincides with the frame.
-        activeVideoClips.forEach { clip ->
-            key(clip.id) { ClipFrameOutline(clip = clip, now = now, aspectMod = aspectMod) }
+        if (!useBufferedPreview) {
+            activeVideoClips.forEach { clip ->
+                key(clip.id) { ClipFrameOutline(clip = clip, now = now, aspectMod = aspectMod) }
+            }
         }
       } // end inner zoomed frame
 
@@ -411,6 +433,54 @@ fun PreviewPlayer(
             }
         }
     }
+}
+
+/**
+ * Play a pre-rendered region as one cheap decoder stream. The editor clock remains authoritative:
+ * scrubbing seeks this file relative to [BufferedPreview.startMs], while normal playback lets the
+ * player run and only corrects meaningful drift.
+ */
+@Composable
+private fun BufferedPreviewLayer(
+    buffer: BufferedPreview,
+    now: Long,
+    isPlaying: Boolean,
+    playbackRate: Float,
+) {
+    val context = LocalContext.current
+    val player = remember(buffer.path) { ExoPlayer.Builder(context).build() }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+    LaunchedEffect(buffer.path) {
+        player.setMediaItem(ExoMediaItem.fromUri(Uri.fromFile(java.io.File(buffer.path))))
+        player.prepare()
+        player.seekTo((now - buffer.startMs).coerceAtLeast(0L))
+    }
+    LaunchedEffect(now, isPlaying, playbackRate, buffer.startMs, buffer.endMs) {
+        val target = (now - buffer.startMs).coerceIn(0L, (buffer.endMs - buffer.startMs).coerceAtLeast(0L))
+        val tolerance = if (isPlaying) PLAY_DRIFT_TOLERANCE_MS else SCRUB_SEEK_TOLERANCE_MS
+        if (kotlin.math.abs(player.currentPosition - target) > tolerance) {
+            player.seekTo(target)
+        }
+        player.setPlaybackSpeed(playbackRate)
+        player.playWhenReady = isPlaying
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            (android.view.LayoutInflater.from(ctx)
+                .inflate(com.hereliesaz.guillotine.R.layout.preview_player_view, null) as PlayerView).apply {
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                setKeepContentOnPlayerReset(true)
+                setBackgroundColor(android.graphics.Color.BLACK)
+                this.player = player
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
 }
 
 /**
