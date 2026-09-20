@@ -470,7 +470,7 @@ class OnDeviceAgentBackend(
 
     private companion object {
         private const val BORING_FAST_PATH_ANALYSIS_PROMPT = "Cut pauses and dead air."
-        private const val MAX_ROUTED_TOOL_DEFINITIONS = 16
+        private const val MAX_ROUTED_TOOL_DEFINITIONS = 20
         private const val MAX_ON_DEVICE_TOOLS = 10
         private const val MAX_TOOL_DESCRIPTION_CHARS = 96
         private const val MAX_TOOL_ARGS_CHARS = 96
