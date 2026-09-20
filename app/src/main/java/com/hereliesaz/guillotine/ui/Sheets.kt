@@ -65,7 +65,10 @@ import com.hereliesaz.guillotine.ai.FrameAnalysisCache
 import com.hereliesaz.guillotine.ai.ImageGen
 import kotlin.math.roundToInt
 import com.hereliesaz.guillotine.ai.ModelCatalog
+import com.hereliesaz.guillotine.ai.agent.AndroidDeviceModelProfile
 import com.hereliesaz.guillotine.ai.agent.BundledModelExtractor
+import com.hereliesaz.guillotine.ai.agent.DeviceModelAdvisor
+import com.hereliesaz.guillotine.ai.agent.DeviceModelFit
 import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
 import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_FACE_MODELS
@@ -952,11 +955,28 @@ private fun ModelPicker(
     val state by ModelDownloadManager.state.collectAsState()
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
+    val deviceProfile = remember(context) { AndroidDeviceModelProfile.read(context) }
+    val advice = remember(models, deviceProfile) { DeviceModelAdvisor.advise(deviceProfile, models) }
 
     // Merely opening Settings must not force the ~167 MB bundled model to finish extracting.
     // The editor prewarms it gradually; an explicit "Use now" below is allowed to finish it at once.
 
     Text(title, color = Neutral400, fontSize = 12.sp)
+    if (models.any { it.category == ModelCategory.ASSISTANT_LLM }) {
+        Text(
+            deviceProfile.shortSummary,
+            color = White,
+            fontSize = 10.sp,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        Text(
+            "Model fit is estimated locally from RAM, free storage, CPU cores and 32/64-bit runtime. " +
+                "Actual speed still varies by chipset, accelerator support and thermals.",
+            color = Neutral500,
+            fontSize = 10.sp,
+            modifier = Modifier.padding(bottom = 2.dp),
+        )
+    }
     // Gemma redistribution notice: shown whenever this group offers a Gemma model. We re-host the
     // weights un-gated, so we pass through the Gemma Terms of Use per the license.
     if (models.any { it.license.contains("Gemma", ignoreCase = true) }) {
@@ -967,7 +987,8 @@ private fun ModelPicker(
             modifier = Modifier.clickableText { uriHandler.openUri("https://ai.google.dev/gemma/terms") },
         )
     }
-    models.forEach { model ->
+    advice.forEach { recommendation ->
+        val model = recommendation.model
         val installed = remember(state, model.id) {
             if (model.bundled) BundledModelExtractor.installedPath(context)
             else ModelDownloadManager.installedPath(context, model)
@@ -992,6 +1013,17 @@ private fun ModelPicker(
                 Column(Modifier.weight(1f)) {
                     Text(model.label, color = White, fontSize = 12.sp)
                     Text("${model.sizeLabel} · ${model.license}", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                        recommendation.badge,
+                        color = when (recommendation.fit) {
+                            DeviceModelFit.BEST_FIT -> Red500
+                            DeviceModelFit.RECOMMENDED -> White
+                            DeviceModelFit.CAUTION -> Neutral400
+                            DeviceModelFit.NOT_RECOMMENDED -> Red500
+                        },
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     when {
@@ -1019,6 +1051,12 @@ private fun ModelPicker(
                     }
                 }
             }
+            Text(
+                recommendation.reason,
+                color = if (recommendation.fit == DeviceModelFit.NOT_RECOMMENDED) Red500 else Neutral500,
+                fontSize = 10.sp,
+                modifier = Modifier.padding(top = 2.dp),
+            )
             if (downloading != null) {
                 LinearProgressIndicator(
                     progress = { downloading.fraction },
