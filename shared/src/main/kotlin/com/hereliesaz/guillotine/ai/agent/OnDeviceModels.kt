@@ -498,19 +498,20 @@ val RECOMMENDED_DIARIZE_EMBED_MODELS: List<OnDeviceModel> = listOf(
  */
 val RECOMMENDED_STEM_MODELS: List<OnDeviceModel> = listOf(
     OnDeviceModel(
-        id = "spleeter-2stems",
-        label = "Spleeter 2-stem — vocals / accompaniment",
-        fileName = "sherpa-onnx-spleeter-2stems.tar.bz2",
-        sizeBytes = 71_200_000L,
+        id = "spleeter-2stems-fp16",
+        label = "Spleeter 2-stem (fp16) — vocals / accompaniment",
+        fileName = "sherpa-onnx-spleeter-2stems-fp16.tar.bz2",
+        sizeBytes = 40_000_000L, // extracted ONNX weights are ~19 MB per stem
         license = "MIT (Deezer Spleeter)",
         gated = false,
-        repoUrl = hfRepo("csukuangfj/sherpa-onnx-spleeter-2stems"),
-        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/sherpa-onnx-spleeter-2stems.tar.bz2",
-        abilities = "Separates a song into a vocals track and an instrumental (accompaniment) track — real ML stem splitting for remixes, karaoke, or isolating either part.",
-        limitations = "~71 MB. Runs via ONNX Runtime; heavy (hundreds of MB of RAM) — best on a capable device and moderate clip lengths.",
+        repoUrl = "https://k2-fsa.github.io/sherpa/onnx/source-separation/models.html",
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/sherpa-onnx-spleeter-2stems-fp16.tar.bz2",
+        abilities = "Separates a song into vocals + accompaniment with the same 2-stem architecture at roughly half the model-weight footprint.",
+        limitations = "Still compute/RAM heavy on long clips because the spectrogram working set dominates; best on capable devices and moderate clip lengths.",
         isArchive = true,
-        archiveMarker = "vocals.onnx",
+        archiveMarker = "vocals.fp16.onnx",
         category = ModelCategory.STEM,
+        capabilityTier = 4,
     ),
 )
 
