@@ -194,6 +194,109 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
 )
 
 /**
+ * Desktop assistant catalog. Desktop does NOT reuse the phone/tablet LiteRT weights: these entries are
+ * Ollama-hosted local models, which lets desktops scale into much larger planners while keeping the
+ * editor integration on the same OpenAI-compatible tool-calling protocol.
+ *
+ * [fileName] stores the local selector as `ollama:<tag>`; desktop Settings treats these as Ollama
+ * models rather than files and can pull/select them directly. Sizes are the published Ollama bundle
+ * sizes used only for device-fit/storage guidance.
+ */
+val RECOMMENDED_DESKTOP_ASSISTANT_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "desktop-qwen3-1.7b",
+        label = "Qwen3 1.7B — light desktop",
+        fileName = "ollama:qwen3:1.7b",
+        sizeBytes = 1_400_000_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ollama.com/library/qwen3",
+        downloadUrl = null,
+        abilities = "Lightweight desktop-local planner with strong agent/tool behavior for its size.",
+        limitations = "Best for straightforward to medium-complexity edits; weaker than the larger desktop tiers.",
+        capabilityTier = 3,
+    ),
+    OnDeviceModel(
+        id = "desktop-qwen3-4b",
+        label = "Qwen3 4B — balanced desktop",
+        fileName = "ollama:qwen3:4b",
+        sizeBytes = 2_500_000_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ollama.com/library/qwen3",
+        downloadUrl = null,
+        abilities = "Strong instruction following and agent behavior with a moderate desktop footprint.",
+        limitations = "A better fit for 16 GB-class systems than very small laptops; larger models reason more deeply.",
+        capabilityTier = 4,
+    ),
+    OnDeviceModel(
+        id = "desktop-phi4-mini",
+        label = "Phi-4 Mini 3.8B — tool-use",
+        fileName = "ollama:phi4-mini",
+        sizeBytes = 2_500_000_000L,
+        license = "MIT",
+        gated = false,
+        repoUrl = "https://ollama.com/library/phi4-mini",
+        downloadUrl = null,
+        abilities = "Compact reasoning model with explicit function-calling support; good alternate planner.",
+        limitations = "Similar memory class to Qwen3 4B; choose based on actual behavior on your workload.",
+        capabilityTier = 4,
+    ),
+    OnDeviceModel(
+        id = "desktop-qwen3-8b",
+        label = "Qwen3 8B — strong desktop",
+        fileName = "ollama:qwen3:8b",
+        sizeBytes = 5_200_000_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ollama.com/library/qwen3",
+        downloadUrl = null,
+        abilities = "Strong local planner for multi-step edits and tool orchestration; good workstation default.",
+        limitations = "Needs significantly more RAM than the 4B tier and benefits from GPU acceleration.",
+        capabilityTier = 5,
+    ),
+    OnDeviceModel(
+        id = "desktop-qwen3-14b",
+        label = "Qwen3 14B — high-end desktop",
+        fileName = "ollama:qwen3:14b",
+        sizeBytes = 9_300_000_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ollama.com/library/qwen3",
+        downloadUrl = null,
+        abilities = "Deeper local reasoning and stronger complex-agent performance for high-memory workstations.",
+        limitations = "Large 9.3 GB model; not appropriate for ordinary 8–16 GB machines while editing video.",
+        capabilityTier = 5,
+    ),
+    OnDeviceModel(
+        id = "desktop-gpt-oss-20b",
+        label = "gpt-oss 20B — agentic workstation",
+        fileName = "ollama:gpt-oss:20b",
+        sizeBytes = 14_000_000_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ollama.com/library/gpt-oss",
+        downloadUrl = null,
+        abilities = "Agentic/tool-oriented reasoning model intended for powerful local workflows.",
+        limitations = "14 GB weights; reserve this for high-RAM desktops so Guillotine still has memory for video.",
+        capabilityTier = 5,
+    ),
+    OnDeviceModel(
+        id = "desktop-qwen3-30b",
+        label = "Qwen3 30B — workstation / high-memory",
+        fileName = "ollama:qwen3:30b",
+        sizeBytes = 19_000_000_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ollama.com/library/qwen3",
+        downloadUrl = null,
+        abilities = "Very strong desktop-local planning tier for machines with substantial memory/VRAM.",
+        limitations = "19 GB download and large working set. Overkill for most laptops and mainstream desktops.",
+        capabilityTier = 5,
+    ),
+)
+
+/**
  * Recommended general image-embedding models for recognition ("is this the same specific thing?").
  * These are MediaPipe ImageEmbedder-compatible `.tflite` files; "Use" sets `idEmbedModelPath`.
  * Populated with verified Hugging Face downloads.
