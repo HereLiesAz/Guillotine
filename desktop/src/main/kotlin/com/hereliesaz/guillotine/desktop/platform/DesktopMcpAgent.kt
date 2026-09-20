@@ -31,7 +31,7 @@ object DesktopMcpAgent {
             DesktopOllamaAgentBackend(tag, frames = tools as? FrameImageSource)
         }
 
-        return when (provider) {
+        val brain = when (provider) {
             AiProviderType.ANTHROPIC ->
                 if (key.isNotBlank()) AnthropicAgentBackend(key, model, cloudFrames) else localBackend
 
@@ -53,6 +53,8 @@ object DesktopMcpAgent {
 
             AiProviderType.LOCAL, AiProviderType.MLKIT -> localBackend
         }
+
+        return brain?.let { DesktopDelegatingAgentBackend(settings, it) }
     }
 
     private const val OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
