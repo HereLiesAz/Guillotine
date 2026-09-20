@@ -286,14 +286,6 @@ object Exporter {
                 context.cacheDir,
                 "guillotine_preview_${System.currentTimeMillis()}.mp4",
             )
-            // Preview renders are disposable. Keep at most the newly-created buffer rather than
-            // slowly turning cacheDir into a tiny archaeological dig.
-            withContext(Dispatchers.IO) {
-                context.cacheDir.listFiles()
-                    ?.filter { it.name.startsWith("guillotine_preview_") && it != outFile }
-                    ?.forEach { runCatching { it.delete() } }
-            }
-
             coroutineScope {
                 var poller: Job? = null
                 try {
