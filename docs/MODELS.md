@@ -147,6 +147,32 @@ and Phi-4 mini q8**. Existing files are not deleted from a user's storage automa
 stop being offered as recommended downloads. Gemma 3 1B remains served from the
 [Gemma mirror](#the-gemma-mirror) (Gemma Terms of Use apply).
 
+### Desktop-local assistant catalog
+
+Desktop does **not** reuse the Android phone/tablet LiteRT weights. Guillotine Desktop integrates
+with **Ollama on localhost** and maintains a separate catalog sized for laptops/workstations. Settings
+reads desktop RAM, free storage, CPU/architecture and a best-effort GPU/accelerator label, then ranks
+these independently from the mobile list:
+
+| Desktop model | Published Ollama size | Role |
+|---|---:|---|
+| Qwen3 1.7B | ~1.4 GB | light desktop / low-memory laptop |
+| Qwen3 4B | ~2.5 GB | balanced mainstream desktop |
+| Phi-4 Mini 3.8B | ~2.5 GB | alternate compact planner with function calling |
+| Qwen3 8B | ~5.2 GB | strong desktop/workstation default |
+| Qwen3 14B | ~9.3 GB | high-memory workstation |
+| gpt-oss 20B | ~14 GB | agentic high-memory workstation |
+| Qwen3 30B | ~19 GB | very high-memory workstation |
+
+Selecting **Install & use** starts/uses the local Ollama service, pulls the selected planner, stores
+`agentModelPath` as `ollama:<tag>`, switches the analyzer to **Local**, and routes the existing MCP
+tool loop to `127.0.0.1`. No API key or remote inference is involved.
+
+Desktop also has a separate **routing model**: `qwen3:0.6b`. It is installed with the first local
+desktop planner and has one job only — inspect the live MCP catalog in compact batches and delegate
+the request to the relevant tools/model roles. It never edits or answers the user. If it is absent or
+uncertain, Guillotine gives the planner the full MCP catalog instead.
+
 ---
 
 ## `RECOGNITION` — "teach a specific thing"
