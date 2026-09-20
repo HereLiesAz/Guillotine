@@ -71,4 +71,29 @@ class DeviceModelAdvisorTest {
         assertEquals(DeviceModelFit.NOT_RECOMMENDED, advice.fit)
         assertTrue(advice.reason.contains("archive is extracted"))
     }
+
+
+    @Test
+    fun desktopCatalogScalesBestFitUpWithWorkstationRam() {
+        val desktop32 = DeviceModelProfile(
+            deviceLabel = "Desktop",
+            totalRamBytes = 32_000_000_000L,
+            freeStorageBytes = 100_000_000_000L,
+            cpuCores = 16,
+            is64Bit = true,
+            lowRam = false,
+            osLabel = "Desktop OS",
+            acceleratorLabel = "GPU",
+        )
+        val desktop64 = desktop32.copy(totalRamBytes = 64_000_000_000L)
+
+        val best32 = DeviceModelAdvisor.advise(desktop32, RECOMMENDED_DESKTOP_ASSISTANT_MODELS)
+            .first { it.fit == DeviceModelFit.BEST_FIT }
+        val best64 = DeviceModelAdvisor.advise(desktop64, RECOMMENDED_DESKTOP_ASSISTANT_MODELS)
+            .first { it.fit == DeviceModelFit.BEST_FIT }
+
+        assertEquals("desktop-qwen3-8b", best32.model.id)
+        assertEquals("desktop-qwen3-14b", best64.model.id)
+        assertTrue(best32.reason.contains("GPU"))
+    }
 }
