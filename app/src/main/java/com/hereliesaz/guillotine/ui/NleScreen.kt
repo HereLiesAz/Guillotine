@@ -186,6 +186,62 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val settings by keyStore.settings.collectAsState(initial = AiSettings())
     val scope = rememberCoroutineScope()
 
+    // Vegas-style rendered preview buffer for the selected ruler/playback region. It is deliberately
+    // transient: any edit or region change invalidates it, and the file lives only in app cache.
+    var bufferedPreview by remember { mutableStateOf<BufferedPreview?>(null) }
+    var previewBufferRendering by remember { mutableStateOf(false) }
+    var previewBufferProgress by remember { mutableFloatStateOf(0f) }
+
+    androidx.compose.runtime.LaunchedEffect(state.document, state.playbackRegion) {
+        val existing = bufferedPreview ?: return@LaunchedEffect
+        val sameRegion = state.playbackRegion?.let {
+            it.first == existing.startMs && it.last == existing.endMs
+        } == true
+        if (!sameRegion || existing.documentHash != state.document.hashCode()) {
+            runCatching { java.io.File(existing.path).delete() }
+            bufferedPreview = null
+            previewBufferProgress = 0f
+        }
+    }
+
+    val renderBufferedPreview: () -> Unit = {
+        val region = state.playbackRegion
+        if (region != null && !previewBufferRendering) {
+            val snapshot = state.document
+            previewBufferRendering = true
+            previewBufferProgress = 0f
+            scope.launch {
+                try {
+                    val file = Exporter.renderPreviewBuffer(
+                        context = context,
+                        document = snapshot,
+                        region = region,
+                        onProgress = { previewBufferProgress = it },
+                    )
+                    bufferedPreview?.let { old -> runCatching { java.io.File(old.path).delete() } }
+                    bufferedPreview = BufferedPreview(
+                        path = file.absolutePath,
+                        startMs = region.first,
+                        endMs = region.last,
+                        documentHash = snapshot.hashCode(),
+                    )
+                    ActivityLog.info("Preview buffer ready: ${"%.1f".format((region.last - region.first) / 1000f)}s at 720p/24fps.")
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
+                } catch (e: Throwable) {
+                    ActivityLog.error("Preview render failed: ${Exporter.describeExportError(e)}")
+                    android.widget.Toast.makeText(
+                        context,
+                        "Preview render failed.",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } finally {
+                    previewBufferRendering = false
+                }
+            }
+        }
+    }
+
     // One shared MCP tool surface: the embedded server, the optional relay, and the in-app AI
     // assistant all drive the editor through this same object ({ settings } reads live).
     val sharedMcpTools = remember { com.hereliesaz.guillotine.mcp.McpTools(context, vm) { settings } }
@@ -619,12 +675,20 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         PreviewPlayer(
                             state,
                             androidx.compose.ui.Modifier.weight(1f).fillMaxWidth(),
+                            bufferedPreview = bufferedPreview,
                             cropMode = state.tool == EditorTool.CROP,
                             showSafeZones = state.tool == EditorTool.CROP,
                             onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
                             onToggleFullscreen = { fullscreenPreview = true },
                         )
-                        TransportControls(vm, state)
+                        TransportControls(
+                            vm = vm,
+                            state = state,
+                            onRenderPreview = renderBufferedPreview,
+                            previewRendering = previewBufferRendering,
+                            previewProgress = previewBufferProgress,
+                            previewBuffered = bufferedPreview != null,
+                        )
                     }
                     DraggableVerticalDivider(
                         onDoubleTap = toggleOrientation,
@@ -654,12 +718,20 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         PreviewPlayer(
                             state,
                             androidx.compose.ui.Modifier.weight(1f).fillMaxWidth(),
+                            bufferedPreview = bufferedPreview,
                             cropMode = state.tool == EditorTool.CROP,
                             showSafeZones = state.tool == EditorTool.CROP,
                             onCropTransform = { z, x, y, r -> vm.transformSelectedClip(z, x, y, r) },
                             onToggleFullscreen = { fullscreenPreview = true },
                         )
-                        TransportControls(vm, state)
+                        TransportControls(
+                            vm = vm,
+                            state = state,
+                            onRenderPreview = renderBufferedPreview,
+                            previewRendering = previewBufferRendering,
+                            previewProgress = previewBufferProgress,
+                            previewBuffered = bufferedPreview != null,
+                        )
                     }
                     DraggableTimelineDivider(
                         onDoubleTap = toggleOrientation,
@@ -1166,7 +1238,14 @@ private fun NameProjectDialog(current: String, onConfirm: (String) -> Unit, onDi
 
 
 @Composable
-private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
+private fun TransportControls(
+    vm: EditorViewModel,
+    state: EditorUiState,
+    onRenderPreview: () -> Unit,
+    previewRendering: Boolean,
+    previewProgress: Float,
+    previewBuffered: Boolean,
+) {
     val total = state.document.totalDurationMs
     Row(
         Modifier.fillMaxWidth().height(48.dp).background(Neutral950).padding(horizontal = 12.dp),
@@ -1193,6 +1272,27 @@ private fun TransportControls(vm: EditorViewModel, state: EditorUiState) {
             IconToolButton(Icons.Filled.SkipNext, "End") { vm.seekTo(total) }
         }
         Spacer(Modifier.weight(1f))
+        // Render the selected ruler region to a disposable low-quality cache file, then play that
+        // single stream instead of decoding/compositing every source clip live.
+        IconToolButton(
+            Icons.Filled.Bolt,
+            when {
+                previewRendering -> "Rendering preview ${(previewProgress * 100).toInt()}%"
+                previewBuffered -> "Rendered preview ready"
+                else -> "Render playback region preview"
+            },
+            active = previewBuffered,
+            enabled = state.playbackRegion != null && !previewRendering,
+            onClick = onRenderPreview,
+        )
+        if (previewRendering) {
+            Text(
+                "${(previewProgress * 100).toInt()}%",
+                color = Neutral500,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
         // Loop toggle (right, before the speed control): restart at the region/timeline start instead
         // of stopping at its end.
         IconToolButton(Icons.Filled.Repeat, "Loop playback", active = state.loopPlayback) { vm.toggleLoop() }
