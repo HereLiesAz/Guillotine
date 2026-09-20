@@ -71,12 +71,11 @@ object DeviceModelAdvisor {
         if (models.isEmpty()) return emptyList()
 
         val assessed = models.map { assess(profile, it) }.toMutableList()
+        // "Best fit" means genuinely recommended, not merely the least-bad caution option.
+        // If every model in a category is a caution/reject, say that plainly instead of painting one green.
         val bestIndex = assessed.indices
             .filter { assessed[it].fit == DeviceModelFit.RECOMMENDED }
             .maxByOrNull { assessed[it].score }
-            ?: assessed.indices
-                .filter { assessed[it].fit == DeviceModelFit.CAUTION }
-                .maxByOrNull { assessed[it].score }
 
         if (bestIndex != null) {
             val best = assessed[bestIndex]
@@ -84,7 +83,6 @@ object DeviceModelAdvisor {
                 fit = DeviceModelFit.BEST_FIT,
                 reason = best.reason
                     .removePrefix("Recommended: ")
-                    .removePrefix("Possible, but not a recommendation: ")
                     .let { "Best fit: $it" },
             )
         }
