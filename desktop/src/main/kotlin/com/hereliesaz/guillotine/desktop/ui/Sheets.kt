@@ -30,6 +30,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,9 @@ import com.hereliesaz.guillotine.ai.LeonardoModel
 import com.hereliesaz.guillotine.ai.LeonardoModels
 import com.hereliesaz.guillotine.ai.ModelCatalog
 import com.hereliesaz.guillotine.ai.meta
+import com.hereliesaz.guillotine.ai.agent.DeviceModelAdvisor
+import com.hereliesaz.guillotine.ai.agent.DeviceModelFit
+import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_DESKTOP_ASSISTANT_MODELS
 import com.hereliesaz.guillotine.desktop.ui.theme.Black
 import com.hereliesaz.guillotine.desktop.ui.theme.Neutral400
 import com.hereliesaz.guillotine.desktop.ui.theme.Neutral500
@@ -70,6 +74,8 @@ import com.hereliesaz.guillotine.model.Quality
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
+import com.hereliesaz.guillotine.desktop.platform.DesktopDeviceModelProfile
+import com.hereliesaz.guillotine.desktop.platform.DesktopOllama
 import com.hereliesaz.guillotine.desktop.platform.DesktopStorage
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -159,6 +165,44 @@ fun SettingsScreen(
 
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
+
+    var desktopProfile by remember {
+        mutableStateOf<com.hereliesaz.guillotine.ai.agent.DeviceModelProfile?>(null)
+    }
+    var ollamaStatus by remember { mutableStateOf<DesktopOllama.Status?>(null) }
+    var ollamaBusyModel by remember { mutableStateOf<String?>(null) }
+    var ollamaMessage by remember { mutableStateOf<String?>(null) }
+
+    fun refreshDesktopModelState() {
+        scope.launch {
+            val pair = withContext(Dispatchers.IO) {
+                DesktopDeviceModelProfile.read() to DesktopOllama.status()
+            }
+            desktopProfile = pair.first
+            ollamaStatus = pair.second
+        }
+    }
+
+    LaunchedEffect(Unit) { refreshDesktopModelState() }
+
+    fun installAndUseDesktopModel(selector: String) {
+        val tag = selector.removePrefix("ollama:")
+        if (tag.isBlank() || ollamaBusyModel != null) return
+        scope.launch {
+            ollamaBusyModel = tag
+            ollamaMessage = "Installing $tag with Ollama…"
+            val result = withContext(Dispatchers.IO) { DesktopOllama.pull(tag) }
+            ollamaBusyModel = null
+            if (result.isSuccess) {
+                agentModelPath = "ollama:$tag"
+                provider = AiProviderType.LOCAL
+                ollamaMessage = "Installed and selected $tag."
+                refreshDesktopModelState()
+            } else {
+                ollamaMessage = "Ollama install failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"
+            }
+        }
+    }
 
     // Assemble settings from the current editable state — shared by Save and the .azp installer
     // (which folds newly-routed model paths into the visible fields first).
