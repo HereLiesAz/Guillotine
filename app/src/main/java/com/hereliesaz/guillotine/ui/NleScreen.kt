@@ -193,14 +193,16 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var previewBufferProgress by remember { mutableFloatStateOf(0f) }
 
     androidx.compose.runtime.LaunchedEffect(state.document, state.playbackRegion) {
-        val existing = bufferedPreview ?: return@LaunchedEffect
-        val sameRegion = state.playbackRegion?.let {
-            it.first == existing.startMs && it.last == existing.endMs
-        } == true
-        if (!sameRegion || existing.documentHash != state.document.hashCode()) {
-            runCatching { java.io.File(existing.path).delete() }
-            bufferedPreview = null
-            previewBufferProgress = 0f
+        val existing = bufferedPreview
+        if (existing != null) {
+            val sameRegion = state.playbackRegion?.let {
+                it.first == existing.startMs && it.last == existing.endMs
+            } == true
+            if (!sameRegion || existing.documentHash != state.document.hashCode()) {
+                runCatching { java.io.File(existing.path).delete() }
+                bufferedPreview = null
+                previewBufferProgress = 0f
+            }
         }
     }
 
