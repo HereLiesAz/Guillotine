@@ -19,7 +19,7 @@ class DeviceModelAdvisorTest {
         )
 
         val advice = DeviceModelAdvisor.advise(profile, RECOMMENDED_ON_DEVICE_MODELS)
-        assertEquals("phi4-mini-q8", advice.first { it.fit == DeviceModelFit.BEST_FIT }.model.id)
+        assertEquals("qwen3-1.7b-int4", advice.first { it.fit == DeviceModelFit.BEST_FIT }.model.id)
         assertTrue(advice.first().reason.startsWith("Best fit:"))
     }
 
