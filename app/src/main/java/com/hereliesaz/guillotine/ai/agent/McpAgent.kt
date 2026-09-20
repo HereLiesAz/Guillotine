@@ -29,7 +29,7 @@ object McpAgent {
         // (the on-device invariant: pixels never leave the device).
         val frames = tools as? FrameProvider
         val cloudFrames = if (settings.cloudVision) tools as? FrameImageSource else null
-        return when (provider) {
+        val brain = when (provider) {
             AiProviderType.ANTHROPIC ->
                 if (key.isNotBlank()) AnthropicAgentBackend(key, model, cloudFrames) else onDevice(context, settings, frames)
 
@@ -55,6 +55,10 @@ object McpAgent {
             // Non-LLM on-device analyzers (the default): the brain is the on-device LLM if present.
             AiProviderType.LOCAL, AiProviderType.MLKIT -> onDevice(context, settings, frames)
         }
+
+        // One tiny local router fronts every planner. Its job is not to edit; it narrows the live MCP
+        // catalog to the capabilities/models that fit this request, then hands those to the real brain.
+        return brain?.let { DelegatingAgentBackend(context.applicationContext, settings, it) }
     }
 
     private fun onDevice(context: Context, settings: AiSettings, frames: FrameProvider?): AgentBackend? =

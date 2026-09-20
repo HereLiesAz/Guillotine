@@ -30,6 +30,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,9 @@ import com.hereliesaz.guillotine.ai.LeonardoModel
 import com.hereliesaz.guillotine.ai.LeonardoModels
 import com.hereliesaz.guillotine.ai.ModelCatalog
 import com.hereliesaz.guillotine.ai.meta
+import com.hereliesaz.guillotine.ai.agent.DeviceModelAdvisor
+import com.hereliesaz.guillotine.ai.agent.DeviceModelFit
+import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_DESKTOP_ASSISTANT_MODELS
 import com.hereliesaz.guillotine.desktop.ui.theme.Black
 import com.hereliesaz.guillotine.desktop.ui.theme.Neutral400
 import com.hereliesaz.guillotine.desktop.ui.theme.Neutral500
@@ -70,6 +74,8 @@ import com.hereliesaz.guillotine.model.Quality
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
+import com.hereliesaz.guillotine.desktop.platform.DesktopDeviceModelProfile
+import com.hereliesaz.guillotine.desktop.platform.DesktopOllama
 import com.hereliesaz.guillotine.desktop.platform.DesktopStorage
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -89,20 +95,57 @@ private fun SheetCard(content: @Composable () -> Unit) {
     )
 }
 
+@Composable
+private fun DesktopModelSlotStatus(
+    title: String,
+    slot: String,
+    description: String,
+    storeCategory: String,
+) {
+    val resolved = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve(slot)
+    val uriHandler = LocalUriHandler.current
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, color = Neutral400, fontSize = 12.sp)
+        Text(description, color = Neutral500, fontSize = 10.sp)
+        Text(
+            if (resolved.isBlank()) "Not installed" else "Installed · ${java.io.File(resolved).name}",
+            color = if (resolved.isBlank()) Neutral500 else White,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+        Text(
+            "Get desktop model from Azphalt Store ↗",
+            color = Red500,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clickable { uriHandler.openUri("https://azphalt.store/browse?category=$storeCategory") }
+                .padding(top = 2.dp),
+        )
+    }
+}
+
 /** Desktop mirror of the app side's `AiCapabilitySummary` (`app/.../ui/Sheets.kt`) — see its doc. */
 @Composable
 private fun DesktopAiCapabilitySummary(settings: AiSettings) {
     val cloudConfigured = settings.provider != AiProviderType.MLKIT && settings.keyFor(settings.provider).isNotBlank()
+    val localTag = settings.agentModelPath.removePrefix("ollama:")
+    val localMultimodal =
+        localTag.startsWith("qwen3.5", ignoreCase = true) ||
+            localTag.startsWith("gemma4", ignoreCase = true)
+    fun installed(slot: String) =
+        com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve(slot).isNotBlank()
+
     val rows = listOf(
-        "Assistant brain" to (cloudConfigured || settings.agentModelPath.isNotBlank()),
-        "Frame vision (recognition)" to true,
-        "Transcription" to (settings.speechModelPath.isNotBlank() || settings.asrModelPath.isNotBlank() || settings.keyFor(AiProviderType.OPENAI).isNotBlank()),
-        "Text-to-speech" to settings.ttsModelPath.isNotBlank(),
-        "Frame captioning (VLM)" to settings.vlmModelPath.isNotBlank(),
-        "Audio highlight detection" to settings.audioEventModelPath.isNotBlank(),
-        "Speaker diarization" to (settings.diarizeSegModelPath.isNotBlank() && settings.diarizeEmbedModelPath.isNotBlank()),
-        "Stem separation" to settings.stemModelPath.isNotBlank(),
-        "Denoise" to settings.denoiseModelPath.isNotBlank(),
+        "Assistant brain" to (cloudConfigured || settings.agentModelPath.startsWith("ollama:")),
+        "Frame vision" to (localMultimodal || installed("labelModelPath") || (cloudConfigured && settings.cloudVision)),
+        "Transcription (Vosk)" to installed("speechModelPath"),
+        "Text-to-speech (ONNX)" to installed("ttsModelPath"),
+        "Local multimodal planner" to localMultimodal,
+        "Audio highlight detection" to installed("audioEventModelPath"),
+        "Speaker diarization" to installed("diarizeEmbedModelPath"),
+        "Stem separation" to installed("stemModelPath"),
+        "Speech denoise (desktop)" to false, // GTCRN desktop executor is not wired yet; don't advertise a path as capability.
         "Image/video/music generation" to (settings.genKeys.values.any { it.isNotBlank() } || settings.leonardoKey.isNotBlank()),
         "Cloud may see the current frame" to settings.cloudVision,
     )
@@ -159,6 +202,52 @@ fun SettingsScreen(
 
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
+
+    var desktopProfile by remember {
+        mutableStateOf<com.hereliesaz.guillotine.ai.agent.DeviceModelProfile?>(null)
+    }
+    var ollamaStatus by remember { mutableStateOf<DesktopOllama.Status?>(null) }
+    var ollamaBusyModel by remember { mutableStateOf<String?>(null) }
+    var ollamaMessage by remember { mutableStateOf<String?>(null) }
+
+    fun refreshDesktopModelState() {
+        scope.launch {
+            val pair = withContext(Dispatchers.IO) {
+                DesktopDeviceModelProfile.read() to DesktopOllama.status()
+            }
+            desktopProfile = pair.first
+            ollamaStatus = pair.second
+        }
+    }
+
+    LaunchedEffect(Unit) { refreshDesktopModelState() }
+
+    fun installAndUseDesktopModel(selector: String) {
+        val tag = selector.removePrefix("ollama:")
+        if (tag.isBlank() || ollamaBusyModel != null) return
+        scope.launch {
+            ollamaBusyModel = tag
+            ollamaMessage = "Preparing the dedicated router (${DesktopOllama.ROUTER_MODEL})…"
+            val result = withContext(Dispatchers.IO) {
+                val installed = if (DesktopOllama.ensureRunning()) DesktopOllama.listModels() else emptySet()
+                val routerResult = if (DesktopOllama.ROUTER_MODEL in installed) {
+                    Result.success(Unit)
+                } else {
+                    DesktopOllama.pull(DesktopOllama.ROUTER_MODEL)
+                }
+                if (routerResult.isFailure) routerResult else DesktopOllama.pull(tag)
+            }
+            ollamaBusyModel = null
+            if (result.isSuccess) {
+                agentModelPath = "ollama:$tag"
+                provider = AiProviderType.LOCAL
+                ollamaMessage = "Installed and selected $tag. Router: ${DesktopOllama.ROUTER_MODEL}."
+                refreshDesktopModelState()
+            } else {
+                ollamaMessage = "Ollama install failed: ${result.exceptionOrNull()?.message ?: "unknown error"}"
+            }
+        }
+    }
 
     // Assemble settings from the current editable state — shared by Save and the .azp installer
     // (which folds newly-routed model paths into the visible fields first).
@@ -398,118 +487,256 @@ fun SettingsScreen(
                     
                     
                     
-                    Text("AI assistant — on-device model (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = agentModelPath, hint = "assistant .task/.litertlm model", isDirectory = false) { agentModelPath = it }
-                    Text("Run the assistant fully offline with no key. Blank = use the selected provider's key above.", color = Neutral500, fontSize = 10.sp)
+                    Text("AI assistant — desktop local model (optional)", color = Neutral400, fontSize = 12.sp)
                     Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=litert") }.padding(top = 2.dp)
-                        )
+                        "Desktop uses its own larger local-model catalog through Ollama; phone/tablet LiteRT " +
+                            "weights are not offered here. Selecting a local model switches the analyzer to Local.",
+                        color = Neutral500,
+                        fontSize = 10.sp,
+                    )
 
-                    Text("Recognition model — for \"teach a specific thing\" (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = idEmbedModelPath, hint = "recognition .tflite model", isDirectory = false) { idEmbedModelPath = it }
-                    Text("A stronger embedder sharpens \"is this the same thing?\" matching. Blank = the bundled MobileNet-V3-small.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
-                        )
-
-                    Text("Face model — for identifying a specific person (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = faceEmbedModelPath, hint = "face .tflite model", isDirectory = false) { faceEmbedModelPath = it }
-                    Text("When set, teaching a person uses face recognition. Blank = fall back to the general recognition model.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
-                        )
-
-                    Text("Image effects — on-device TFLite models (optional)", color = Neutral400, fontSize = 12.sp)
-                    listOf(
-                        Triple("depth", "Depth model path — depth map (e.g. bokeh)", "tflite"),
-                        Triple("superres", "Super-resolution model path — upscale a frame", "tflite"),
-                        Triple("lowlight", "Low-light model path — brighten a frame", "tflite"),
-                        Triple("style", "Style transfer path — apply an artistic style", "tflite")
-                    ).forEach { (kind, hint, cat) ->
-                        ModelPathField(value = effectModelPaths[kind].orEmpty(), hint = hint, isDirectory = false) { effectModelPaths = effectModelPaths + (kind to it) }
+                    desktopProfile?.let { profile ->
+                        Text(profile.shortSummary, color = White, fontSize = 10.sp)
                         Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=${cat}") }.padding(top = 2.dp)
+                            "Fit is estimated locally from RAM, free storage, CPU cores, architecture and any " +
+                                "accelerator Guillotine can identify. Ollama chooses the actual CPU/GPU backend.",
+                            color = Neutral500,
+                            fontSize = 10.sp,
                         )
+                        val recommendations = remember(profile) {
+                            DeviceModelAdvisor.advise(profile, RECOMMENDED_DESKTOP_ASSISTANT_MODELS)
+                        }
+                        val installed = ollamaStatus?.installedModels.orEmpty()
+                        val ollamaAvailable = ollamaStatus?.executableAvailable == true
+                        val routerInstalled = DesktopOllama.ROUTER_MODEL in installed
+                        Text(
+                            if (routerInstalled) {
+                                "Dedicated router: ${DesktopOllama.ROUTER_MODEL} · ready"
+                            } else {
+                                "Dedicated router: ${DesktopOllama.ROUTER_MODEL} · installs with the first desktop-local planner"
+                            },
+                            color = if (routerInstalled) White else Neutral500,
+                            fontSize = 10.sp,
+                        )
+
+                        recommendations.forEach { recommendation ->
+                            val model = recommendation.model
+                            val tag = model.fileName.removePrefix("ollama:")
+                            val selected = agentModelPath == model.fileName
+                            val isInstalled = tag in installed
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Neutral800)
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(model.label, color = White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                        Text("${model.sizeLabel} · ${model.license}", color = Neutral500, fontSize = 10.sp)
+                                    }
+                                    Text(
+                                        recommendation.badge,
+                                        color = when (recommendation.fit) {
+                                            DeviceModelFit.BEST_FIT -> Red500
+                                            DeviceModelFit.RECOMMENDED -> White
+                                            DeviceModelFit.CAUTION -> Neutral400
+                                            DeviceModelFit.NOT_RECOMMENDED -> Red500
+                                        },
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+                                Text(model.abilities, color = Neutral400, fontSize = 10.sp)
+                                Text(
+                                    recommendation.reason,
+                                    color = if (recommendation.fit == DeviceModelFit.NOT_RECOMMENDED) Red500 else Neutral500,
+                                    fontSize = 10.sp,
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    when {
+                                        selected -> Text("In use", color = Red500, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                                        ollamaBusyModel == tag -> Text("Installing…", color = Neutral400, fontSize = 10.sp)
+                                        isInstalled -> Text(
+                                            "Use",
+                                            color = Red500,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.clickable {
+                                                agentModelPath = model.fileName
+                                                provider = AiProviderType.LOCAL
+                                            },
+                                        )
+                                        ollamaAvailable -> Text(
+                                            "Install & use",
+                                            color = Red500,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.clickable { installAndUseDesktopModel(model.fileName) },
+                                        )
+                                        else -> Text(
+                                            "Install Ollama ↗",
+                                            color = Red500,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.clickable { uriHandler.openUri("https://ollama.com/download") },
+                                        )
+                                    }
+                                    Text(
+                                        "Model details ↗",
+                                        color = Neutral400,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.clickable { uriHandler.openUri(model.repoUrl) },
+                                    )
+                                }
+                            }
+                        }
+                    } ?: Text("Reading desktop hardware…", color = Neutral500, fontSize = 10.sp)
+
+                    ollamaMessage?.let { Text(it, color = Neutral400, fontSize = 10.sp) }
+                    ModelPathField(
+                        value = agentModelPath,
+                        hint = "advanced: ollama:<tag> or custom desktop local selector",
+                        isDirectory = false,
+                    ) { agentModelPath = it }
+                    Text(
+                        "Blank = use the selected cloud provider. Desktop-local models stay on this machine; " +
+                            "Guillotine connects only to Ollama on 127.0.0.1.",
+                        color = Neutral500,
+                        fontSize = 10.sp,
+                    )
+
+                    Text(
+                        "Desktop specialist models",
+                        color = White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        "Desktop specialists use ONNX/Vosk packages from the local Azphalt registry — not the " +
+                            "Android TFLite/sherpa bundles. Only models that have a working desktop executor are shown.",
+                        color = Neutral500,
+                        fontSize = 10.sp,
+                    )
+
+                    DesktopModelSlotStatus(
+                        "Footage search / image labeling",
+                        "labelModelPath",
+                        "Desktop ONNX image classifier used by frame description, prompt-driven analysis and clip search.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Concept recognition / teach a specific thing",
+                        "idEmbedModelPath",
+                        "Desktop ONNX image embedder for learned visual concepts.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Face detection / tracking",
+                        "faceDetectModelPath",
+                        "Desktop ONNX face detector used for blur and auto-reframe.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Face recognition",
+                        "faceEmbedModelPath",
+                        "Desktop ONNX face embedding model for identifying a taught person.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Background segmentation",
+                        "segModelPath",
+                        "Desktop ONNX segmentation model for background replacement and portrait bokeh.",
+                        "onnx",
+                    )
+
+                    Text("Image effects — desktop ONNX", color = Neutral400, fontSize = 12.sp)
+                    listOf(
+                        Triple("effect_depth", "Depth", "Monocular depth / parallax effects."),
+                        Triple("effect_superres", "Super-resolution", "Frame upscaling / enhancement."),
+                        Triple("effect_lowlight", "Low-light", "Dark-frame enhancement."),
+                        Triple("effect_style", "Style", "Single-model style transformation."),
+                    ).forEach { (slot, label, description) ->
+                        val path = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve(slot)
+                        Text(
+                            "$label · " + if (path.isBlank()) "not installed" else "installed (${java.io.File(path).name})",
+                            color = if (path.isBlank()) Neutral500 else White,
+                            fontSize = 10.sp,
+                        )
+                        Text(description, color = Neutral500, fontSize = 10.sp)
                     }
-                    Text("Enables \"apply the image effect\" ... Commands run the matching model.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                        "Browse desktop ONNX effects ↗",
+                        color = Red500,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }
+                            .padding(top = 2.dp),
+                    )
 
-                    Text("Audio-event model — highlight detection (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = audioEventModelPath, hint = "YAMNet .tflite model", isDirectory = false) { audioEventModelPath = it }
-                    Text("Enables \"find the highlights / best moments\". Blank = feature off.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=tflite") }.padding(top = 2.dp)
-                        )
+                    DesktopModelSlotStatus(
+                        "Audio-event highlights",
+                        "audioEventModelPath",
+                        "Desktop YAMNet ONNX classifier used to find applause, cheering, laughter and other highlight events.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Transcription / captions",
+                        "speechModelPath",
+                        "Desktop uses a Vosk model directory for local captions, animated captions and filler-word timing.",
+                        "vosk",
+                    )
+                    DesktopModelSlotStatus(
+                        "Text-to-speech / voiceover",
+                        "ttsModelPath",
+                        "Desktop uses a VITS/Piper-compatible ONNX voice model — not the Android sherpa TTS bundle.",
+                        "onnx",
+                    )
 
-                    Text("Speech (ASR) — offline transcription (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = asrModelPath, hint = "sherpa-onnx ASR model directory", isDirectory = true) { asrModelPath = it }
-                    Text("Enables \"transcribe this accurately\" via offline Whisper (sherpa-onnx).", color = Neutral500, fontSize = 10.sp)
+                    val localPlannerTag = agentModelPath.removePrefix("ollama:")
+                    val localPlannerVision =
+                        localPlannerTag.startsWith("qwen3.5", ignoreCase = true) ||
+                            localPlannerTag.startsWith("gemma4", ignoreCase = true)
+                    Text("Frame understanding", color = Neutral400, fontSize = 12.sp)
                     Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
+                        if (localPlannerVision) {
+                            "The selected desktop planner ($localPlannerTag) can inspect the current frame locally through Ollama."
+                        } else {
+                            "Text-only planners use the installed ONNX image labeler for frame descriptions. " +
+                                "Choose Qwen3.5 or Gemma 4 for richer local frame understanding."
+                        },
+                        color = if (localPlannerVision) White else Neutral500,
+                        fontSize = 10.sp,
+                    )
 
-                    Text("Speech (TTS) — offline voiceover (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = ttsModelPath, hint = "sherpa-onnx TTS voice directory", isDirectory = true) { ttsModelPath = it }
-                    Text("Enables \"add a voiceover saying …\" via offline neural TTS (sherpa-onnx).", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
+                    DesktopModelSlotStatus(
+                        "Speaker diarization",
+                        "diarizeEmbedModelPath",
+                        "Desktop uses energy VAD plus an ONNX speaker embedder; it does not need Android's separate segmentation bundle.",
+                        "onnx",
+                    )
+                    DesktopModelSlotStatus(
+                        "Stem separation",
+                        "stemModelPath",
+                        "Desktop runs the Spleeter ONNX pair through ONNX Runtime for vocals + accompaniment.",
+                        "onnx",
+                    )
 
-                    Text("Frame captioning (VLM) — multimodal model (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = vlmModelPath, hint = "Multimodal VLM model (.task)", isDirectory = false) { vlmModelPath = it }
-                    Text("Lets the assistant \"describe / understand this frame\" in rich language.", color = Neutral500, fontSize = 10.sp)
+                    Text("Speech denoise", color = Neutral400, fontSize = 12.sp)
                     Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=litert") }.padding(top = 2.dp)
-                        )
+                        "No desktop denoiser is recommended yet: the existing GTCRN slot has no desktop executor. " +
+                            "Guillotine will not pretend an installed model makes denoise_clip available.",
+                        color = Neutral500,
+                        fontSize = 10.sp,
+                    )
 
-                    Text("Speaker diarization — who spoke when (optional, needs both models)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = diarizeSegModelPath, hint = "Diarization segmentation directory (pyannote)", isDirectory = true) { diarizeSegModelPath = it }
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
-                    ModelPathField(value = diarizeEmbedModelPath, hint = "Speaker-embedding model (.onnx)", isDirectory = false) { diarizeEmbedModelPath = it }
-                    Text("Enables \"who speaks when?\" — set BOTH a segmentation and an embedding model.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
-
-                    Text("Stem separation — vocals / instrumental (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = stemModelPath, hint = "Spleeter model directory (ONNX)", isDirectory = true) { stemModelPath = it }
-                    Text("Enables \"separate the stems / isolate the vocals\". Heavy — best on a capable device. Blank = feature off.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
-
-                    Text("Noise reduction — clean up voice audio (optional)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = denoiseModelPath, hint = "Speech-denoiser model (.onnx)", isDirectory = false) { denoiseModelPath = it }
-                    Text("Enables \"remove background noise / clean up the audio\" — strips hiss, hum, and background noise from voice.", color = Neutral500, fontSize = 10.sp)
-                    Text(
-                            "Get from Azphalt Store  ↗",
-                            color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://azphalt.store/browse?category=onnx") }.padding(top = 2.dp)
-                        )
-                    
                     Text("Install AI model (.azp)", color = Neutral400, fontSize = 12.sp)
                     Text(
                         if (azpBusy) "Installing…" else "Install from file",

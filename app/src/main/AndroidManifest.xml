@@ -42,6 +42,11 @@
         android:resizeableActivity="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.Guillotine">
+        <!-- LiteRT-LM GPU backend probes these vendor libraries when present; required=false keeps
+             CPU fallback working on devices that do not expose OpenCL. -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
 
         <!-- Optional OpenCL libs used by the on-device LLM (MediaPipe LLM Inference) GPU backend. -->
         <uses-native-library android:name="libOpenCL.so" android:required="false" />

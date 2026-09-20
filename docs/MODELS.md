@@ -15,9 +15,13 @@ interpreters (`.tflite`), **sherpa-onnx** offline speech (`.tar.bz2` bundles and
 files), and **ONNX Runtime** (Spleeter stem separation).
 
 You manage everything from **Settings → the Model Manager** (see [SETTINGS.md](SETTINGS.md)). Each
-category has a text field for a model *path* plus a picker listing the recommended models, where each
-row offers **Download**, **Resume**, **Cancel**, **✓ Use**, **In use**, or **Remove** (gated repos
-show **Get ↗** instead — a link out). For how these models power specific assistant commands
+category has a text field for a model *path* plus a picker listing the recommended models. Guillotine
+reads permission-free local device facts (RAM, free app storage, CPU core count, 32/64-bit runtime and
+Android's low-RAM flag), sorts models by device fit, and explains **Best fit / Recommended / Use with
+caution / Not recommended** directly under each row. This is an estimate, not a benchmark: chipset
+accelerators and thermals still vary by device. Each row offers **Download**, **Resume**, **Cancel**,
+**✓ Use**, **In use**, or **Remove** (gated repos show **Get ↗** instead — a link out). For how these
+models power specific assistant commands
 (`caption_frame`, `transcribe_precise`, `separate_stems`, `find_highlights`, …), see
 [TOOLS.md](TOOLS.md); for the day-to-day workflow, see [MANUAL.md](MANUAL.md); for the *cloud*
 bring-your-own-key generation providers (a separate, opt-in system), see [PROVIDERS.md](PROVIDERS.md).
@@ -46,8 +50,14 @@ bring-your-own-key generation providers (a separate, opt-in system), see [PROVID
   a per-model directory (the top-level folder is stripped), and "Use" wires that *directory* path;
   install is confirmed by a marker file inside it.
 - **The bundled starter.** One model — **SmolLM 135M Instruct (q8)** — ships *inside the APK* and is
-  extracted to `llm-models` on first launch, so the assistant works offline out of the box with no
-  download. It cannot be removed.
+  extracted to `llm-models` progressively after launch, so the assistant works offline with no
+  download. If a prompt needs it before prewarming finishes, extraction completes immediately. It
+  cannot be removed.
+- **Dedicated router role.** The same bundled 135M *weights* are also opened in an isolated routing
+  engine whose only job is delegation: it reads the live MCP capability catalog plus which specialist
+  model roles are configured, selects the smallest relevant set, then hands that narrowed catalog to
+  the real planner. It does **not** edit or answer the user. Reusing the weights avoids shipping a
+  second ~167 MB copy.
 - **Picking one.** Tapping **✓ Use** sets that category's `…ModelPath` setting to the installed path;
   a freshly finished download is auto-adopted for its own category. These paths are persisted and
   travel in the Settings backup bundle.
@@ -110,29 +120,60 @@ downloadable model — see [the note below](#a-note-on-reserved-categories).
 | `STEM` | "Separate the stems / isolate vocals" | ONNX Runtime (Spleeter) · `.tar.bz2` dir | `stemModelPath` | 1 |
 | `DENOISE` | "Clean up the audio" (speech denoise) | sherpa-onnx GTCRN · `.onnx` | `denoiseModelPath` | 1 |
 
-Total: **22 recommended models** across 14 catalogs.
+Total: **36 recommended models** across 15 catalogs (including the separate desktop-assistant catalog).
 
 ---
 
 ## `ASSISTANT_LLM` — the assistant brain
 
-MediaPipe `LlmInference` models (`.task`, or the newer `.litertlm`) that let the AI editor plan and
-run edits **fully offline, with no API key**. If `agentModelPath` is blank the command bar falls back
-to whichever cloud provider key you've configured (see [PROVIDERS.md](PROVIDERS.md)); set a local
-model here to stay offline. The bundled SmolLM starter is always present.
+Android phone/tablet assistants use two local runtimes: legacy `.task` files stay on MediaPipe
+`LlmInference`, while modern `.litertlm` files use **LiteRT-LM 0.17.1** with GPU-first, CPU-fallback
+loading. The device advisor ranks these from the actual phone/tablet RAM, storage, CPU and runtime
+bitness rather than pretending one model is right for every device.
 
-| Model (`id`) | Purpose | Size | Format | License | Source |
+| Mobile model (`id`) | Purpose | Size | Format | License | Source |
 |---|---|---|---|---|---|
-| SmolLM 135M Instruct q8 (`smollm-135m-q8`) | Bundled starter. Instant startup, basic completion & simple tool calls; very limited reasoning. | 166 MB | `.task` | Apache-2.0 | **Bundled in APK** (no download) |
-| Qwen2.5 0.5B Instruct q8 (`qwen2.5-0.5b-q8`) | Good reasoning for its size; handles tool calls and editing context. | 546 MB | `.task` | Apache-2.0 | HF `litert-community/Qwen2.5-0.5B-Instruct` |
-| Qwen2.5 1.5B Instruct q8 (`qwen2.5-1.5b-q8`) | Strong reasoning & tool use; best quality/size balance. | 1.57 GB | `.task` | Apache-2.0 | HF `litert-community/Qwen2.5-1.5B-Instruct` |
-| Phi-4 mini Instruct q8 (`phi4-mini-q8`) | Most capable on-device model; excellent reasoning. Needs a high-end device. | 3.94 GB | `.task` | MIT | HF `litert-community/Phi-4-mini-instruct` |
-| Gemma 3 1B Instruct int4 (`gemma3-1b-int4`) | Compact & fast with good reasoning; smallest of the full-capability models. | 554 MB | `.task` | Gemma | HF `HereLiesAz/gemma3-1b-it` (mirrored) |
-| DeepSeek-R1 Distill Qwen 1.5B q8 (`deepseek-r1-qwen-1.5b-q8`) | Strong step-by-step reasoning (distilled R1); good for multi-step edits. Verbose traces. | 1.86 GB | `.task` | MIT | HF `litert-community/DeepSeek-R1-Distill-Qwen-1.5B` |
-| Qwen3 0.6B int4 (`qwen3-0.6b-int4`) | Small, fast, up-to-date lightweight default; ships as LiteRT-LM. | 497 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3-0.6B` |
+| SmolLM 135M q8 (`smollm-135m-q8`) | Bundled starter plus Android routing/coach weight. | 166 MB | `.task` | Apache-2.0 | bundled |
+| SmolLM2 360M (`smollm2-360m`) | Ultra-light low-memory tier. | 373 MB | `.litertlm` | Apache-2.0 | HF `litert-community/SmolLM2-360M-Instruct` |
+| Qwen3 0.6B int4 (`qwen3-0.6b-int4`) | Compact sub-0.5 GB planner retained as a small-footprint tier. | 497 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3-0.6B` |
+| Gemma 3 1B int4 (`gemma3-1b-int4`) | Proven legacy-`.task` compatibility fallback. | 554 MB | `.task` | Gemma | HF `HereLiesAz/gemma3-1b-it` |
+| MiniCPM5 1B mixed int4/int8 (`minicpm5-1b-int4`) | Edge/tool-use focused 1B tier. | 793 MB | `.litertlm` | Apache-2.0 | HF `litert-community/MiniCPM5-1B` |
+| Qwen3.5 0.8B int8 (`qwen3.5-0.8b-int8`) | Current lightweight Qwen3.5 hybrid; mobile GPU path supported. | ~963 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3.5-0.8B` |
+| MiniCPM5 2B int4 (`minicpm5-2b-int4`) | Efficient heavy-phone tier with tool-oriented behavior. | 1.55 GB | `.litertlm` | Apache-2.0 | HF `litert-community/MiniCPM5-2B` |
+| Qwen3.5 2B int8 (`qwen3.5-2b-int8`) | Strong current-generation mobile planner. | ~1.97 GB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3.5-2B` |
+| Qwen3.5 4B mixed int4 (`qwen3.5-4b-int4`) | Flagship mobile/tablet planning tier. | ~2.57 GB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3.5-4B` |
+| Gemma 4 E2B (`gemma4-e2b`) | Current Gemma edge alternative with native function-calling support. | ~2.59 GB | `.litertlm` | Apache-2.0 | HF `litert-community/gemma-4-E2B-it-litert-lm` |
 
-Notes: the `.litertlm` Qwen3 model loads directly on the current MediaPipe runtime (0.10.35). The
-Gemma 3 1B entry is served from the [Gemma mirror](#the-gemma-mirror) (Gemma Terms of Use apply).
+The retired recommended mobile entries are **Qwen2.5 0.5B q8, Qwen2.5 1.5B q8, Qwen3 1.7B int4,
+DeepSeek-R1 Distill Qwen 1.5B q8, and Phi-4 mini q8**. Existing downloads are not deleted; they simply
+stop appearing as recommended new installs.
+
+### Desktop-local assistant catalog
+
+Desktop intentionally uses a **different model family and runtime**. Guillotine Desktop talks to a
+local Ollama service on `127.0.0.1`, so laptops/workstations can use substantially larger planners
+without shipping Android LiteRT weights. Desktop Settings reads RAM, free storage, CPU/architecture
+and a best-effort accelerator/GPU label, then ranks this catalog independently:
+
+| Desktop model | Published Ollama size | Role |
+|---|---:|---|
+| Qwen3.5 0.8B | ~1.0 GB | light desktop / low-memory laptop |
+| Qwen3.5 2B | ~2.7 GB | efficient laptop/desktop |
+| Phi-4 Mini 3.8B | ~2.5 GB | compact alternate planner with function calling |
+| Qwen3.5 4B | ~3.4 GB | balanced mainstream desktop |
+| Qwen3.5 9B | ~6.6 GB | strong desktop |
+| Gemma 4 12B | ~7.6 GB | multimodal-era workstation planner |
+| gpt-oss 20B | ~14 GB | agentic high-memory workstation |
+| Qwen3.5 27B | ~17 GB | very high-memory workstation |
+
+Selecting **Install & use** starts/uses Ollama, installs the desktop router if needed, pulls the chosen
+planner, stores `agentModelPath` as `ollama:<tag>`, switches the analyzer to **Local**, and routes the
+existing MCP tool loop to localhost. No API key or remote inference is required.
+
+Desktop's dedicated routing model is **`qwen3.5:0.8b`**. It is installed alongside the first local
+desktop planner and has one job only: inspect the complete live MCP catalog in compact batches and
+delegate the request to relevant tools/model roles. It never edits or answers the user. If the router
+is absent or uncertain, Guillotine gives the planner the full MCP catalog instead.
 
 ---
 

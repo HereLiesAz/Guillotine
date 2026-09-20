@@ -109,7 +109,7 @@ compose.desktop {
             // its only notable JDK dep — java.util.logging (OrtEnvironment's Logger) — is already in
             // the image via java.sql's `requires transitive java.logging`. If a runtime
             // NoClassDefFoundError ever points at java.util.logging, add "java.logging" explicitly.
-            modules("java.sql", "jdk.unsupported", "java.naming")
+            modules("java.sql", "jdk.unsupported", "java.naming", "java.management", "jdk.management")
 
             macOS {
                 bundleID = "com.hereliesaz.guillotine"

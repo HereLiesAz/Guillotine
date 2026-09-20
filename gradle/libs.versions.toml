@@ -36,6 +36,7 @@ vosk = "0.3.75"
 # UnsatisfiedLinkError; linux-x86_64 (CI) and windows-x86_64 are covered.
 voskJvm = "0.3.45"
 mediapipeTasksGenai = "0.10.35"
+liteRtLm = "0.17.1"
 # Pin EXACTLY to match tasks-genai (aligns MPImage/vision-modality + native libs). Do NOT use a dynamic
 # version: tasks-vision's Maven metadata advertises the old 0.20230731 as <release>, and version
 # comparison treats 0.20230731 > 0.10.35, so `0.10.+`/`+` would resolve back to the stale 2023 build.
@@ -45,7 +46,7 @@ billing = "9.1.0"
 nanohttpd = "2.3.1"
 okhttp = "5.5.0"
 tensorflowLite = "2.17.0"
-sherpaOnnx = "v1.13.4"
+sherpaOnnx = "v1.13.8"
 onnxruntime = "1.29.0"
 commonsCompress = "1.28.0"
 junit = "4.13.2"
@@ -96,6 +97,7 @@ vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref =
 # net.java.dev.jna transitively. See the Apple-Silicon caveat on the `voskJvm` version above.
 vosk-jvm = { group = "com.alphacephei", name = "vosk", version.ref = "voskJvm" }
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
+litert-lm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "liteRtLm" }
 mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipeTasksVision" }
 # AzNavRail publishes several modules on JitPack. Use the MAIN Android library module — artifact
 # `aznavrail` (the `:aznavrail` Android module) — NOT the Compose-Multiplatform variant

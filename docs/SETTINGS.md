@@ -41,8 +41,12 @@ Two control patterns repeat across the screen — described once here, reference
 
 ### Model picker
 
-Most on-device model fields are paired with a **model picker**: a curated list of recommended models,
-each showing its label, download size, and license. Per row the action is one of:
+Most on-device model fields are paired with a **model picker**. Guillotine reads the current
+device's RAM, free app storage, CPU core count, 32/64-bit runtime and low-RAM flag locally (no
+permission, no upload), then orders the catalog and labels each row **Best fit**, **Recommended**,
+**Use with caution**, or **Not recommended**, with a short explanation. The fit is deliberately
+conservative and does not pretend to know a universal NPU/GPU score. Each row also shows its label,
+download size, and license. Per row the action is one of:
 
 - **Download** / **Resume** — fetch the model straight to the device (Wi-Fi recommended). Shows a
   progress bar with percent; **Cancel** stops it, leaving a resumable partial.
@@ -115,10 +119,21 @@ A radio list — pick exactly one. This sets [`AiSettings.provider`](#5-aisettin
 
 ### AI assistant — on-device model (optional)
 
-- **Type:** model-path field (`.task`) + [model picker](#model-picker) ("Assistant models").
-- Run the assistant fully offline with **no key** from a downloaded `.task` LLM. Blank = the assistant
+- **Type:** model-path field (`.task` / `.litertlm`) + [model picker](#model-picker) ("Assistant models").
+- Run the assistant fully offline with **no key** from a downloaded local LLM. Blank = the assistant
   uses the selected provider's key above instead. Writes
   [`AiSettings.agentModelPath`](#5-aisettings-field-reference).
+- **Android / phone / tablet:** the picker offers the LiteRT/MediaPipe catalog and the dedicated
+  router reuses the bundled SmolLM-135M weights in an isolated engine.
+- **Desktop:** the picker is deliberately different. Guillotine reads workstation specs and ranks a
+  separate Ollama catalog (Qwen3 / Phi-4 Mini / gpt-oss tiers). **Install & use** pulls the chosen model
+  locally, stores `agentModelPath` as `ollama:<tag>`, switches the analyzer to Local, and talks only
+  to Ollama on `127.0.0.1`.
+- **Task router:** desktop uses its own dedicated `qwen3.5:0.8b` Ollama router, installed with the first
+  desktop-local planner. The routing role reads the complete live MCP catalog in compact batches,
+  selects only relevant capabilities/model roles, and hands those to the actual local/cloud planner.
+  It never edits, generates tool arguments, or answers the user; on absence/uncertainty it falls back
+  to the full catalog.
 
 ### Recognition model — for "teach a specific thing" (optional)
 

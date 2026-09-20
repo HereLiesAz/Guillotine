@@ -231,6 +231,7 @@ dependencies {
     implementation(libs.mlkit.face.detection)
     implementation(libs.mlkit.segmentation.selfie)
     implementation(libs.mediapipe.tasks.genai)
+    implementation(libs.litert.lm.android)
     implementation(libs.mediapipe.tasks.vision)
     implementation(libs.tensorflow.lite)
     // Declared BEFORE sherpa-onnx so its libonnxruntime.so (newer) wins the jniLibs pickFirst.
