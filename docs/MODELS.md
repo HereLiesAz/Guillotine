@@ -126,52 +126,54 @@ Total: **22 recommended models** across 14 catalogs.
 
 ## `ASSISTANT_LLM` — the assistant brain
 
-Assistant models use two local runtimes: legacy `.task` files stay on MediaPipe `LlmInference`,
-while modern `.litertlm` files use the official **LiteRT-LM 0.17.1** Kotlin runtime with GPU-first,
-CPU-fallback loading. Both paths are fully offline. If `agentModelPath` is blank the command bar
-falls back to whichever cloud provider key you've configured (see [PROVIDERS.md](PROVIDERS.md)); set
-a local model here to stay offline. The bundled SmolLM starter is always present.
+Android phone/tablet assistants use two local runtimes: legacy `.task` files stay on MediaPipe
+`LlmInference`, while modern `.litertlm` files use **LiteRT-LM 0.17.1** with GPU-first, CPU-fallback
+loading. The device advisor ranks these from the actual phone/tablet RAM, storage, CPU and runtime
+bitness rather than pretending one model is right for every device.
 
-| Model (`id`) | Purpose | Size | Format | License | Source |
+| Mobile model (`id`) | Purpose | Size | Format | License | Source |
 |---|---|---|---|---|---|
-| SmolLM 135M Instruct q8 (`smollm-135m-q8`) | Bundled starter plus routing/coach weight. Tiny and fast; intentionally not the main complex planner. | 166 MB | `.task` | Apache-2.0 | **Bundled in APK** (no download) |
-| SmolLM2 360M Instruct (`smollm2-360m`) | Ultra-light modern planner for constrained devices; replaces the older Qwen2.5 0.5B q8 tier with a smaller footprint. | 373 MB | `.litertlm` | Apache-2.0 | HF `litert-community/SmolLM2-360M-Instruct` |
-| Qwen3 0.6B int4 (`qwen3-0.6b-int4`) | Fast modern Qwen3 planner under 0.5 GB; good default on modest phones. | 497 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3-0.6B` |
-| Gemma 3 1B Instruct int4 (`gemma3-1b-int4`) | Compact 1B assistant with strong instruction following; retained as the proven `.task` option. | 554 MB | `.task` | Gemma | HF `HereLiesAz/gemma3-1b-it` (mirrored) |
-| MiniCPM5 1B mixed int4/int8 (`minicpm5-1b-int4`) | On-device-first 1B model with particularly strong tool use, code and difficult reasoning for its class. | 793 MB | `.litertlm` | Apache-2.0 | HF `litert-community/MiniCPM5-1B` |
-| Qwen3 1.7B int4 (`qwen3-1.7b-int4`) | Strong mobile planner in under 1 GB; GPU-optimized. Replaces the older 1.5B q8 assistant tier. | 977 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3-1.7B` |
-| MiniCPM5 2B int4 (`minicpm5-2b-int4`) | Heavy phone tier with hybrid reasoning and tool-oriented behavior. Replaces the 3.94 GB Phi-4 / 1.86 GB R1 entries with a much smaller modern option. | ~1.55 GB | `.litertlm` | Apache-2.0 | HF `litert-community/MiniCPM5-2B` |
+| SmolLM 135M q8 (`smollm-135m-q8`) | Bundled starter plus Android routing/coach weight. | 166 MB | `.task` | Apache-2.0 | bundled |
+| SmolLM2 360M (`smollm2-360m`) | Ultra-light low-memory tier. | 373 MB | `.litertlm` | Apache-2.0 | HF `litert-community/SmolLM2-360M-Instruct` |
+| Qwen3 0.6B int4 (`qwen3-0.6b-int4`) | Compact sub-0.5 GB planner retained as a small-footprint tier. | 497 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3-0.6B` |
+| Gemma 3 1B int4 (`gemma3-1b-int4`) | Proven legacy-`.task` compatibility fallback. | 554 MB | `.task` | Gemma | HF `HereLiesAz/gemma3-1b-it` |
+| MiniCPM5 1B mixed int4/int8 (`minicpm5-1b-int4`) | Edge/tool-use focused 1B tier. | 793 MB | `.litertlm` | Apache-2.0 | HF `litert-community/MiniCPM5-1B` |
+| Qwen3.5 0.8B int8 (`qwen3.5-0.8b-int8`) | Current lightweight Qwen3.5 hybrid; mobile GPU path supported. | ~963 MB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3.5-0.8B` |
+| MiniCPM5 2B int4 (`minicpm5-2b-int4`) | Efficient heavy-phone tier with tool-oriented behavior. | 1.55 GB | `.litertlm` | Apache-2.0 | HF `litert-community/MiniCPM5-2B` |
+| Qwen3.5 2B int8 (`qwen3.5-2b-int8`) | Strong current-generation mobile planner. | ~1.97 GB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3.5-2B` |
+| Qwen3.5 4B mixed int4 (`qwen3.5-4b-int4`) | Flagship mobile/tablet planning tier. | ~2.57 GB | `.litertlm` | Apache-2.0 | HF `litert-community/Qwen3.5-4B` |
+| Gemma 4 E2B (`gemma4-e2b`) | Current Gemma edge alternative with native function-calling support. | ~2.59 GB | `.litertlm` | Apache-2.0 | HF `litert-community/gemma-4-E2B-it-litert-lm` |
 
-The retired catalog entries are **Qwen2.5 0.5B q8, Qwen2.5 1.5B q8, DeepSeek-R1 Distill Qwen 1.5B q8,
-and Phi-4 mini q8**. Existing files are not deleted from a user's storage automatically; they simply
-stop being offered as recommended downloads. Gemma 3 1B remains served from the
-[Gemma mirror](#the-gemma-mirror) (Gemma Terms of Use apply).
+The retired recommended mobile entries are **Qwen2.5 0.5B q8, Qwen2.5 1.5B q8, Qwen3 1.7B int4,
+DeepSeek-R1 Distill Qwen 1.5B q8, and Phi-4 mini q8**. Existing downloads are not deleted; they simply
+stop appearing as recommended new installs.
 
 ### Desktop-local assistant catalog
 
-Desktop does **not** reuse the Android phone/tablet LiteRT weights. Guillotine Desktop integrates
-with **Ollama on localhost** and maintains a separate catalog sized for laptops/workstations. Settings
-reads desktop RAM, free storage, CPU/architecture and a best-effort GPU/accelerator label, then ranks
-these independently from the mobile list:
+Desktop intentionally uses a **different model family and runtime**. Guillotine Desktop talks to a
+local Ollama service on `127.0.0.1`, so laptops/workstations can use substantially larger planners
+without shipping Android LiteRT weights. Desktop Settings reads RAM, free storage, CPU/architecture
+and a best-effort accelerator/GPU label, then ranks this catalog independently:
 
 | Desktop model | Published Ollama size | Role |
 |---|---:|---|
-| Qwen3 1.7B | ~1.4 GB | light desktop / low-memory laptop |
-| Qwen3 4B | ~2.5 GB | balanced mainstream desktop |
-| Phi-4 Mini 3.8B | ~2.5 GB | alternate compact planner with function calling |
-| Qwen3 8B | ~5.2 GB | strong desktop/workstation default |
-| Qwen3 14B | ~9.3 GB | high-memory workstation |
+| Qwen3.5 0.8B | ~1.0 GB | light desktop / low-memory laptop |
+| Qwen3.5 2B | ~2.7 GB | efficient laptop/desktop |
+| Phi-4 Mini 3.8B | ~2.5 GB | compact alternate planner with function calling |
+| Qwen3.5 4B | ~3.4 GB | balanced mainstream desktop |
+| Qwen3.5 9B | ~6.6 GB | strong desktop |
+| Gemma 4 12B | ~7.6 GB | multimodal-era workstation planner |
 | gpt-oss 20B | ~14 GB | agentic high-memory workstation |
-| Qwen3 30B | ~19 GB | very high-memory workstation |
+| Qwen3.5 27B | ~17 GB | very high-memory workstation |
 
-Selecting **Install & use** starts/uses the local Ollama service, pulls the selected planner, stores
-`agentModelPath` as `ollama:<tag>`, switches the analyzer to **Local**, and routes the existing MCP
-tool loop to `127.0.0.1`. No API key or remote inference is involved.
+Selecting **Install & use** starts/uses Ollama, installs the desktop router if needed, pulls the chosen
+planner, stores `agentModelPath` as `ollama:<tag>`, switches the analyzer to **Local**, and routes the
+existing MCP tool loop to localhost. No API key or remote inference is required.
 
-Desktop also has a separate **routing model**: `qwen3:0.6b`. It is installed with the first local
-desktop planner and has one job only — inspect the live MCP catalog in compact batches and delegate
-the request to the relevant tools/model roles. It never edits or answers the user. If it is absent or
-uncertain, Guillotine gives the planner the full MCP catalog instead.
+Desktop's dedicated routing model is **`qwen3.5:0.8b`**. It is installed alongside the first local
+desktop planner and has one job only: inspect the complete live MCP catalog in compact batches and
+delegate the request to relevant tools/model roles. It never edits or answers the user. If the router
+is absent or uncertain, Guillotine gives the planner the full MCP catalog instead.
 
 ---
 
