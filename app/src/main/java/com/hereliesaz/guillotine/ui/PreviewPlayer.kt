@@ -131,7 +131,7 @@ fun PreviewPlayer(
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
 
     val now = state.currentTimeMs
-    val useBufferedPreview = bufferedPreview != null &&
+    val useBufferedPreview = !cropMode && bufferedPreview != null &&
         now >= bufferedPreview.startMs && now <= bufferedPreview.endMs
     // Disabled/hidden tracks drop out entirely.
     val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
