@@ -172,7 +172,7 @@ object DeviceModelAdvisor {
             DeviceModelFit.CAUTION -> 100
             DeviceModelFit.RECOMMENDED, DeviceModelFit.BEST_FIT -> 300
         } +
-            model.capabilityTier.coerceIn(1, 5) * 30 -
+            model.capabilityTier.coerceIn(1, 8) * 25 -
             (ramRatio * 35.0).toInt() -
             when {
                 model.sizeBytes >= 3_000L * MB -> 18
@@ -204,8 +204,11 @@ object DeviceModelAdvisor {
         else if (profile.cpuCores in 5..7) parts += "${profile.cpuCores} cores are a reasonable fit"
         if (profile.acceleratorLabel.isNotBlank()) parts += "${profile.acceleratorLabel} can help local inference"
         if (model.category == ModelCategory.ASSISTANT_LLM) {
-            parts += when (model.capabilityTier.coerceIn(1, 5)) {
-                5 -> "it is the strongest local assistant in the catalog"
+            parts += when (model.capabilityTier.coerceIn(1, 8)) {
+                8 -> "it is the highest-capability workstation tier in this catalog"
+                7 -> "it is a high-capability planner for machines with substantial headroom"
+                6 -> "it provides strong multi-step planning without jumping to the largest tier"
+                5 -> "it is a strong balanced local assistant"
                 4 -> "it offers stronger reasoning without the largest footprint"
                 3 -> "it favors speed and efficiency"
                 2 -> "it favors a lighter runtime"
