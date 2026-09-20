@@ -7,7 +7,6 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.LogSeverity
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * Text-only adapter for modern `.litertlm` assistant models.
@@ -25,20 +24,29 @@ object LiteRtLmTextEngine {
     private var engine: Engine? = null
     private var backendLabel: String = ""
 
-    suspend fun prepare(context: Context, modelPath: String): String = mutex.withLock {
-        ensureEngineLocked(context.applicationContext, modelPath)
-        backendLabel
+    suspend fun prepare(context: Context, modelPath: String): String {
+        mutex.lock()
+        return try {
+            ensureEngineLocked(context.applicationContext, modelPath)
+            backendLabel
+        } finally {
+            mutex.unlock()
+        }
     }
 
-    suspend fun generate(context: Context, modelPath: String, prompt: String): String =
-        mutex.withLock {
+    suspend fun generate(context: Context, modelPath: String, prompt: String): String {
+        mutex.lock()
+        return try {
             val active = ensureEngineLocked(context.applicationContext, modelPath)
             val out = StringBuilder()
             active.createConversation().use { conversation ->
                 conversation.sendMessageAsync(prompt).collect { chunk -> out.append(chunk) }
             }
             out.toString().trim()
+        } finally {
+            mutex.unlock()
         }
+    }
 
     private suspend fun ensureEngineLocked(context: Context, modelPath: String): Engine {
         engine?.let { if (path == modelPath) return it }
