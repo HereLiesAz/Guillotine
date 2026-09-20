@@ -39,6 +39,15 @@ class OnDeviceAgentBackend(
         onEvent: (AgentEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         try {
+            // "Cut the boring parts" is the app's canonical vague-pacing example. It has a safe,
+            // deterministic interpretation (dead-air/downtime removal), so do not wake a multi-GB LLM
+            // just to rediscover get_timeline -> set_prompt -> analyze_clip.
+            if (PromptCoach.isBoringCutRequest(instruction)) {
+                ActivityLog.info("AI · instant pacing edit — skipping LLM load.")
+                runBoringCutFastPath(tools, onEvent)
+                return@withContext
+            }
+
             val modelName = File(modelPath).name.ifBlank { "on-device model" }
             ActivityLog.progress("AI · loading $modelName…")
             val loadStarted = SystemClock.elapsedRealtime()
@@ -114,6 +123,72 @@ class OnDeviceAgentBackend(
             throw e
         } catch (e: Throwable) {
             onEvent(AgentEvent.Failed(e.message ?: "On-device model failed (check the model path)."))
+        }
+    }
+
+    /**
+     * Deterministic execution for the common vague pacing request. The concrete instruction passed to
+     * analysis deliberately says "pauses and dead air" so Analysis uses its lightweight audio/RMS path
+     * instead of trying to classify "boring" as a visual object.
+     */
+    private fun runBoringCutFastPath(
+        tools: McpToolsSurface,
+        onEvent: (AgentEvent) -> Unit,
+    ) {
+        fun execute(name: String, args: JSONObject = JSONObject()): ToolOutcome {
+            onEvent(AgentEvent.ToolStarted(name))
+            val outcome = callTool(tools, name, args)
+            onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
+            return outcome
+        }
+
+        val timeline = execute("get_timeline")
+        if (timeline.isError) {
+            onEvent(AgentEvent.Failed("Couldn't read the timeline: ${timeline.summary()}"))
+            return
+        }
+
+        val clips = timeline.json.optJSONArray("clips")
+        val ids = buildList {
+            if (clips != null) {
+                for (i in 0 until clips.length()) {
+                    val clip = clips.optJSONObject(i) ?: continue
+                    if (clip.optString("type") == "VIDEO") {
+                        clip.optString("id").takeIf { it.isNotBlank() }?.let(::add)
+                    }
+                }
+            }
+        }
+        if (ids.isEmpty()) {
+            onEvent(AgentEvent.Done("There are no video clips to tighten."))
+            return
+        }
+
+        var completed = 0
+        var failed = 0
+        for (id in ids) {
+            val setPrompt = execute(
+                "set_prompt",
+                JSONObject()
+                    .put("clip_id", id)
+                    .put("prompt", BORING_FAST_PATH_ANALYSIS_PROMPT),
+            )
+            if (setPrompt.isError) {
+                failed++
+                continue
+            }
+
+            val analyzed = execute("analyze_clip", JSONObject().put("clip_id", id))
+            if (analyzed.isError) failed++ else completed++
+        }
+
+        when {
+            failed == 0 ->
+                onEvent(AgentEvent.Done("Tightened pacing on $completed video clip(s) by cutting pauses and dead air."))
+            completed > 0 ->
+                onEvent(AgentEvent.Done("Tightened $completed video clip(s); $failed clip(s) could not be analyzed."))
+            else ->
+                onEvent(AgentEvent.Failed("The pacing analysis could not run on the video clips."))
         }
     }
 
@@ -348,6 +423,7 @@ class OnDeviceAgentBackend(
     }
 
     private companion object {
+        private const val BORING_FAST_PATH_ANALYSIS_PROMPT = "Cut pauses and dead air."
         private const val MAX_ON_DEVICE_TOOLS = 10
         private const val MAX_TOOL_DESCRIPTION_CHARS = 96
         private const val MAX_TOOL_ARGS_CHARS = 96
