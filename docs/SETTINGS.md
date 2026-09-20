@@ -129,7 +129,7 @@ A radio list — pick exactly one. This sets [`AiSettings.provider`](#5-aisettin
   separate Ollama catalog (Qwen3 / Phi-4 Mini / gpt-oss tiers). **Install & use** pulls the chosen model
   locally, stores `agentModelPath` as `ollama:<tag>`, switches the analyzer to Local, and talks only
   to Ollama on `127.0.0.1`.
-- **Task router:** desktop uses its own dedicated `qwen3:0.6b` Ollama router, installed with the first
+- **Task router:** desktop uses its own dedicated `qwen3.5:0.8b` Ollama router, installed with the first
   desktop-local planner. The routing role reads the complete live MCP catalog in compact batches,
   selects only relevant capabilities/model roles, and hands those to the actual local/cloud planner.
   It never edits, generates tool arguments, or answers the user; on absence/uncertainty it falls back
