@@ -1509,17 +1509,21 @@ private fun EditorToolStrip(
                     }
 
                     if (localResult?.isFailure == true) {
-                        withContext(Dispatchers.Main) {
-                            localAsrBroken = true
-                            android.widget.Toast.makeText(
-                                voiceCtx,
-                                "Local speech engine can't run here — using system speech recognition. Say it again.",
-                                android.widget.Toast.LENGTH_LONG,
-                            ).show()
-                        }
+                        withContext(Dispatchers.Main) { localAsrBroken = true }
                     }
 
                     val systemText = if (systemSpeechAvailable) {
+                        withContext(Dispatchers.Main) {
+                            android.widget.Toast.makeText(
+                                voiceCtx,
+                                if (localResult?.isFailure == true) {
+                                    "Local speech engine can't run here — using system speech recognition. Say it again."
+                                } else {
+                                    "Using system speech recognition — say it again."
+                                },
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
                         com.hereliesaz.guillotine.ai.SystemSpeechRecognizer.recognizeOnce(voiceCtx)
                     } else null
 
