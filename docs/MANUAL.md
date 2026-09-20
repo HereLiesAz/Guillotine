@@ -426,9 +426,13 @@ Both are on-device per-clip effects in the **Background** popup — see
 
 ### Voice commands
 
-When an offline speech model is configured, a **microphone** appears next to the prompt field
-(while nothing is selected). Tap to record, tap to stop, and your words are transcribed
-**on-device** into the prompt for you to review and send.
+A **microphone** appears next to the prompt field (while nothing is selected) whenever at least
+one speech path is available. Tap to record and tap again to stop. Guillotine first tries its
+configured **on-device** ASR model. If that runtime cannot load on the device, it falls back to
+Android's **system speech recognition** and explicitly asks you to say the command again. If system
+recognition also fails and an OpenAI key is configured, Guillotine can reuse the original recording
+for cloud Whisper transcription. The resulting text is placed in the prompt for you to review before
+sending.
 
 ### The activity log
 
