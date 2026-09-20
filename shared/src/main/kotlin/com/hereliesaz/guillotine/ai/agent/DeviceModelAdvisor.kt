@@ -155,7 +155,7 @@ object DeviceModelAdvisor {
             DeviceModelFit.CAUTION -> 100
             DeviceModelFit.RECOMMENDED, DeviceModelFit.BEST_FIT -> 300
         } +
-            model.capabilityTier.coerceIn(1, 5) * 20 -
+            model.capabilityTier.coerceIn(1, 5) * 30 -
             (ramRatio * 35.0).toInt() -
             when {
                 model.sizeBytes >= 3_000L * MB -> 18
