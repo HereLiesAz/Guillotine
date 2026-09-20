@@ -12,13 +12,17 @@ class AssistantModelCatalogTest {
 
         assertTrue("smollm2-360m" in ids)
         assertTrue("minicpm5-1b-int4" in ids)
-        assertTrue("qwen3-1.7b-int4" in ids)
+        assertTrue("qwen3.5-0.8b-int8" in ids)
+        assertTrue("qwen3.5-2b-int8" in ids)
+        assertTrue("qwen3.5-4b-int4" in ids)
+        assertTrue("gemma4-e2b" in ids)
         assertTrue("minicpm5-2b-int4" in ids)
 
         assertFalse("qwen2.5-0.5b-q8" in ids)
         assertFalse("qwen2.5-1.5b-q8" in ids)
         assertFalse("deepseek-r1-qwen-1.5b-q8" in ids)
         assertFalse("phi4-mini-q8" in ids)
+        assertFalse("qwen3-1.7b-int4" in ids)
     }
 
     @Test
@@ -28,7 +32,10 @@ class AssistantModelCatalogTest {
                 "smollm2-360m",
                 "qwen3-0.6b-int4",
                 "minicpm5-1b-int4",
-                "qwen3-1.7b-int4",
+                "qwen3.5-0.8b-int8",
+                "qwen3.5-2b-int8",
+                "qwen3.5-4b-int4",
+                "gemma4-e2b",
                 "minicpm5-2b-int4",
             )
         }
@@ -47,7 +54,9 @@ class AssistantModelCatalogTest {
         assertTrue(desktop.isNotEmpty())
         assertTrue(desktop.none { it.id in mobileIds })
         assertTrue(desktop.all { it.fileName.startsWith("ollama:") })
-        assertTrue(desktop.any { it.id == "desktop-qwen3-8b" })
+        assertTrue(desktop.any { it.id == "desktop-qwen3.5-9b" })
+        assertTrue(desktop.any { it.id == "desktop-gemma4-12b" })
         assertTrue(desktop.any { it.id == "desktop-gpt-oss-20b" })
+        assertTrue(desktop.any { it.id == "desktop-qwen3.5-27b" })
     }
 }
