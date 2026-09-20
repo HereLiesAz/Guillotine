@@ -19,35 +19,48 @@ import kotlinx.coroutines.withContext
 object TaskRouterLocalModel {
     private val mutex = Mutex()
 
-    suspend fun route(context: Context, prompt: String): String? = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val modelPath = runCatching {
-                BundledModelExtractor.ensureExtracted(context.applicationContext)
-            }.getOrNull() ?: return@withLock null
+    suspend fun route(context: Context, prompt: String): String? =
+        routeMany(context, listOf(prompt)).firstOrNull()
 
-            try {
-                val llm = LlmInference.createFromOptions(
-                    context.applicationContext,
-                    LlmInference.LlmInferenceOptions.builder()
-                        .setModelPath(modelPath)
-                        .setMaxTokens(192)
-                        .build(),
-                )
+    /**
+     * Route several catalog batches while loading the tiny router weights only once. The full MCP
+     * catalog can therefore be covered without either a giant prompt or repeated model startup.
+     */
+    suspend fun routeMany(context: Context, prompts: List<String>): List<String?> =
+        withContext(Dispatchers.IO) {
+            if (prompts.isEmpty()) return@withContext emptyList()
+            mutex.withLock {
+                val modelPath = runCatching {
+                    BundledModelExtractor.ensureExtracted(context.applicationContext)
+                }.getOrNull() ?: return@withLock List(prompts.size) { null }
+
                 try {
-                    llm.generateResponse(prompt.take(7_500))
-                        .orEmpty()
-                        .trim()
-                        .takeIf { it.isNotBlank() }
-                } finally {
-                    runCatching { llm.close() }
+                    val llm = LlmInference.createFromOptions(
+                        context.applicationContext,
+                        LlmInference.LlmInferenceOptions.builder()
+                            .setModelPath(modelPath)
+                            .setMaxTokens(192)
+                            .build(),
+                    )
+                    try {
+                        prompts.map { prompt ->
+                            runCatching {
+                                llm.generateResponse(prompt.take(7_500))
+                                    .orEmpty()
+                                    .trim()
+                                    .takeIf { it.isNotBlank() }
+                            }.getOrNull()
+                        }
+                    } finally {
+                        runCatching { llm.close() }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    List(prompts.size) { null }
+                } catch (_: LinkageError) {
+                    List(prompts.size) { null }
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                null
-            } catch (_: LinkageError) {
-                null
             }
         }
-    }
 }
