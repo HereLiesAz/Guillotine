@@ -348,18 +348,51 @@ val RECOMMENDED_ASR_MODELS: List<OnDeviceModel> = listOf(
 val RECOMMENDED_TTS_MODELS: List<OnDeviceModel> = listOf(
     OnDeviceModel(
         id = "sherpa-piper-en-us-amy-low",
-        label = "Piper — Amy (US English) voice",
+        label = "Piper — Amy (US English) — tiny",
         fileName = "vits-piper-en_US-amy-low.tar.bz2",
-        sizeBytes = 30_000_000L, // approximate
-        license = "MIT (verify the voice's dataset license before commercial use)",
+        sizeBytes = 30_000_000L, // approximate compressed size
+        license = "MIT (verify the voice dataset license before commercial use)",
         gated = false,
         repoUrl = hfRepo("csukuangfj/vits-piper-en_US-amy-low"),
         downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-low.tar.bz2",
-        abilities = "Offline neural text-to-speech for voiceover / narration (Piper VITS).",
-        limitations = "~30 MB. One English voice; runs offline via sherpa-onnx.",
+        abilities = "Smallest voice option. Fast offline English narration with very little storage or RAM.",
+        limitations = "One voice and older Piper/VITS quality; chosen for footprint rather than naturalness.",
         isArchive = true,
         archiveMarker = "en_US-amy-low.onnx",
         category = ModelCategory.TTS,
+        capabilityTier = 2,
+    ),
+    OnDeviceModel(
+        id = "sherpa-kitten-nano-en-v08-int8",
+        label = "KittenTTS Nano v0.8 (int8) — compact multi-voice",
+        fileName = "kitten-nano-en-v0_8-int8.tar.bz2",
+        sizeBytes = 46_000_000L, // conservative approximate installed/download footprint
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://k2-fsa.github.io/sherpa/onnx/tts/all/English/kitten-nano-en-v0_8-int8.html",
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_8-int8.tar.bz2",
+        abilities = "Modern compact English TTS with selectable voice embeddings; stronger quality/variety than the tiny Piper option.",
+        limitations = "English only. The current voiceover tool uses speaker 0 until voice selection is exposed in the UI.",
+        isArchive = true,
+        archiveMarker = "model.int8.onnx",
+        category = ModelCategory.TTS,
+        capabilityTier = 4,
+    ),
+    OnDeviceModel(
+        id = "sherpa-kokoro-en-v019",
+        label = "Kokoro 82M v0.19 — natural multi-voice",
+        fileName = "kokoro-en-v0_19.tar.bz2",
+        sizeBytes = 345_000_000L, // approximate installed bundle footprint
+        license = "Apache-2.0 weights",
+        gated = false,
+        repoUrl = "https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html",
+        downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2",
+        abilities = "Higher-quality English narration with 11 speaker voices. Best local voice quality in the curated TTS list.",
+        limitations = "~345 MB installed. Heavier than Piper/Kitten; current voiceover tool uses speaker 0 until voice selection is exposed.",
+        isArchive = true,
+        archiveMarker = "model.onnx",
+        category = ModelCategory.TTS,
+        capabilityTier = 5,
     ),
 )
 
