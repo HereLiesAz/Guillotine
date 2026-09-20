@@ -128,6 +128,28 @@ object PromptCoach {
     }
 
     /**
+     * A submitted request that is safe to execute as a deterministic pacing edit without waking the
+     * assistant LLM. This is intentionally narrower than [looksLikeBoring]: merely mentioning pacing
+     * should not delete anything. We require an editing verb plus a boring/dead-air style target.
+     */
+    fun isBoringCutRequest(input: String): Boolean {
+        val q = normalize(input)
+        if (q.contains("slow motion") || containsAny(q, "make it slower", "slow it down", "slower pacing")) {
+            return false
+        }
+        val action = containsAny(
+            q,
+            "cut", "remove", "delete", "trim", "shorten", "tighten", "speed up", "faster",
+        )
+        val target = BORING_PREFIX_REGEX.containsMatchIn(q) || containsAny(
+            q,
+            "dead air", "downtime", "long pause", "long pauses", "slow parts", "dragging", "drags",
+            "nothing happens", "low action", "low-action",
+        )
+        return action && target
+    }
+
+    /**
      * Keep the model fallback for short, vague commands. Concrete/long prompts do not need a rewrite,
      * and skipping them avoids waking the local model unnecessarily while the user is still typing.
      */

@@ -1259,6 +1259,11 @@ private fun EditorToolStrip(
         // sits behind a stuck keyboard.
         keyboard?.hide()
         focusManager.clearFocus()
+        // One command pipeline at a time. Previously a user could select a clip while the general
+        // assistant was still loading/generating and press Send again, starting clip analysis in
+        // parallel with the LLM. That produced interleaved "Starting…" / analysis errors and two
+        // heavyweight native pipelines fighting for the same phone.
+        if (assistant.running || state.isProcessing) return@submit
         if (selected.isEmpty()) {
             val text = assistant.input.ifBlank { state.lastPrompt }
             if (text.isNotBlank()) { vm.rememberPrompt(text); onAgentRun(text) }
@@ -1476,7 +1481,7 @@ private fun EditorToolStrip(
                             if (submitNow) submit()
                         },
                         // Keep the field focusable while the agent runs so Android never strands the IME.
-                        readOnly = assistant.running,
+                        readOnly = assistant.running || state.isProcessing,
                         modifier = Modifier
                             .fillMaxWidth()
                             .onFocusChanged { promptFocused = it.isFocused }
@@ -1559,7 +1564,7 @@ private fun EditorToolStrip(
             }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (!hasClip && assistant.running) {
+                if (assistant.running || state.isProcessing) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Red500)
                 } else {
                     IconToolButton(

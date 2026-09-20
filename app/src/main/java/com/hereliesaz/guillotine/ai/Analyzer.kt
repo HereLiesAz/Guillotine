@@ -2,6 +2,7 @@ package com.hereliesaz.guillotine.ai
 
 import android.content.Context
 import android.net.Uri
+import com.hereliesaz.guillotine.ai.agent.PromptCoach
 import com.hereliesaz.guillotine.model.EditSegment
 import com.hereliesaz.guillotine.model.MediaKind
 
@@ -46,7 +47,9 @@ object Analysis {
         onProgress: (AnalysisProgress) -> Unit = {},
         checkpoint: () -> Unit = {},
     ): List<EditSegment> = when {
-        // Silence/quiet request — route to the silence heuristic (works on any media with audio).
+        // Silence/quiet and explicit "cut the boring parts" pacing requests route to the cheap audio
+        // heuristic. "Boring" is not a visual label; sending it to frame classification is both slow
+        // and meaningless, while dead-air removal is the concrete behavior Prompt Coach advertises.
         isSilenceIntent(prompt) ->
             LocalHeuristicProvider.analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
         // Speech-content request — transcribe audio and match transcript against the prompt.
@@ -63,8 +66,9 @@ object Analysis {
             MlKitProvider().analyze(context, mediaUri, kind, prompt, durationMs, onProgress, checkpoint)
     }
 
-    /** Heuristic: does the prompt ask about audio (silence/quiet/pauses) rather than what's on screen? */
+    /** Heuristic: does the prompt ask for silence/dead-air or the explicit boring-parts pacing edit? */
     private fun isSilenceIntent(prompt: String): Boolean {
+        if (PromptCoach.isBoringCutRequest(prompt)) return true
         val p = prompt.lowercase()
         return listOf("silen", "quiet", "pause", "dead air", "dead-air", "mute", "no sound", "no audio")
             .any { it in p }

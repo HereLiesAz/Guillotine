@@ -73,18 +73,35 @@ class MlKitProvider : ClipAnalyzer {
         }
         val intent = parsed.copy(terms = expandTerms(parsed.terms))
 
-        val labeler = ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS)
+        // Start only the engines this request can actually use. The old code eagerly constructed
+        // ML Kit's image labeler for every visual analysis even when the bundled MediaPipe detector /
+        // classifier were healthy. On affected release builds that unnecessary initialization could
+        // throw an obfuscated runtime NPE before the real analyzer even got a chance to run.
         val faceDetector = if (intent.useFaces) {
-            FaceDetection.getClient(
-                FaceDetectorOptions.Builder()
-                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                    .build(),
-            )
+            runCatching {
+                FaceDetection.getClient(
+                    FaceDetectorOptions.Builder()
+                        .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                        .build(),
+                )
+            }.getOrNull()
         } else null
+        if (intent.useFaces && faceDetector == null) {
+            throw IllegalStateException("The on-device face detector couldn't start on this device.")
+        }
+
         val objectVision = if (intent.useFaces) null else ObjectVision(context)
         val sceneClassifier = if (intent.useFaces) null else SceneClassifier(context)
-        val useMlKitFallback = objectVision?.available != true &&
-            sceneClassifier?.available != true
+        val useMlKitFallback =
+            !intent.useFaces &&
+                objectVision?.available != true &&
+                sceneClassifier?.available != true
+        val labeler = if (useMlKitFallback) {
+            runCatching { ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS) }.getOrNull()
+        } else null
+        if (useMlKitFallback && labeler == null) {
+            throw IllegalStateException("The on-device image analyzer couldn't start on this device.")
+        }
 
         val uriStr = mediaUri.toString()
         val match: (Long, Bitmap) -> Verdict = { atMs, bmp ->
@@ -104,7 +121,7 @@ class MlKitProvider : ClipAnalyzer {
                 scanVideo(context, mediaUri, durationMs, intent.keepMatches, onProgress, checkpoint, match)
             }
         } finally {
-            labeler.close()
+            labeler?.close()
             faceDetector?.close()
             objectVision?.close()
             sceneClassifier?.close()
@@ -527,7 +544,7 @@ class MlKitProvider : ClipAnalyzer {
         atMs: Long,
         bmp: Bitmap,
         intent: Intent,
-        labeler: com.google.mlkit.vision.label.ImageLabeler,
+        labeler: com.google.mlkit.vision.label.ImageLabeler?,
         faceDetector: com.google.mlkit.vision.face.FaceDetector?,
         objectVision: ObjectVision?,
         sceneClassifier: SceneClassifier?,
@@ -557,9 +574,10 @@ class MlKitProvider : ClipAnalyzer {
         }
         if (!useMlKitFallback) return Verdict(false, seen.take(5).toList(), null)
         // Tier 3: ML Kit generic labels (tertiary fallback when both models unavailable).
+        val fallbackLabeler = labeler ?: return Verdict(false, seen.take(5).toList(), null)
         val mlLabels = FrameAnalysisCache.sceneLabels(uri, atMs) {
             val image = InputImage.fromBitmap(bmp, 0)
-            Tasks.await(labeler.process(image)).map {
+            Tasks.await(fallbackLabeler.process(image)).map {
                 FrameAnalysisCache.SceneLabel(it.text, it.text.lowercase(), it.confidence)
             }
         }.filter { it.confidence >= 0.5f }
