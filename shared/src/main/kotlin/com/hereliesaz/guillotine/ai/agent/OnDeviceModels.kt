@@ -1,9 +1,9 @@
 package com.hereliesaz.guillotine.ai.agent
 
 /**
- * Curated, known-good on-device LLM models for the assistant brain. All are `.task` files that load
- * with MediaPipe `LlmInference` (`tasks-genai`). Ungated repos download in-app with one tap; gated
- * ones (Gemma's license) link out to Hugging Face for a free sign-in, then the user pastes the path.
+ * Curated on-device LLM models for the assistant brain. Legacy `.task` models run through MediaPipe
+ * `LlmInference`; modern `.litertlm` models run through LiteRT-LM. Ungated repos download in-app
+ * with one tap; gated models link out to their source.
  *
  * Sizes/filenames verified against the litert-community repos. Direct download follows HF's
  * `resolve/main/<file>?download=true`, which 302s ungated files to a public CDN (no auth needed).
@@ -96,7 +96,7 @@ private fun hfResolve(repo: String, file: String) =
 
 private fun hfRepo(repo: String) = "https://huggingface.co/$repo"
 
-/** Recommended models, bundled starter first. */
+/** Recommended assistant models, lightest/bundled first; device advisor reorders them at runtime. */
 val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
     OnDeviceModel(
         id = "smollm-135m-q8",
@@ -107,81 +107,23 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         gated = false,
         repoUrl = hfRepo("litert-community/SmolLM-135M-Instruct"),
         downloadUrl = null,
-        abilities = "Instant startup, basic text completion, simple tool calls. Works offline with no download.",
-        limitations = "Very limited reasoning. Struggles with multi-step instructions and complex edits.",
+        abilities = "Instant starter and dedicated routing/coach weight. Fine for tiny decisions and simple tool calls.",
+        limitations = "Very limited reasoning. The planner should prefer a larger model for multi-step edits.",
         bundled = true,
         capabilityTier = 1,
     ),
     OnDeviceModel(
-        id = "qwen2.5-0.5b-q8",
-        label = "Qwen2.5 0.5B Instruct (q8)",
-        fileName = "Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task",
-        sizeBytes = 546_660_344L,
+        id = "smollm2-360m",
+        label = "SmolLM2 360M Instruct — ultra-light",
+        fileName = "SmolLM2_360M_instruct.litertlm",
+        sizeBytes = 373_719_040L,
         license = "Apache-2.0",
         gated = false,
-        repoUrl = hfRepo("litert-community/Qwen2.5-0.5B-Instruct"),
-        downloadUrl = hfResolve(
-            "litert-community/Qwen2.5-0.5B-Instruct",
-            "Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task",
-        ),
-        abilities = "Good reasoning for its size. Handles tool calls and understands editing context well.",
-        limitations = "Slower than the starter. Weaker than 1.5B+ models on complex creative tasks.",
-        capabilityTier = 3,
-    ),
-    OnDeviceModel(
-        id = "qwen2.5-1.5b-q8",
-        label = "Qwen2.5 1.5B Instruct (q8)",
-        fileName = "Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task",
-        sizeBytes = 1_567_364_648L,
-        license = "Apache-2.0",
-        gated = false,
-        repoUrl = hfRepo("litert-community/Qwen2.5-1.5B-Instruct"),
-        downloadUrl = hfResolve(
-            "litert-community/Qwen2.5-1.5B-Instruct",
-            "Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task",
-        ),
-        abilities = "Strong reasoning and tool use. Best balance of quality and download size.",
-        limitations = "1.57 GB download. May be slow on older devices.",
-        capabilityTier = 4,
-    ),
-    OnDeviceModel(
-        id = "phi4-mini-q8",
-        label = "Phi-4 mini Instruct (q8)",
-        fileName = "phi4_q8_ekv1280.task",
-        sizeBytes = 3_944_280_650L,
-        license = "MIT",
-        gated = false,
-        repoUrl = hfRepo("litert-community/Phi-4-mini-instruct"),
-        downloadUrl = hfResolve("litert-community/Phi-4-mini-instruct", "phi4_q8_ekv1280.task"),
-        abilities = "Most capable on-device model. Excellent reasoning and instruction following.",
-        limitations = "3.94 GB download. Needs a high-end device with plenty of storage.",
-        capabilityTier = 5,
-    ),
-    OnDeviceModel(
-        id = "gemma3-1b-int4",
-        label = "Gemma 3 1B Instruct (int4)",
-        fileName = "gemma3-1b-it-int4.task",
-        sizeBytes = 554_661_243L,
-        license = "Gemma",
-        gated = false,
-        repoUrl = hfRepo("HereLiesAz/gemma3-1b-it"),
-        downloadUrl = hfResolve("HereLiesAz/gemma3-1b-it", "gemma3-1b-it-int4.task"),
-        abilities = "Compact and fast with good reasoning. Smallest download of the full-capability models.",
-        limitations = "~0.55 GB. Mirrored from Google's Gemma release (Gemma Terms of Use apply).",
-        capabilityTier = 4,
-    ),
-    OnDeviceModel(
-        id = "deepseek-r1-qwen-1.5b-q8",
-        label = "DeepSeek-R1 Distill Qwen 1.5B (q8) — reasoning",
-        fileName = "deepseek_q8_ekv1280.task",
-        sizeBytes = 1_860_686_856L,
-        license = "MIT",
-        gated = false,
-        repoUrl = hfRepo("litert-community/DeepSeek-R1-Distill-Qwen-1.5B"),
-        downloadUrl = hfResolve("litert-community/DeepSeek-R1-Distill-Qwen-1.5B", "deepseek_q8_ekv1280.task"),
-        abilities = "Strong step-by-step reasoning for its size (distilled R1). Good for multi-step edits.",
-        limitations = "1.86 GB download. Its reasoning traces can be verbose.",
-        capabilityTier = 4,
+        repoUrl = hfRepo("litert-community/SmolLM2-360M-Instruct"),
+        downloadUrl = hfResolve("litert-community/SmolLM2-360M-Instruct", "SmolLM2_360M_instruct.litertlm"),
+        abilities = "Modern lightweight assistant for low-memory devices. Much smaller than the old 0.5B q8 tier.",
+        limitations = "Best for straightforward edits; limited planning depth compared with 1B+ models.",
+        capabilityTier = 2,
     ),
     OnDeviceModel(
         id = "qwen3-0.6b-int4",
@@ -192,12 +134,63 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         gated = false,
         repoUrl = hfRepo("litert-community/Qwen3-0.6B"),
         downloadUrl = hfResolve("litert-community/Qwen3-0.6B", "qwen3_0_6b_mixed_int4.litertlm"),
-        abilities = "Small, fast, up-to-date Qwen3 assistant (mixed int4). A good lightweight default; ships as LiteRT-LM (.litertlm).",
-        limitations = "~0.5 GB. Reasons less deeply than the 1.5 B+ options.",
+        abilities = "Fast modern Qwen3 planner with a sub-0.5 GB footprint. Good default for modest phones.",
+        limitations = "Less reliable on long, multi-step plans than the 1B–2B choices.",
         capabilityTier = 3,
     ),
-    // Gemma-3n (VLM list) and this Qwen3 entry are both un-gated. Qwen3 ships as LiteRT-LM
-    // (.litertlm), which the current MediaPipe runtime (0.10.35) loads directly.
+    OnDeviceModel(
+        id = "gemma3-1b-int4",
+        label = "Gemma 3 1B Instruct (int4)",
+        fileName = "gemma3-1b-it-int4.task",
+        sizeBytes = 554_661_243L,
+        license = "Gemma",
+        gated = false,
+        repoUrl = hfRepo("HereLiesAz/gemma3-1b-it"),
+        downloadUrl = hfResolve("HereLiesAz/gemma3-1b-it", "gemma3-1b-it-int4.task"),
+        abilities = "Compact 1B assistant with strong instruction following for its size; proven legacy .task path.",
+        limitations = "~0.55 GB. Mirrored from Google's Gemma release; Gemma Terms of Use apply.",
+        capabilityTier = 4,
+    ),
+    OnDeviceModel(
+        id = "minicpm5-1b-int4",
+        label = "MiniCPM5 1B (mixed int4/int8) — tool-use",
+        fileName = "minicpm_wi4b32_wi8_afp32.litertlm",
+        sizeBytes = 793_034_752L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("litert-community/MiniCPM5-1B"),
+        downloadUrl = hfResolve("litert-community/MiniCPM5-1B", "minicpm_wi4b32_wi8_afp32.litertlm"),
+        abilities = "Built for on-device assistants; especially strong at tool use, code, and difficult reasoning in the 1B class.",
+        limitations = "~0.79 GB. More memory and startup cost than the lightweight tier.",
+        capabilityTier = 4,
+    ),
+    OnDeviceModel(
+        id = "qwen3-1.7b-int4",
+        label = "Qwen3 1.7B (int4) — strong mobile planner",
+        fileName = "Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm",
+        sizeBytes = 977_184_032L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("litert-community/Qwen3-1.7B"),
+        downloadUrl = hfResolve("litert-community/Qwen3-1.7B", "Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm"),
+        abilities = "Strong Qwen3 reasoning in under 1 GB; GPU-optimized and substantially leaner than the retired 1.5B q8 models.",
+        limitations = "The int4 build strongly prefers GPU; CPU fallback works but is much slower.",
+        capabilityTier = 5,
+    ),
+    OnDeviceModel(
+        id = "minicpm5-2b-int4",
+        label = "MiniCPM5 2B (int4) — high-capability mobile",
+        fileName = "MiniCPM5-2B_int4.litertlm",
+        sizeBytes = 1_550_000_000L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = hfRepo("litert-community/MiniCPM5-2B"),
+        downloadUrl = hfResolve("litert-community/MiniCPM5-2B", "MiniCPM5-2B_int4.litertlm"),
+        abilities = "High-capability edge model with hybrid reasoning and native tool-oriented behavior; intended as the heavy phone tier.",
+        limitations = "~1.55 GB and requires LiteRT-LM 0.16+. Better suited to devices with ample RAM and a working GPU backend.",
+        capabilityTier = 5,
+        verifyBySize = false,
+    ),
 )
 
 /**
