@@ -205,6 +205,15 @@ class OnDeviceAgentBackend(
     }
 
     private fun selectToolDefinitions(defs: JSONArray, instruction: String): JSONArray {
+        // A DelegatingAgentBackend already narrowed the live catalog with the dedicated router. Honor
+        // that decision verbatim instead of applying a second prompt-specific heuristic that could
+        // accidentally throw the routed specialist back out.
+        if (defs.length() <= MAX_ROUTED_TOOL_DEFINITIONS) {
+            return JSONArray().apply {
+                for (i in 0 until defs.length()) defs.optJSONObject(i)?.let(::put)
+            }
+        }
+
         data class Candidate(val index: Int, val definition: JSONObject, val name: String, val score: Int)
 
         val terms = searchTerms(instruction)
@@ -436,6 +445,7 @@ class OnDeviceAgentBackend(
 
     private companion object {
         private const val BORING_FAST_PATH_ANALYSIS_PROMPT = "Cut pauses and dead air."
+        private const val MAX_ROUTED_TOOL_DEFINITIONS = 16
         private const val MAX_ON_DEVICE_TOOLS = 10
         private const val MAX_TOOL_DESCRIPTION_CHARS = 96
         private const val MAX_TOOL_ARGS_CHARS = 96
