@@ -28,7 +28,9 @@ object DesktopMcpAgent {
             ?.removePrefix("ollama:")
             ?.takeIf { it.isNotBlank() }
         val localBackend = localModel?.let { tag ->
-            DesktopOllamaAgentBackend(tag, frames = tools as? FrameImageSource)
+            // The curated desktop planner list is text/tool oriented. Rich frame understanding remains
+            // a separate local VLM tool instead of pretending every Ollama planner accepts images.
+            DesktopOllamaAgentBackend(tag)
         }
 
         val brain = when (provider) {
