@@ -41,4 +41,34 @@ class DeviceModelAdvisorTest {
         assertTrue(phi.reason.contains("Not recommended"))
         assertTrue(phi.reason.contains("storage") || phi.reason.contains("RAM"))
     }
+
+    @Test
+    fun archiveRecommendationReservesExtractionHeadroom() {
+        val archive = OnDeviceModel(
+            id = "archive-test",
+            label = "Archive test",
+            fileName = "archive.tar.bz2",
+            sizeBytes = 500_000_000L,
+            license = "Test",
+            gated = false,
+            repoUrl = "https://example.invalid",
+            downloadUrl = "https://example.invalid/archive.tar.bz2",
+            isArchive = true,
+            archiveMarker = "model.onnx",
+            category = ModelCategory.STEM,
+        )
+        val profile = DeviceModelProfile(
+            deviceLabel = "Storage constrained",
+            totalRamBytes = 8_000_000_000L,
+            freeStorageBytes = 1_000_000_000L,
+            cpuCores = 8,
+            is64Bit = true,
+            lowRam = false,
+            osLabel = "Android",
+        )
+
+        val advice = DeviceModelAdvisor.advise(profile, listOf(archive)).single()
+        assertEquals(DeviceModelFit.NOT_RECOMMENDED, advice.fit)
+        assertTrue(advice.reason.contains("archive is extracted"))
+    }
 }
