@@ -1390,18 +1390,61 @@ private fun EditorToolStrip(
     // Whether the prompt field has focus — drives the recent-prompts history dropdown.
     var promptFocused by remember { mutableStateOf(false) }
 
-    // ---- Voice-command dictation (offline ASR) --------------------------------------------------
-    // Tap the mic → record → tap again → transcribe on-device → drop the text into the prompt field
-    // (the user reviews, then hits send). Only offered when an offline ASR model is configured.
+    // ---- Voice-command dictation ---------------------------------------------------------------
+    // Preferred order: Guillotine's local ASR -> Android system speech recognition -> configured
+    // cloud Whisper -> typing. The system recognizer cannot consume our already-recorded PCM, so if
+    // the local engine fails the user is asked to say the command once more; cloud fallback can reuse
+    // the original recording and does not require a third attempt.
     val voiceCtx = LocalContext.current
     val voiceScope = rememberCoroutineScope()
     var capture by remember { mutableStateOf<com.hereliesaz.guillotine.ai.VoiceCapture?>(null) }
     var listening by remember { mutableStateOf(false) }
     var transcribing by remember { mutableStateOf(false) }
+    var localAsrBroken by remember(asrModelPath) { mutableStateOf(false) }
+
+    val appendVoiceText: (String) -> Unit = { spoken ->
+        val clean = spoken.trim()
+        if (clean.isNotEmpty()) {
+            val existing = assistant.input
+            onAgentInput(if (existing.isBlank()) clean else "${existing.trim()} $clean")
+        }
+    }
+
+    val hasCloudSpeech =
+        aiSettings.keyFor(com.hereliesaz.guillotine.ai.AiProviderType.OPENAI).isNotBlank()
+    val systemSpeechAvailable = remember(voiceCtx) {
+        com.hereliesaz.guillotine.ai.SystemSpeechRecognizer.isAvailable(voiceCtx)
+    }
+
+    fun finishVoiceFailure(message: String) {
+        transcribing = false
+        android.widget.Toast.makeText(
+            voiceCtx,
+            message,
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+
+    suspend fun cloudFallback(pcm: FloatArray): String? {
+        if (!hasCloudSpeech || pcm.isEmpty()) return null
+        withContext(Dispatchers.Main) {
+            android.widget.Toast.makeText(
+                voiceCtx,
+                "System speech recognition failed — trying configured cloud transcription.",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+        return try {
+            Transcription.transcribeVoicePcmCloud(voiceCtx, aiSettings, pcm)
+        } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            ActivityLog.error("Voice cloud fallback failed: ${t.message ?: t.javaClass.simpleName}")
+            null
+        }
+    }
+
     val beginListening: () -> Unit = {
-        // Assign capture from start()'s result directly: a prior `VoiceCapture().also { …capture = null }`
-        // form was buggy — .also returns the receiver, so the outer assignment overwrote the null and
-        // capture was never null on failure (listening stuck true, no error shown).
         val cap = com.hereliesaz.guillotine.ai.VoiceCapture()
         if (cap.start()) {
             capture = cap
@@ -1409,29 +1452,44 @@ private fun EditorToolStrip(
         } else {
             capture = null
             listening = false
-            android.widget.Toast.makeText(voiceCtx, "Couldn't start the mic — it may be in use.", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(
+                voiceCtx,
+                "Couldn't start the mic — it may be in use.",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
         }
     }
+
     val micPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) beginListening()
-        else android.widget.Toast.makeText(voiceCtx, "Mic permission is needed for voice commands.", android.widget.Toast.LENGTH_SHORT).show()
+        else android.widget.Toast.makeText(
+            voiceCtx,
+            "Mic permission is needed for voice commands.",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
     }
+
     val toggleVoice: () -> Unit = {
         if (listening) {
-            val cap = capture; capture = null; listening = false
+            val cap = capture
+            capture = null
+            listening = false
             if (cap != null) {
                 transcribing = true
                 voiceScope.launch(Dispatchers.Default) {
                     val pcm = cap.stop()
-                    // Distinguish the failure modes so the mic never fails silently: engine couldn't
-                    // run (e.g. the ASR native lib/runtime is incompatible on this device) vs. no audio
-                    // captured vs. audio heard but no words recognized.
-                    val result = if (asrModelPath.isNotBlank() && pcm.isNotEmpty()) {
-                        // Catch Exception + LinkageError (native ASR lib/ABI faults), rethrow
-                        // CancellationException; don't swallow fatal VM errors (OOM) — transcription is
-                        // memory-heavy, and a swallowed OutOfMemoryError leaves the process unstable.
+                    if (pcm.isEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            finishVoiceFailure("No audio captured — check the mic permission.")
+                        }
+                        return@launch
+                    }
+
+                    val localResult = if (asrModelPath.isNotBlank() && !localAsrBroken) {
                         try {
-                            Result.success(com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm))
+                            Result.success(
+                                com.hereliesaz.guillotine.ai.SherpaAsr.transcribe(asrModelPath, pcm),
+                            )
                         } catch (c: kotlin.coroutines.cancellation.CancellationException) {
                             throw c
                         } catch (e: Exception) {
@@ -1440,19 +1498,52 @@ private fun EditorToolStrip(
                             Result.failure(l)
                         }
                     } else null
-                    val text = result?.getOrNull()
+
+                    val localText = localResult?.getOrNull()?.trim().orEmpty()
+                    if (localText.isNotEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            transcribing = false
+                            appendVoiceText(localText)
+                        }
+                        return@launch
+                    }
+
+                    if (localResult?.isFailure == true) {
+                        withContext(Dispatchers.Main) {
+                            localAsrBroken = true
+                            android.widget.Toast.makeText(
+                                voiceCtx,
+                                "Local speech engine can't run here — using system speech recognition. Say it again.",
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                    }
+
+                    val systemText = if (systemSpeechAvailable) {
+                        com.hereliesaz.guillotine.ai.SystemSpeechRecognizer.recognizeOnce(voiceCtx)
+                    } else null
+
+                    if (!systemText.isNullOrBlank()) {
+                        withContext(Dispatchers.Main) {
+                            transcribing = false
+                            appendVoiceText(systemText)
+                        }
+                        return@launch
+                    }
+
+                    val cloudText = cloudFallback(pcm)
                     withContext(Dispatchers.Main) {
-                        transcribing = false
-                        if (!text.isNullOrBlank()) {
-                            val existing = assistant.input
-                            onAgentInput(if (existing.isBlank()) text.trim() else "${existing.trim()} ${text.trim()}")
+                        if (!cloudText.isNullOrBlank()) {
+                            transcribing = false
+                            appendVoiceText(cloudText)
                         } else {
-                            val msg = when {
-                                pcm.isEmpty() -> "No audio captured — check the mic permission."
-                                result?.isFailure == true -> "The speech engine couldn't run on this device."
-                                else -> "Didn't catch any speech — try again."
-                            }
-                            android.widget.Toast.makeText(voiceCtx, msg, android.widget.Toast.LENGTH_SHORT).show()
+                            finishVoiceFailure(
+                                if (hasCloudSpeech) {
+                                    "Speech recognition failed. Type the command instead."
+                                } else {
+                                    "Speech recognition unavailable. Type the command, or configure cloud transcription in Settings."
+                                },
+                            )
                         }
                     }
                 }
@@ -1658,9 +1749,9 @@ private fun EditorToolStrip(
                     }
                 }
             }
-            // Voice-command mic: dictate an instruction on-device. Only when ASR is configured and no
-            // clip is selected (the field is an AI instruction, not a per-clip analysis prompt).
-            if (!hasClip && asrModelPath.isNotBlank()) {
+            // Voice-command mic: local ASR first, then Android system recognition, then configured
+            // cloud transcription. Keep it available whenever at least one speech path exists.
+            if (!hasClip && (asrModelPath.isNotBlank() || systemSpeechAvailable || hasCloudSpeech)) {
                 Spacer(Modifier.width(4.dp))
                 if (transcribing) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Red500)
