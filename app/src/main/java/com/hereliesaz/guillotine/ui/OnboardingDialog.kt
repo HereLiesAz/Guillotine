@@ -49,7 +49,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import com.hereliesaz.guillotine.ai.agent.AndroidDeviceModelProfile
 import com.hereliesaz.guillotine.ai.agent.BundledModelExtractor
+import com.hereliesaz.guillotine.ai.agent.DeviceModelAdvisor
+import com.hereliesaz.guillotine.ai.agent.DeviceModelFit
 import com.hereliesaz.guillotine.ai.agent.ModelDownloadManager
 import com.hereliesaz.guillotine.ai.agent.OnDeviceModel
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
@@ -224,16 +227,26 @@ private fun ModelSelectionStep(
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val deviceProfile = remember(context) { AndroidDeviceModelProfile.read(context) }
+    val recommendations = remember(deviceProfile) {
+        DeviceModelAdvisor.advise(deviceProfile, RECOMMENDED_ON_DEVICE_MODELS)
+    }
 
     Text("Choose your AI model", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
     Text(
-        "A starter model is included and prepares quietly while you use the app. " +
-            "Choose it now to finish preparing it immediately, or download a larger model for better results.",
+        deviceProfile.shortSummary,
+        color = White,
+        fontSize = 11.sp,
+    )
+    Text(
+        "Guillotine ranks the local models from this device's RAM, free storage, CPU cores and " +
+            "32/64-bit runtime. These are recommendations, not a benchmark; chipset acceleration and thermals still matter.",
         color = Neutral400, fontSize = 12.sp,
     )
     Spacer(Modifier.height(4.dp))
 
-    RECOMMENDED_ON_DEVICE_MODELS.forEach { model ->
+    recommendations.forEach { recommendation ->
+        val model = recommendation.model
         val installed = if (model.bundled) bundledPath else ModelDownloadManager.installedPath(context, model)
         val isInstalled = installed != null
         val isSelected = isInstalled && installed == selectedModelPath
@@ -242,6 +255,9 @@ private fun ModelSelectionStep(
             model = model,
             isInstalled = isInstalled,
             isSelected = isSelected,
+            recommendationFit = recommendation.fit,
+            recommendationReason = recommendation.reason,
+            recommendationBadge = recommendation.badge,
             onClick = {
                 when {
                     isInstalled -> onSelect(installed.orEmpty(), null)
@@ -402,6 +418,9 @@ private fun ModelCard(
     model: OnDeviceModel,
     isInstalled: Boolean,
     isSelected: Boolean,
+    recommendationFit: DeviceModelFit,
+    recommendationReason: String,
+    recommendationBadge: String,
     onClick: () -> Unit,
 ) {
     Column(
@@ -425,6 +444,17 @@ private fun ModelCard(
             Column(Modifier.weight(1f)) {
                 Text(model.label, color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 Text("${model.sizeLabel} · ${model.license}", color = Neutral500, fontSize = 10.sp)
+                Text(
+                    recommendationBadge,
+                    color = when (recommendationFit) {
+                        DeviceModelFit.BEST_FIT -> Red500
+                        DeviceModelFit.RECOMMENDED -> White
+                        DeviceModelFit.CAUTION -> Neutral400
+                        DeviceModelFit.NOT_RECOMMENDED -> Red500
+                    },
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                )
             }
             val badgeColor = Color(0xFF4ADE80) // green-400
             when {
@@ -446,6 +476,12 @@ private fun ModelCard(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
+        Text(
+            recommendationReason,
+            color = if (recommendationFit == DeviceModelFit.NOT_RECOMMENDED) Red500 else Neutral500,
+            fontSize = 10.sp,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 
