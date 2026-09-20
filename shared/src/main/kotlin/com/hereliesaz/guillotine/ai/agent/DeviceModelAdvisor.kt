@@ -1,6 +1,5 @@
 package com.hereliesaz.guillotine.ai.agent
 
-import kotlin.math.max
 
 /**
  * Hardware facts Guillotine can read locally without permissions. This deliberately stays platform-
@@ -66,6 +65,8 @@ data class DeviceModelAdvice(
 object DeviceModelAdvisor {
     private const val MB = 1_000_000L
     private const val GB = 1_000_000_000L
+    // Keep this identical to ModelDownloadManager's download safety margin.
+    private const val DOWNLOAD_SAFETY_MARGIN = 200L * 1024L * 1024L
 
     fun advise(profile: DeviceModelProfile, models: List<OnDeviceModel>): List<DeviceModelAdvice> {
         if (models.isEmpty()) return emptyList()
@@ -110,12 +111,25 @@ object DeviceModelAdvisor {
             0.0
         }
 
-        val storageMargin = max(256L * MB, (model.sizeBytes * 0.30).toLong())
+        // Match ModelDownloadManager's fresh-install free-space policy. Archive downloads must
+        // coexist with roughly 2x their compressed size while extracting, plus the download itself
+        // and the same 200 MiB safety margin. Being stricter here prevents a "Best fit" label on a
+        // model whose Download button would immediately fail the app's own storage check.
+        val extractionHeadroom = if (model.isArchive) model.sizeBytes * 2L else 0L
+        val requiredStorage = model.sizeBytes + extractionHeadroom + DOWNLOAD_SAFETY_MARGIN
         if (
             profile.freeStorageBytes > 0L &&
-            profile.freeStorageBytes < model.sizeBytes + storageMargin
+            profile.freeStorageBytes < requiredStorage
         ) {
-            blockers += "only ${DeviceModelProfile.formatGb(profile.freeStorageBytes)} storage is free for a ${model.sizeLabel} model"
+            blockers += buildString {
+                append("only ")
+                append(DeviceModelProfile.formatGb(profile.freeStorageBytes))
+                append(" storage is free; a fresh ")
+                append(model.sizeLabel)
+                append(" install needs about ")
+                append(DeviceModelProfile.formatGb(requiredStorage))
+                if (model.isArchive) append(" while the archive is extracted")
+            }
         }
 
         if (!profile.is64Bit && model.sizeBytes >= 1_000L * MB) {
