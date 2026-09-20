@@ -99,16 +99,23 @@ private fun SheetCard(content: @Composable () -> Unit) {
 @Composable
 private fun DesktopAiCapabilitySummary(settings: AiSettings) {
     val cloudConfigured = settings.provider != AiProviderType.MLKIT && settings.keyFor(settings.provider).isNotBlank()
+    val localTag = settings.agentModelPath.removePrefix("ollama:")
+    val localMultimodal =
+        localTag.startsWith("qwen3.5", ignoreCase = true) ||
+            localTag.startsWith("gemma4", ignoreCase = true)
+    fun installed(slot: String) =
+        com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve(slot).isNotBlank()
+
     val rows = listOf(
-        "Assistant brain" to (cloudConfigured || settings.agentModelPath.isNotBlank()),
-        "Frame vision (recognition)" to true,
-        "Transcription" to (settings.speechModelPath.isNotBlank() || settings.asrModelPath.isNotBlank() || settings.keyFor(AiProviderType.OPENAI).isNotBlank()),
-        "Text-to-speech" to settings.ttsModelPath.isNotBlank(),
-        "Frame captioning (VLM)" to settings.vlmModelPath.isNotBlank(),
-        "Audio highlight detection" to settings.audioEventModelPath.isNotBlank(),
-        "Speaker diarization" to (settings.diarizeSegModelPath.isNotBlank() && settings.diarizeEmbedModelPath.isNotBlank()),
-        "Stem separation" to settings.stemModelPath.isNotBlank(),
-        "Denoise" to settings.denoiseModelPath.isNotBlank(),
+        "Assistant brain" to (cloudConfigured || settings.agentModelPath.startsWith("ollama:")),
+        "Frame vision" to (localMultimodal || installed("labelModelPath") || (cloudConfigured && settings.cloudVision)),
+        "Transcription (Vosk)" to installed("speechModelPath"),
+        "Text-to-speech (ONNX)" to installed("ttsModelPath"),
+        "Local multimodal planner" to localMultimodal,
+        "Audio highlight detection" to installed("audioEventModelPath"),
+        "Speaker diarization" to installed("diarizeEmbedModelPath"),
+        "Stem separation" to installed("stemModelPath"),
+        "Speech denoise (desktop)" to false, // GTCRN desktop executor is not wired yet; don't advertise a path as capability.
         "Image/video/music generation" to (settings.genKeys.values.any { it.isNotBlank() } || settings.leonardoKey.isNotBlank()),
         "Cloud may see the current frame" to settings.cloudVision,
     )
