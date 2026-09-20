@@ -45,29 +45,51 @@ class DelegatingAgentBackend(
             }
 
             ActivityLog.progress("AI · router: choosing models/tools…")
-            val prompt = TaskDelegationRouter.prompt(
-                instruction = instruction,
-                definitions = definitions,
-                modelStatus = modelStatus(),
-            )
-            val raw = TaskRouterLocalModel.route(context, prompt)
-            val route = TaskDelegationRouter.parse(raw, definitions)
+            val status = modelStatus()
+            val batches = TaskDelegationRouter.definitionBatches(definitions)
+            val prompts = batches.map { batch ->
+                TaskDelegationRouter.prompt(
+                    instruction = instruction,
+                    definitions = batch,
+                    modelStatus = status,
+                    maxTools = ROUTER_TOOLS_PER_BATCH,
+                )
+            }
+            val raws = TaskRouterLocalModel.routeMany(context, prompts)
+            val partialRoutes = batches.indices.mapNotNull { index ->
+                TaskDelegationRouter.parse(
+                    raw = raws.getOrNull(index),
+                    definitions = batches[index],
+                    maxTools = ROUTER_TOOLS_PER_BATCH,
+                )
+            }
 
-            if (route == null) {
+            if (partialRoutes.isEmpty()) {
                 ActivityLog.info("AI · router unavailable/uncertain — using full planner catalog.")
                 delegate.run(instruction, tools, onEvent)
                 return
             }
 
+            val routedTools = partialRoutes
+                .flatMap { it.tools }
+                .distinct()
+                .take(MAX_ROUTED_SPECIALIST_TOOLS)
+            if (routedTools.isEmpty()) {
+                ActivityLog.info("AI · router found no confident capability — using full planner catalog.")
+                delegate.run(instruction, tools, onEvent)
+                return
+            }
+            val routedRoles = partialRoutes.flatMap { it.modelRoles }.distinct().take(6)
+            val reasons = partialRoutes.map { it.reason }.filter { it.isNotBlank() }.distinct().take(2)
+
             val allowed = LinkedHashSet<String>().apply {
                 addAll(TaskDelegationRouter.UNIVERSAL_TOOLS)
-                addAll(route.tools)
+                addAll(routedTools)
             }
-            val roleText = route.modelRoles.takeIf { it.isNotEmpty() }?.joinToString(", ")
-                ?: "general"
-            val why = route.reason.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+            val roleText = routedRoles.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "general"
+            val why = reasons.takeIf { it.isNotEmpty() }?.joinToString("; ")?.let { " · $it" }.orEmpty()
             ActivityLog.info(
-                "AI · router: $roleText → ${route.tools.joinToString(", ")}$why",
+                "AI · router: $roleText → ${routedTools.joinToString(", ")}$why",
             )
 
             delegate.run(
@@ -148,5 +170,7 @@ class DelegatingAgentBackend(
 
     private companion object {
         const val MIN_CATALOG_FOR_ROUTING = 12
+        const val ROUTER_TOOLS_PER_BATCH = 2
+        const val MAX_ROUTED_SPECIALIST_TOOLS = 12
     }
 }
