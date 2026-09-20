@@ -65,6 +65,11 @@ data class OnDeviceModel(
     /** Which runtime this model is for (drives storage dir + how "Use" wires it). */
     val category: ModelCategory = ModelCategory.ASSISTANT_LLM,
     /**
+     * Relative capability inside its own category (1 = basic/lightweight, 5 = strongest). Used only
+     * as a tiebreaker after device-fit checks; it never overrides a RAM/storage incompatibility.
+     */
+    val capabilityTier: Int = 3,
+    /**
      * True if [downloadUrl] is a `.tar.bz2` bundle of several files (sherpa-onnx models) that must be
      * extracted into a per-model directory rather than used as a single file. When set, "Use" wires the
      * extracted *directory* path (not a single file) and installed-ness is checked via [archiveMarker].
@@ -105,6 +110,7 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         abilities = "Instant startup, basic text completion, simple tool calls. Works offline with no download.",
         limitations = "Very limited reasoning. Struggles with multi-step instructions and complex edits.",
         bundled = true,
+        capabilityTier = 1,
     ),
     OnDeviceModel(
         id = "qwen2.5-0.5b-q8",
@@ -120,6 +126,7 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         ),
         abilities = "Good reasoning for its size. Handles tool calls and understands editing context well.",
         limitations = "Slower than the starter. Weaker than 1.5B+ models on complex creative tasks.",
+        capabilityTier = 3,
     ),
     OnDeviceModel(
         id = "qwen2.5-1.5b-q8",
@@ -135,6 +142,7 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         ),
         abilities = "Strong reasoning and tool use. Best balance of quality and download size.",
         limitations = "1.57 GB download. May be slow on older devices.",
+        capabilityTier = 4,
     ),
     OnDeviceModel(
         id = "phi4-mini-q8",
@@ -147,6 +155,7 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         downloadUrl = hfResolve("litert-community/Phi-4-mini-instruct", "phi4_q8_ekv1280.task"),
         abilities = "Most capable on-device model. Excellent reasoning and instruction following.",
         limitations = "3.94 GB download. Needs a high-end device with plenty of storage.",
+        capabilityTier = 5,
     ),
     OnDeviceModel(
         id = "gemma3-1b-int4",
@@ -159,6 +168,7 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         downloadUrl = hfResolve("HereLiesAz/gemma3-1b-it", "gemma3-1b-it-int4.task"),
         abilities = "Compact and fast with good reasoning. Smallest download of the full-capability models.",
         limitations = "~0.55 GB. Mirrored from Google's Gemma release (Gemma Terms of Use apply).",
+        capabilityTier = 4,
     ),
     OnDeviceModel(
         id = "deepseek-r1-qwen-1.5b-q8",
@@ -171,6 +181,7 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         downloadUrl = hfResolve("litert-community/DeepSeek-R1-Distill-Qwen-1.5B", "deepseek_q8_ekv1280.task"),
         abilities = "Strong step-by-step reasoning for its size (distilled R1). Good for multi-step edits.",
         limitations = "1.86 GB download. Its reasoning traces can be verbose.",
+        capabilityTier = 4,
     ),
     OnDeviceModel(
         id = "qwen3-0.6b-int4",
@@ -183,6 +194,7 @@ val RECOMMENDED_ON_DEVICE_MODELS: List<OnDeviceModel> = listOf(
         downloadUrl = hfResolve("litert-community/Qwen3-0.6B", "qwen3_0_6b_mixed_int4.litertlm"),
         abilities = "Small, fast, up-to-date Qwen3 assistant (mixed int4). A good lightweight default; ships as LiteRT-LM (.litertlm).",
         limitations = "~0.5 GB. Reasons less deeply than the 1.5 B+ options.",
+        capabilityTier = 3,
     ),
     // Gemma-3n (VLM list) and this Qwen3 entry are both un-gated. Qwen3 ships as LiteRT-LM
     // (.litertlm), which the current MediaPipe runtime (0.10.35) loads directly.
