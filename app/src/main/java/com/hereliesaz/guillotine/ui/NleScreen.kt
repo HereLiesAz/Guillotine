@@ -198,7 +198,12 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             val sameRegion = state.playbackRegion?.let {
                 it.first == existing.startMs && it.last == existing.endMs
             } == true
-            if (!sameRegion || existing.documentHash != state.document.hashCode()) {
+            val renderHash = state.document.copy(
+                name = "",
+                promptHistory = emptyList(),
+                pixelsPerSecond = null,
+            ).hashCode()
+            if (!sameRegion || existing.documentHash != renderHash) {
                 runCatching { java.io.File(existing.path).delete() }
                 bufferedPreview = null
                 previewBufferProgress = 0f
@@ -225,7 +230,11 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                         path = file.absolutePath,
                         startMs = region.first,
                         endMs = region.last,
-                        documentHash = snapshot.hashCode(),
+                        documentHash = snapshot.copy(
+                            name = "",
+                            promptHistory = emptyList(),
+                            pixelsPerSecond = null,
+                        ).hashCode(),
                     )
                     ActivityLog.info("Preview buffer ready: ${"%.1f".format((region.last - region.first) / 1000f)}s at 720p/24fps.")
                 } catch (ce: kotlinx.coroutines.CancellationException) {
