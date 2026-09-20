@@ -123,11 +123,17 @@ A radio list — pick exactly one. This sets [`AiSettings.provider`](#5-aisettin
 - Run the assistant fully offline with **no key** from a downloaded local LLM. Blank = the assistant
   uses the selected provider's key above instead. Writes
   [`AiSettings.agentModelPath`](#5-aisettings-field-reference).
-- **Task router:** before the planner sees the full MCP surface, a dedicated tiny local routing role
-  uses the bundled SmolLM-135M weights in its own isolated engine. It reads the live tool catalog and
-  configured specialist model roles, selects only the relevant capabilities, and hands those to the
-  actual local/cloud planner. It never edits, generates arguments, or answers the user; on uncertainty
-  it falls back to the full catalog.
+- **Android / phone / tablet:** the picker offers the LiteRT/MediaPipe catalog and the dedicated
+  router reuses the bundled SmolLM-135M weights in an isolated engine.
+- **Desktop:** the picker is deliberately different. Guillotine reads workstation specs and ranks a
+  separate Ollama catalog (Qwen3 / Phi-4 Mini / gpt-oss tiers). **Install & use** pulls the chosen model
+  locally, stores `agentModelPath` as `ollama:<tag>`, switches the analyzer to Local, and talks only
+  to Ollama on `127.0.0.1`.
+- **Task router:** desktop uses its own dedicated `qwen3:0.6b` Ollama router, installed with the first
+  desktop-local planner. The routing role reads the complete live MCP catalog in compact batches,
+  selects only relevant capabilities/model roles, and hands those to the actual local/cloud planner.
+  It never edits, generates tool arguments, or answers the user; on absence/uncertainty it falls back
+  to the full catalog.
 
 ### Recognition model — for "teach a specific thing" (optional)
 
