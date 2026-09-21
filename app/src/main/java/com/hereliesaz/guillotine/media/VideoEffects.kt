@@ -15,7 +15,6 @@ import androidx.media3.effect.RgbAdjustment
 import androidx.media3.effect.RgbFilter
 import androidx.media3.effect.RgbMatrix
 import androidx.media3.effect.ScaleAndRotateTransformation
-import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipFilters
 import com.hereliesaz.guillotine.model.GlobalSettings
 import com.hereliesaz.guillotine.model.KeyframeProperty
@@ -383,11 +382,14 @@ object VideoEffects {
     }
 
     /**
-     * Project-level geometry effects (crop + aspect ratio) derived from
-     * [GlobalSettings]. Applied to every video clip in the export so the output
-     * frame matches the project, not just the preview.
+     * Project-level per-item geometry. Project ASPECT RATIO is deliberately absent: aspect is the
+     * composition canvas ([ProjectVideoCompositorSettings]), not a resize applied to each clip.
+     * Clip scale/pan/rotation remain exclusively in [transformEffects].
+     *
+     * [outputHeightPx] normalizes every input to the project's vertical pixel scale so changing
+     * canvas width cannot alter a layer's size. Project crop and fps remain project-wide effects.
      */
-    fun geometry(settings: GlobalSettings): List<Effect> {
+    fun geometry(settings: GlobalSettings, outputHeightPx: Int): List<Effect> {
         val effects = mutableListOf<Effect>()
 
         // Crop. Our crop is x/y/w/h in percent; Media3 Crop takes NDC [-1, 1].
@@ -408,26 +410,12 @@ object VideoEffects {
             }
         }
 
-        // Aspect ratio (scale-to-fit, letterboxed). ORIGINAL = no change.
-        val ratio = when (settings.aspectRatio) {
-            AspectRatio.RATIO_16_9 -> 16f / 9f
-            AspectRatio.RATIO_9_16 -> 9f / 16f
-            AspectRatio.RATIO_1_1 -> 1f
-            AspectRatio.ORIGINAL -> null
-        }
-        if (ratio != null) {
-            effects += Presentation.createForAspectRatio(ratio, Presentation.LAYOUT_SCALE_TO_FIT)
+        // Establish a stable vertical pixel scale for the layer. The project aspect changes only the
+        // compositor's output width, so this value does not change when the user switches aspect.
+        if (outputHeightPx > 0) {
+            effects += Presentation.createForHeight(outputHeightPx)
         }
 
-        // Output resolution. Applied AFTER the aspect-ratio presentation so it resizes the letterboxed
-        // frame rather than the raw source, and height-only so the ratio just established survives.
-        // Until this existed, GlobalSettings.quality was a control that changed nothing: Transformer was
-        // built with a MIME type and no resolution configuration at all.
-        settings.quality.targetHeight?.let { effects += Presentation.createForHeight(it) }
-
-        // Output frame rate. Note this can only ever *cap* the rate — Media3's frame drop discards
-        // frames and cannot synthesise them, so setting 60 on 30 fps source footage is a no-op rather
-        // than an interpolation. Capping is what the setting is for; raising it was never possible.
         if (settings.fps > 0) {
             effects += FrameDropEffect.createDefaultFrameDropEffect(settings.fps.toFloat())
         }
