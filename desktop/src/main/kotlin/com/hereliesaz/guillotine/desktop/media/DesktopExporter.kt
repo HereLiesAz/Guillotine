@@ -454,10 +454,12 @@ object DesktopExporter {
         val cx = canvasW / 2.0 + ox * canvasW
         val cy = canvasH / 2.0 + oy * canvasH
 
-        // Fit-inside scaling
-        val fitScale = minOf(canvasW.toDouble() / img.width, canvasH.toDouble() / img.height)
-        val drawW = img.width * fitScale * scale
-        val drawH = img.height * fitScale * scale
+        // Stable layer baseline: source aspect, project height. Canvas WIDTH is deliberately absent
+        // from this calculation, so changing the project aspect only changes what part of the layer
+        // the canvas sees. User-authored clip.scale is the only event-level size transform.
+        val baseScale = canvasH.toDouble() / img.height.coerceAtLeast(1)
+        val drawW = img.width * baseScale * scale
+        val drawH = img.height * baseScale * scale
 
         val transform = AffineTransform()
         transform.translate(cx, cy)
