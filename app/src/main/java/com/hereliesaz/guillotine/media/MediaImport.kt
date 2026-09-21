@@ -64,14 +64,13 @@ object MediaImport {
                 if (hasVideo) {
                     val rawW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
                     val rawH = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-                    // A 90/270 rotation swaps which raw dimension is actually "up" — e.g. a phone-shot
-                    // portrait video is stored as 1920x1080 with a 90° rotation flag, so the DISPLAYED
-                    // (and letterboxing-relevant) shape is 1080x1920.
-                    val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-                    val swapped = rotation == 90 || rotation == 270
+                    // WIDTH is width and HEIGHT is height. Do not swap them using the rotation
+                    // metadata here: MediaMetadataRetriever already reports the source dimensions we
+                    // use as the project's ORIGINAL canvas, and swapping a second time turns portrait
+                    // footage landscape (and vice versa).
                     if (rawW != null && rawH != null && rawW > 0 && rawH > 0) {
-                        widthPx = if (swapped) rawH else rawW
-                        heightPx = if (swapped) rawW else rawH
+                        widthPx = rawW
+                        heightPx = rawH
                     }
                 }
             } catch (e: Exception) {
