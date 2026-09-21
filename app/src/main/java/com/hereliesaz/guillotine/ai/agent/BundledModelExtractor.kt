@@ -144,7 +144,12 @@ object BundledModelExtractor {
         val copied = part.length()
         val input = context.assets.open(bundledModel.fileName)
         skipFully(input, copied)
-        val output = FileOutputStream(part, true)
+        val output = try {
+            FileOutputStream(part, true)
+        } catch (e: Exception) {
+            runCatching { input.close() }
+            throw e
+        }
 
         return CopySession(target, part, input, output, copied).also { session = it }
     }

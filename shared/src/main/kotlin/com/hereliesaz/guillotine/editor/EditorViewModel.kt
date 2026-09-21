@@ -541,7 +541,7 @@ open class EditorViewModel {
 
     /** Filter edit targeting one specific clip (used by the per-clip tool popups on a group). */
     fun updateClipFilters(clipId: String, transform: (ClipFilters) -> ClipFilters) {
-        val before = document.clips.firstOrNull { it.id == clipId }?.filters
+        val before = synchronized(historyLock) { document.clips.firstOrNull { it.id == clipId }?.filters }
         updateClip(clipId) { it.copy(filters = transform(it.filters)) }
         if (actionRecorder.isRecording && before != null) {
             val after = document.clips.firstOrNull { it.id == clipId }?.filters ?: return

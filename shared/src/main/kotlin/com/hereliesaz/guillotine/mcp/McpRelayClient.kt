@@ -33,7 +33,7 @@ class McpRelayClient(
     private val client = OkHttpClient.Builder()
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile private var running = false
     @Volatile private var ws: WebSocket? = null
@@ -41,6 +41,13 @@ class McpRelayClient(
 
     fun start() {
         if (running || !config.isUsable) return
+        // Recreate scope if it was cancelled by a previous stop() — a cancelled scope cannot
+        // launch new coroutines, so frames would silently be dropped.
+        synchronized(this) {
+            if (!scope.coroutineContext[kotlinx.coroutines.Job]!!.isActive) {
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            }
+        }
         running = true
         connect()
     }

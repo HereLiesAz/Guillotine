@@ -1664,7 +1664,12 @@ class McpTools(
             context, OperationKind.GENERATE, "Synthesizing voiceover…", pausable = false,
         ) { _ ->
             val out = java.io.File(context.cacheDir, "voiceover_${System.currentTimeMillis()}.wav")
-            val result = SherpaTts.synthesize(dir, text.trim(), out.absolutePath, speed.coerceIn(0.5f, 2.0f))
+            val result = try {
+                SherpaTts.synthesize(dir, text.trim(), out.absolutePath, speed.coerceIn(0.5f, 2.0f))
+            } catch (e: Exception) {
+                runCatching { out.delete() }
+                throw e
+            }
             val duration = result.durationMs.coerceAtLeast(500L)
             vm.addMedia(
                 listOf(
@@ -1690,12 +1695,19 @@ class McpTools(
         ) { _ ->
             val out = java.io.File(context.cacheDir, "instrumental_${System.currentTimeMillis()}.wav")
             val stereo = com.hereliesaz.guillotine.ai.StereoPcmDecoder.decode(context, Uri.parse(media.uri))
-            val duration = (if (stereo == null || stereo.channels < 2) null
-                else VocalIsolator.removeVocals(stereo.left, stereo.right, stereo.sampleRate, out.absolutePath))
-                ?: throw IllegalStateException(
+            val duration = try {
+                if (stereo == null || stereo.channels < 2) null
+                else VocalIsolator.removeVocals(stereo.left, stereo.right, stereo.sampleRate, out.absolutePath)
+            } catch (e: Exception) {
+                runCatching { out.delete() }
+                throw e
+            } ?: run {
+                runCatching { out.delete() }
+                throw IllegalStateException(
                     "Couldn't remove vocals — the clip needs a stereo audio track (center-channel " +
                         "cancellation can't work on mono).",
                 )
+            }
             vm.addMedia(
                 listOf(
                     MediaItem(newId(), Uri.fromFile(out).toString(), "Instrumental: ${media.name}", MediaKind.AUDIO, duration),

@@ -50,9 +50,9 @@ class VoiceCapture {
     /** Stop recording and return the captured 16 kHz mono float PCM. */
     fun stop(): FloatArray {
         recording = false
+        runCatching { record?.stop() }
         runCatching { worker?.join(500) }
         worker = null
-        runCatching { record?.stop() }
         runCatching { record?.release() }
         record = null
         return synchronized(samples) { samples.toFloatArray() }
