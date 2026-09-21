@@ -109,14 +109,17 @@ class OnDeviceAgentBackend(
                     continue
                 }
 
+                val callArgs = repairMissingClipId(name, args, selectedTools, tools)
+                val executedCall = if (callArgs === args) obj else JSONObject(obj.toString()).put("args", callArgs)
+
                 onEvent(AgentEvent.ToolStarted(name))
-                val outcome = callTool(tools, name, args)
+                val outcome = callTool(tools, name, callArgs)
                 onEvent(AgentEvent.ToolFinished(name, outcome.summary(), outcome.isError))
-                guard.check(name, args.toString(), outcome.isError)?.let { stop ->
+                guard.check(name, callArgs.toString(), outcome.isError)?.let { stop ->
                     onEvent(AgentEvent.Failed(stop))
                     return@withContext
                 }
-                addHistory(history, "ASSISTANT: $obj")
+                addHistory(history, "ASSISTANT: $executedCall")
                 addHistory(history, "OBSERVATION: ${outcome.content().take(MAX_OBSERVATION_CHARS)}")
             }
             onEvent(AgentEvent.Failed("Stopped after $MAX_AGENT_ITERATIONS steps."))
@@ -203,6 +206,74 @@ class OnDeviceAgentBackend(
                     ),
                 )
         }
+    }
+
+    /**
+     * Local models sometimes choose the right tool but omit clip_id. Repair that cheaply when the
+     * timeline makes the target unambiguous instead of burning another multi-second/minute inference
+     * turn just to rediscover an ID. Ambiguous cases are left untouched; callTool's schema validation
+     * then returns a precise recoverable error.
+     */
+    private fun repairMissingClipId(
+        name: String,
+        args: JSONObject,
+        definitions: JSONArray,
+        tools: McpToolsSurface,
+    ): JSONObject {
+        if (args.optString("clip_id").isNotBlank()) return args
+
+        var requiresClipId = false
+        for (i in 0 until definitions.length()) {
+            val definition = definitions.optJSONObject(i) ?: continue
+            if (definition.optString("name") != name) continue
+            val required = definition.optJSONObject("inputSchema")?.optJSONArray("required")
+            if (required != null) {
+                for (j in 0 until required.length()) {
+                    if (required.optString(j) == "clip_id") {
+                        requiresClipId = true
+                        break
+                    }
+                }
+            }
+            break
+        }
+        if (!requiresClipId) return args
+
+        val timeline = callTool(tools, "get_timeline", JSONObject())
+        if (timeline.isError) return args
+
+        val selected = buildList {
+            val ids = timeline.json.optJSONArray("selectedClipIds")
+            if (ids != null) {
+                for (i in 0 until ids.length()) {
+                    ids.optString(i).takeIf { it.isNotBlank() }?.let(::add)
+                }
+            }
+        }
+        val clips = buildList {
+            val array = timeline.json.optJSONArray("clips")
+            if (array != null) {
+                for (i in 0 until array.length()) {
+                    array.optJSONObject(i)?.let(::add)
+                }
+            }
+        }
+        val now = timeline.json.optLong("currentTimeMs", Long.MIN_VALUE)
+        val active = if (now == Long.MIN_VALUE) emptyList() else clips.filter { clip ->
+            val start = clip.optLong("startTimeMs", Long.MIN_VALUE)
+            val duration = clip.optLong("durationMs", -1L)
+            start != Long.MIN_VALUE && duration >= 0L && now >= start && now < start + duration
+        }.mapNotNull { it.optString("id").takeIf(String::isNotBlank) }
+
+        val candidate = when {
+            selected.size == 1 -> selected.single()
+            clips.size == 1 -> clips.single().optString("id").takeIf(String::isNotBlank)
+            active.size == 1 -> active.single()
+            else -> null
+        } ?: return args
+
+        ActivityLog.info("AI · supplied missing clip_id from timeline context.")
+        return JSONObject(args.toString()).put("clip_id", candidate)
     }
 
     private fun selectToolDefinitions(defs: JSONArray, instruction: String): JSONArray {
