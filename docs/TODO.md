@@ -1594,11 +1594,12 @@ all 12 keyframe properties, background removal, audio effects, multi-track compo
 crossfade are at full parity. The following gaps remain:
 - ~~**Caption text size differs**~~ — **Done (2026-08-24):** see the dated entry near the top of
   this file ("Android caption export text size was a fixed 64px...").
-- ~~**Quality/FPS settings not wired into export**~~ — **Done (2026-08-01):** both are applied in
-  `VideoEffects.geometry()`, which is where the other project-level settings (crop, aspect ratio) already
-  land. `quality` becomes `Presentation.createForHeight(Quality.targetHeight)`, applied *after* the
-  aspect-ratio presentation so it resizes the letterboxed frame and the ratio survives; `fps` becomes a
-  `FrameDropEffect`. **Caveat worth keeping:** frame drop can only *cap* the rate — Media3 discards
+- ~~**Quality/FPS settings not wired into export**~~ — **Done (2026-08-01; canvas semantics
+  corrected 2026-09-20):** quality/fps remain wired through `VideoEffects.geometry()`, but project
+  **aspect ratio no longer lives there**. Aspect now sets the composition/output canvas through
+  `ProjectVideoCompositorSettings`; it never resizes an individual media layer. `quality` establishes
+  the output/layer vertical pixel scale and `fps` becomes a `FrameDropEffect`. **Caveat worth keeping:**
+  frame drop can only *cap* the rate — Media3 discards
   frames and cannot synthesise them — so selecting 60 fps on 30 fps source is a no-op, not interpolation.
   Bitrate is still unconfigured (`DefaultEncoderFactory` defaults apply); that would need
   `VideoEncoderSettings` and a target worth defending, so it is deliberately not guessed at here.
