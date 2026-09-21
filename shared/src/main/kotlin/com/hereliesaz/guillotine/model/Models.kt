@@ -113,8 +113,8 @@ enum class Quality {
      *
      * This existed as a setting the user could change and the exporter never read — `Transformer` was
      * built with a video MIME type and nothing else, so picking 720p produced a full-resolution file.
-     * Width is deliberately not fixed: the export applies this through a height-only presentation so the
-     * frame's aspect ratio (already letterboxed by [GlobalSettings.aspectRatio]) is preserved.
+     * Width is deliberately not fixed here: [Document.projectCanvasSize] combines this target height
+     * with the project canvas aspect. Aspect changes the canvas bounds; it is never a per-layer resize.
      */
     val targetHeight: Int?
         get() = when (this) {
