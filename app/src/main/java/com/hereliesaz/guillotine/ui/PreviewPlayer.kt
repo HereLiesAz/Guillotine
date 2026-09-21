@@ -9,11 +9,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,6 +53,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -158,27 +162,12 @@ fun PreviewPlayer(
         null
     }
 
-    // The frame's own shape must never depend on how the surrounding (resizable) pane happens to be
-    // sized — that's exactly the "preview window gets modified by something that isn't the user
-    // editing the frame" class of bug (see the crop-tool viewport-pan removal above). For a fixed
-    // project aspect ratio that's already true (Modifier.aspectRatio below is a hard Compose-level
-    // lock, independent of the pane). For ORIGINAL there was no such lock at all — Modifier.fillMaxSize()
-    // let the frame's own proportions become whatever shape the pane currently has, relying solely on
-    // PlayerView's native resize_mode="fit" to letterbox *inside* that ever-changing box. That is a
-    // second system (Android's View measure/layout) racing Compose's own layout on every resize frame,
-    // which is exactly the kind of two-systems-fighting setup that shows as a stretched/squished frame
-    // mid-drag. Tracked from the topmost video track's own player (the layer actually on top,
-    // `videoTracks[0]`), so ORIGINAL gets the same single-source-of-truth Compose-level lock every
-    // other ratio already has, the moment the reference clip's real size is known.
-    var referenceVideoAspect by remember { mutableStateOf<Float?>(null) }
-
     // ---- surface ----
-    val aspectMod = when (state.document.settings.aspectRatio) {
-        AspectRatio.RATIO_16_9 -> Modifier.aspectRatio(16f / 9f)
-        AspectRatio.RATIO_9_16 -> Modifier.aspectRatio(9f / 16f)
-        AspectRatio.RATIO_1_1 -> Modifier.aspectRatio(1f)
-        AspectRatio.ORIGINAL -> referenceVideoAspect?.let { Modifier.aspectRatio(it) } ?: Modifier.fillMaxSize()
-    }
+    // Project shape is a canvas boundary, never a clip transform. ORIGINAL comes from the imported
+    // media's stored width/height; fixed presets change the canvas only. Clip geometry below remains
+    // source-shaped until the user changes scale/position/rotation with the Crop tool.
+    val projectCanvas = state.document.projectCanvasSize()
+    val aspectMod = Modifier.aspectRatio(projectCanvas.aspectRatio)
 
     val cropModifier = if (cropMode) {
         Modifier.pointerInput(Unit) {
@@ -304,15 +293,8 @@ fun PreviewPlayer(
                     playbackRate = state.playbackRate,
                     maxVideoDim = state.previewQuality.maxDimension,
                     aspectMod = aspectMod,
+                    projectCanvas = projectCanvas,
                     projectFps = state.document.settings.fps,
-                    // Only the topmost track (videoTracks[0] — see the class doc above) sets the
-                    // frame's own aspect ratio; a lower track's own footage may be a different shape
-                    // and must not fight the reference track for the frame's shape.
-                    onAspectChanged = if (trackId == state.document.videoTracks.firstOrNull()) {
-                        { referenceVideoAspect = it }
-                    } else {
-                        null
-                    },
                     cropTargetClipId = cropTargetClipId,
                 )
             }
@@ -376,7 +358,15 @@ fun PreviewPlayer(
         // exactly what the clip is doing; a plain resting clip's outline just coincides with the frame.
         if (!useBufferedPreview) {
             activeVideoClips.forEach { clip ->
-                key(clip.id) { ClipFrameOutline(clip = clip, now = now, aspectMod = aspectMod) }
+                key(clip.id) {
+                    ClipFrameOutline(
+                        clip = clip,
+                        media = state.document.mediaFor(clip),
+                        now = now,
+                        aspectMod = aspectMod,
+                        projectCanvas = projectCanvas,
+                    )
+                }
             }
         }
       } // end inner zoomed frame
@@ -553,9 +543,8 @@ private fun VideoTrackLayer(
     playbackRate: Float,
     maxVideoDim: Int,
     aspectMod: Modifier,
+    projectCanvas: com.hereliesaz.guillotine.model.ProjectCanvasSize,
     projectFps: Int,
-    /** Non-null only for the reference (topmost) track — see [PreviewPlayer]'s `referenceVideoAspect`. */
-    onAspectChanged: ((Float) -> Unit)? = null,
     /** The clip the crop tool is actively editing (see [PreviewPlayer]'s `cropTargetClipId`), or null. */
     cropTargetClipId: String? = null,
 ) {
@@ -576,26 +565,6 @@ private fun VideoTrackLayer(
         onDispose {
             playerA.release()
             playerB.release()
-        }
-    }
-    // The reference track's own decoded video size, not the project's chosen export aspect ratio —
-    // see the ORIGINAL-mode comment in PreviewPlayer. playerA is "outgoing", i.e. whichever clip is
-    // actually visible on this track right now; a listener rather than a one-shot read because the
-    // size isn't known until the decoder reports it, and changes again if the track's clip changes.
-    val currentOnAspectChanged by rememberUpdatedState(onAspectChanged)
-    if (onAspectChanged != null) {
-        DisposableEffect(playerA) {
-            val listener = object : androidx.media3.common.Player.Listener {
-                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                    if (videoSize.width <= 0 || videoSize.height <= 0) return
-                    val rotated = videoSize.unappliedRotationDegrees % 180 != 0
-                    val w = if (rotated) videoSize.height else videoSize.width
-                    val h = if (rotated) videoSize.width else videoSize.height
-                    currentOnAspectChanged?.invoke((w * videoSize.pixelWidthHeightRatio) / h)
-                }
-            }
-            playerA.addListener(listener)
-            onDispose { playerA.removeListener(listener) }
         }
     }
     // Preview-quality cap: constrain the players' target video resolution (longest edge). Lower
@@ -668,8 +637,32 @@ private fun VideoTrackLayer(
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
     }?.times(trackOpacity)?.times(if (differentTypeOverlap) 1f else (xfade ?: 0f)) ?: 0f
 
-    VideoSlot(outgoing, playerA, cutoutA, faceBlurA, opacityA, now, aspectMod, transparent = false, cropTargetClipId)
-    VideoSlot(incoming, playerB, cutoutB, faceBlurB, opacityB, now, aspectMod, transparent = true, cropTargetClipId)
+    VideoSlot(
+        clip = outgoing,
+        media = outgoing?.let(mediaFor),
+        player = playerA,
+        cutout = cutoutA,
+        faceBlur = faceBlurA,
+        alpha = opacityA,
+        now = now,
+        aspectMod = aspectMod,
+        projectCanvas = projectCanvas,
+        transparent = false,
+        cropTargetClipId = cropTargetClipId,
+    )
+    VideoSlot(
+        clip = incoming,
+        media = incoming?.let(mediaFor),
+        player = playerB,
+        cutout = cutoutB,
+        faceBlur = faceBlurB,
+        alpha = opacityB,
+        now = now,
+        aspectMod = aspectMod,
+        projectCanvas = projectCanvas,
+        transparent = true,
+        cropTargetClipId = cropTargetClipId,
+    )
 }
 
 /** Compute a face-blur overlay for [clip], or null when the clip doesn't anonymize faces. */
@@ -707,12 +700,14 @@ private suspend fun cutoutFor(
 @Composable
 private fun VideoSlot(
     clip: TimelineClip?,
+    media: MediaItem?,
     player: ExoPlayer,
     cutout: ImageBitmap?,
     faceBlur: ImageBitmap?,
     alpha: Float,
     now: Long,
     aspectMod: Modifier,
+    projectCanvas: com.hereliesaz.guillotine.model.ProjectCanvasSize,
     transparent: Boolean,
     cropTargetClipId: String? = null,
 ) {
@@ -734,25 +729,34 @@ private fun VideoSlot(
     // so "in frame" vs. "will be cropped" stays legible while this clip paints past that line and the
     // frame itself visibly stays put.
     val isCropTarget = clip.id == cropTargetClipId
-    // The outer box establishes the frame's own size (aspect-locked) and never moves; everything
-    // that can be transformed by the crop tool lives inside it as a fillMaxSize child so the frame's
-    // own rectangle stays a fixed, visible reference regardless of what the gesture does to the clip.
-    Box(modifier = aspectMod, contentAlignment = Alignment.Center) {
+    // The project frame clips the layer, but does not size it. At scale=1 a visual layer keeps its
+    // own source aspect and spans the project canvas height; changing only the project aspect changes
+    // the window around that layer, not the layer. The Crop tool is the sole owner of layer scale/pan.
+    BoxWithConstraints(
+        modifier = aspectMod.then(if (isCropTarget) Modifier else Modifier.clipToBounds()),
+        contentAlignment = Alignment.Center,
+    ) {
+        val density = LocalDensity.current
+        val frameWidthPx = with(density) { maxWidth.toPx() }
+        val frameHeightPx = with(density) { maxHeight.toPx() }
+        val sourceAspect = if (clip.type == ClipType.TEXT) {
+            projectCanvas.aspectRatio.toDouble()
+        } else {
+            media?.aspectRatioValue ?: projectCanvas.aspectRatio.toDouble()
+        }
+        val layerWidth = maxHeight * sourceAspect.toFloat()
         val mod = Modifier
-            .fillMaxSize()
-            // Same clipToBounds exemption as explained above this function's `isCropTarget` — kept
-            // here since it's this box, not that one, that actually carries the transform being clipped.
-            .then(if (isCropTarget) Modifier else Modifier.clipToBounds())
+            .requiredHeight(maxHeight)
+            .requiredWidth(layerWidth)
             .graphicsLayer {
                 this.alpha = alpha.coerceIn(0f, 1f)
                 scaleX = s
                 scaleY = s
                 rotationZ = rotationDeg
-                translationX = offXFrac * size.width
-                translationY = offYFrac * size.height
+                translationX = offXFrac * frameWidthPx
+                translationY = offYFrac * frameHeightPx
             }
-        // Picture + optional face-blur overlay share the same transformed box so blurred patches track
-        // the video. Fit is used for both so the overlay (frame-sized) aligns with the fitted picture.
+        // Picture + optional face-blur overlay share the same transformed source-shaped box.
         Box(modifier = mod, contentAlignment = Alignment.Center) {
             if (clip.type == ClipType.TEXT) {
                 // A title/caption clip: transparent glyphs only — no baked-in scrim/background. If a
@@ -812,22 +816,37 @@ private fun VideoSlot(
  * `clipToBounds` in [VideoSlot]) it traces exactly how far the clip's content now overflows past it.
  */
 @Composable
-private fun ClipFrameOutline(clip: TimelineClip, now: Long, aspectMod: Modifier) {
+private fun ClipFrameOutline(
+    clip: TimelineClip,
+    media: MediaItem?,
+    now: Long,
+    aspectMod: Modifier,
+    projectCanvas: com.hereliesaz.guillotine.model.ProjectCanvasSize,
+) {
     val rel = now - clip.startTimeMs
     val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, rel, clip.scale).coerceAtLeast(0f)
     val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, rel, clip.rotation)
     val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, rel, clip.offsetX)
     val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, rel, clip.offsetY)
-    Box(modifier = aspectMod, contentAlignment = Alignment.Center) {
+    BoxWithConstraints(modifier = aspectMod, contentAlignment = Alignment.Center) {
+        val density = LocalDensity.current
+        val frameWidthPx = with(density) { maxWidth.toPx() }
+        val frameHeightPx = with(density) { maxHeight.toPx() }
+        val sourceAspect = if (clip.type == ClipType.TEXT) {
+            projectCanvas.aspectRatio.toDouble()
+        } else {
+            media?.aspectRatioValue ?: projectCanvas.aspectRatio.toDouble()
+        }
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .requiredHeight(maxHeight)
+                .requiredWidth(maxHeight * sourceAspect.toFloat())
                 .graphicsLayer {
                     scaleX = s
                     scaleY = s
                     rotationZ = rotationDeg
-                    translationX = offXFrac * size.width
-                    translationY = offYFrac * size.height
+                    translationX = offXFrac * frameWidthPx
+                    translationY = offYFrac * frameHeightPx
                 }
                 .border(1.dp, Red500),
         )
