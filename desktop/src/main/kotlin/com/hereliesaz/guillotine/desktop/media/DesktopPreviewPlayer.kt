@@ -4,9 +4,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
@@ -190,12 +193,8 @@ fun DesktopPreviewPlayer(
         null
     }
 
-    val aspectMod = when (state.document.settings.aspectRatio) {
-        AspectRatio.RATIO_16_9 -> Modifier.aspectRatio(16f / 9f)
-        AspectRatio.RATIO_9_16 -> Modifier.aspectRatio(9f / 16f)
-        AspectRatio.RATIO_1_1 -> Modifier.aspectRatio(1f)
-        AspectRatio.ORIGINAL -> Modifier.fillMaxSize()
-    }
+    val projectCanvas = state.document.projectCanvasSize()
+    val aspectMod = Modifier.aspectRatio(projectCanvas.aspectRatio)
 
     // Global crop (x/y/w/h in % of the frame): scale the crop sub-rectangle up to fill the frame, so
     // the preview matches the export's crop semantics (DesktopExporter takes the same sub-rect and
@@ -267,6 +266,7 @@ fun DesktopPreviewPlayer(
                     now = now,
                     isPlaying = state.isPlaying,
                     frameDurationMs = state.document.settings.frameDurationMs,
+                    projectCanvas = projectCanvas,
                     cropTargetClipId = cropTargetClipId,
                 )
             }
@@ -296,25 +296,21 @@ fun DesktopPreviewPlayer(
                 val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
                 val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX)
                 val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY)
-                Box(modifier = aspectMod, contentAlignment = Alignment.Center) {
+                SourceLayerBox(
+                    clip = clip,
+                    media = state.document.mediaFor(clip),
+                    projectCanvas = projectCanvas,
+                    alpha = 1f,
+                    scale = s,
+                    rotationDeg = if (clip.id == cropTargetClipId) 0f else rotationDeg,
+                    offsetXFrac = offXFrac,
+                    offsetYFrac = offYFrac,
+                    clipToFrame = false,
+                ) {
                     if (clip.id == cropTargetClipId) {
-                        CropWireframe(
-                            scale = s, offsetXFrac = offXFrac, offsetYFrac = offYFrac,
-                            onCropTransform = onCropTransform,
-                        )
+                        CropWireframe(onCropTransform = onCropTransform)
                     } else {
-                        Box(
-                            Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    scaleX = s
-                                    scaleY = s
-                                    rotationZ = rotationDeg
-                                    translationX = offXFrac * size.width
-                                    translationY = offYFrac * size.height
-                                }
-                                .border(1.dp, Red500),
-                        )
+                        Box(Modifier.fillMaxSize().border(1.dp, Red500))
                     }
                 }
             }
@@ -400,6 +396,55 @@ fun DesktopPreviewPlayer(
     }
 }
 
+/**
+ * Place a layer in project coordinates without letting project aspect resize it. The layer's
+ * untransformed height is the project height; its width comes only from its own source aspect.
+ */
+@Composable
+private fun SourceLayerBox(
+    clip: TimelineClip,
+    media: MediaItem?,
+    projectCanvas: com.hereliesaz.guillotine.model.ProjectCanvasSize,
+    alpha: Float,
+    scale: Float,
+    rotationDeg: Float,
+    offsetXFrac: Float,
+    offsetYFrac: Float,
+    clipToFrame: Boolean,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .then(if (clipToFrame) Modifier.clipToBounds() else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        val density = LocalDensity.current
+        val frameWidthPx = with(density) { maxWidth.toPx() }
+        val frameHeightPx = with(density) { maxHeight.toPx() }
+        val sourceAspect = if (clip.type == ClipType.TEXT) {
+            projectCanvas.aspectRatio.toDouble()
+        } else {
+            media?.aspectRatioValue ?: projectCanvas.aspectRatio.toDouble()
+        }
+        Box(
+            Modifier
+                .requiredHeight(maxHeight)
+                .requiredWidth(maxHeight * sourceAspect.toFloat())
+                .graphicsLayer {
+                    this.alpha = alpha.coerceIn(0f, 1f)
+                    scaleX = scale
+                    scaleY = scale
+                    rotationZ = rotationDeg
+                    translationX = offsetXFrac * frameWidthPx
+                    translationY = offsetYFrac * frameHeightPx
+                },
+            contentAlignment = Alignment.Center,
+            content = content,
+        )
+    }
+}
+
 @Composable
 private fun VideoTrackLayer(
     trackId: String,
@@ -409,6 +454,7 @@ private fun VideoTrackLayer(
     now: Long,
     isPlaying: Boolean,
     frameDurationMs: Double,
+    projectCanvas: com.hereliesaz.guillotine.model.ProjectCanvasSize,
     cropTargetClipId: String? = null,
 ) {
     // TEXT clips share this same track namespace ("just a clip on a video track") and are included
@@ -443,18 +489,19 @@ private fun VideoTrackLayer(
         TimelineMath.valueAt(it, KeyframeProperty.OPACITY, now - it.startTimeMs, 1f)
     }?.times(trackOpacity)?.times(if (differentTypeOverlap) 1f else (xfade ?: 0f)) ?: 0f
 
-    VideoSlot(outgoing, mediaFor, opacityA, now, isPlaying, frameDurationMs, cropTargetClipId)
-    VideoSlot(incoming, mediaFor, opacityB, now, isPlaying, frameDurationMs, cropTargetClipId)
+    VideoSlot(outgoing, outgoing?.let(mediaFor), opacityA, now, isPlaying, frameDurationMs, projectCanvas, cropTargetClipId)
+    VideoSlot(incoming, incoming?.let(mediaFor), opacityB, now, isPlaying, frameDurationMs, projectCanvas, cropTargetClipId)
 }
 
 @Composable
 private fun VideoSlot(
     clip: TimelineClip?,
-    mediaFor: (TimelineClip) -> MediaItem?,
+    media: MediaItem?,
     alpha: Float,
     now: Long,
     isPlaying: Boolean,
     frameDurationMs: Double,
+    projectCanvas: com.hereliesaz.guillotine.model.ProjectCanvasSize,
     cropTargetClipId: String? = null,
 ) {
     if (clip == null || alpha <= 0f) return
@@ -477,17 +524,6 @@ private fun VideoSlot(
     // there) marks where the frame boundary actually is so "in frame" vs. "will be cropped" stays
     // legible while it paints past that line.
     val isCropTarget = clip.id == cropTargetClipId
-    val mod = Modifier
-        .fillMaxSize()
-        .then(if (isCropTarget) Modifier else Modifier.clipToBounds())
-        .graphicsLayer {
-            this.alpha = alpha.coerceIn(0f, 1f)
-            scaleX = s
-            scaleY = s
-            rotationZ = rotationDeg
-            translationX = offXFrac * size.width
-            translationY = offYFrac * size.height
-        }
 
     // A title/caption clip: transparent glyphs only — no baked-in scrim/background (a background, if
     // wanted, is a separate shape-layer clip stacked underneath). Computed before the media lookup
@@ -496,23 +532,35 @@ private fun VideoSlot(
     // gets the same red outline as any other active clip — genuinely indistinguishable from a video
     // layer, matching Android's PreviewPlayer.VideoSlot.
     if (clip.type == ClipType.TEXT) {
-        Text(
-            clip.text,
-            color = White,
-            fontSize = 14.sp,
-            fontFamily = when (clip.font) {
-                com.hereliesaz.guillotine.model.TextFont.SANS -> androidx.compose.ui.text.font.FontFamily.SansSerif
-                com.hereliesaz.guillotine.model.TextFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
-                com.hereliesaz.guillotine.model.TextFont.MONO -> androidx.compose.ui.text.font.FontFamily.Monospace
-                com.hereliesaz.guillotine.model.TextFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
-            },
-            textAlign = TextAlign.Center,
-            modifier = mod.wrapContentSize().padding(horizontal = 8.dp, vertical = 3.dp),
-        )
+        SourceLayerBox(
+            clip = clip,
+            media = null,
+            projectCanvas = projectCanvas,
+            alpha = alpha,
+            scale = s,
+            rotationDeg = rotationDeg,
+            offsetXFrac = offXFrac,
+            offsetYFrac = offYFrac,
+            clipToFrame = !isCropTarget,
+        ) {
+            Text(
+                clip.text,
+                color = White,
+                fontSize = 14.sp,
+                fontFamily = when (clip.font) {
+                    com.hereliesaz.guillotine.model.TextFont.SANS -> androidx.compose.ui.text.font.FontFamily.SansSerif
+                    com.hereliesaz.guillotine.model.TextFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
+                    com.hereliesaz.guillotine.model.TextFont.MONO -> androidx.compose.ui.text.font.FontFamily.Monospace
+                    com.hereliesaz.guillotine.model.TextFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
+                },
+                textAlign = TextAlign.Center,
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+        }
         return
     }
 
-    val media = mediaFor(clip) ?: return
+    if (media == null) return
 
     // Frame decimation (frameStep): hold the same grabbed frame across `frameStep` output frames by
     // snapping the source time to the project's kept-frame grid. No-op when frameStep <= 1.
@@ -572,7 +620,24 @@ private fun VideoSlot(
     }
 
     frame?.let { bmp ->
-        Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = mod)
+        SourceLayerBox(
+            clip = clip,
+            media = media,
+            projectCanvas = projectCanvas,
+            alpha = alpha,
+            scale = s,
+            rotationDeg = rotationDeg,
+            offsetXFrac = offXFrac,
+            offsetYFrac = offYFrac,
+            clipToFrame = !isCropTarget,
+        ) {
+            Image(
+                bitmap = bmp,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 
@@ -588,20 +653,11 @@ private fun VideoSlot(
  */
 @Composable
 private fun CropWireframe(
-    scale: Float,
-    offsetXFrac: Float,
-    offsetYFrac: Float,
     onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit,
 ) {
     Box(
         Modifier
             .fillMaxSize()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                translationX = offsetXFrac * size.width
-                translationY = offsetYFrac * size.height
-            }
             .border(1.dp, Red500),
     ) {
         val corners = listOf(
@@ -615,7 +671,7 @@ private fun CropWireframe(
             // Counter-scale so the handle stays a constant on-screen size regardless of how zoomed
             // in/out the clip is — otherwise a 6x-scaled clip's handle would render at 6x size, and a
             // 0.1x one would shrink to under a pixel.
-            val handleSize = (HANDLE_SIZE_DP / scale.coerceAtLeast(0.05f)).dp
+            val handleSize = HANDLE_SIZE_DP.dp
             Box(
                 Modifier
                     .align(alignment)
