@@ -19,7 +19,7 @@ class ProjectVideoCompositorSettings(
 ) : VideoCompositorSettings {
     private val identity = StaticOverlaySettings.Builder().build()
 
-    override fun getOutputSize(inputSizes: MutableList<Size>): Size =
+    override fun getOutputSize(inputSizes: List<Size>): Size =
         Size(canvas.width, canvas.height)
 
     override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings =
