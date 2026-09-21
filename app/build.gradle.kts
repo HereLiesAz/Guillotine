@@ -205,6 +205,12 @@ androidComponents {
     }
 }
 
+// sherpa-onnx ships all JVM classes inside its AAR; the JVM jar artifact duplicates them.
+// Exclude globally so no transitive path re-introduces it.
+configurations.all {
+    exclude(group = "com.github.k2-fsa", module = "sherpa-onnx-jvm")
+}
+
 dependencies {
     implementation(project(":shared"))
     implementation(libs.androidx.core.ktx)
@@ -236,10 +242,7 @@ dependencies {
     implementation(libs.tensorflow.lite)
     // Declared BEFORE sherpa-onnx so its libonnxruntime.so (newer) wins the jniLibs pickFirst.
     implementation(libs.onnxruntime.android)
-    implementation(libs.sherpa.onnx) {
-        // The AAR already contains all JVM classes; exclude the JVM jar to prevent duplicate-class errors.
-        exclude(group = "com.github.k2-fsa", module = "sherpa-onnx-jvm")
-    }
+    implementation(libs.sherpa.onnx)
     implementation(libs.commons.compress)
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)
