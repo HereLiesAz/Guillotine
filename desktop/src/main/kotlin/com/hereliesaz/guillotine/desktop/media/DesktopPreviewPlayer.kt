@@ -42,6 +42,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import com.hereliesaz.guillotine.desktop.ui.HeldModifiers
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -52,7 +53,6 @@ import com.hereliesaz.guillotine.desktop.ui.theme.Neutral950
 import com.hereliesaz.guillotine.desktop.ui.theme.Red500
 import com.hereliesaz.guillotine.desktop.ui.theme.White
 import com.hereliesaz.guillotine.editor.EditorUiState
-import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.ClipType
 import com.hereliesaz.guillotine.model.FxLayer
 import com.hereliesaz.guillotine.model.KeyframeProperty
