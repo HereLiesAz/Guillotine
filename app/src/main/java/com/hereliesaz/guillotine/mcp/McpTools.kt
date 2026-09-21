@@ -52,8 +52,1279 @@ class McpTools(
     com.hereliesaz.guillotine.ai.agent.FrameImageSource {
 
     /**
-     * Pixel size of the actual project canvas. Shared with preview/export so ORIGINAL is the imported
-     * media's exact width/height and fixed aspect changes never invent a second geometry policy.
+     * The active video clip's frame at the playhead as a Bitmap, or null if there's no video there /
+     * it can't be decoded. Lets the on-device assistant *see* the current frame (pixels stay on-device).
+     * The caller owns the bitmap and must recycle it. Mirrors the clip-resolution the frame tools use.
+     */
+    override fun currentFrame(): android.graphics.Bitmap? {
+        val st = vm.uiState.value
+        val now = st.currentTimeMs
+        val clip = com.hereliesaz.guillotine.model.TimelineMath.activeClip(
+            st.document.clips, com.hereliesaz.guillotine.model.ClipType.VIDEO, now,
+        ) ?: return null
+        val media = st.document.mediaFor(clip) ?: return null
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, now).coerceAtLeast(0L)
+        return grabFrame(Uri.parse(media.uri), sourceMs)
+    }
+
+    /**
+     * The current frame encoded as a base64 JPEG for a CLOUD image API — used only on the opt-in
+     * cloud-vision path (McpAgent only wires this when the user enabled it). Downscales to at most
+     * [CLOUD_FRAME_MAX_DIM] on the long edge to bound upload size/cost, then recycles all bitmaps.
+     */
+    override fun currentFrameImage(): com.hereliesaz.guillotine.ai.agent.FrameImage? {
+        val frame = currentFrame() ?: return null
+        return try {
+            val longEdge = maxOf(frame.width, frame.height)
+            val scaled = if (longEdge > CLOUD_FRAME_MAX_DIM) {
+                val ratio = CLOUD_FRAME_MAX_DIM.toFloat() / longEdge
+                android.graphics.Bitmap.createScaledBitmap(
+                    frame, (frame.width * ratio).toInt().coerceAtLeast(1),
+                    (frame.height * ratio).toInt().coerceAtLeast(1), true,
+                )
+            } else {
+                frame
+            }
+            val bytes = java.io.ByteArrayOutputStream().use { out ->
+                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                out.toByteArray()
+            }
+            if (scaled !== frame) scaled.recycle()
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            com.hereliesaz.guillotine.ai.agent.FrameImage(b64, "image/jpeg")
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { frame.recycle() }
+        }
+    }
+
+    /**
+     * Cancel whatever [OperationController] currently has claimed. It only ever tracks one in-flight
+     * long operation (analyze/generate/export) for the whole app, so there's no per-[requestId]
+     * bookkeeping to do here — [McpDispatcher] has already confirmed [requestId] is the one it's
+     * tracking as in-flight before calling this. A blocking MCP tool built on
+     * [OperationController.runBlocking] observes the cancel via [OperationController.Sink.checkpointBlocking].
+     */
+    override fun cancel(requestId: Any?) {
+        OperationController.cancel()
+    }
+
+    // ---- tool definitions ---------------------------------------------------
+
+    override fun definitions(): JSONArray = JSONArray().apply {
+        put(toolDefinition("get_timeline", "Get the current timeline state: all clips, tracks, and timing.",
+            emptySchema()))
+        put(toolDefinition("get_clip", "Get details for a specific clip by ID.",
+            objSchema("clip_id" to stringProp("The clip ID"), required = listOf("clip_id"))))
+        put(toolDefinition("set_prompt", "Set the AI analysis prompt for a clip.",
+            objSchema(
+                "clip_id" to stringProp(), "prompt" to stringProp(),
+                required = listOf("clip_id", "prompt"),
+            )))
+        put(toolDefinition("analyze_clip",
+            "Run on-device vision on a clip using its current prompt AND cut it for real: matching ranges " +
+                "are found, then the clip is split into its kept pieces and the removed ranges are deleted " +
+                "with the timeline closing up (no black gaps). For \"cut/remove the frames with X\" the " +
+                "matched ranges are removed; for \"keep only X\" the non-matching ranges are removed. Use " +
+                "remove_object_generative instead when the clip must stay the SAME length.",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+        put(toolDefinition("select_clip", "Select a clip by ID (empty string to clear).",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+
+        // ---- real timeline edits (the app's actual split/delete/ripple operations) ----
+        put(toolDefinition("split_clip", "Split a clip into two at a timeline position (ms).",
+            objSchema("clip_id" to stringProp(), "at_ms" to intProp("Timeline position in ms"),
+                required = listOf("clip_id", "at_ms"))))
+        put(toolDefinition("segment_clip", "Split a clip into separate clips at every keep/remove edit boundary (keeps all pieces).",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+        put(toolDefinition("delete_clip", "Delete a clip (and its linked audio / group) from the timeline.",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
+        put(toolDefinition("ripple_delete_range", "Cut a timeline span [start_ms, end_ms) out of every track and close the gap.",
+            objSchema("start_ms" to intProp(), "end_ms" to intProp(), required = listOf("start_ms", "end_ms"))))
+        put(toolDefinition(
+            "analyze_clip_with_reference",
+            "Like analyze_clip (finds matches AND cuts the clip for real), but uses the clip's CURRENT " +
+                "playhead frame as a visual reference to find that specific object across the clip. Use when " +
+                "the user points at the current frame (e.g. \"this is my phone\"). Set the clip's prompt to " +
+                "the object first.",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "remove_object_generative",
+            "Remove an object by GENERATING replacement frames (cloud, BYO Leonardo key) so the clip stays " +
+                "the SAME length: the object's segments become inpainted image clips grouped with the " +
+                "original pieces. Use when the user wants the object gone but the video kept natural / the " +
+                "same length (NOT cut shorter). Set the clip's prompt to the object first.",
+            objSchema("clip_id" to stringProp(), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "describe_current_frame",
+            "Get an on-device vision description of what's in the current preview frame (the video clip " +
+                "at the playhead). Returns detected objects (label, confidence, pixel bounding box), the " +
+                "clip's id, and the source-media timestamp. The raw frame stays on the device — only the " +
+                "resulting text goes to you. Use whenever the user references 'this frame', 'what's on " +
+                "screen', 'the current thing', or otherwise points at the current preview.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "create_user_tool",
+            "Create a named editing method the user can invoke later by name. The description should " +
+                "be step-by-step instructions for what to do to a clip (using the other tools). If a " +
+                "tool with the same name exists it is overwritten.",
+            objSchema(
+                "name" to stringProp("Short name for the method (e.g. \"comedy zoom\")"),
+                "description" to stringProp("Step-by-step instructions the agent should follow when this tool is invoked"),
+                required = listOf("name", "description"),
+            ),
+        ))
+        put(toolDefinition(
+            "list_user_tools",
+            "List all user-defined editing methods (tools). Returns name + description for each.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "delete_user_tool",
+            "Delete a user-defined editing method by name.",
+            objSchema("name" to stringProp("Name of the tool to delete"), required = listOf("name")),
+        ))
+        put(toolDefinition(
+            "run_user_tool",
+            "Run a user-defined editing method on a clip. Returns the method's step-by-step " +
+                "instructions — execute them using the other tools on the given clip.",
+            objSchema(
+                "name" to stringProp("Name of the user tool to run"),
+                "clip_id" to stringProp("The clip to apply the method to"),
+                required = listOf("name", "clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "start_recording",
+            "Start recording the user's editing actions on a clip. While recording, every edit " +
+                "operation (split, trim, delete, keyframe, filter change, etc.) is captured. " +
+                "Stop with stop_recording to save the recorded actions as a user-defined tool.",
+            objSchema("clip_id" to stringProp("The clip to record actions on"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "stop_recording",
+            "Stop recording and save the captured actions as a user-defined tool. Returns the " +
+                "recorded steps so the user can review them. The user can add caveats or " +
+                "clarifications via create_user_tool afterward.",
+            objSchema(
+                "name" to stringProp("Name for the new tool (e.g. \"dramatic zoom cut\")"),
+                "extra_instructions" to stringProp("Optional caveats or generalizations to append (e.g. \"adapt timings to clip length\")"),
+                required = listOf("name"),
+            ),
+        ))
+        put(toolDefinition(
+            "discard_recording",
+            "Discard the current recording without saving.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "transcribe_clip",
+            "Transcribe a clip's audio (on-device Vosk or cloud Whisper) and add timed caption text " +
+                "clips to the timeline, grouped with the source clip. Each caption appears and disappears " +
+                "in sync with the spoken words.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
+        put(toolDefinition(
+            "animated_transcribe_clip",
+            "Transcribe a clip's audio and create ANIMATED per-syllable captions: each word is split " +
+                "into syllables placed on separate video tracks so they all appear simultaneously, with " +
+                "SCALE keyframes that ramp each syllable from small to large as it is spoken — a " +
+                "\"grow as said\" kinetic typography effect. Use when the user asks for animated, " +
+                "kinetic, per-word, or per-syllable text/captions.",
+            objSchema("clip_id" to stringProp("The clip to transcribe"), required = listOf("clip_id")),
+        ))
+
+        // ---- teach a specific thing by pointing at it (few-shot, on-device) ----
+        put(toolDefinition(
+            "add_reference",
+            "Teach the app a SPECIFIC thing by pointing at it in the CURRENT preview frame: captures an " +
+                "on-device fingerprint of what's there and adds it as an example of a named concept. Call " +
+                "it once per frame the user points the thing out in (\"this is my dog Rex\", \"here he is " +
+                "again\") — more examples = more robust recognition. Pass `term` (the kind of thing, e.g. " +
+                "\"dog\") if the user said it, to help pick the right object in the frame. Set " +
+                "negative=true for a NON-example (\"this frame does NOT have Rex\", \"that's a different " +
+                "dog\") — it fingerprints the same-kind look-alikes so recognition can reject them.",
+            objSchema(
+                "name" to stringProp("Short name for the thing, e.g. \"Rex\""),
+                "term" to stringProp("Optional kind of object, e.g. \"dog\", \"mug\""),
+                "negative" to JSONObject().apply {
+                    put("type", "boolean"); put("description", "True if this frame does NOT contain the thing (a look-alike to reject)")
+                },
+                required = listOf("name"),
+            ),
+        ))
+        put(toolDefinition(
+            "list_concepts",
+            "List the things the user has taught by pointing them out (learned concepts): name + how many " +
+                "examples each has.",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "delete_concept",
+            "Forget a learned thing by name.",
+            objSchema("name" to stringProp(), required = listOf("name")),
+        ))
+        put(toolDefinition(
+            "analyze_clip_with_concept",
+            "Keep or cut a clip by a LEARNED thing (taught via add_reference): finds frames containing that " +
+                "specific instance and cuts for real. keep_only=true keeps ONLY the frames with it (removes " +
+                "the rest — \"keep only shots with Rex\"); keep_only=false removes the frames with it (\"cut " +
+                "everything with Rex\"). Prefer this over analyze_clip when the user taught the thing by " +
+                "pointing at it.",
+            objSchema(
+                "clip_id" to stringProp(), "name" to stringProp("The learned thing's name"),
+                "keep_only" to JSONObject().apply {
+                    put("type", "boolean"); put("description", "Keep only frames with it (else remove them)")
+                },
+                required = listOf("clip_id", "name"),
+            ),
+        ))
+
+        // ---- on-device image effects (TFLite) ----
+        put(toolDefinition(
+            "apply_image_effect",
+            "Run an ON-DEVICE image model on the current preview frame and add the result as a new image " +
+                "clip. effect = superres (upscale) | style (style transfer) | depth (depth map) | lowlight " +
+                "(brighten a dark/low-light frame). Requires that effect's .tflite model to be set in " +
+                "Settings → AI Analyzer → Image effects; if it isn't, returns an error naming the setting " +
+                "(relay it, don't retry).",
+            objSchema(
+                "effect" to stringProp("superres | style | depth | lowlight"),
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                required = listOf("effect"),
+            ),
+        ))
+        put(toolDefinition(
+            "auto_color",
+            "Auto color-correct a clip ON-DEVICE (no model): analyze a frame and nudge exposure, contrast, " +
+                "and saturation toward a balanced look, applied as the clip's filters. Use for \"auto color\", " +
+                "\"fix the exposure/levels\", \"balance this shot\".",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "match_color",
+            "Shot-match ON-DEVICE: set the TARGET clip's exposure/contrast/saturation to match the SOURCE " +
+                "clip's look, so two shots cut together consistently. Use for \"match this shot to that one\".",
+            objSchema(
+                "source_clip_id" to stringProp("The clip whose look to match"),
+                "target_clip_id" to stringProp("The clip to adjust"),
+                required = listOf("source_clip_id", "target_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "blur_faces",
+            "Toggle ON-DEVICE face anonymization on a clip (ML Kit face detection, no key): every detected " +
+                "face is blurred in both preview and export, for privacy. Use for \"blur the faces\", " +
+                "\"anonymize people\", \"hide identities\", \"censor faces\". Pass enabled=false to turn it " +
+                "back off. Applies to video and image clips.",
+            objSchema(
+                "clip_id" to stringProp("The clip to blur faces on; defaults to the video clip at the playhead"),
+                "enabled" to boolProp("Turn face-blur on (default true) or off"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_lut",
+            "Apply a `.cube` 3D LUT color grade to a clip ON-DEVICE — the standard color-grade format " +
+                "exported by colour-grading and photo-editing tools and shared in free LUT packs. It grades in both " +
+                "preview and export. Use for \"apply this LUT\", \"grade with a .cube\", \"give it a " +
+                "cinematic/teal-orange look via a LUT\". `path` is a filesystem path to a .cube file " +
+                "(usually one the user picked). clear_lut removes it.",
+            objSchema(
+                "clip_id" to stringProp("The clip to grade; defaults to the video clip at the playhead"),
+                "path" to stringProp("Filesystem path to a .cube 3D LUT file"),
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_lut",
+            "Remove the `.cube` LUT color grade from a clip (undo apply_lut).",
+            objSchema(
+                "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_shader",
+            "Apply a custom GLSL shader effect to a clip ON-DEVICE — a standard **ISF** (`.isf`) shader or " +
+                "a raw `.fs`/`.glsl` fragment. It runs on every frame in preview and export. Use for " +
+                "\"apply this ISF shader\", \"add a glitch/CRT/kaleidoscope shader\", \"run this .fs on the " +
+                "clip\". Only single-pass, single-image shaders are supported (multi-pass, feedback, audio, " +
+                "and two-input transition shaders are rejected). `path` is a filesystem path (usually a file " +
+                "the user picked). clear_shader removes it.",
+            objSchema(
+                "clip_id" to stringProp("The clip to affect; defaults to the video clip at the playhead"),
+                "path" to stringProp("Filesystem path to an .isf / .fs / .glsl fragment shader"),
+                "params" to objSchema(required = emptyList()).apply {
+                    put("description", "Optional {name: value} overrides for the shader's scalar inputs (see list_shader_params).")
+                },
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "clear_shader",
+            "Remove the custom GLSL/ISF shader effect from a clip (undo apply_shader).",
+            objSchema(
+                "clip_id" to stringProp("The clip to clear; defaults to the video clip at the playhead"),
+                required = emptyList(),
+            ),
+        ))
+        put(toolDefinition(
+            "list_shader_params",
+            "List an ISF/GLSL shader's adjustable scalar inputs (name, type, default, min, max) so you " +
+                "know what to pass to apply_shader's `params`. `path` is a shader file.",
+            objSchema(
+                "path" to stringProp("Filesystem path to an .isf / .fs / .glsl shader"),
+                required = listOf("path"),
+            ),
+        ))
+        put(toolDefinition(
+            "replace_background",
+            "Replace a clip's background ON-DEVICE with no green screen (ML Kit subject matte): segment " +
+                "the subject and composite it over a new background — a solid color or an image — placed " +
+                "on a new track behind. Use for \"replace the background\", \"put me on a red/blue " +
+                "background\", \"change the backdrop\", \"green-screen me onto this image\". Provide color " +
+                "(hex like #1e90ff or a name like \"blue\") OR image_path; defaults to black. For a " +
+                "generated backdrop, generate an image first, then pass its path.",
+            objSchema(
+                "clip_id" to stringProp("The subject clip; defaults to the video clip at the playhead"),
+                "color" to stringProp("Background color (hex #RRGGBB or a name). Ignored if image_path is set."),
+                "image_path" to stringProp("Filesystem path to a background image (overrides color)"),
+                required = emptyList(),
+            ),
+        ))
+
+        // ---- audio-event highlights (YAMNet, on-device) ----
+        put(toolDefinition(
+            "find_highlights",
+            "Scan a clip's AUDIO on-device (YAMNet) for exciting moments — applause, cheering, laughter, " +
+                "music, screaming, a roaring crowd — and return them as timestamped ranges. By default it " +
+                "also splits the clip at each highlight boundary so every best-moment becomes its own clip " +
+                "(pass split=false to only report). Use for \"find the best moments / highlights\", " +
+                "\"make a highlight reel\", \"where does the crowd cheer?\". Requires the YAMNet model set " +
+                "in Settings → AI Analyzer → Audio highlights; if it isn't, returns an error naming the " +
+                "setting (relay it, don't retry).",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to scan"),
+                "threshold" to numberProp("Detection confidence 0–1 (default 0.3; lower finds more)"),
+                "split" to boolProp("Split the clip at highlight boundaries (default true)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+
+        // ---- shot / scene detection (on-device, no model) ----
+        put(toolDefinition(
+            "detect_scenes",
+            "Detect visual scene/shot cuts in a clip on-device (colour-histogram content difference — no " +
+                "model or key needed) and, by default, split the clip at each cut so every shot is its own " +
+                "piece. Use for \"detect scenes\", \"split into shots\", \"auto-chapter this\", \"cut at " +
+                "every scene change\". sensitivity 0–1 (higher finds more cuts). Pass split=false to only " +
+                "report the cut timestamps.",
+            objSchema(
+                "clip_id" to stringProp("The clip to scan"),
+                "sensitivity" to numberProp("0–1, higher = more cuts (default 0.5)"),
+                "split" to boolProp("Split the clip at each scene cut (default true)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+
+        // ---- offline speech (sherpa-onnx ASR + TTS) ----
+        put(toolDefinition(
+            "transcribe_precise",
+            "Transcribe a clip's audio ON-DEVICE with the offline Whisper (sherpa-onnx) model and return " +
+                "the transcript text. More accurate than transcribe_clip's lightweight recognizer; use it " +
+                "for \"what is said in this clip?\", \"transcribe this accurately\", or to get text for " +
+                "summaries / voice commands. Requires the ASR model in Settings → AI Analyzer → Speech " +
+                "(ASR); if it isn't set it returns an error naming the setting — relay it, don't retry. " +
+                "(transcribe_clip still handles adding timed on-screen captions.)",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to transcribe"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "add_voiceover",
+            "Synthesize speech from text ON-DEVICE (offline neural TTS via sherpa-onnx) and add it to the " +
+                "timeline as an audio clip. Use for \"add a voiceover saying …\", \"narrate this\", " +
+                "\"read this out\". Requires the TTS voice in Settings → AI Analyzer → Speech (TTS); if it " +
+                "isn't set it returns an error naming the setting — relay it, don't retry.",
+            objSchema(
+                "text" to stringProp("The words to speak"),
+                "speed" to numberProp("Speaking rate (default 1.0; <1 slower, >1 faster)"),
+                required = listOf("text"),
+            ),
+        ))
+        put(toolDefinition(
+            "remove_vocals",
+            "Remove the lead vocals from a clip's audio ON-DEVICE (no model/key) and add the resulting " +
+                "instrumental as a new audio clip — for karaoke / backing tracks. Use for \"remove the " +
+                "vocals\", \"make a karaoke / instrumental version\", \"strip the singing\". Uses stereo " +
+                "center-channel cancellation, so it needs a STEREO track (returns an error on mono); it's " +
+                "a lightweight instrumental extractor, not a full multi-stem split.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to process"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "set_export_preset",
+            "Set the project's output aspect ratio for a platform ON-DEVICE. Use for \"make it vertical " +
+                "for TikTok/Reels/Shorts\", \"square for Instagram\", \"16:9 for YouTube\", \"back to " +
+                "original\". preset = tiktok | reels | shorts | vertical (all 9:16), square | instagram " +
+                "(1:1), youtube | landscape (16:9), or original.",
+            objSchema(
+                "preset" to stringProp("Platform/aspect: tiktok/reels/shorts/vertical, square, youtube/landscape, original"),
+                required = listOf("preset"),
+            ),
+        ))
+        put(toolDefinition(
+            "assemble_music_video",
+            "Assemble the clips on a video track into a montage cut to the beat ON-DEVICE: analyze the " +
+                "audio clip's beat grid and trim each clip on the track to span one beat interval, butting " +
+                "them together on the downbeats. Use for \"make a music video from these clips\", \"cut " +
+                "this montage to the beat\", \"one clip per bar\". mode = beats | downbeats | onsets; " +
+                "beats_per_clip sets how many beats each clip holds (default 1).",
+            objSchema(
+                "track_id" to stringProp("The video track whose clips to assemble (e.g. V1)"),
+                "audio_clip_id" to stringProp("The music clip that provides the beat grid"),
+                "mode" to stringProp("beats | downbeats | onsets (default downbeats)"),
+                "beats_per_clip" to intProp("Beats each clip spans (default 1)"),
+                required = listOf("track_id", "audio_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "normalize_levels",
+            "Even out the loudness of the timeline's audio clips ON-DEVICE (no key): measures each audio " +
+                "clip's level and sets its volume so they all sit at a consistent perceived loudness. Use " +
+                "for \"normalize the audio levels\", \"even out the volume\", \"level-match the clips\". " +
+                "(Simple RMS level matching; for a platform loudness target use normalize_loudness.)",
+            emptySchema(),
+        ))
+        put(toolDefinition(
+            "normalize_loudness",
+            "Normalize each audio clip to a platform LOUDNESS target ON-DEVICE (no key), using ITU-R " +
+                "BS.1770 K-weighted LUFS. Use for \"normalize to -14 LUFS\", \"match YouTube/Spotify " +
+                "loudness\", \"make it broadcast loudness\". target_lufs defaults to -14 (YouTube/Spotify); " +
+                "-16 is Apple/podcasts, -23 is EBU R128 broadcast. (Ungated integrated LUFS — a good " +
+                "loudness match, not a certified meter.)",
+            objSchema(
+                "target_lufs" to numberProp("Target loudness in LUFS (default -14)"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_bokeh",
+            "Add a depth-of-field / portrait \"bokeh\" blur to the current frame ON-DEVICE: runs the depth " +
+                "model, keeps the near subject sharp and blurs the far background, and adds the result as " +
+                "an image clip. Use for \"blur the background\", \"portrait mode\", \"add bokeh / depth of " +
+                "field\", \"cinematic blur\". strength scales the blur (default 1.0). Requires the depth " +
+                "model in Settings → AI Analyzer → Image effects (depth); relay its error if unset.",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                "strength" to numberProp("Blur strength (default 1.0; higher = more blur)"),
+            ),
+        ))
+        put(toolDefinition(
+            "separate_stems",
+            "Split a clip's music into VOCALS and ACCOMPANIMENT (instrumental) tracks ON-DEVICE (Spleeter " +
+                "via ONNX, no key) and add both as audio clips — true ML stem separation for remixes, " +
+                "karaoke, or isolating either part. Use for \"separate the stems\", \"split vocals and " +
+                "instrumental\", \"isolate the vocals\", \"give me the acapella / instrumental\". (For a " +
+                "quick stereo karaoke without a model, use remove_vocals.) Requires the Spleeter model in " +
+                "Settings → AI Analyzer → Stem separation; heavy — best on moderate clip lengths. Relay " +
+                "its error if the model isn't set.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to separate"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "denoise_clip",
+            "Remove background noise from a clip's VOICE audio ON-DEVICE (GTCRN speech denoiser, no key) and " +
+                "add the cleaned track as a new audio clip. Strips hiss, hum, air-conditioner drone, and " +
+                "general background noise while keeping speech. Use for \"remove background noise\", \"clean " +
+                "up the audio\", \"denoise this\", \"isolate the voice\", \"reduce the hiss\". Requires the " +
+                "denoiser model in Settings → AI Analyzer → Noise reduction; relay its error if unset.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose voice audio to denoise"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_ffmpeg_filter",
+            "Bake a standard **FFmpeg `-vf` filtergraph** onto a clip ON-DEVICE and add the result as a new " +
+                "clip — the whole FFmpeg filter ecosystem, and **Frei0r** plugins via `frei0r=<name>:<params>`. " +
+                "The ESCAPE HATCH for effects with no dedicated tool: AUTHOR the `-vf` graph yourself from the " +
+                "user's plain-English request. Frame decimation/stutter — \"cut/remove every other frame\", " +
+                "\"drop every 2nd frame\", \"make it choppy\" → \"framestep=2\" (every third → \"framestep=3\"); " +
+                "\"choppy N-fps look\" → \"fps=8\"; \"frame-blend/motion trail\" → \"tmix=frames=3\". Also " +
+                "\"run a frei0r plugin\", \"vintage/vhs/chromashift\", \"eq/curves/deband this\". `filter` is the " +
+                "raw -vf graph, e.g. \"framestep=2\", \"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Audio is " +
+                "copied unchanged (`-c:a copy`), so prefer duration-preserving graphs (framestep/fps/tmix/eq) " +
+                "and avoid setpts/trim, which desync the audio. Requires an ffmpeg executable set in " +
+                "Settings → AI Analyzer → FFmpeg filters (desktop-first; relay its error if unset). This is " +
+                "a bake-to-new-clip step, not a live filter.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose video to filter"),
+                "filter" to stringProp("An FFmpeg -vf filtergraph you author from the request, e.g. framestep=2 for \"every other frame\" (Frei0r via frei0r=name:params)"),
+                required = listOf("clip_id", "filter"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_transition",
+            "Create a GL-style TRANSITION between two clips ON-DEVICE (FFmpeg `xfade`) and add the combined " +
+                "result as a new clip. Use for \"add a crossfade/dissolve between these\", \"wipe from this " +
+                "to that\", \"put a transition here\". type is any xfade transition: fade, fadeblack, " +
+                "fadewhite, wipeleft/right/up/down, slideleft/right/up/down, circleopen, circleclose, " +
+                "dissolve, pixelize, radial, smoothleft, distance, and more (default fade). duration_sec " +
+                "is the overlap (default 1). Requires an ffmpeg executable (Settings → AI Analyzer → FFmpeg " +
+                "filters); relay its error if unset. Bake-to-new-clip, desktop-first.",
+            objSchema(
+                "from_clip_id" to stringProp("The outgoing (first) clip"),
+                "to_clip_id" to stringProp("The incoming (second) clip"),
+                "type" to stringProp("xfade transition type (default fade)"),
+                "duration_sec" to numberProp("Transition/overlap length in seconds (default 1)"),
+                required = listOf("from_clip_id", "to_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "diarize_clip",
+            "Speaker diarization ON-DEVICE (no key): work out WHO spoke WHEN in a clip's audio and return " +
+                "the speaker turns (speaker index + time range). Use for \"who speaks when?\", \"label the " +
+                "speakers\", \"split by speaker\", \"how many people are talking?\", or as the basis for " +
+                "podcast multicam switching. Optionally pass num_speakers if you know the count (else it's " +
+                "inferred). Requires BOTH diarization models in Settings → AI Analyzer → Speaker " +
+                "diarization; relay its error if unset.",
+            objSchema(
+                "clip_id" to stringProp("The clip whose audio to diarize"),
+                "num_speakers" to intProp("Known speaker count (0 = infer automatically)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "remove_fillers",
+            "Remove filler words (\"um\", \"uh\", \"er\", \"hmm\") from a clip ON-DEVICE using the offline " +
+                "Whisper (sherpa-onnx) word timings, ripple-deleting each filler so the timeline closes " +
+                "up. Use for \"remove the ums\", \"cut the filler words\", \"clean up the ums and uhs\". " +
+                "Requires the ASR model in Settings → AI Analyzer → Speech (ASR); relay its error if unset. " +
+                "Timings are approximate — review the result.",
+            objSchema(
+                "clip_id" to stringProp("The clip to de-filler"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "sync_by_audio",
+            "Sync two clips by their audio ON-DEVICE (no key): cross-correlates the two audio tracks to " +
+                "find the time offset and moves the second clip so its audio lines up with the reference " +
+                "(multicam / dual-recording sync). Use for \"sync these two clips by audio\", \"line up " +
+                "the multicam angles\", \"match the second camera to the audio recorder\". Both clips need " +
+                "audio of the same moment.",
+            objSchema(
+                "reference_clip_id" to stringProp("The clip to keep fixed (the reference)"),
+                "clip_id" to stringProp("The clip to move so its audio aligns to the reference"),
+                "max_offset_sec" to intProp("Max search offset in seconds (default 15)"),
+                required = listOf("reference_clip_id", "clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "auto_reframe",
+            "Auto-reframe a clip to keep the subject centered ON-DEVICE (no key): detects the main face " +
+                "across the clip and pans a punched-in crop to follow it — the classic \"make it work " +
+                "vertically / follow the speaker\" reframe. Use for \"auto-reframe this\", \"keep the " +
+                "subject centered\", \"follow the face\", \"reframe for vertical/Reels\". zoom is the " +
+                "punch-in (default 1.3). Sets the clip's scale and writes OFFSET_X keyframes that track " +
+                "the face; needs faces in the footage (returns an error if none are found).",
+            objSchema(
+                "clip_id" to stringProp("The clip to reframe"),
+                "zoom" to numberProp("Punch-in scale (default 1.3; more = tighter, more room to pan)"),
+                required = listOf("clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "search_clips",
+            "Find which video clips contain something ON-DEVICE (no key): samples each clip's frames and " +
+                "matches them against [query] using on-device image labels (~400 common things/scenes — " +
+                "e.g. dog, car, beach, sunset, food, crowd). Use for \"find the clips with a dog\", " +
+                "\"which shots have a sunset?\", \"where's the beach footage?\". Returns the matching " +
+                "clips with the matched label and a timestamp; it does not edit anything.",
+            objSchema(
+                "query" to stringProp("What to look for, e.g. \"dog\" or \"sunset\""),
+                required = listOf("query"),
+            ),
+        ))
+        put(toolDefinition(
+            "auto_duck",
+            "Auto-duck (sidechain) a music clip under a voice/speech clip ON-DEVICE (no model/key): detect " +
+                "where the voice is talking and dip the music's VOLUME there with smooth ramps, restoring " +
+                "it in the gaps. Use for \"duck the music under the voiceover\", \"lower the music when " +
+                "someone's talking\", \"sidechain the music to the narration\". amount is the ducked level " +
+                "(0–1, default 0.3 = −10 dB-ish).",
+            objSchema(
+                "music_clip_id" to stringProp("The music clip to duck"),
+                "voice_clip_id" to stringProp("The voice/speech clip that triggers the ducking"),
+                "amount" to numberProp("Ducked music level 0–1 (default 0.3; lower = quieter under speech)"),
+                required = listOf("music_clip_id", "voice_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "caption_frame",
+            "Describe a frame in rich natural language using the ON-DEVICE multimodal VLM (Gemma-3n). " +
+                "Prefer this over describe_current_frame when the user wants a real description / " +
+                "understanding of the scene (\"what's happening in this frame?\", \"describe this shot\", " +
+                "\"what is this a picture of?\") rather than just a list of detected objects. Optionally " +
+                "pass a specific question as prompt. Requires the VLM model in Settings → AI Analyzer → " +
+                "Frame captioning (VLM); if it isn't set it returns an error naming the setting — relay " +
+                "it, don't retry (you can still fall back to describe_current_frame).",
+            objSchema(
+                "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
+                "prompt" to stringProp("Optional question about the frame (default: describe it)"),
+            ),
+        ))
+
+        // ---- generative media (cloud, BYO key; key-gated at call time) ----
+        put(toolDefinition(
+            "generate_image",
+            "Generate a NEW image from a text prompt using the user's configured image provider and add " +
+                "it to the timeline as an image clip. Optionally pass provider/model to pick among " +
+                "configured providers. If no image provider is configured it returns an error telling " +
+                "the user to add a key in Settings — relay that, don't retry.",
+            objSchema(
+                "prompt" to stringProp("What to generate"),
+                "provider" to stringProp("Optional provider id (e.g. OPENAI_IMAGE, BFL_FLUX, FAL)"),
+                "model" to stringProp("Optional model id"),
+                required = listOf("prompt"),
+            ),
+        ))
+        put(toolDefinition(
+            "generate_video",
+            "Generate a NEW video clip from a text prompt (cloud, BYO key) and add it to the timeline. " +
+                "Async — may take a while. Optional provider/model/duration_sec.",
+            objSchema(
+                "prompt" to stringProp(), "provider" to stringProp(), "model" to stringProp(),
+                "duration_sec" to intProp("Requested length in seconds"),
+                required = listOf("prompt"),
+            ),
+        ))
+        put(toolDefinition(
+            "generate_music",
+            "Generate NEW music (or a sound effect) from a text prompt (cloud, BYO key) and add it to " +
+                "the timeline as an audio clip. Describe mood/genre/length in the prompt. Optional " +
+                "provider/model/duration_sec.",
+            objSchema(
+                "prompt" to stringProp(), "provider" to stringProp(), "model" to stringProp(),
+                "duration_sec" to intProp("Requested length in seconds"),
+                required = listOf("prompt"),
+            ),
+        ))
+        put(toolDefinition(
+            "add_shape_layer",
+            "Add a solid-color rectangle as a new opaque image clip on its own new video track, stacked " +
+                "at the very back — an instant, on-device \"shape layer\" (no provider/key, unlike " +
+                "generate_image). Use this to put an opaque background behind a text/caption clip that " +
+                "needs to read over bright footage (text clips are transparent glyphs only and never " +
+                "bake in a background themselves), or as a plain colored background/wipe on its own. " +
+                "color is any CSS color name or hex code (#RRGGBB or #AARRGGBB).",
+            objSchema(
+                "color" to stringProp("e.g. \"#000000\", \"black\", \"#000000AA\""),
+                "opacity" to numberProp("0..1, multiplies the color's own alpha; default 1"),
+                required = listOf("color"),
+            ),
+        ))
+
+        // ---- rhythm / edit-to-the-beat ----
+        put(toolDefinition(
+            "get_beat_map",
+            "Analyze an AUDIO clip ON-DEVICE and return its tempo (bpm) plus beat, downbeat, and onset " +
+                "timestamps (in source ms). Call this before cut_to_beats / apply_on_beat.",
+            objSchema("audio_clip_id" to stringProp("The audio/music clip to analyze"), required = listOf("audio_clip_id")),
+        ))
+        put(toolDefinition(
+            "cut_to_beats",
+            "Split a VIDEO clip at the beats of an AUDIO clip so it cuts in time with the music (all " +
+                "footage is kept — nothing deleted). mode = beats | downbeats | onsets (downbeats is a " +
+                "good punchy default). every_n keeps only every Nth point (e.g. 2 = every other beat).",
+            objSchema(
+                "video_clip_id" to stringProp(), "audio_clip_id" to stringProp(),
+                "mode" to stringProp("beats | downbeats | onsets"),
+                "every_n" to intProp("Keep every Nth point (default 1)"),
+                required = listOf("video_clip_id", "audio_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "apply_on_beat",
+            "Add on-beat motion to a VIDEO clip synced to an AUDIO clip: effect = zoom (scale punch-in) " +
+                "| flash (brightness pop) | shake (position jitter), placed as keyframes on each beat/" +
+                "downbeat/onset. Great combined with cut_to_beats for a music-video feel.",
+            objSchema(
+                "video_clip_id" to stringProp(), "audio_clip_id" to stringProp(),
+                "effect" to stringProp("zoom | flash | shake"),
+                "mode" to stringProp("beats | downbeats | onsets"),
+                required = listOf("video_clip_id", "audio_clip_id", "effect"),
+            ),
+        ))
+        put(toolDefinition(
+            "align_clips_to_beats",
+            "Snap the START of every clip on a track to the nearest beat of an AUDIO clip — assemble a " +
+                "montage locked to the music. mode = beats | downbeats | onsets.",
+            objSchema(
+                "track_id" to stringProp(), "audio_clip_id" to stringProp(),
+                "mode" to stringProp("beats | downbeats | onsets"),
+                required = listOf("track_id", "audio_clip_id"),
+            ),
+        ))
+        put(toolDefinition(
+            "set_clip_filter", "Sets static values for a clip filter (e.g., brightness = 1.2, speed = 2.0).",
+            objSchema(
+                "clip_id" to stringProp(), "property" to stringProp("e.g. brightness, speed"), "value" to numberProp(),
+                required = listOf("clip_id", "property", "value")
+            )
+        ))
+        put(toolDefinition(
+            "set_frame_step",
+            "Frame decimation — keep only every Nth frame of a clip for a choppy/stutter/strobe look, LIVE " +
+                "and on-device (no ffmpeg, no baking, no new clip). step=2 removes every other frame, step=3 " +
+                "keeps one of every three, step=1 turns it off. The clip stays the SAME length and its audio " +
+                "is untouched, so it stays in sync — this is the go-to for \"cut/remove every other frame\", " +
+                "\"make it choppy/stuttery\", \"low-frame-rate look\". Quantizes against the project frame rate. " +
+                "(For a baked-to-a-new-clip version, apply_ffmpeg_filter with \"framestep=N\" does the same.)",
+            objSchema(
+                "clip_id" to stringProp("The clip to decimate"),
+                "step" to intProp("Keep 1 of every N frames. 2 = every other frame; 1 = off."),
+                required = listOf("clip_id", "step"),
+            ),
+        ))
+        put(toolDefinition(
+            "add_keyframe", "Adds a keyframe for a specific KeyframeProperty at a specific time in the clip.",
+            objSchema(
+                "clip_id" to stringProp(), "property" to stringProp(), "time_ms" to intProp(), "value" to numberProp(),
+                required = listOf("clip_id", "property", "time_ms", "value")
+            )
+        ))
+        put(toolDefinition(
+            "clear_keyframes", "Removes all keyframes for a specified property on a clip.",
+            objSchema(
+                "clip_id" to stringProp(), "property" to stringProp(),
+                required = listOf("clip_id", "property")
+            )
+        ))
+        put(toolDefinition(
+            "list_azp_plugins",
+            "List all available azphalt `.azp` effect and kinetic typography plugins installed in the " +
+                "extensions directories. Returns the plugin IDs, names, and tags. Use this to discover " +
+                "available advanced effects to apply.",
+            emptySchema()
+        ))
+        put(toolDefinition(
+            "apply_azp_plugin",
+            "Apply a specific `.azp` plugin (by its ID) to a clip on the timeline. A kinetic-typography " +
+                "motion plugin applied to a caption (TEXT clip) is baked into keyframes, so it animates " +
+                "in preview and export and stays editable.",
+            objSchema(
+                "clip_id" to stringProp("The ID of the clip to apply the plugin to"),
+                "plugin_id" to stringProp("The ID of the plugin (from list_azp_plugins)"),
+                required = listOf("clip_id", "plugin_id")
+            )
+        ))
+        put(toolDefinition(
+            "clear_azp_plugin",
+            "Remove an applied kinetic-typography preset (its baked keyframes) and any applied-plugin " +
+                "marker from a clip. Hand-authored keyframes are kept.",
+            objSchema(
+                "clip_id" to stringProp("The ID of the clip to clear the plugin/preset from"),
+                required = listOf("clip_id")
+            )
+        ))
+        put(toolDefinition(
+            "lookup_vocabulary",
+            "Look up an editing word/phrase in the vocabulary graph: returns the concept it maps to, its " +
+                "synonyms, its opposite (antonym), the tool it routes to, and — for the exact phrase — whether " +
+                "the sense is inverted (a negation like 'less/reduce/remove' flips it to the opposite tool). " +
+                "Use it to resolve unfamiliar or vague wording to a known tool before acting.",
+            objSchema("term" to stringProp("The word or phrase to look up, e.g. 'crispy' or 'less warm'."),
+                required = listOf("term")),
+        ))
+        // Named one-call video effects (sharpen, film_grain, vhs, mirror, thermal, …), each a standard
+        // FFmpeg -vf graph baked to a new clip. Shared registry so both platforms expose the same set.
+        val videoFx = VideoFilterCatalog.toolDefinitions()
+        for (i in 0 until videoFx.length()) put(videoFx.get(i))
+        // Core timeline verbs (seek, move_clip, trim, add_text, tracks, undo/redo, …), shared across
+        // platforms and backed by the editor view-model.
+        val timelineFx = TimelineTools.toolDefinitions()
+        for (i in 0 until timelineFx.length()) put(timelineFx.get(i))
+    }
+
+    // ---- tool dispatch ------------------------------------------------------
+
+    override fun call(name: String, args: JSONObject): JSONObject = when (name) {
+        "get_timeline" -> getTimeline()
+        "get_clip" -> getClip(args.getString("clip_id"))
+        "set_prompt" -> setPrompt(args.getString("clip_id"), args.getString("prompt"))
+        "analyze_clip" -> analyzeClip(args.getString("clip_id"))
+        "select_clip" -> selectClip(args.getString("clip_id"))
+        "split_clip" -> splitClipTool(args.getString("clip_id"), args.getLong("at_ms"))
+        "segment_clip" -> segmentClipTool(args.getString("clip_id"))
+        "delete_clip" -> deleteClipTool(args.getString("clip_id"))
+        "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
+        "analyze_clip_with_reference" -> analyzeClipWithReference(args.getString("clip_id"))
+        "remove_object_generative" -> removeObjectGenerative(args.getString("clip_id"))
+        "describe_current_frame" -> describeCurrentFrame()
+        "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
+        "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
+        "create_user_tool" -> createUserTool(args.getString("name"), args.getString("description"))
+        "list_user_tools" -> listUserTools()
+        "delete_user_tool" -> deleteUserTool(args.getString("name"))
+        "run_user_tool" -> runUserTool(args.getString("name"), args.getString("clip_id"))
+        "start_recording" -> startRecording(args.getString("clip_id"))
+        "stop_recording" -> stopRecording(args.getString("name"), args.optString("extra_instructions", ""))
+        "discard_recording" -> discardRecording()
+        "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
+        "auto_color" -> autoColor(args.optString("clip_id"))
+        "match_color" -> matchColor(args.getString("source_clip_id"), args.getString("target_clip_id"))
+        "blur_faces" -> blurFaces(args.optString("clip_id"), if (args.has("enabled")) args.getBoolean("enabled") else true)
+        "apply_lut" -> applyLut(args.optString("clip_id"), args.getString("path"))
+        "clear_lut" -> clearLut(args.optString("clip_id"))
+        "apply_shader" -> applyShader(args.optString("clip_id"), args.getString("path"), args.optJSONObject("params"))
+        "clear_shader" -> clearShader(args.optString("clip_id"))
+        "list_shader_params" -> listShaderParams(args.getString("path"))
+        "replace_background" -> replaceBackgroundTool(args.optString("clip_id"), args.optString("color"), args.optString("image_path"))
+        "apply_bokeh" -> applyBokeh(args.optString("clip_id"), args.optDouble("strength", 1.0).toFloat())
+        "normalize_loudness" -> normalizeLoudness(args.optDouble("target_lufs", -14.0))
+        "add_reference" -> addReference(args.getString("name"), args.optString("term"), args.optBoolean("negative", false))
+        "list_concepts" -> listConcepts()
+        "delete_concept" -> deleteConcept(args.getString("name"))
+        "analyze_clip_with_concept" -> analyzeClipWithConcept(args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false))
+        "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
+        "generate_video" -> generateMedia(GenKind.VIDEO, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
+        "generate_music" -> generateMedia(GenKind.MUSIC, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
+        "add_shape_layer" -> addShapeLayer(args.getString("color"), args.optDouble("opacity", 1.0).toFloat())
+        "get_beat_map" -> getBeatMap(args.getString("audio_clip_id"))
+        "cut_to_beats" -> cutToBeats(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("every_n", 1))
+        "apply_on_beat" -> applyOnBeat(args.getString("video_clip_id"), args.getString("audio_clip_id"), args.getString("effect"), args.optString("mode", "downbeats"))
+        "align_clips_to_beats" -> alignClipsToBeats(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "beats"))
+        "find_highlights" -> findHighlights(args.getString("clip_id"), args.optDouble("threshold", 0.3).toFloat(), args.optBoolean("split", true))
+        "detect_scenes" -> detectScenes(args.getString("clip_id"), args.optDouble("sensitivity", 0.5).toFloat(), args.optBoolean("split", true))
+        "transcribe_precise" -> transcribePrecise(args.getString("clip_id"))
+        "add_voiceover" -> addVoiceover(args.getString("text"), args.optDouble("speed", 1.0).toFloat())
+        "remove_vocals" -> removeVocals(args.getString("clip_id"))
+        "caption_frame" -> captionFrame(args.optString("clip_id"), args.optString("prompt"))
+        "auto_duck" -> autoDuck(args.getString("music_clip_id"), args.getString("voice_clip_id"), args.optDouble("amount", 0.3).toFloat())
+        "search_clips" -> searchClips(args.getString("query"))
+        "auto_reframe" -> autoReframe(args.getString("clip_id"), args.optDouble("zoom", 1.3).toFloat())
+        "sync_by_audio" -> syncByAudio(args.getString("reference_clip_id"), args.getString("clip_id"), args.optInt("max_offset_sec", 15))
+        "set_export_preset" -> setExportPreset(args.getString("preset"))
+        "assemble_music_video" -> assembleMusicVideo(args.getString("track_id"), args.getString("audio_clip_id"), args.optString("mode", "downbeats"), args.optInt("beats_per_clip", 1))
+        "normalize_levels" -> normalizeLevels()
+        "remove_fillers" -> removeFillers(args.getString("clip_id"))
+        "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
+        "separate_stems" -> separateStems(args.getString("clip_id"))
+        "denoise_clip" -> denoiseClip(args.getString("clip_id"))
+        "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
+        "apply_transition" -> applyTransition(args.getString("from_clip_id"), args.getString("to_clip_id"), args.optString("type", "fade"), args.optDouble("duration_sec", 1.0).toFloat())
+        "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
+        "set_frame_step" -> setFrameStep(args.getString("clip_id"), args.getInt("step"))
+        "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
+        "clear_keyframes" -> clearKeyframes(args.getString("clip_id"), args.getString("property"))
+        "list_azp_plugins" -> listAzpPlugins()
+        "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
+        "clear_azp_plugin" -> clearAzpPlugin(args.getString("clip_id"))
+        "lookup_vocabulary" -> com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.lookupJson(args.getString("term"))
+        in TimelineTools.names -> TimelineTools.call(vm, name, args)
+        in VideoFilterCatalog.names ->
+            applyFfmpegFilter(args.getString("clip_id"), VideoFilterCatalog.graphFor(name, args))
+                .apply { put("humanSummary", VideoFilterCatalog.summaryFor(name)) }
+        else -> throw IllegalArgumentException("Unknown tool: $name")
+    }
+
+    // ---- resource definitions -----------------------------------------------
+
+    override fun resourceDefinitions(): JSONArray = JSONArray().apply {
+        put(JSONObject().apply {
+            put("uri", "guillotine://timeline"); put("name", "Timeline")
+            put("description", "Current editor timeline state"); put("mimeType", "application/json")
+        })
+        put(JSONObject().apply {
+            put("uri", "guillotine://clips"); put("name", "Clips")
+            put("description", "List of all clips"); put("mimeType", "application/json")
+        })
+    }
+
+    override fun readResource(uri: String): JSONObject = when (uri) {
+        "guillotine://timeline" -> getTimeline()
+        "guillotine://clips" -> JSONObject().apply {
+            put("clips", JSONArray().apply { vm.uiState.value.document.clips.forEach { put(clipJson(it)) } })
+        }
+        else -> throw IllegalArgumentException("Unknown resource: $uri")
+    }
+
+    // ---- tool implementations -----------------------------------------------
+
+    private fun getTimeline(): JSONObject {
+        val doc = vm.uiState.value.document
+        val now = vm.uiState.value.currentTimeMs
+        return JSONObject().apply {
+            put("name", doc.name)
+            put("totalDurationMs", doc.totalDurationMs)
+            put("currentTimeMs", now)
+            put("videoTracks", JSONArray(doc.videoTracks))
+            put("audioTracks", JSONArray(doc.audioTracks))
+            put("clipCount", doc.clips.size)
+            put("clips", JSONArray().apply { doc.clips.forEach { put(clipJson(it)) } })
+            put("selectedClipIds", JSONArray(vm.uiState.value.selectedClipIds))
+            put("globalSettings", JSONObject().apply {
+                put("fps", doc.settings.fps)
+                put("aspectRatio", doc.settings.aspectRatio.name)
+                val c = doc.settings.crop
+                put("crop", JSONObject().put("x", c.x).put("y", c.y).put("w", c.w).put("h", c.h))
+            })
+            put("trackSettings", JSONObject().apply {
+                (doc.videoTracks + doc.audioTracks).forEach { tid ->
+                    val ts = doc.trackSettingsFor(tid)
+                    put(tid, JSONObject()
+                        .put("volume", ts.volume).put("opacity", ts.opacity)
+                        .put("muted", ts.muted).put("disabled", ts.disabled))
+                }
+            })
+            put(
+                "humanSummary",
+                "Read timeline: ${doc.clips.size} clip(s), ${msFmt(doc.totalDurationMs)} total, playhead ${msFmt(now)}.",
+            )
+        }
+    }
+
+    private fun getClip(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+        return clipJson(clip).apply {
+            if (media != null) {
+                put("mediaName", media.name); put("mediaKind", media.kind.name); put("mediaUri", media.uri)
+            }
+            put(
+                "humanSummary",
+                buildString {
+                    append("Read clip \"${media?.name ?: clip.id.take(6)}\": ${msFmt(clip.durationMs)}")
+                    if (clip.edits.isNotEmpty()) append(", ${clip.edits.size} edit(s)")
+                    if (clip.prompt.isNotBlank()) append(", prompt \"${clip.prompt.take(60)}\"")
+                    append(".")
+                },
+            )
+        }
+    }
+
+    private fun setPrompt(clipId: String, prompt: String): JSONObject {
+        vm.updateClip(clipId) { it.copy(prompt = prompt) }
+        return JSONObject().apply {
+            put("ok", true); put("clipId", clipId); put("prompt", prompt)
+            put("humanSummary", "Set clip prompt to \"${prompt.take(80)}\".")
+        }
+    }
+
+    private fun analyzeClip(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        require(clip.prompt.isNotBlank()) { "Clip has no prompt. Use set_prompt first." }
+        val edits = runBlocking {
+            Analysis.run(
+                context, settingsProvider(), Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
+                onProgress = { p -> 
+                    p.finding?.let { ActivityLog.info(it) } 
+                    p.currentMs?.let { ms -> vm.seekTo(clip.startTimeMs + ms) }
+                },
+            )
+        }
+        return analyzeResult(clipId, edits)
+    }
+
+    /**
+     * Apply an analysis result as a REAL cut — split the clip into its kept pieces and delete the matched
+     * (removed) ranges, rippling the timeline closed, exactly like the user doing it by hand with the
+     * scissors + trash. The ranges are passed straight into [EditorViewModel.applyCuts] so the split +
+     * delete is one atomic step that NEVER leaves "scripting" REMOVE marks on the timeline (which only
+     * skipped/blacked the frames instead of removing them). The AI has no mark-only path — this is it.
+     */
+    private fun analyzeResult(clipId: String, edits: List<EditSegment>): JSONObject {
+        val cutApplied = edits.any { it.action == EditAction.REMOVE }
+        val removed = edits.filter { it.action == EditAction.REMOVE }
+        val removedMs = removed.sumOf { it.endMs - it.startMs }
+        val keptCount = edits.count { it.action == EditAction.KEEP }
+        val removedCount = removed.size
+        // Surface the exact actions (and why) in the activity feed, not just to the agent.
+        if (removed.isEmpty()) {
+            ActivityLog.info("No matching frames — nothing to cut.")
+        } else {
+            ActivityLog.info("Cutting $removedCount region(s) (${msFmt(removedMs)}):")
+            removed.take(12).forEach {
+                ActivityLog.info("  · ${msFmt(it.startMs)}–${msFmt(it.endMs)} — ${it.reason}")
+            }
+            if (removed.size > 12) ActivityLog.info("  · …and ${removed.size - 12} more")
+        }
+        if (cutApplied) vm.applyCuts(clipId, edits)
+        val newClipCount = vm.uiState.value.document.clips.size
+        val newTotal = vm.uiState.value.document.totalDurationMs
+        return JSONObject().apply {
+            put("ok", true); put("clipId", clipId); put("segmentsFound", edits.size)
+            put("segments", segmentsJson(edits))
+            put("cutApplied", cutApplied)
+            put("clipCount", newClipCount)
+            put("totalDurationMs", newTotal)
+            put(
+                "humanSummary",
+                when {
+                    edits.isEmpty() -> "No frames matched — nothing to cut."
+                    !cutApplied -> "Matched $keptCount kept range(s); no cuts needed."
+                    else ->
+                        "Cut $removedCount range(s) (${msFmt(removedMs)}), kept $keptCount. " +
+                            "Timeline now $newClipCount clip(s), ${msFmt(newTotal)} total."
+                },
+            )
+        }
+    }
+
+    private fun selectClip(clipId: String): JSONObject {
+        vm.selectClip(clipId.ifBlank { null })
+        val summary = if (clipId.isBlank()) "Cleared selection." else run {
+            val doc = vm.uiState.value.document
+            val cl = doc.clips.firstOrNull { it.id == clipId }
+            val name = cl?.let { doc.mediaFor(it)?.name } ?: clipId.take(6)
+            "Selected clip \"$name\"."
+        }
+        return JSONObject().apply { put("ok", true); put("humanSummary", summary) }
+    }
+
+    private fun splitClipTool(clipId: String, atMs: Long): JSONObject {
+        vm.splitClip(clipId, atMs)
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("clipCount", n)
+            put("humanSummary", "Split clip at ${msFmt(atMs)}. Timeline now $n clip(s).")
+        }
+    }
+
+    private fun segmentClipTool(clipId: String): JSONObject {
+        vm.segmentClip(clipId)
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("clipCount", n)
+            put("humanSummary", "Segmented clip at every edit boundary (all pieces kept). Timeline now $n clip(s).")
+        }
+    }
+
+    private fun deleteClipTool(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val name = doc.clips.firstOrNull { it.id == clipId }?.let { doc.mediaFor(it)?.name } ?: clipId.take(6)
+        vm.deleteClip(clipId)
+        val n = vm.uiState.value.document.clips.size
+        return ok().apply {
+            put("clipCount", n)
+            put("humanSummary", "Deleted clip \"$name\". $n clip(s) remain.")
+        }
+    }
+
+    private fun rippleDeleteRangeTool(startMs: Long, endMs: Long): JSONObject {
+        vm.rippleDeleteRange(startMs, endMs)
+        val total = vm.uiState.value.document.totalDurationMs
+        return ok().apply {
+            put("totalDurationMs", total)
+            put(
+                "humanSummary",
+                "Rippled out ${msFmt(startMs)}–${msFmt(endMs)} (${msFmt(endMs - startMs)}) across all tracks. " +
+                    "Timeline now ${msFmt(total)}.",
+            )
+        }
+    }
+
+    private fun analyzeClipWithReference(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        require(clip.prompt.isNotBlank()) { "Set the clip's prompt to the target object first (use set_prompt)." }
+        // The frame the user scrubbed to: timeline playhead -> this clip's source time.
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath
+            .sourceTimeMs(clip, vm.uiState.value.currentTimeMs).coerceAtLeast(0)
+        val reference = grabFrame(Uri.parse(media.uri), sourceMs)
+            ?: throw IllegalStateException("Could not read the current frame for reference matching.")
+        val edits = runBlocking {
+            MlKitProvider().analyzeWithReference(
+                context, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs, reference,
+                embedModelPath = com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, settingsProvider(), "idEmbedModelPath"),
+                onProgress = { p -> p.finding?.let { ActivityLog.info(it) } },
+            )
+        }
+        reference.recycle()
+        return analyzeResult(clipId, edits)
+    }
+
+    private fun removeObjectGenerative(clipId: String): JSONObject {
+        val settings = settingsProvider()
+        val key = settings.leonardoKey
+        require(key.isNotBlank()) { "Add your Leonardo API key in Settings to generate replacements." }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip)
+            ?: throw IllegalArgumentException("No media for clip: $clipId")
+        require(clip.prompt.isNotBlank()) { "Set the clip's prompt to the object to remove first (use set_prompt)." }
+
+        // Run in the background via the foreground service: a progress notification, pausable, cancellable.
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Removing ${clip.prompt}…", pausable = true,
+        ) { sink ->
+            // 1. Object's segments, on-device (the REMOVE ranges), via the normal on-device analyzer.
+            // Force a REMOVE intent ("remove <object>") so the analyzer marks the object-PRESENT
+            // ranges as REMOVE. Passing the bare object name is parsed as a "keep only <object>"
+            // intent, which inverts it — the object's ranges become KEEP and this filter would then
+            // pick the object-absent gaps, so detection below never finds the object to inpaint.
+            val removes = runBlocking {
+                Analysis.run(
+                    context, settings, Uri.parse(media.uri), media.kind, "remove ${clip.prompt}", clip.durationMs,
+                    onProgress = { p -> 
+                        p.currentMs?.let { ms -> vm.seekTo(clip.startTimeMs + ms) }
+                    },
+                    checkpoint = sink::checkpointBlocking,
+                )
+            }.filter { it.action == EditAction.REMOVE }
+            if (removes.isEmpty()) {
+                JSONObject().apply {
+                    put("ok", true); put("replaced", 0); put("note", "No matching object to remove.")
+                    put("humanSummary", "No \"${clip.prompt}\" found in the clip — nothing generated.")
+                }
+            } else {
+                // 2. For each segment: on-device mask from a representative frame -> cloud inpaint -> media.
+                // Hoist ObjectVision out of the segment loop — before, we `new`d + `use`d it per
+                // segment, reloading the EfficientDet .tflite model each time. Once per run is
+                // enough; the model owns no per-segment state.
+                val replacements = com.hereliesaz.guillotine.ai.ObjectVision(context).use { ov ->
+                    runBlocking {
+                        removes.mapIndexedNotNull { idx, seg ->
+                            sink.checkpointBlocking()
+                            sink.report(idx.toFloat() / removes.size, "Removing ${clip.prompt}… ${idx + 1}/${removes.size}")
+                            val frame = grabFrame(Uri.parse(media.uri), (seg.startMs + seg.endMs) / 2)
+                                ?: return@mapIndexedNotNull null
+                            try {
+                                val boxes = ov.detect(frame).filter { matchesPrompt(clip.prompt, it.label) }.map { it.box }
+                                if (boxes.isEmpty()) return@mapIndexedNotNull null
+                            val rects = boxes.map { android.graphics.RectF(it.left, it.top, it.right, it.bottom) }
+                            val mask = com.hereliesaz.guillotine.ai.InpaintMask.fromBoxes(frame.width, frame.height, rects)
+                            try {
+                                val uri = runCatching {
+                                    com.hereliesaz.guillotine.ai.ImageGen.Leonardo.inpaint(
+                                        context, key, settings.leonardoModel, frame, mask,
+                                        "remove the ${clip.prompt}, clean natural background, photorealistic",
+                                    )
+                                }.getOrNull()
+                                uri?.let {
+                                    val relStart = (seg.startMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
+                                    val relEnd = (seg.endMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
+                                    EditorViewModel.Replacement(
+                                        relStart, relEnd,
+                                        MediaItem(newId(), it.toString(), "inpaint", MediaKind.IMAGE, relEnd - relStart),
+                                    )
+                                }
+                            } finally {
+                                mask.recycle()
+                            }
+                        } finally {
+                            frame.recycle()
+                        }
+                    }
+                    }
+                }
+                if (replacements.isEmpty()) throw IllegalStateException("Generation produced no usable replacements.")
+                vm.replaceSegmentsWithGenerated(clipId, replacements)
+                val replacedMs = replacements.sumOf { (it.relEndMs - it.relStartMs).coerceAtLeast(0L) }
+                JSONObject().apply {
+                    put("ok", true); put("replaced", replacements.size)
+                    put("clipCount", vm.uiState.value.document.clips.size)
+                    put("totalDurationMs", vm.uiState.value.document.totalDurationMs)
+                    put(
+                        "humanSummary",
+                        "Erased \"${clip.prompt}\" from ${replacements.size} segment(s) (${msFmt(replacedMs)}) " +
+                            "with inpainted replacements — clip length unchanged.",
+                    )
+                }
+            }
+        }
+    }
+
+    // ---- generative media ---------------------------------------------------
+
+    private fun generateMedia(
+        kind: GenKind,
+        prompt: String,
+        provider: String,
+        model: String,
+        durationSec: Int?,
+    ): JSONObject {
+        val settings = settingsProvider()
+        require(prompt.isNotBlank()) { "Enter a prompt to generate." }
+        val providerType = provider.takeIf { it.isNotBlank() }
+            ?.let { runCatching { GenProviderType.valueOf(it.uppercase()) }.getOrNull() }
+        val label = when (kind) { GenKind.IMAGE -> "image"; GenKind.VIDEO -> "video"; GenKind.MUSIC -> "music" }
+        return OperationController.runBlocking(
+            context, OperationKind.GENERATE, "Generating $label…", pausable = true,
+        ) { sink ->
+            val item = runBlocking {
+                GenController.generate(
+                    context, settings, kind, prompt,
+                    providerOverride = providerType,
+                    modelOverride = model.takeIf { it.isNotBlank() },
+                    durationSec = durationSec ?: if (kind == GenKind.IMAGE) 0 else 8,
+                    onProgress = { p -> if (p != null) sink.report(p, "Generating $label…") },
+                    checkpoint = { sink.checkpointBlocking() },
+                )
+            }
+            vm.addMedia(listOf(item))
+            ok().apply {
+                put("mediaKind", item.kind.name)
+                put("durationMs", item.durationMs)
+                put("clipCount", vm.uiState.value.document.clips.size)
+                put("humanSummary", "Generated a $label and added it to the timeline.")
+            }
+        }
+    }
+
+    /**
+     * Instant, on-device (no provider/key) counterpart to [generateMedia]: rasterizes a solid-color
+     * rectangle via [com.hereliesaz.guillotine.media.ShapeLayer] and adds it the same way — a plain
+     * `ClipType.VIDEO`/`MediaKind.IMAGE` clip via `addMedia`. Always lands on a brand-new track
+     * appended to the end of [com.hereliesaz.guillotine.model.Document.videoTracks] (the bottommost/
+     * backmost position — see `PreviewPlayer`'s "stacked bottom-to-top" stacking order), since a
+     * background has to be on a *different* track from whatever it sits behind — two clips on the
+     * same track can only ever be sequential, never simultaneous layers.
+     */
+    private fun addShapeLayer(color: String, opacity: Float): JSONObject {
+        val doc = vm.uiState.value.document
+        val (w, h) = resolveFrameSize(doc)
+        val item = com.hereliesaz.guillotine.media.ShapeLayer.generate(context, color, opacity, w, h)
+        vm.addTrack(com.hereliesaz.guillotine.model.ClipType.VIDEO)
+        val track = vm.uiState.value.document.videoTracks.last()
+        vm.addMedia(listOf(item), targetTrack = track)
+        return ok().apply {
+            put("trackId", track)
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Added a $color shape layer behind everything else on $track.")
+        }
+    }
+
+    /**
+     * A pixel size matching the project's current aspect ratio, so the shape's `ContentScale.Fit`
+     * picture (see `VideoSlot`) fills the frame exactly instead of letterboxing inside it. `ORIGINAL`
+     * has no fixed ratio of its own — falls back to the first video clip's own probed dimensions
+     * (same source `PreviewPlayer`'s `referenceVideoAspect` would resolve to once playing), or a
+     * plain 16:9 default for a genuinely empty project.
      */
     private fun resolveFrameSize(doc: com.hereliesaz.guillotine.model.Document): Pair<Int, Int> {
         val canvas = doc.projectCanvasSize()
