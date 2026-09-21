@@ -208,7 +208,9 @@ androidComponents {
 // sherpa-onnx ships all JVM classes inside its AAR; the JVM jar artifact duplicates them.
 // Exclude globally so no transitive path re-introduces it.
 configurations.all {
-    exclude(group = "com.github.k2-fsa", module = "sherpa-onnx-jvm")
+    // JitPack group for multi-module repos is "com.github.USER.REPO"; the JVM jar duplicates
+    // classes already bundled in the AAR.
+    exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
 }
 
 dependencies {
