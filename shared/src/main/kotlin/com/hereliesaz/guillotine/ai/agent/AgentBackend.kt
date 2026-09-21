@@ -562,7 +562,7 @@ inline fun frameLookOutcome(
 private fun missingRequiredToolArgs(tools: McpToolsSurface, name: String, args: JSONObject): List<String> {
     val definitions = try {
         tools.definitions()
-    } catch (_: Throwable) {
+    } catch (_: Exception) {
         return emptyList()
     }
     var definition: JSONObject? = null
