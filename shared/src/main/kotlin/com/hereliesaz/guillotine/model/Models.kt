@@ -414,20 +414,19 @@ data class Document(
     fun mediaFor(clip: TimelineClip): MediaItem? = mediaItems.firstOrNull { it.id == clip.mediaId }
 
     /**
-     * The visual source that defines ORIGINAL project dimensions. Timeline order wins; unused media
-     * in the bin is only a fallback. This keeps a project's frame tied to what was actually imported
-     * onto the edit rather than whatever decoder happens to be active at the current playhead.
+     * The imported source that defines ORIGINAL project dimensions. Prefer the first imported VIDEO
+     * and keep using it regardless of playhead/timeline state; an image is only the fallback for an
+     * image-only project. "Original" therefore means the source file's own width × height, not the
+     * dimensions of whichever layer happens to be visible now.
      */
     fun referenceVisualMedia(): MediaItem? =
-        clips.asSequence()
-            .filter { it.type == ClipType.VIDEO }
-            .sortedBy { it.startTimeMs }
-            .mapNotNull(::mediaFor)
-            .firstOrNull { it.widthPx != null && it.heightPx != null && it.widthPx > 0 && it.heightPx > 0 }
-            ?: mediaItems.firstOrNull {
-                it.kind != MediaKind.AUDIO &&
-                    it.widthPx != null && it.heightPx != null && it.widthPx > 0 && it.heightPx > 0
-            }
+        mediaItems.firstOrNull {
+            it.kind == MediaKind.VIDEO &&
+                it.widthPx != null && it.heightPx != null && it.widthPx > 0 && it.heightPx > 0
+        } ?: mediaItems.firstOrNull {
+            it.kind != MediaKind.AUDIO &&
+                it.widthPx != null && it.heightPx != null && it.widthPx > 0 && it.heightPx > 0
+        }
 
     /**
      * Resolve the project canvas independently of every clip transform.
