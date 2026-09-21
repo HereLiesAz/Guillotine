@@ -292,7 +292,7 @@ object Exporter {
                 coroutineScope {
                     var poller: Job? = null
                     try {
-                        suspendCancellableCoroutine { cont ->
+                        suspendCancellableCoroutine<Unit> { cont ->
                             val builder = Transformer.Builder(context)
                                 .setVideoMimeType(MimeTypes.VIDEO_H264)
                             if (hasAudio) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
