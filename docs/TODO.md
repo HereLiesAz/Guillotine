@@ -342,10 +342,10 @@ moving/scaling/rotating the entire preview window, not just the selected video c
 Two issues reported directly from screenshots: a clip letterboxed inside a mismatched project frame,
 and a "3D Environment" (kind `pack`) extension that installed and then did nothing.
 
-- **Aspect ratio.** `Document.settings.aspectRatio` defaults to `ORIGINAL` (derive the frame from the
-  clip's own shape) for every new project — confirmed no code path defaults it to a fixed ratio, and
-  `AspectRatio.ORIGINAL`'s existing lock-to-reference-clip logic (`PreviewPlayer.kt`'s
-  `referenceVideoAspect`) already works correctly once a video's real size is known. So the reported
+- **Aspect ratio.** `Document.settings.aspectRatio` defaults to `ORIGINAL`. **Corrected
+  2026-09-20:** project aspect now controls only the project/output canvas. `ORIGINAL` resolves from
+  the first imported video's stored width × height via `Document.projectCanvasSize()`; preview and
+  export layers keep source geometry until the user changes them with Crop / transform. The reported
   letterboxing means the project's ratio had been explicitly set to something fixed (e.g. 9:16, most
   likely via Project Settings) that doesn't match the clip in question — not a bug in `ORIGINAL`
   itself, just docs/UX_ACTION_TREE.md Branch B.4 ("first clip on an empty timeline offers to match
