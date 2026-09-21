@@ -468,7 +468,10 @@ Before you render, set the output shape and resolution from the menu's **Project
 | **1:1** | Square | **1080p** | Full HD |
 | **Original** | Match the source | **720p** | HD |
 
-The safe-zone guides in the Crop tool follow the 9:16 and 1:1 choices.
+**Aspect ratio changes the project canvas, not the clips.** Switching 16:9, 9:16, or 1:1 never
+rescales/repositions a video layer; only the **Crop / transform** tool changes a clip's spatial
+transform. **Original** uses the imported reference video's actual width × height exactly — width is
+never swapped with height. The safe-zone guides in the Crop tool follow the 9:16 and 1:1 choices.
 
 ### Rendering
 
