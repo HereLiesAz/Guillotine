@@ -342,10 +342,10 @@ moving/scaling/rotating the entire preview window, not just the selected video c
 Two issues reported directly from screenshots: a clip letterboxed inside a mismatched project frame,
 and a "3D Environment" (kind `pack`) extension that installed and then did nothing.
 
-- **Aspect ratio.** `Document.settings.aspectRatio` defaults to `ORIGINAL` (derive the frame from the
-  clip's own shape) for every new project — confirmed no code path defaults it to a fixed ratio, and
-  `AspectRatio.ORIGINAL`'s existing lock-to-reference-clip logic (`PreviewPlayer.kt`'s
-  `referenceVideoAspect`) already works correctly once a video's real size is known. So the reported
+- **Aspect ratio.** `Document.settings.aspectRatio` defaults to `ORIGINAL`. **Corrected
+  2026-09-20:** project aspect now controls only the project/output canvas. `ORIGINAL` resolves from
+  the first imported video's stored width × height via `Document.projectCanvasSize()`; preview and
+  export layers keep source geometry until the user changes them with Crop / transform. The reported
   letterboxing means the project's ratio had been explicitly set to something fixed (e.g. 9:16, most
   likely via Project Settings) that doesn't match the clip in question — not a bug in `ORIGINAL`
   itself, just docs/UX_ACTION_TREE.md Branch B.4 ("first clip on an empty timeline offers to match
@@ -1594,11 +1594,12 @@ all 12 keyframe properties, background removal, audio effects, multi-track compo
 crossfade are at full parity. The following gaps remain:
 - ~~**Caption text size differs**~~ — **Done (2026-08-24):** see the dated entry near the top of
   this file ("Android caption export text size was a fixed 64px...").
-- ~~**Quality/FPS settings not wired into export**~~ — **Done (2026-08-01):** both are applied in
-  `VideoEffects.geometry()`, which is where the other project-level settings (crop, aspect ratio) already
-  land. `quality` becomes `Presentation.createForHeight(Quality.targetHeight)`, applied *after* the
-  aspect-ratio presentation so it resizes the letterboxed frame and the ratio survives; `fps` becomes a
-  `FrameDropEffect`. **Caveat worth keeping:** frame drop can only *cap* the rate — Media3 discards
+- ~~**Quality/FPS settings not wired into export**~~ — **Done (2026-08-01; canvas semantics
+  corrected 2026-09-20):** quality/fps remain wired through `VideoEffects.geometry()`, but project
+  **aspect ratio no longer lives there**. Aspect now sets the composition/output canvas through
+  `ProjectVideoCompositorSettings`; it never resizes an individual media layer. `quality` establishes
+  the output/layer vertical pixel scale and `fps` becomes a `FrameDropEffect`. **Caveat worth keeping:**
+  frame drop can only *cap* the rate — Media3 discards
   frames and cannot synthesise them — so selecting 60 fps on 30 fps source is a no-op, not interpolation.
   Bitrate is still unconfigured (`DefaultEncoderFactory` defaults apply); that would need
   `VideoEncoderSettings` and a target worth defending, so it is deliberately not guessed at here.

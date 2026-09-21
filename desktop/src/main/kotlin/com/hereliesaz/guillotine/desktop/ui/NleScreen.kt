@@ -672,7 +672,9 @@ fun NleScreen(
         // 1920x1080 — otherwise a 9:16 vertical or 1:1 square project exports as letterboxed landscape.
         // Computed once here (not just inside onStart) so the sheet's own summary text can show the real
         // dimensions instead of a hardcoded "1920x1080" that was wrong for anything but 16:9/Original.
-        val (exportW, exportH) = exportDimensionsFor(state.document.settings.aspectRatio)
+        val exportCanvas = state.document.projectCanvasSize()
+        val exportW = exportCanvas.width
+        val exportH = exportCanvas.height
         ExportSheet(
             totalDurationMs = state.document.totalDurationMs,
             exportWidth = exportW,
@@ -1160,16 +1162,7 @@ private fun EditorToolStrip(
     }
 }
 
-/**
- * Real export pixel dimensions for a project's aspect ratio -- what [NleScreen]'s export flow actually
- * renders at, and what [ExportSheet]'s summary text should describe instead of a hardcoded "1920x1080"
- * that was wrong for a 9:16 or 1:1 project.
- */
-private fun exportDimensionsFor(aspectRatio: AspectRatio): Pair<Int, Int> = when (aspectRatio) {
-    AspectRatio.RATIO_9_16 -> 1080 to 1920
-    AspectRatio.RATIO_1_1 -> 1080 to 1080
-    else -> 1920 to 1080 // RATIO_16_9 and ORIGINAL → 1080p landscape
-}
+
 
 // -------------------------------------------------------------------------------------
 // Playback / keyboard

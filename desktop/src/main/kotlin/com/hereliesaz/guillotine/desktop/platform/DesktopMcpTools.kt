@@ -2882,19 +2882,10 @@ class DesktopMcpTools(
      * ratio of its own — falls back to the first video clip's own probed dimensions, or a plain
      * 16:9 default for a genuinely empty project.
      */
-    private fun resolveFrameSize(doc: com.hereliesaz.guillotine.model.Document): Pair<Int, Int> =
-        when (doc.settings.aspectRatio) {
-            com.hereliesaz.guillotine.model.AspectRatio.RATIO_16_9 -> 1280 to 720
-            com.hereliesaz.guillotine.model.AspectRatio.RATIO_9_16 -> 720 to 1280
-            com.hereliesaz.guillotine.model.AspectRatio.RATIO_1_1 -> 1080 to 1080
-            com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL -> {
-                val ref = doc.clips.firstOrNull { it.type == com.hereliesaz.guillotine.model.ClipType.VIDEO }
-                    ?.let(doc::mediaFor)
-                val w = ref?.widthPx?.takeIf { it > 0 }
-                val h = ref?.heightPx?.takeIf { it > 0 }
-                if (w != null && h != null) w to h else 1280 to 720
-            }
-        }
+    private fun resolveFrameSize(doc: com.hereliesaz.guillotine.model.Document): Pair<Int, Int> {
+        val canvas = doc.projectCanvasSize()
+        return canvas.width to canvas.height
+    }
 
     private fun ok() = JSONObject().put("ok", true)
 

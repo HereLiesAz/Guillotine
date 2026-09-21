@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import com.hereliesaz.guillotine.media.MediaImport
 import com.hereliesaz.guillotine.model.Document
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -41,7 +42,9 @@ object ProjectAutosave {
     fun load(context: Context): Document? {
         val f = File(context.filesDir, FILE)
         if (!f.exists()) return null
-        return runCatching { ProjectStore.deserialize(f.readText()) }.getOrNull()
+        return runCatching {
+            ProjectStore.repairImportedDimensions(context, ProjectStore.deserialize(f.readText()))
+        }.getOrNull()
     }
 }
 
@@ -62,6 +65,21 @@ object ProjectStore {
 
     fun deserialize(text: String): Document = json.decodeFromString(Document.serializer(), text)
 
+    /**
+     * Repair legacy project media dimensions on Android. Builds before the project-canvas fix could
+     * persist width/height transposed for rotated phone video; re-probing the original persisted URI
+     * makes "Original" correct immediately even for an existing autosave/.gilt project.
+     */
+    fun repairImportedDimensions(context: Context, document: Document): Document {
+        var changed = false
+        val media = document.mediaItems.map { item ->
+            val repaired = MediaImport.refreshVisualDimensions(context, item)
+            if (repaired !== item && repaired != item) changed = true
+            repaired
+        }
+        return if (changed) document.copy(mediaItems = media) else document
+    }
+
     fun save(context: Context, uri: Uri, document: Document) {
         // Serialize BEFORE opening the destination stream: "wt" mode truncates the target the
         // moment it's opened, so if we serialized lazily inside the `use` block a bad Document
@@ -79,7 +97,7 @@ object ProjectStore {
     fun load(context: Context, uri: Uri): Document {
         val text = context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
             ?: throw IllegalStateException("Could not read project file.")
-        return deserialize(text)
+        return repairImportedDimensions(context, deserialize(text))
     }
 }
 

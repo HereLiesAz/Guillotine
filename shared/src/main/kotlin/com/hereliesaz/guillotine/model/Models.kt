@@ -1,5 +1,6 @@
 package com.hereliesaz.guillotine.model
 
+import kotlin.math.roundToInt
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
@@ -112,8 +113,8 @@ enum class Quality {
      *
      * This existed as a setting the user could change and the exporter never read — `Transformer` was
      * built with a video MIME type and nothing else, so picking 720p produced a full-resolution file.
-     * Width is deliberately not fixed: the export applies this through a height-only presentation so the
-     * frame's aspect ratio (already letterboxed by [GlobalSettings.aspectRatio]) is preserved.
+     * Width is deliberately not fixed here: [Document.projectCanvasSize] combines this target height
+     * with the project canvas aspect. Aspect changes the canvas bounds; it is never a per-layer resize.
      */
     val targetHeight: Int?
         get() = when (this) {
@@ -360,6 +361,17 @@ data class TrackSettings(
     val minimized: Boolean = false,
 )
 
+/**
+ * Concrete project-canvas pixel dimensions.
+ *
+ * The canvas and the media layers are deliberately separate coordinate systems: changing the
+ * project's aspect ratio changes these bounds, never a clip's scale/position. ORIGINAL uses the
+ * imported source dimensions verbatim so width stays width and height stays height.
+ */
+data class ProjectCanvasSize(val width: Int, val height: Int) {
+    val aspectRatio: Float get() = width.toFloat() / height.coerceAtLeast(1).toFloat()
+}
+
 @Serializable
 data class GlobalSettings(
     val aspectRatio: AspectRatio = AspectRatio.ORIGINAL,
@@ -400,6 +412,48 @@ data class Document(
         get() = clips.maxOfOrNull { it.endTimeMs } ?: 0L
 
     fun mediaFor(clip: TimelineClip): MediaItem? = mediaItems.firstOrNull { it.id == clip.mediaId }
+
+    /**
+     * The imported source that defines ORIGINAL project dimensions. Prefer the first imported VIDEO
+     * and keep using it regardless of playhead/timeline state; an image is only the fallback for an
+     * image-only project. "Original" therefore means the source file's own width × height, not the
+     * dimensions of whichever layer happens to be visible now.
+     */
+    fun referenceVisualMedia(): MediaItem? =
+        mediaItems.firstOrNull {
+            it.kind == MediaKind.VIDEO &&
+                it.widthPx != null && it.heightPx != null && it.widthPx > 0 && it.heightPx > 0
+        } ?: mediaItems.firstOrNull {
+            it.kind != MediaKind.AUDIO &&
+                it.widthPx != null && it.heightPx != null && it.widthPx > 0 && it.heightPx > 0
+        }
+
+    /**
+     * Resolve the project canvas independently of every clip transform.
+     *
+     * ORIGINAL + ORIGINAL quality is exactly the imported reference media's width/height. Fixed
+     * aspect presets keep the reference/output height and only change canvas width, so switching
+     * 16:9 ↔ 9:16 ↔ 1:1 cannot resize a media layer. Explicit export quality may scale the entire
+     * output resolution, but that is a quality change, not an aspect-ratio transform.
+     */
+    fun projectCanvasSize(): ProjectCanvasSize {
+        val ref = referenceVisualMedia()
+        val sourceW = ref?.widthPx?.takeIf { it > 0 } ?: 1920
+        val sourceH = ref?.heightPx?.takeIf { it > 0 } ?: 1080
+        val targetH = settings.quality.targetHeight ?: sourceH
+
+        if (settings.aspectRatio == AspectRatio.ORIGINAL) {
+            if (settings.quality == Quality.ORIGINAL) return ProjectCanvasSize(sourceW, sourceH)
+            val scaledW = (targetH.toDouble() * sourceW.toDouble() / sourceH.toDouble())
+                .roundToInt()
+                .coerceAtLeast(1)
+            return ProjectCanvasSize(scaledW, targetH)
+        }
+
+        val ratio = settings.aspectRatio.fixedRatioValue ?: sourceW.toDouble() / sourceH.toDouble()
+        val width = (targetH * ratio).roundToInt().coerceAtLeast(1)
+        return ProjectCanvasSize(width, targetH)
+    }
 
     fun trackSettingsFor(trackId: String): TrackSettings = trackSettings[trackId] ?: TrackSettings()
 

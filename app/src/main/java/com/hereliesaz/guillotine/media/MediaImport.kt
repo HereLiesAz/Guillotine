@@ -64,14 +64,13 @@ object MediaImport {
                 if (hasVideo) {
                     val rawW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
                     val rawH = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-                    // A 90/270 rotation swaps which raw dimension is actually "up" — e.g. a phone-shot
-                    // portrait video is stored as 1920x1080 with a 90° rotation flag, so the DISPLAYED
-                    // (and letterboxing-relevant) shape is 1080x1920.
-                    val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-                    val swapped = rotation == 90 || rotation == 270
+                    // WIDTH is width and HEIGHT is height. Do not swap them using the rotation
+                    // metadata here: MediaMetadataRetriever already reports the source dimensions we
+                    // use as the project's ORIGINAL canvas, and swapping a second time turns portrait
+                    // footage landscape (and vice versa).
                     if (rawW != null && rawH != null && rawW > 0 && rawH > 0) {
-                        widthPx = if (swapped) rawH else rawW
-                        heightPx = if (swapped) rawW else rawH
+                        widthPx = rawW
+                        heightPx = rawH
                     }
                 }
             } catch (e: Exception) {
@@ -115,6 +114,44 @@ object MediaImport {
             widthPx = widthPx,
             heightPx = heightPx,
         )
+    }
+
+    /**
+     * Re-probe only the stored visual dimensions of an existing project item.
+     *
+     * Older Guillotine builds manually swapped VIDEO_WIDTH/VIDEO_HEIGHT when rotation metadata was
+     * 90/270 degrees, so autosaved/project-file MediaItems can carry transposed dimensions forever.
+     * Loading a project runs this once and repairs those stale values from the source URI. Failures
+     * are non-destructive: keep the dimensions already stored in the project.
+     */
+    fun refreshVisualDimensions(context: Context, item: MediaItem): MediaItem {
+        if (item.kind == MediaKind.AUDIO) return item
+        val uri = runCatching { Uri.parse(item.uri) }.getOrNull() ?: return item
+
+        val size: Pair<Int, Int>? = if (item.kind == MediaKind.IMAGE) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeStream(stream, null, opts)
+                    if (opts.outWidth > 0 && opts.outHeight > 0) opts.outWidth to opts.outHeight else null
+                }
+            }.getOrNull()
+        } else {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, uri)
+                val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+                val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+                if (w != null && h != null && w > 0 && h > 0) w to h else null
+            } catch (_: Exception) {
+                null
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }
+
+        val (w, h) = size ?: return item
+        return if (item.widthPx == w && item.heightPx == h) item else item.copy(widthPx = w, heightPx = h)
     }
 
     private fun queryDisplayName(context: Context, uri: Uri): String? {

@@ -423,8 +423,8 @@ object Exporter {
      * by ramping the incoming clip in over a held outgoing clip (via [VideoEffects.fadeIn]), and draws
      * the **background-removal subjects + captions over the final composite** as Composition-level
      * overlays (so a bg-removed clip on an upper track shows lower tracks through its matte). Otherwise a
-     * single flattened sequence + per-item matte/caption overlay is used. Project crop + aspect apply
-     * to every video clip via [VideoEffects.geometry]. Per clip/item this bakes in: color filters,
+     * single flattened sequence + per-item matte/caption overlay is used. Project aspect is an output
+     * canvas boundary; it is never applied as a per-clip transform. Per clip/item this bakes in: color filters,
      * the Crop-tool transform, keyframed opacity/scale (via [VideoEffects.keyframeEffects]),
      * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
      * (which stay in sync across 'remove' cuts via each item's timeline start).
@@ -436,7 +436,8 @@ object Exporter {
         mattes: Map<Long, Bitmap>,
         faceBlur: Map<Long, Bitmap>,
     ): Composition? {
-        val geometry = VideoEffects.geometry(document.settings)
+        val canvas = document.projectCanvasSize()
+        val geometry = VideoEffects.geometry(document.settings, canvas.height)
 
         val disabled = document.disabledTrackIds
         val videoClips = document.clips
@@ -458,9 +459,7 @@ object Exporter {
         // VideoEffects.geometry) leaves the source's own decoded height untouched, so the first video
         // clip's own probed dimensions are the best available estimate. Falls back to 1080 (this
         // overlay's own reference height, i.e. no scaling) for a genuinely undecodable/unprobed clip.
-        val refHeightPx = document.settings.quality.targetHeight
-            ?: videoClips.firstNotNullOfOrNull { document.mediaFor(it)?.heightPx?.takeIf { h -> h > 0 } }
-            ?: 1080
+        val refHeightPx = canvas.height
 
         // Overlays (matte + captions) are attached to EVERY base item with that item's timeline
         // start, so they stay aligned even after 'remove' ranges are physically cut.
@@ -741,6 +740,10 @@ object Exporter {
         // accepts the mixed shape in 1.10.1. Media3 synthesises silent audio on its own when a
         // sequence declares AUDIO but has no audio items.
         val composition = Composition.Builder(sequences)
+            // Aspect ratio belongs to the OUTPUT canvas, not to any input clip. Identity overlay
+            // settings keep every sequence centered at its own geometry; the user's Crop-tool
+            // transform remains the only per-clip scale/pan/rotation.
+            .setVideoCompositorSettings(ProjectVideoCompositorSettings(canvas))
         // Advanced path: the background-removal subjects (matte) + captions composite over the FINAL
         // stacked video, so a bg-removed clip on an upper track shows the lower tracks through its matte,
         // and overlays sit on top of every layer and survive gaps in any one track/lane. (The simple
