@@ -90,8 +90,11 @@ class MlKitProvider : ClipAnalyzer {
             throw IllegalStateException("The on-device face detector couldn't start on this device.")
         }
 
-        val objectVision = if (intent.useFaces) null else ObjectVision(context)
-        val sceneClassifier = if (intent.useFaces) null else SceneClassifier(context)
+        // Native MediaPipe/TFLite initializers can fail on particular device/runtime combinations.
+        // Treat either engine as optional and continue down the fallback chain instead of surfacing an
+        // obfuscated native NPE before analysis has even started.
+        val objectVision = if (intent.useFaces) null else runCatching { ObjectVision(context) }.getOrNull()
+        val sceneClassifier = if (intent.useFaces) null else runCatching { SceneClassifier(context) }.getOrNull()
         val useMlKitFallback =
             !intent.useFaces &&
                 objectVision?.available != true &&
@@ -148,8 +151,21 @@ class MlKitProvider : ClipAnalyzer {
         require(kind != MediaKind.AUDIO) { "Reference matching needs a video or image clip." }
         val parsed = parseIntent(prompt)
         val terms = expandTerms(parsed.terms)
-        val objectVision = ObjectVision(context)
-        val embed = ImageEmbed(context, embedModelPath?.takeIf { it.isNotBlank() })
+        val objectVision = runCatching { ObjectVision(context) }.getOrNull()
+        val embed = runCatching { ImageEmbed(context, embedModelPath?.takeIf { it.isNotBlank() }) }.getOrNull()
+        if (objectVision == null || embed == null) {
+            objectVision?.close()
+            embed?.close()
+            return@withContext analyze(
+                context = context,
+                mediaUri = mediaUri,
+                kind = kind,
+                prompt = prompt,
+                durationMs = durationMs,
+                onProgress = onProgress,
+                checkpoint = checkpoint,
+            )
+        }
         try {
             fun matchesTerm(label: String) = terms.any { it.contains(label) || label.contains(it) }
             val refBox = objectVision.detect(reference)

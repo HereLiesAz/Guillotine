@@ -553,9 +553,56 @@ inline fun frameLookOutcome(
     }
 }
 
+/**
+ * Validate required arguments from the live tool schema before dispatching. Small/local models occasionally
+ * emit a syntactically-valid tool call with a missing required field; letting JSONObject.get* throw obscures
+ * the actual problem and wastes another inference turn. Unknown tools are still forwarded so routed/stateful
+ * backends can recover with a previously-seen valid tool name.
+ */
+private fun missingRequiredToolArgs(tools: McpToolsSurface, name: String, args: JSONObject): List<String> {
+    val definitions = try {
+        tools.definitions()
+    } catch (_: Exception) {
+        return emptyList()
+    }
+    var definition: JSONObject? = null
+    for (i in 0 until definitions.length()) {
+        val candidate = definitions.optJSONObject(i) ?: continue
+        if (candidate.optString("name") == name) {
+            definition = candidate
+            break
+        }
+    }
+    val required = definition
+        ?.optJSONObject("inputSchema")
+        ?.optJSONArray("required")
+        ?: return emptyList()
+
+    return buildList {
+        for (i in 0 until required.length()) {
+            val key = required.optString(i)
+            if (key.isBlank()) continue
+            val value = if (args.has(key) && !args.isNull(key)) args.opt(key) else null
+            if (value == null || (value is String && value.isBlank())) add(key)
+        }
+    }
+}
+
 /** Execute one MCP tool in-process, capturing thrown errors as a result the model can recover from. */
-fun callTool(tools: McpToolsSurface, name: String, args: JSONObject): ToolOutcome =
-    try {
+fun callTool(tools: McpToolsSurface, name: String, args: JSONObject): ToolOutcome {
+    val missing = missingRequiredToolArgs(tools, name, args)
+    if (missing.isNotEmpty()) {
+        return ToolOutcome(
+            JSONObject().put(
+                "error",
+                "Missing required argument${if (missing.size == 1) "" else "s"}: ${missing.joinToString(", ")}. " +
+                    "Inspect the timeline and retry with real values.",
+            ),
+            isError = true,
+        )
+    }
+
+    return try {
         ToolOutcome(tools.call(name, args), isError = false)
     } catch (c: kotlin.coroutines.cancellation.CancellationException) {
         // Cooperative cancellation must propagate, not be reported as a tool failure.
@@ -575,3 +622,4 @@ fun callTool(tools: McpToolsSurface, name: String, args: JSONObject): ToolOutcom
         } else ""
         ToolOutcome(JSONObject().put("error", "$msg$hint"), isError = true)
     }
+}
