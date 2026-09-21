@@ -116,6 +116,44 @@ object MediaImport {
         )
     }
 
+    /**
+     * Re-probe only the stored visual dimensions of an existing project item.
+     *
+     * Older Guillotine builds manually swapped VIDEO_WIDTH/VIDEO_HEIGHT when rotation metadata was
+     * 90/270 degrees, so autosaved/project-file MediaItems can carry transposed dimensions forever.
+     * Loading a project runs this once and repairs those stale values from the source URI. Failures
+     * are non-destructive: keep the dimensions already stored in the project.
+     */
+    fun refreshVisualDimensions(context: Context, item: MediaItem): MediaItem {
+        if (item.kind == MediaKind.AUDIO) return item
+        val uri = runCatching { Uri.parse(item.uri) }.getOrNull() ?: return item
+
+        val size: Pair<Int, Int>? = if (item.kind == MediaKind.IMAGE) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeStream(stream, null, opts)
+                    if (opts.outWidth > 0 && opts.outHeight > 0) opts.outWidth to opts.outHeight else null
+                }
+            }.getOrNull()
+        } else {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, uri)
+                val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+                val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+                if (w != null && h != null && w > 0 && h > 0) w to h else null
+            } catch (_: Exception) {
+                null
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }
+
+        val (w, h) = size ?: return item
+        return if (item.widthPx == w && item.heightPx == h) item else item.copy(widthPx = w, heightPx = h)
+    }
+
     private fun queryDisplayName(context: Context, uri: Uri): String? {
         return runCatching {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
