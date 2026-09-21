@@ -308,7 +308,7 @@ fun DesktopPreviewPlayer(
                     clipToFrame = false,
                 ) {
                     if (clip.id == cropTargetClipId) {
-                        CropWireframe(onCropTransform = onCropTransform)
+                        CropWireframe(scale = s, onCropTransform = onCropTransform)
                     } else {
                         Box(Modifier.fillMaxSize().border(1.dp, Red500))
                     }
@@ -653,6 +653,7 @@ private fun VideoSlot(
  */
 @Composable
 private fun CropWireframe(
+    scale: Float,
     onCropTransform: (zoom: Float, panXFrac: Float, panYFrac: Float, rotationDelta: Float) -> Unit,
 ) {
     Box(
@@ -671,7 +672,7 @@ private fun CropWireframe(
             // Counter-scale so the handle stays a constant on-screen size regardless of how zoomed
             // in/out the clip is — otherwise a 6x-scaled clip's handle would render at 6x size, and a
             // 0.1x one would shrink to under a pixel.
-            val handleSize = HANDLE_SIZE_DP.dp
+            val handleSize = (HANDLE_SIZE_DP / scale.coerceAtLeast(0.05f)).dp
             Box(
                 Modifier
                     .align(alignment)
