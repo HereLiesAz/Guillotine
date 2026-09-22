@@ -551,8 +551,9 @@ object Exporter {
         }
 
         // Append a list of video clips into [seq] starting at [startCursor] on the timeline (a leading
-        // gap fills startCursor..firstClip, so stacked track sequences stay time-aligned). Matte/face
-        // overlays are attached only when [withOverlays]. When [captionTimelineSegments] is supplied,
+        // gap fills startCursor..firstClip, so stacked track sequences stay time-aligned). Here
+        // [withOverlays] means item-timed matte/face overlays only; captions are always composition-level.
+        // When [captionTimelineSegments] is supplied,
         // record every real item's composition-time → source-timeline mapping for the composition-level
         // caption pass; gaps deliberately produce no segment, matching the old per-item caption behavior.
         // Returns true if any real item (not just a gap) was added.
