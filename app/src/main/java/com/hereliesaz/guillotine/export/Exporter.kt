@@ -484,11 +484,20 @@ object Exporter {
         fun compositionOverlaysFor(
             timelineStartMs: Long,
             includeMatteAndFace: Boolean,
+            captionTimelineSegments: List<CaptionTimelineSegment>,
         ): OverlayEffect? {
             val list = mutableListOf<TextureOverlay>()
             if (includeMatteAndFace && hasMatte) list += MatteOverlay(mattes, timelineStartMs)
             if (includeMatteAndFace && faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
-            textClips.forEach { list += CaptionOverlay(it, timelineStartMs, refHeightPx) }
+            textClips.forEach { clip ->
+                list += CaptionOverlay(
+                    clip = clip,
+                    timelineStartMs = timelineStartMs,
+                    refHeightPx = refHeightPx,
+                    timelineSegments = captionTimelineSegments,
+                    trackOpacity = document.trackSettingsFor(clip.trackId).opacity,
+                )
+            }
             return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
         }
 
@@ -542,24 +551,32 @@ object Exporter {
         }
 
         // Append a list of video clips into [seq] starting at [startCursor] on the timeline (a leading
-        // gap fills startCursor..firstClip, so stacked track sequences stay time-aligned). Overlays
-        // (matte + captions) are attached only when [withOverlays] — in multi-track mode that's the
-        // bottom track, so a caption isn't drawn once per stacked track. Returns true if any real item
-        // (not just a gap) was added.
+        // gap fills startCursor..firstClip, so stacked track sequences stay time-aligned). Here
+        // [withOverlays] means item-timed matte/face overlays only; captions are always composition-level.
+        // When [captionTimelineSegments] is supplied,
+        // record every real item's composition-time → source-timeline mapping for the composition-level
+        // caption pass; gaps deliberately produce no segment, matching the old per-item caption behavior.
+        // Returns true if any real item (not just a gap) was added.
         fun appendVideoItems(
             seq: EditedMediaItemSequence.Builder,
             clips: List<TimelineClip>,
             startCursor: Long,
             withOverlays: Boolean,
             fadeFor: (TimelineClip) -> LongRange? = { null },
+            captionTimelineSegments: MutableList<CaptionTimelineSegment>? = null,
         ): Boolean {
             var cursor = startCursor
+            var presentationCursor = 0L
             var added = false
             clips.sortedBy { it.startTimeMs }.forEach { clip ->
                 val media = document.mediaFor(clip) ?: return@forEach
                 val fade = fadeFor(clip)
                 val gap = clip.startTimeMs - cursor
-                if (gap > 0) { seq.addGap(gap * 1000); cursor += gap }
+                if (gap > 0) {
+                    seq.addGap(gap * 1000)
+                    cursor += gap
+                    presentationCursor += gap
+                }
                 if (media.kind == MediaKind.IMAGE) {
                     val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
                     val mediaItem = ExoMediaItem.Builder()
@@ -570,7 +587,16 @@ object Exporter {
                         EditedMediaItem.Builder(mediaItem).setFrameRate(30)
                             .setEffects(videoEffectsFor(clip, 0L, clip.startTimeMs, withOverlays, fade)).build(),
                     )
-                    added = true; cursor += dur
+                    captionTimelineSegments?.add(
+                        CaptionTimelineSegment(
+                            presentationStartMs = presentationCursor,
+                            presentationEndMs = presentationCursor + dur,
+                            timelineStartMs = clip.startTimeMs,
+                        ),
+                    )
+                    presentationCursor += dur
+                    added = true
+                    cursor += dur
                 } else {
                     for (range in TimelineMath.keptRanges(clip)) {
                         val startMs = range.first
@@ -591,7 +617,17 @@ object Exporter {
                             EditedMediaItem.Builder(mediaItem)
                                 .setEffects(videoEffectsFor(clip, clipLocalStart, timelineStart, withOverlays, fade)).build(),
                         )
-                        added = true; cursor += (endMs - startMs)
+                        val keptDuration = endMs - startMs
+                        captionTimelineSegments?.add(
+                            CaptionTimelineSegment(
+                                presentationStartMs = presentationCursor,
+                                presentationEndMs = presentationCursor + keptDuration,
+                                timelineStartMs = timelineStart,
+                            ),
+                        )
+                        presentationCursor += keptDuration
+                        added = true
+                        cursor += keptDuration
                     }
                 }
             }
@@ -625,8 +661,13 @@ object Exporter {
         val globalZero = if (advanced) {
             videoClips.filter { document.mediaFor(it) != null }.minOf { it.startTimeMs }
         } else {
-            0L
+            baseClips.firstOrNull()?.startTimeMs ?: 0L
         }
+        // Simple export has one authoritative sequence, so record exactly how each real item maps
+        // composition presentation time back to the editor timeline. This preserves caption timing
+        // across a non-zero first clip and across REMOVE-range discontinuities. Advanced export keeps
+        // its existing common-zero clock because several parallel lanes do not have one unique item map.
+        val captionTimelineSegments = mutableListOf<CaptionTimelineSegment>()
 
         // Whether the composition has any real audio source. Video sequences declare an AUDIO
         // trackType only when this is true — otherwise Media3 would synthesise a silent audio
@@ -704,8 +745,9 @@ object Exporter {
             val any = appendVideoItems(
                 seq,
                 baseClips,
-                baseClips.firstOrNull()?.startTimeMs ?: 0L,
+                globalZero,
                 withOverlays = true,
+                captionTimelineSegments = captionTimelineSegments,
             )
             if (any) listOf(seq.build()) else emptyList()
         }
@@ -771,10 +813,15 @@ object Exporter {
             // transform remains the only per-clip scale/pan/rotation.
             .setVideoCompositorSettings(ProjectVideoCompositorSettings(canvas))
         // Captions always composite over the FINAL project canvas so their offsets are measured against
-        // the project frame rather than a source item's aspect. In advanced mode matte/face overlays also
-        // belong here because they must sit above the fully composited track stack; in the simple path
-        // those remain item-timed while only captions are promoted to composition level.
-        compositionOverlaysFor(globalZero, includeMatteAndFace = advanced)?.let {
+        // the project frame rather than a source item's aspect. The simple path supplies the exact
+        // presentation→timeline segment map recorded while its sequence was built, preserving non-zero
+        // starts and REMOVE discontinuities. Advanced mode retains its shared common-zero timeline and
+        // also puts matte/face overlays here because they must sit above the fully composited track stack.
+        compositionOverlaysFor(
+            timelineStartMs = globalZero,
+            includeMatteAndFace = advanced,
+            captionTimelineSegments = if (advanced) emptyList() else captionTimelineSegments,
+        )?.let {
             composition.setEffects(Effects(emptyList(), listOf(it)))
         }
         return composition.build()
