@@ -15,6 +15,7 @@ import java.nio.file.StandardCopyOption
 object LearnedConceptStore {
     private const val FILE = "learned_concepts.json"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
+    private val lock = Any()
 
     fun load(context: Context): List<LearnedConcept> {
         val f = File(context.filesDir, FILE)
@@ -65,7 +66,7 @@ object LearnedConceptStore {
         terms: List<String>,
         isFace: Boolean,
         transform: (LearnedConcept) -> LearnedConcept,
-    ): LearnedConcept {
+    ): LearnedConcept = synchronized(lock) {
         val n = name.trim()
         val all = load(context).toMutableList()
         val idx = all.indexOfFirst { it.name.equals(n, ignoreCase = true) }
@@ -75,10 +76,10 @@ object LearnedConceptStore {
         )
         if (idx >= 0) all[idx] = updated else all.add(updated)
         save(context, all)
-        return updated
+        updated
     }
 
-    fun remove(context: Context, name: String) {
+    fun remove(context: Context, name: String) = synchronized(lock) {
         save(context, load(context).filterNot { it.name.equals(name.trim(), ignoreCase = true) })
     }
 }

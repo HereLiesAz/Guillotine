@@ -465,7 +465,7 @@ object DesktopExporter {
         transform.translate(cx, cy)
         transform.rotate(Math.toRadians(rotation.toDouble()))
         transform.translate(-drawW / 2, -drawH / 2)
-        transform.scale(fitScale * scale, fitScale * scale)
+        transform.scale(baseScale * scale, baseScale * scale)
 
         g.transform = transform
         g.drawImage(drawImg, 0, 0, null)

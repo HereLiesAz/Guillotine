@@ -112,7 +112,7 @@ object ModelDownloadManager {
      * Stop the in-flight download. The partial `.part` file is **kept** so a later [start] for the
      * same model resumes from where it left off (HTTP Range), rather than starting over.
      */
-    fun cancel() {
+    fun cancel() = synchronized(this) {
         job?.cancel()
         job = null
         // Only reset if a download is actually in flight — otherwise a cancel() racing a just-finished
@@ -122,7 +122,7 @@ object ModelDownloadManager {
 
     /** Start (or resume) downloading [model]; no-op if a download is already running or the model is gated. */
     fun start(context: Context, model: OnDeviceModel) {
-        if (job?.isActive == true) return
+        synchronized(this) { if (job?.isActive == true) return }
         val url = model.downloadUrl ?: run {
             val msg = "This model must be downloaded from Hugging Face."
             _state.value = DownloadState.Failed(model.id, msg)

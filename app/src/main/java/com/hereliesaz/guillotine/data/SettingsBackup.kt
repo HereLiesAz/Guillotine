@@ -91,8 +91,7 @@ object SettingsBackup {
         val text = context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
             ?: throw IllegalStateException("Could not read settings file.")
         val bundle = json.decodeFromString(SettingsBundle.serializer(), text)
-        UserToolStore.save(context, bundle.userTools)
-        return AiSettings(
+        val settings = AiSettings(
             provider = runCatching { AiProviderType.valueOf(bundle.provider) }
                 .getOrDefault(AiProviderType.MLKIT),
             keys = bundle.keys.mapNotNull { (k, v) ->
@@ -132,5 +131,7 @@ object SettingsBackup {
             stemModelPath = bundle.stemModelPath,
             denoiseModelPath = bundle.denoiseModelPath,
         )
+        UserToolStore.save(context, bundle.userTools)
+        return settings
     }
 }

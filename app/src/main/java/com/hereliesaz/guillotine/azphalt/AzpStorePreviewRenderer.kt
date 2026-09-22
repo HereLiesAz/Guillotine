@@ -38,7 +38,7 @@ object AzpStorePreviewRenderer {
     private val unavailable = HashSet<String>()
     private const val SAMPLE_MAX_PX = 128
 
-    private var sampleBitmap: Bitmap? = null
+    @Volatile private var sampleBitmap: Bitmap? = null
 
     suspend fun render(context: Context, entry: AzphaltRegistry.CatalogEntry): ImageBitmap? =
         withContext(Dispatchers.IO) {

@@ -36,11 +36,11 @@ object McpAuth {
     }
 
     /** Rotate the token (invalidates any tool still using the old one). Takes effect immediately. */
-    fun regenerate(context: Context): String {
+    fun regenerate(context: Context): String = synchronized(this) {
         val token = generate()
         prefs(context).edit().putString(KEY_TOKEN, token).apply()
         cached = token
-        return token
+        token
     }
 
     private fun generate(): String {

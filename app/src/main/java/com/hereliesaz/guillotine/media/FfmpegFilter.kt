@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import java.io.File
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
@@ -118,8 +119,14 @@ object FfmpegFilter {
         val out = File(outDir, "ff_${System.nanoTime()}.mp4")
         val cmd = buildList { add(ffmpegPath); add("-y"); addAll(args); add(out.absolutePath) }
         val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
-        val log = process.inputStream.bufferedReader().readText()
+        // Drain stdout on a background thread so waitFor's timeout can actually fire — readText()
+        // blocks until the stream closes, which only happens after the process exits; calling it
+        // before waitFor makes the timeout dead code.
+        val logFuture = CompletableFuture.supplyAsync {
+            process.inputStream.bufferedReader().readText()
+        }
         val finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES)
+        val log = runCatching { logFuture.get(1, TimeUnit.SECONDS) }.getOrDefault("")
         if (!finished) {
             process.destroyForcibly()
             throw IllegalStateException("ffmpeg timed out after $TIMEOUT_MINUTES min.")
