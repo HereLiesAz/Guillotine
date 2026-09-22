@@ -427,8 +427,9 @@ object Exporter {
      * at Composition level so their placement is project-canvas-relative. Project aspect is an output
      * canvas boundary; it is never applied as a per-clip transform. Per clip/item this bakes in: color filters,
      * the Crop-tool transform, keyframed opacity/scale (via [VideoEffects.keyframeEffects]),
-     * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
-     * (which stay in sync across 'remove' cuts via each item's timeline start).
+     * keyframed/static volume + pan + normalize, track opacity, and item-timed matte/face overlays
+     * (which stay in sync across 'remove' cuts via each item's timeline start). Captions are applied
+     * once at Composition level so their anchors are evaluated against the project canvas.
      *
      */
     private fun buildComposition(
