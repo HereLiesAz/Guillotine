@@ -123,7 +123,11 @@ object CrashReporter {
     /** An app can read its OWN process logs via logcat without special permission. */
     private fun readLogcat(): String = runCatching {
         val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "400"))
-        process.inputStream.bufferedReader().use(BufferedReader::readText).takeLast(20_000)
+        try {
+            process.inputStream.bufferedReader().use(BufferedReader::readText).takeLast(20_000)
+        } finally {
+            runCatching { process.destroy() }
+        }
     }.getOrDefault("(logcat unavailable)")
 
     /**

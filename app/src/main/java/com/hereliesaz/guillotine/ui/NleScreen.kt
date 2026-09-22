@@ -806,7 +806,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             // synthesizes an "original request + question + reply" continuation prompt so any
             // backend picks up where it left off without needing message-log state.
             onReply = { t ->
-                assistantVm.sendReply(t, sharedMcpTools, agentBackend)
+                assistantVm.sendReply(t, sharedMcpTools, currentAgentBackend)
             },
             onOpenAiSettings = { showAiSettings = true },
             onOpenSettings = { showSettings = true },
@@ -990,7 +990,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                             scope.launch { exportProgress = p } // hop to the main thread for Compose state
                             // ms is relative to the clamped (region) document when regionOnly — offset
                             // back to the full timeline so the live scrub indicator lands in the right place.
-                            vm.seekTo(ms + (region?.first ?: 0L))
+                            scope.launch { vm.seekTo(ms + (region?.first ?: 0L)) }
                             sink.report(p, "Exporting…")
                         },
                         onPhase = { phase ->
@@ -1084,7 +1084,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         OnboardingDialog(
             onComplete = { selectedModelPath ->
                 scope.launch {
-                    keyStore.save(settings)
+                    keyStore.save(settings.copy(asrModelPath = selectedModelPath))
                     keyStore.markOnboardingDone()
                 }
                 showOnboarding = false

@@ -91,12 +91,16 @@ class DesktopKeyStore {
             put("frame_analysis_cache_size", settings.frameAnalysisCacheSize)
         }
         val bytes = encrypt(json.toString())
-        // Same owner-only lockdown pattern as the password/token files below: make sure the file's
-        // permissions are restricted BEFORE the encrypted API keys land in it, not after.
         dataFile.parentFile?.mkdirs()
+        // Write to a temp file first, then atomically rename so a crash mid-write can't destroy
+        // settings.enc. Apply owner-only permissions before either file holds the ciphertext.
+        val tmp = File(dataFile.parentFile, "${dataFile.name}.tmp")
+        if (!tmp.exists()) runCatching { tmp.writeBytes(ByteArray(0)) }
+        lockDownFile(tmp)
+        tmp.writeBytes(bytes)
         if (!dataFile.exists()) runCatching { dataFile.writeBytes(ByteArray(0)) }
         lockDownFile(dataFile)
-        dataFile.writeBytes(bytes)
+        java.nio.file.Files.move(tmp.toPath(), dataFile.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
     }
 
     private fun encrypt(plaintext: String): ByteArray {

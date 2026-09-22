@@ -18,6 +18,7 @@ data class UserTool(
 object UserToolStore {
     private const val FILE = "user_tools.json"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
+    private val lock = Any()
 
     fun load(context: Context): List<UserTool> {
         val f = File(context.filesDir, FILE)
@@ -39,12 +40,12 @@ object UserToolStore {
         }
     }
 
-    fun add(context: Context, tool: UserTool) {
+    fun add(context: Context, tool: UserTool) = synchronized(lock) {
         val current = load(context).filter { it.name != tool.name }
         save(context, current + tool)
     }
 
-    fun remove(context: Context, name: String) {
+    fun remove(context: Context, name: String) = synchronized(lock) {
         save(context, load(context).filter { it.name != name })
     }
 

@@ -27,11 +27,14 @@ object SherpaAsr {
         val recognizer = buildRecognizer(modelDir)
         return try {
             val stream = recognizer.createStream()
-            stream.acceptWaveform(pcm16k, 16000)
-            recognizer.decode(stream)
-            val res = recognizer.getResult(stream)
-            stream.release()
-            buildWords(res.tokens, res.timestamps)
+            try {
+                stream.acceptWaveform(pcm16k, 16000)
+                recognizer.decode(stream)
+                val res = recognizer.getResult(stream)
+                buildWords(res.tokens, res.timestamps)
+            } finally {
+                stream.release()
+            }
         } finally {
             recognizer.release()
         }
@@ -70,11 +73,13 @@ object SherpaAsr {
         val recognizer = buildRecognizer(modelDir)
         return try {
             val stream = recognizer.createStream()
-            stream.acceptWaveform(pcm16k, 16000)
-            recognizer.decode(stream)
-            val text = recognizer.getResult(stream).text
-            stream.release()
-            text
+            try {
+                stream.acceptWaveform(pcm16k, 16000)
+                recognizer.decode(stream)
+                recognizer.getResult(stream).text
+            } finally {
+                stream.release()
+            }
         } finally {
             recognizer.release()
         }

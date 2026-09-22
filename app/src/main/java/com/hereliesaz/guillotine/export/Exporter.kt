@@ -201,9 +201,11 @@ object Exporter {
             // The encode runs on Main (Transformer requires it), but copying the finished MP4 into
             // the gallery is blocking file I/O — do it off the main thread so a large export can't ANR.
             withContext(Dispatchers.IO) {
-                val u = saveToGallery(context, outFile, outputName)
-                outFile.delete()
-                u
+                try {
+                    saveToGallery(context, outFile, outputName)
+                } finally {
+                    outFile.delete()
+                }
             }
         } finally {
             // Free the precomputed matte bitmaps once the encode is done (or it failed/cancelled).
@@ -286,42 +288,47 @@ object Exporter {
                 context.cacheDir,
                 "guillotine_preview_${System.currentTimeMillis()}.mp4",
             )
-            coroutineScope {
-                var poller: Job? = null
-                try {
-                    suspendCancellableCoroutine { cont ->
-                        val builder = Transformer.Builder(context)
-                            .setVideoMimeType(MimeTypes.VIDEO_H264)
-                        if (hasAudio) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
-                        val transformer = builder
-                            .addListener(object : Transformer.Listener {
-                                override fun onCompleted(c: Composition, result: ExportResult) {
-                                    if (cont.isActive) cont.resume(Unit)
-                                }
+            try {
+                coroutineScope {
+                    var poller: Job? = null
+                    try {
+                        suspendCancellableCoroutine<Unit> { cont ->
+                            val builder = Transformer.Builder(context)
+                                .setVideoMimeType(MimeTypes.VIDEO_H264)
+                            if (hasAudio) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
+                            val transformer = builder
+                                .addListener(object : Transformer.Listener {
+                                    override fun onCompleted(c: Composition, result: ExportResult) {
+                                        if (cont.isActive) cont.resume(Unit)
+                                    }
 
-                                override fun onError(c: Composition, result: ExportResult, e: ExportException) {
-                                    if (cont.isActive) cont.resumeWithException(e)
-                                }
-                            })
-                            .build()
+                                    override fun onError(c: Composition, result: ExportResult, e: ExportException) {
+                                        if (cont.isActive) cont.resumeWithException(e)
+                                    }
+                                })
+                                .build()
 
-                        poller = launch {
-                            val holder = ProgressHolder()
-                            while (isActive) {
-                                transformer.getProgress(holder)
-                                onProgress((holder.progress / 100f).coerceIn(0f, 1f))
-                                delay(150)
+                            poller = launch {
+                                val holder = ProgressHolder()
+                                while (isActive) {
+                                    transformer.getProgress(holder)
+                                    onProgress((holder.progress / 100f).coerceIn(0f, 1f))
+                                    delay(150)
+                                }
                             }
+                            cont.invokeOnCancellation {
+                                runCatching { transformer.cancel() }
+                                runCatching { outFile.delete() }
+                            }
+                            transformer.start(composition, outFile.absolutePath)
                         }
-                        cont.invokeOnCancellation {
-                            runCatching { transformer.cancel() }
-                            runCatching { outFile.delete() }
-                        }
-                        transformer.start(composition, outFile.absolutePath)
+                    } finally {
+                        poller?.cancel()
                     }
-                } finally {
-                    poller?.cancel()
                 }
+            } catch (e: Exception) {
+                runCatching { outFile.delete() }
+                throw e
             }
             onProgress(1f)
             outFile
