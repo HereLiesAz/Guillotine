@@ -38,7 +38,7 @@ object AzpStorePreviewRenderer {
     private val unavailable = HashSet<String>()
     private const val SAMPLE_MAX_PX = 128
 
-    @Volatile private var sampleBitmap: Bitmap? = null
+    private var sampleBitmap: Bitmap? = null
 
     suspend fun render(context: Context, entry: AzphaltRegistry.CatalogEntry): ImageBitmap? =
         withContext(Dispatchers.IO) {
@@ -76,7 +76,7 @@ object AzpStorePreviewRenderer {
     }
 
     /** The bundled app icon, downscaled once — the "project thumbnail" every preview renders onto. */
-    private fun sample(context: Context): Bitmap? {
+    @Synchronized private fun sample(context: Context): Bitmap? {
         sampleBitmap?.let { return it }
         return runCatching {
             val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
