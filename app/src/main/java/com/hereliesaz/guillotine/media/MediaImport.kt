@@ -64,13 +64,13 @@ object MediaImport {
                 if (hasVideo) {
                     val rawW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
                     val rawH = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-                    // WIDTH is width and HEIGHT is height. Do not swap them using the rotation
-                    // metadata here: MediaMetadataRetriever already reports the source dimensions we
-                    // use as the project's ORIGINAL canvas, and swapping a second time turns portrait
-                    // footage landscape (and vice versa).
+                    val rotation = retriever
+                        .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                        ?.toIntOrNull() ?: 0
                     if (rawW != null && rawH != null && rawW > 0 && rawH > 0) {
-                        widthPx = rawW
-                        heightPx = rawH
+                        val display = displayDimensions(rawW, rawH, rotation)
+                        widthPx = display.first
+                        heightPx = display.second
                     }
                 }
             } catch (e: Exception) {
@@ -119,8 +119,8 @@ object MediaImport {
     /**
      * Re-probe only the stored visual dimensions of an existing project item.
      *
-     * Older Guillotine builds manually swapped VIDEO_WIDTH/VIDEO_HEIGHT when rotation metadata was
-     * 90/270 degrees, so autosaved/project-file MediaItems can carry transposed dimensions forever.
+     * Re-probes the source and stores display-oriented dimensions (including the source rotation)
+     * so autosaved/project-file MediaItems cannot keep stale or encoded-orientation dimensions.
      * Loading a project runs this once and repairs those stale values from the source URI. Failures
      * are non-destructive: keep the dimensions already stored in the project.
      */
@@ -142,7 +142,10 @@ object MediaImport {
                 retriever.setDataSource(context, uri)
                 val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
                 val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-                if (w != null && h != null && w > 0 && h > 0) w to h else null
+                val rotation = retriever
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                    ?.toIntOrNull() ?: 0
+                if (w != null && h != null && w > 0 && h > 0) displayDimensions(w, h, rotation) else null
             } catch (_: Exception) {
                 null
             } finally {
@@ -152,6 +155,17 @@ object MediaImport {
 
         val (w, h) = size ?: return item
         return if (item.widthPx == w && item.heightPx == h) item else item.copy(widthPx = w, heightPx = h)
+    }
+
+    /**
+     * Convert encoded video dimensions to the dimensions the user actually sees. Width/height
+     * metadata describes the encoded frame; a 90/270-degree rotation turns those axes on display.
+     * Apply that rotation exactly once here so every caller stores display width as width and display
+     * height as height.
+     */
+    private fun displayDimensions(width: Int, height: Int, rotationDegrees: Int): Pair<Int, Int> {
+        val rotation = ((rotationDegrees % 360) + 360) % 360
+        return if (rotation == 90 || rotation == 270) height to width else width to height
     }
 
     private fun queryDisplayName(context: Context, uri: Uri): String? {

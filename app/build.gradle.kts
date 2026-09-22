@@ -244,7 +244,11 @@ dependencies {
     implementation(libs.tensorflow.lite)
     // Declared BEFORE sherpa-onnx so its libonnxruntime.so (newer) wins the jniLibs pickFirst.
     implementation(libs.onnxruntime.android)
-    implementation(libs.sherpa.onnx)
+    implementation(libs.sherpa.onnx) {
+        // The Android AAR already contains the com.k2fsa.sherpa.onnx classes. Its published POM also
+        // pulls the JVM jar, which contains the same classes and makes AGP's duplicate-class check fail.
+        exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
+    }
     implementation(libs.commons.compress)
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)

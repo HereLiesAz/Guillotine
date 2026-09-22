@@ -430,11 +430,13 @@ object Exporter {
      * by ramping the incoming clip in over a held outgoing clip (via [VideoEffects.fadeIn]), and draws
      * the **background-removal subjects + captions over the final composite** as Composition-level
      * overlays (so a bg-removed clip on an upper track shows lower tracks through its matte). Otherwise a
-     * single flattened sequence + per-item matte/caption overlay is used. Project aspect is an output
+     * single flattened sequence + per-item matte/face overlay is used; captions are always applied
+     * at Composition level so their placement is project-canvas-relative. Project aspect is an output
      * canvas boundary; it is never applied as a per-clip transform. Per clip/item this bakes in: color filters,
      * the Crop-tool transform, keyframed opacity/scale (via [VideoEffects.keyframeEffects]),
-     * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
-     * (which stay in sync across 'remove' cuts via each item's timeline start).
+     * keyframed/static volume + pan + normalize, track opacity, and item-timed matte/face overlays
+     * (which stay in sync across 'remove' cuts via each item's timeline start). Captions are applied
+     * once at Composition level so their anchors are evaluated against the project canvas.
      *
      */
     private fun buildComposition(
@@ -468,12 +470,24 @@ object Exporter {
         // overlay's own reference height, i.e. no scaling) for a genuinely undecodable/unprobed clip.
         val refHeightPx = canvas.height
 
-        // Overlays (matte + captions) are attached to EVERY base item with that item's timeline
-        // start, so they stay aligned even after 'remove' ranges are physically cut.
-        fun overlaysFor(timelineStartMs: Long): OverlayEffect? {
+        // Matte/face overlays are item-timed because remove ranges physically split source items.
+        // Captions deliberately are NOT attached here: per-item caption anchors are evaluated in the
+        // source-shaped item frame, so they move incorrectly when project and source aspects differ.
+        // Captions are added once at Composition level below, where anchors use the project canvas.
+        fun itemOverlaysFor(timelineStartMs: Long): OverlayEffect? {
             val list = mutableListOf<TextureOverlay>()
             if (hasMatte) list += MatteOverlay(mattes, timelineStartMs)
             if (faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
+            return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
+        }
+
+        fun compositionOverlaysFor(
+            timelineStartMs: Long,
+            includeMatteAndFace: Boolean,
+        ): OverlayEffect? {
+            val list = mutableListOf<TextureOverlay>()
+            if (includeMatteAndFace && hasMatte) list += MatteOverlay(mattes, timelineStartMs)
+            if (includeMatteAndFace && faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
             textClips.forEach { list += CaptionOverlay(it, timelineStartMs, refHeightPx) }
             return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
         }
@@ -507,7 +521,12 @@ object Exporter {
             // Keyframe-aware color + crop/placement transform + opacity (animated when keyframed, static
             // otherwise). clipLocalStartMs maps the item's presentationTime to clip-relative time.
             val color = VideoEffects.colorEffects(clip, clipLocalStartMs)
-            val transform = VideoEffects.transformEffects(clip, clipLocalStartMs)
+            val sourceAspect = document.mediaFor(clip)?.aspectRatioValue
+                ?.toFloat()
+                ?.takeIf { it > 0f }
+                ?: canvas.aspectRatio
+            val offsetXScale = canvas.aspectRatio / sourceAspect
+            val transform = VideoEffects.transformEffects(clip, clipLocalStartMs, offsetXScale)
             val opacity = VideoEffects.opacityEffects(clip, clipLocalStartMs)
             // Frame decimation (frameStep): drop frames to fps/step up front so the rest of the pipeline
             // processes fewer frames. Kept frames keep their timestamps, so the presentationTime-driven
@@ -515,7 +534,7 @@ object Exporter {
             val decimate = VideoEffects.frameDrop(clip.filters.frameStep, document.settings.fps.toFloat())
             // Crossfade ramp: the incoming clip fades 0→1 across its overlap with the held outgoing clip.
             val fadeFx = fade?.let { listOf(VideoEffects.fadeIn(timelineStartMs, it.first, it.last)) } ?: emptyList()
-            val overlay = if (withOverlays) listOfNotNull(overlaysFor(timelineStartMs)) else emptyList()
+            val overlay = if (withOverlays) listOfNotNull(itemOverlaysFor(timelineStartMs)) else emptyList()
             return Effects(
                 audioFor(clip, clipLocalStartMs),
                 decimate + color + transform + opacity + fadeFx + geometry + overlay + alpha,
@@ -751,12 +770,12 @@ object Exporter {
             // settings keep every sequence centered at its own geometry; the user's Crop-tool
             // transform remains the only per-clip scale/pan/rotation.
             .setVideoCompositorSettings(ProjectVideoCompositorSettings(canvas))
-        // Advanced path: the background-removal subjects (matte) + captions composite over the FINAL
-        // stacked video, so a bg-removed clip on an upper track shows the lower tracks through its matte,
-        // and overlays sit on top of every layer and survive gaps in any one track/lane. (The simple
-        // path keeps its per-item overlays.)
-        if (advanced) {
-            overlaysFor(globalZero)?.let { composition.setEffects(Effects(emptyList(), listOf(it))) }
+        // Captions always composite over the FINAL project canvas so their offsets are measured against
+        // the project frame rather than a source item's aspect. In advanced mode matte/face overlays also
+        // belong here because they must sit above the fully composited track stack; in the simple path
+        // those remain item-timed while only captions are promoted to composition level.
+        compositionOverlaysFor(globalZero, includeMatteAndFace = advanced)?.let {
+            composition.setEffects(Effects(emptyList(), listOf(it)))
         }
         return composition.build()
     }
