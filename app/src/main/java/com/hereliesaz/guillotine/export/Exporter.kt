@@ -474,7 +474,20 @@ object Exporter {
             val list = mutableListOf<TextureOverlay>()
             if (hasMatte) list += MatteOverlay(mattes, timelineStartMs)
             if (faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
-            textClips.forEach { list += CaptionOverlay(it, timelineStartMs, refHeightPx) }
+            return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
+        }
+
+        fun compositionOverlaysFor(
+            timelineStartMs: Long,
+            includeMatteAndFace: Boolean,
+        ): OverlayEffect? {
+            val list = mutableListOf<TextureOverlay>()
+            if (includeMatteAndFace && hasMatte) list += MatteOverlay(mattes, timelineStartMs)
+            if (includeMatteAndFace && faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
+            textClips.forEach {
+                val ts = document.trackSettingsFor(it.trackId)
+                list += CaptionOverlay(it, timelineStartMs, refHeightPx, ts.opacity)
+            }
             return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
         }
 
@@ -603,11 +616,10 @@ object Exporter {
         val advanced = bgTracks.size >= 2 || sameTrackOverlap
         // Common zero across every composited clip (incl. foreground, whose matte overlay is timed
         // against it): composition time 0 == this timeline instant.
-        val globalZero = if (advanced) {
-            videoClips.filter { document.mediaFor(it) != null }.minOf { it.startTimeMs }
-        } else {
-            0L
-        }
+        // Composition presentationTimeUs=0 maps to this timeline instant for all overlays (captions,
+        // mattes). In the non-advanced path the sequence also starts here (first clip's startTimeMs),
+        // so captions time correctly in both modes with the same reference point.
+        val globalZero = videoClips.filter { document.mediaFor(it) != null }.minOfOrNull { it.startTimeMs } ?: 0L
 
         // Whether the composition has any real audio source. Video sequences declare an AUDIO
         // trackType only when this is true — otherwise Media3 would synthesise a silent audio
@@ -751,12 +763,12 @@ object Exporter {
             // settings keep every sequence centered at its own geometry; the user's Crop-tool
             // transform remains the only per-clip scale/pan/rotation.
             .setVideoCompositorSettings(ProjectVideoCompositorSettings(canvas))
-        // Advanced path: the background-removal subjects (matte) + captions composite over the FINAL
-        // stacked video, so a bg-removed clip on an upper track shows the lower tracks through its matte,
-        // and overlays sit on top of every layer and survive gaps in any one track/lane. (The simple
-        // path keeps its per-item overlays.)
-        if (advanced) {
-            overlaysFor(globalZero)?.let { composition.setEffects(Effects(emptyList(), listOf(it))) }
+        // Captions always composite over the FINAL project canvas so their offsets are measured against
+        // the project frame rather than a source item's aspect. In advanced mode matte/face overlays also
+        // belong here because they must sit above the fully composited track stack; in the simple path
+        // those remain item-timed while only captions are promoted to composition level.
+        compositionOverlaysFor(globalZero, includeMatteAndFace = advanced)?.let {
+            composition.setEffects(Effects(emptyList(), listOf(it)))
         }
         return composition.build()
     }

@@ -44,16 +44,19 @@ class CaptionOverlay(
      * source. See [Exporter]'s call site for how this is resolved.
      */
     refHeightPx: Int,
+    /** Track-level opacity multiplier (from [TrackSettings.opacity]); multiplied into per-frame alpha. */
+    private val trackOpacity: Float = 1f,
 ) : TextOverlay() {
 
     private val empty = SpannableString("")
     private val sizePx = (REFERENCE_SIZE_PX * refHeightPx / REFERENCE_HEIGHT_PX.toFloat()).roundToInt().coerceAtLeast(1)
+    private val staticAlpha = (trackOpacity.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)
     private val styled = SpannableString(clip.text).apply {
         if (isNotEmpty()) {
             // Transparent glyphs only — no baked-in background. Matches the preview (PreviewPlayer's
             // VideoSlot ClipType.TEXT branch), keeping export WYSIWYG. A background, if wanted, is a
             // separate shape-layer clip stacked underneath, not something this overlay bakes in itself.
-            setSpan(ForegroundColorSpan(Color.WHITE), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+            setSpan(ForegroundColorSpan(Color.argb(staticAlpha, 255, 255, 255)), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             setSpan(AbsoluteSizeSpan(sizePx), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             setSpan(TypefaceSpan(typefaceName(clip.font)), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
         }
@@ -83,11 +86,11 @@ class CaptionOverlay(
         if (!hasKeyframes) return styled
 
         val relMs = (t - clip.startTimeMs).coerceIn(0, clip.durationMs)
-        val opacity = TimelineMath.interpolateSorted(opKfs, relMs, 1f)
+        val opacity = TimelineMath.interpolateSorted(opKfs, relMs, 1f) * trackOpacity
         if (opacity <= 0.01f) return empty
 
-        // Rebuild with alpha when opacity is keyframed
-        if (opKfs.isNotEmpty()) {
+        // Rebuild with alpha when opacity is keyframed or track opacity is non-default
+        if (opKfs.isNotEmpty() || trackOpacity < 1f) {
             val alpha = (opacity * 255).toInt().coerceIn(0, 255)
             val s = SpannableString(clip.text)
             s.setSpan(ForegroundColorSpan(Color.argb(alpha, 255, 255, 255)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
