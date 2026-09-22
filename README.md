@@ -151,4 +151,4 @@ Alongside the license, the project keeps a **non-binding, good-faith companion**
 [Open-Source Open-Mind covenant](docs/OPEN-SOURCE-OPEN-MIND.md). It's not a condition of anything; it just
 asks that the real author's statement, if one is ever sent, be heard once. *Be OSOM to each other.*
 
-<!-- ci: retrigger after AAB-upload timeout fix (workflows PR #50) -->
+<!-- ci: retrigger per user request to reconfirm identity check + publish -->
