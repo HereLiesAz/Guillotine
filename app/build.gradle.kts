@@ -41,6 +41,19 @@ android {
             useSupportLibrary = true
         }
 
+        // litert-lm-android (the on-device LLM brain runtime) ships native libraries for
+        // arm64-v8a and x86_64 only — no armeabi-v7a, no x86. Verified by downloading
+        // litertlm-android-0.17.1.aar from Google's Maven and inspecting its jni/ subdirectories;
+        // every OTHER native dependency here (mediapipe-tasks-genai, onnxruntime-android, ...)
+        // covers all four ABIs. Without this filter, the AAB's armeabi-v7a/x86 splits bundle
+        // litert-lm's Kotlin/Java classes but not its native code, and Google Play refuses to
+        // roll out the release ("does not allow any existing users to upgrade to the newly added
+        // APKs") because it can't guarantee those splits still function. Restrict the whole app
+        // to the two ABIs the on-device LLM brain actually supports.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+
         // Crash auto-reporting: CrashUploadWorker files a GitHub issue containing the crash log, using
         // this token. It is read at BUILD time from the GH_TOKEN env var (the same one
         // settings.gradle.kts uses for the GitHub Packages maven repo), with a gradle-property
@@ -283,5 +296,4 @@ androidComponents {
         variant.sources.assets?.addGeneratedSourceDirectory(copyHelpDocs, CopyHelpDocsTask::outputDir)
     }
 }
-
 
