@@ -1,0 +1,75 @@
+# centralized-by: HereLiesAz/workflows
+# central-source-path: .github/workflows/release-aab.yml
+# central-source-sha256: 09adb91f6846d345ebb261ae428ad9412bfbfac6fe1d1192a726b84546b46928
+# central-run-tracker: HereLiesAz/workflows
+# The actual build and Play publish run centrally. This workflow exists so
+# Guillotine keeps a visible Actions run and manual Run workflow entry.
+name: Release AAB to Play
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - version.properties
+  workflow_dispatch:
+    inputs:
+      publish:
+        default: true
+        description: "Push the AAB to Play (false = build only)"
+
+permissions:
+  actions: read
+  contents: read
+  statuses: read
+
+jobs:
+  central-status:
+    name: Track centralized run
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Mirror centralized workflow status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_CONTEXT: .github/workflows/release-aab.yml
+          TARGET_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          created_at="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)"
+          threshold="$(date -u -d "$created_at - 5 seconds" +%s)"
+          last_state=""
+
+          for attempt in $(seq 1 720); do
+            statuses="$(gh api "repos/$GITHUB_REPOSITORY/statuses/$TARGET_SHA?per_page=100")"
+            row="$(jq -c \
+              --arg context "$STATUS_CONTEXT" \
+              --argjson threshold "$threshold" \
+              '[.[] | select(.context == $context and ((.updated_at | fromdateiso8601) >= $threshold))][0] // empty' \
+              <<<"$statuses")"
+
+            if [[ -n "$row" ]]; then
+              state="$(jq -r '.state' <<<"$row")"
+              target_url="$(jq -r '.target_url // empty' <<<"$row")"
+              if [[ "$state" != "$last_state" ]]; then
+                echo "Central workflow state: $state"
+                [[ -z "$target_url" ]] || echo "Central run: $target_url"
+                last_state="$state"
+              fi
+
+              case "$state" in
+                success)
+                  exit 0
+                  ;;
+                failure|error)
+                  exit 1
+                  ;;
+              esac
+            fi
+
+            sleep 15
+          done
+
+          echo "::error::Timed out waiting for centralized workflow status $STATUS_CONTEXT on $TARGET_SHA" >&2
+          exit 1
