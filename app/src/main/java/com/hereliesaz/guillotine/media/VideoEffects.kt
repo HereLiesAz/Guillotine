@@ -120,7 +120,13 @@ object VideoEffects {
      * the rotation is negated; NDC spans [-1, 1] (full edge = 2) and screen-Y is down while NDC-Y is
      * up, so the Y offset is inverted.
      */
-    fun transform(scale: Float, rotationDeg: Float, offsetX: Float, offsetY: Float): List<Effect> {
+    fun transform(
+        scale: Float,
+        rotationDeg: Float,
+        offsetX: Float,
+        offsetY: Float,
+        offsetXScale: Float = 1f,
+    ): List<Effect> {
         val effects = mutableListOf<Effect>()
         val s = scale.coerceAtLeast(0f)
         if (s != 1f || rotationDeg != 0f) {
@@ -132,7 +138,9 @@ object VideoEffects {
         if (offsetX != 0f || offsetY != 0f) {
             // The translation is static for the clip, so build the Matrix once and reuse it —
             // the lambda is called per frame, so allocating there would churn the GC.
-            val matrix = android.graphics.Matrix().apply { setTranslate(offsetX * 2f, -offsetY * 2f) }
+            val matrix = android.graphics.Matrix().apply {
+                setTranslate(offsetX * 2f * offsetXScale, -offsetY * 2f)
+            }
             effects += MatrixTransformation { _ -> matrix }
         }
         return effects
@@ -152,12 +160,16 @@ object VideoEffects {
             build(clip.filters)
         }
 
-    /** Per-frame crop/placement transform when keyframed (SCALE/ROTATION/OFFSET_X/OFFSET_Y), else static. */
-    fun transformEffects(clip: TimelineClip, startMs: Long): List<Effect> =
+    /**
+     * Per-frame crop/placement transform when keyframed (SCALE/ROTATION/OFFSET_X/OFFSET_Y), else
+     * static. [offsetXScale] converts the model's project-canvas-relative horizontal offset into the
+     * source-shaped item's NDC space (canvasWidth / sourceLayerWidth).
+     */
+    fun transformEffects(clip: TimelineClip, startMs: Long, offsetXScale: Float = 1f): List<Effect> =
         if (clip.keyframes.any { it.property in KeyframeProperty.TRANSFORM }) {
-            listOf(KeyframeTransform(clip, startMs))
+            listOf(KeyframeTransform(clip, startMs, offsetXScale))
         } else {
-            transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY)
+            transform(clip.scale, clip.rotation, clip.offsetX, clip.offsetY, offsetXScale)
         }
 
     /** Per-frame alpha when opacity is keyframed (track/clip-level opacity is applied separately). */
@@ -223,7 +235,11 @@ object VideoEffects {
      * We capture the frame aspect in [configure] and wrap the rotation in an aspect normalize/denormalize
      * (x·a → rotate → x/a) so export rotation matches preview's aspect-correct `graphicsLayer`.
      */
-    private class KeyframeTransform(private val clip: TimelineClip, private val startMs: Long) : MatrixTransformation {
+    private class KeyframeTransform(
+        private val clip: TimelineClip,
+        private val startMs: Long,
+        private val offsetXScale: Float,
+    ) : MatrixTransformation {
         private val m = android.graphics.Matrix()
         private var aspect = 1f // width / height of the input frame, set in configure()
         // Pre-filtered/sorted once so getMatrix (per frame) stays allocation-free.
@@ -252,7 +268,7 @@ object VideoEffects {
             m.postScale(1f / aspect, 1f)
             m.postRotate(-rot)  // Compose CW vs Media3 CCW
             m.postScale(aspect, 1f)
-            m.postTranslate(ox * 2f, -oy * 2f)
+            m.postTranslate(ox * 2f * offsetXScale, -oy * 2f)
             return m
         }
     }
