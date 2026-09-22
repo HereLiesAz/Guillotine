@@ -16,15 +16,19 @@ import com.google.mlkit.vision.face.FaceDetectorOptions
  */
 object FaceEmbed {
 
-    private fun detector() = FaceDetection.getClient(
-        FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-            .build(),
-    )
+    private fun detector() = try {
+        FaceDetection.getClient(
+            FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .build(),
+        )
+    } catch (_: Exception) {
+        null
+    }
 
     /** Crops of every detected face in [frame], largest first. Empty if none / detection fails. */
     fun detectFaces(context: Context, frame: Bitmap): List<Bitmap> {
-        val d = detector()
+        val d = detector() ?: return emptyList()
         return try {
             Tasks.await(d.process(InputImage.fromBitmap(frame, 0)))
                 .sortedByDescending { it.boundingBox.width() * it.boundingBox.height() }
@@ -41,7 +45,7 @@ object FaceEmbed {
      * Used by auto-reframe to pan the crop so the subject stays centered.
      */
     fun largestFaceCenterX(context: Context, frame: Bitmap): Float? {
-        val d = detector()
+        val d = detector() ?: return null
         return try {
             Tasks.await(d.process(InputImage.fromBitmap(frame, 0)))
                 .maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
@@ -55,7 +59,7 @@ object FaceEmbed {
 
     /** Cheap check: is there at least one face in [frame]? Used to route a concept to the face path. */
     fun hasFace(context: Context, frame: Bitmap): Boolean {
-        val d = detector()
+        val d = detector() ?: return false
         return try {
             Tasks.await(d.process(InputImage.fromBitmap(frame, 0))).isNotEmpty()
         } catch (_: Exception) {
