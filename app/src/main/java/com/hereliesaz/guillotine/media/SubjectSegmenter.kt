@@ -33,11 +33,21 @@ object SubjectSegmenter {
      */
     fun cutoutBlocking(context: Context, uri: String, kind: MediaKind, atMs: Long): Bitmap? {
         val frame = grabFrame(context, uri, kind, atMs) ?: return null
-        val segmenter = Segmentation.getClient(
-            SelfieSegmenterOptions.Builder()
-                .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
-                .build(),
-        )
+        // Segmentation.getClient() can throw NullPointerException on SDK 28 devices when ML Kit's
+        // MlKitInitProvider ContentProvider hasn't completed initialization before this background
+        // thread reaches it (seen in Play Console vitals, Nokia 6 / Android 9). Wrapping the whole
+        // block catches both the NPE from getClient and any processing error, so a segmentation
+        // failure degrades gracefully instead of crashing the export.
+        val segmenter = try {
+            Segmentation.getClient(
+                SelfieSegmenterOptions.Builder()
+                    .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                    .build(),
+            )
+        } catch (_: Exception) {
+            frame.recycle()
+            return null
+        }
         return try {
             val mask = Tasks.await(segmenter.process(InputImage.fromBitmap(frame, 0)))
             applyMask(frame, mask)

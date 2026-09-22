@@ -40,11 +40,18 @@ object FaceBlurrer {
     /** Blocking variant for the export precompute / render threads. */
     fun blurOverlayBlocking(context: Context, uri: String, kind: MediaKind, atMs: Long): Bitmap? {
         val frame = grabFrame(context, uri, kind, atMs) ?: return null
-        val detector = FaceDetection.getClient(
-            FaceDetectorOptions.Builder()
-                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                .build(),
-        )
+        // FaceDetection.getClient() can NPE on background threads before MlKitInitProvider
+        // completes — same pattern as SubjectSegmenter. Guard it and degrade gracefully.
+        val detector = try {
+            FaceDetection.getClient(
+                FaceDetectorOptions.Builder()
+                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                    .build(),
+            )
+        } catch (_: Exception) {
+            frame.recycle()
+            return null
+        }
         return try {
             val faces = Tasks.await(detector.process(InputImage.fromBitmap(frame, 0)))
             if (faces.isEmpty()) return null
