@@ -437,10 +437,9 @@ class OnDeviceAgentBackend(
         if (isLiteRtLmModel) {
             LiteRtLmTextEngine.generate(context, modelPath, prompt)
         } else {
-            EngineCache.get(context, modelPath, wantVision = visionEngaged)
-                .generateResponse(prompt)
-                .orEmpty()
-                .trim()
+            // EngineCache.generate holds the lock for the full native call so no concurrent
+            // close() can race with nativePredictSync (the source of the native crash).
+            EngineCache.generate(context, modelPath, wantVision = visionEngaged, prompt = prompt)
         }
 
     private fun lookAtFrame(prompt: String): Pair<String, Boolean> {
@@ -455,9 +454,10 @@ class OnDeviceAgentBackend(
             ?: return "There's no video frame under the playhead to look at — scrub onto a video clip first." to true
         val question = prompt.ifBlank { "Describe what is happening in this frame in detail." }
         return try {
-            val llm = EngineCache.get(context, modelPath, wantVision = true)
             visionEngaged = true
-            generateVision(llm, question, frame).ifBlank { "The frame looks empty or couldn't be described." } to false
+            // Lock spans get + session create + nativePredictSync so no close() can intervene.
+            EngineCache.generateVision(context, modelPath, question, frame)
+                .ifBlank { "The frame looks empty or couldn't be described." } to false
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -467,26 +467,6 @@ class OnDeviceAgentBackend(
             "This on-device model can't view images directly. Use caption_frame (a separate vision model set in Settings) to describe the frame instead." to true
         } finally {
             runCatching { frame.recycle() }
-        }
-    }
-
-    private fun generateVision(llm: LlmInference, prompt: String, frame: Bitmap): String {
-        val session = LlmInferenceSession.createFromOptions(
-            llm,
-            LlmInferenceSession.LlmInferenceSessionOptions.builder()
-                .setTopK(10)
-                .setTemperature(0.4f)
-                .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
-                .build(),
-        )
-        val mpImage = BitmapImageBuilder(frame).build()
-        return try {
-            session.addQueryChunk(prompt)
-            session.addImage(mpImage)
-            session.generateResponse().orEmpty().trim()
-        } finally {
-            runCatching { mpImage.close() }
-            runCatching { session.close() }
         }
     }
 
@@ -536,6 +516,34 @@ class OnDeviceAgentBackend(
             path = modelPath
             vision = wantVision
             return instance!!
+        }
+
+        // Lock spans the full get + nativePredictSync so close() cannot race with an active
+        // native prediction call (LlmInferenceEngine_CloseResponseContext crash).
+        @Synchronized
+        fun generate(context: Context, modelPath: String, wantVision: Boolean, prompt: String): String =
+            get(context, modelPath, wantVision).generateResponse(prompt).orEmpty().trim()
+
+        @Synchronized
+        fun generateVision(context: Context, modelPath: String, prompt: String, frame: Bitmap): String {
+            val llm = get(context, modelPath, wantVision = true)
+            val session = LlmInferenceSession.createFromOptions(
+                llm,
+                LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                    .setTopK(10)
+                    .setTemperature(0.4f)
+                    .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
+                    .build(),
+            )
+            val mpImage = BitmapImageBuilder(frame).build()
+            return try {
+                session.addQueryChunk(prompt)
+                session.addImage(mpImage)
+                session.generateResponse().orEmpty().trim()
+            } finally {
+                runCatching { mpImage.close() }
+                runCatching { session.close() }
+            }
         }
     }
 
