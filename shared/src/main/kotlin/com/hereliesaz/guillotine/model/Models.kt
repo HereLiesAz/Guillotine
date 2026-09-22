@@ -440,18 +440,28 @@ data class Document(
         val ref = referenceVisualMedia()
         val sourceW = ref?.widthPx?.takeIf { it > 0 } ?: 1920
         val sourceH = ref?.heightPx?.takeIf { it > 0 } ?: 1080
-        val targetH = settings.quality.targetHeight ?: sourceH
+        // ORIGINAL + ORIGINAL is a fidelity promise: keep the imported display dimensions exactly.
+        // Derived/export-oriented sizes, however, must be encoder-safe. YUV420/H.264 commonly requires
+        // even chroma dimensions, so round only derived dimensions up to the next even pixel.
+        if (settings.aspectRatio == AspectRatio.ORIGINAL && settings.quality == Quality.ORIGINAL) {
+            return ProjectCanvasSize(sourceW, sourceH)
+        }
 
+        fun even(value: Int): Int {
+            val v = value.coerceAtLeast(2)
+            return if (v % 2 == 0) v else v + 1
+        }
+
+        val targetH = even(settings.quality.targetHeight ?: sourceH)
         if (settings.aspectRatio == AspectRatio.ORIGINAL) {
-            if (settings.quality == Quality.ORIGINAL) return ProjectCanvasSize(sourceW, sourceH)
-            val scaledW = (targetH.toDouble() * sourceW.toDouble() / sourceH.toDouble())
-                .roundToInt()
-                .coerceAtLeast(1)
+            val scaledW = even(
+                (targetH.toDouble() * sourceW.toDouble() / sourceH.toDouble()).roundToInt(),
+            )
             return ProjectCanvasSize(scaledW, targetH)
         }
 
         val ratio = settings.aspectRatio.fixedRatioValue ?: sourceW.toDouble() / sourceH.toDouble()
-        val width = (targetH * ratio).roundToInt().coerceAtLeast(1)
+        val width = even((targetH * ratio).roundToInt())
         return ProjectCanvasSize(width, targetH)
     }
 
