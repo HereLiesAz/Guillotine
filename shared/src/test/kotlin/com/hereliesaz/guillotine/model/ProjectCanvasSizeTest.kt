@@ -52,3 +52,15 @@ class ProjectCanvasSizeTest {
         assertEquals(ProjectCanvasSize(1280, 720), doc.projectCanvasSize())
     }
 }
+
+
+    @Test
+    fun `derived 9 by 16 hd canvas uses even encoder-safe width`() {
+        val doc = projectWith(1920, 1080, aspect = AspectRatio.RATIO_9_16, quality = Quality.HD_720P)
+        assertEquals(ProjectCanvasSize(406, 720), doc.projectCanvasSize())
+    }
+
+    @Test
+    fun `original original keeps odd source dimensions exactly`() {
+        assertEquals(ProjectCanvasSize(1001, 777), projectWith(1001, 777).projectCanvasSize())
+    }
