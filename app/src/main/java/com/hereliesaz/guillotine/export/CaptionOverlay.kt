@@ -21,6 +21,18 @@ private const val REFERENCE_SIZE_PX = 64
 private const val REFERENCE_HEIGHT_PX = 1080
 
 /**
+ * Maps a contiguous slice of composition presentation time back to the original editor timeline.
+ * Gaps are intentionally absent: captions were historically attached to real base items only, so a
+ * project-video gap still renders no caption. Multiple segments preserve discontinuities introduced
+ * when REMOVE ranges split a source clip into several kept export items.
+ */
+data class CaptionTimelineSegment(
+    val presentationStartMs: Long,
+    val presentationEndMs: Long,
+    val timelineStartMs: Long,
+)
+
+/**
  * Burns a text clip's caption into the export as a timed [TextOverlay]: the styled text
  * shows only during the clip's window and is placed/scaled/rotated by its crop transform.
  *
@@ -28,9 +40,11 @@ private const val REFERENCE_HEIGHT_PX = 1080
  * position, rotation, and opacity export correctly. Un-keyframed clips still use a single
  * cached settings object (no per-frame allocation).
  *
- * One instance is attached per base export item; [timelineStartMs] is that item's start on the
- * original timeline, so `timelineMs = timelineStartMs + presentationTimeUs/1000` stays accurate
- * even after AI 'remove' ranges are physically cut.
+ * The overlay is attached at composition level so its anchors are evaluated against the project
+ * canvas. [timelineSegments] preserves the old per-item timing semantics for the simple export path:
+ * each kept source range maps back to its original timeline position even after REMOVE ranges are
+ * physically cut. When no map is supplied (the advanced multi-sequence path), [timelineStartMs] is
+ * the composition's timeline origin.
  */
 class CaptionOverlay(
     private val clip: TimelineClip,
@@ -44,19 +58,21 @@ class CaptionOverlay(
      * source. See [Exporter]'s call site for how this is resolved.
      */
     refHeightPx: Int,
-    /** Track-level opacity multiplier (from [TrackSettings.opacity]); multiplied into per-frame alpha. */
-    private val trackOpacity: Float = 1f,
+    private val timelineSegments: List<CaptionTimelineSegment> = emptyList(),
+    trackOpacity: Float = 1f,
 ) : TextOverlay() {
 
     private val empty = SpannableString("")
     private val sizePx = (REFERENCE_SIZE_PX * refHeightPx / REFERENCE_HEIGHT_PX.toFloat()).roundToInt().coerceAtLeast(1)
-    private val staticAlpha = (trackOpacity.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)
+    private val trackAlpha = trackOpacity.coerceIn(0f, 1f)
+    private val sortedTimelineSegments = timelineSegments.sortedBy { it.presentationStartMs }
     private val styled = SpannableString(clip.text).apply {
         if (isNotEmpty()) {
             // Transparent glyphs only — no baked-in background. Matches the preview (PreviewPlayer's
             // VideoSlot ClipType.TEXT branch), keeping export WYSIWYG. A background, if wanted, is a
             // separate shape-layer clip stacked underneath, not something this overlay bakes in itself.
-            setSpan(ForegroundColorSpan(Color.argb(staticAlpha, 255, 255, 255)), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+            val alpha = (trackAlpha * 255f).roundToInt().coerceIn(0, 255)
+            setSpan(ForegroundColorSpan(Color.argb(alpha, 255, 255, 255)), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             setSpan(AbsoluteSizeSpan(sizePx), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             setSpan(TypefaceSpan(typefaceName(clip.font)), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
         }
@@ -81,17 +97,18 @@ class CaptionOverlay(
     } else null
 
     override fun getText(presentationTimeUs: Long): SpannableString {
-        val t = timelineStartMs + presentationTimeUs / 1000
-        if (clip.text.isBlank() || t < clip.startTimeMs || t >= clip.endTimeMs) return empty
+        val t = timelineMs(presentationTimeUs) ?: return empty
+        if (clip.text.isBlank() || t < clip.startTimeMs || t >= clip.endTimeMs || trackAlpha <= 0.01f) return empty
         if (!hasKeyframes) return styled
 
         val relMs = (t - clip.startTimeMs).coerceIn(0, clip.durationMs)
-        val opacity = TimelineMath.interpolateSorted(opKfs, relMs, 1f) * trackOpacity
+        val opacity = TimelineMath.interpolateSorted(opKfs, relMs, 1f) * trackAlpha
         if (opacity <= 0.01f) return empty
 
-        // Rebuild with alpha when opacity is keyframed or track opacity is non-default
-        if (opKfs.isNotEmpty() || trackOpacity < 1f) {
-            val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+        // Rebuild with alpha when opacity is keyframed. Track opacity is folded into the same alpha
+        // because this overlay now lives after the per-item AlphaScale in the composition pipeline.
+        if (opKfs.isNotEmpty()) {
+            val alpha = (opacity * 255).roundToInt().coerceIn(0, 255)
             val s = SpannableString(clip.text)
             s.setSpan(ForegroundColorSpan(Color.argb(alpha, 255, 255, 255)), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
             s.setSpan(AbsoluteSizeSpan(sizePx), 0, s.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
@@ -104,7 +121,7 @@ class CaptionOverlay(
     override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings {
         staticSettings?.let { return it }
 
-        val t = timelineStartMs + presentationTimeUs / 1000
+        val t = timelineMs(presentationTimeUs) ?: clip.startTimeMs
         val relMs = (t - clip.startTimeMs).coerceIn(0, clip.durationMs)
 
         val scale = TimelineMath.interpolateSorted(scaleKfs, relMs, clip.scale)
@@ -117,6 +134,24 @@ class CaptionOverlay(
             .setRotationDegrees(rot)
             .setBackgroundFrameAnchor(anchorX(ox), anchorY(oy))
             .build()
+    }
+
+    private fun timelineMs(presentationTimeUs: Long): Long? {
+        val presentationMs = presentationTimeUs / 1000
+        if (sortedTimelineSegments.isEmpty()) return timelineStartMs + presentationMs
+
+        var lo = 0
+        var hi = sortedTimelineSegments.lastIndex
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val segment = sortedTimelineSegments[mid]
+            when {
+                presentationMs < segment.presentationStartMs -> hi = mid - 1
+                presentationMs >= segment.presentationEndMs -> lo = mid + 1
+                else -> return segment.timelineStartMs + (presentationMs - segment.presentationStartMs)
+            }
+        }
+        return null
     }
 
     // The model's offsetX/offsetY are a fraction of the FULL frame from center (matches the preview,

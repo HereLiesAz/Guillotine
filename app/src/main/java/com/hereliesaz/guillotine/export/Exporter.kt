@@ -430,11 +430,13 @@ object Exporter {
      * by ramping the incoming clip in over a held outgoing clip (via [VideoEffects.fadeIn]), and draws
      * the **background-removal subjects + captions over the final composite** as Composition-level
      * overlays (so a bg-removed clip on an upper track shows lower tracks through its matte). Otherwise a
-     * single flattened sequence + per-item matte/caption overlay is used. Project aspect is an output
+     * single flattened sequence + per-item matte/face overlay is used; captions are always applied
+     * at Composition level so their placement is project-canvas-relative. Project aspect is an output
      * canvas boundary; it is never applied as a per-clip transform. Per clip/item this bakes in: color filters,
      * the Crop-tool transform, keyframed opacity/scale (via [VideoEffects.keyframeEffects]),
-     * keyframed/static volume + pan + normalize, track opacity, and the matte + caption overlays
-     * (which stay in sync across 'remove' cuts via each item's timeline start).
+     * keyframed/static volume + pan + normalize, track opacity, and item-timed matte/face overlays
+     * (which stay in sync across 'remove' cuts via each item's timeline start). Captions are applied
+     * once at Composition level so their anchors are evaluated against the project canvas.
      *
      */
     private fun buildComposition(
@@ -468,9 +470,11 @@ object Exporter {
         // overlay's own reference height, i.e. no scaling) for a genuinely undecodable/unprobed clip.
         val refHeightPx = canvas.height
 
-        // Overlays (matte + captions) are attached to EVERY base item with that item's timeline
-        // start, so they stay aligned even after 'remove' ranges are physically cut.
-        fun overlaysFor(timelineStartMs: Long): OverlayEffect? {
+        // Matte/face overlays are item-timed because remove ranges physically split source items.
+        // Captions deliberately are NOT attached here: per-item caption anchors are evaluated in the
+        // source-shaped item frame, so they move incorrectly when project and source aspects differ.
+        // Captions are added once at Composition level below, where anchors use the project canvas.
+        fun itemOverlaysFor(timelineStartMs: Long): OverlayEffect? {
             val list = mutableListOf<TextureOverlay>()
             if (hasMatte) list += MatteOverlay(mattes, timelineStartMs)
             if (faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
@@ -480,13 +484,19 @@ object Exporter {
         fun compositionOverlaysFor(
             timelineStartMs: Long,
             includeMatteAndFace: Boolean,
+            captionTimelineSegments: List<CaptionTimelineSegment>,
         ): OverlayEffect? {
             val list = mutableListOf<TextureOverlay>()
             if (includeMatteAndFace && hasMatte) list += MatteOverlay(mattes, timelineStartMs)
             if (includeMatteAndFace && faceBlur.isNotEmpty()) list += FaceBlurOverlay(faceBlur, timelineStartMs)
-            textClips.forEach {
-                val ts = document.trackSettingsFor(it.trackId)
-                list += CaptionOverlay(it, timelineStartMs, refHeightPx, ts.opacity)
+            textClips.forEach { clip ->
+                list += CaptionOverlay(
+                    clip = clip,
+                    timelineStartMs = timelineStartMs,
+                    refHeightPx = refHeightPx,
+                    timelineSegments = captionTimelineSegments,
+                    trackOpacity = document.trackSettingsFor(clip.trackId).opacity,
+                )
             }
             return if (list.isNotEmpty()) OverlayEffect(ImmutableList.copyOf(list)) else null
         }
@@ -520,7 +530,12 @@ object Exporter {
             // Keyframe-aware color + crop/placement transform + opacity (animated when keyframed, static
             // otherwise). clipLocalStartMs maps the item's presentationTime to clip-relative time.
             val color = VideoEffects.colorEffects(clip, clipLocalStartMs)
-            val transform = VideoEffects.transformEffects(clip, clipLocalStartMs)
+            val sourceAspect = document.mediaFor(clip)?.aspectRatioValue
+                ?.toFloat()
+                ?.takeIf { it > 0f }
+                ?: canvas.aspectRatio
+            val offsetXScale = canvas.aspectRatio / sourceAspect
+            val transform = VideoEffects.transformEffects(clip, clipLocalStartMs, offsetXScale)
             val opacity = VideoEffects.opacityEffects(clip, clipLocalStartMs)
             // Frame decimation (frameStep): drop frames to fps/step up front so the rest of the pipeline
             // processes fewer frames. Kept frames keep their timestamps, so the presentationTime-driven
@@ -528,7 +543,7 @@ object Exporter {
             val decimate = VideoEffects.frameDrop(clip.filters.frameStep, document.settings.fps.toFloat())
             // Crossfade ramp: the incoming clip fades 0→1 across its overlap with the held outgoing clip.
             val fadeFx = fade?.let { listOf(VideoEffects.fadeIn(timelineStartMs, it.first, it.last)) } ?: emptyList()
-            val overlay = if (withOverlays) listOfNotNull(overlaysFor(timelineStartMs)) else emptyList()
+            val overlay = if (withOverlays) listOfNotNull(itemOverlaysFor(timelineStartMs)) else emptyList()
             return Effects(
                 audioFor(clip, clipLocalStartMs),
                 decimate + color + transform + opacity + fadeFx + geometry + overlay + alpha,
@@ -536,24 +551,32 @@ object Exporter {
         }
 
         // Append a list of video clips into [seq] starting at [startCursor] on the timeline (a leading
-        // gap fills startCursor..firstClip, so stacked track sequences stay time-aligned). Overlays
-        // (matte + captions) are attached only when [withOverlays] — in multi-track mode that's the
-        // bottom track, so a caption isn't drawn once per stacked track. Returns true if any real item
-        // (not just a gap) was added.
+        // gap fills startCursor..firstClip, so stacked track sequences stay time-aligned). Here
+        // [withOverlays] means item-timed matte/face overlays only; captions are always composition-level.
+        // When [captionTimelineSegments] is supplied,
+        // record every real item's composition-time → source-timeline mapping for the composition-level
+        // caption pass; gaps deliberately produce no segment, matching the old per-item caption behavior.
+        // Returns true if any real item (not just a gap) was added.
         fun appendVideoItems(
             seq: EditedMediaItemSequence.Builder,
             clips: List<TimelineClip>,
             startCursor: Long,
             withOverlays: Boolean,
             fadeFor: (TimelineClip) -> LongRange? = { null },
+            captionTimelineSegments: MutableList<CaptionTimelineSegment>? = null,
         ): Boolean {
             var cursor = startCursor
+            var presentationCursor = 0L
             var added = false
             clips.sortedBy { it.startTimeMs }.forEach { clip ->
                 val media = document.mediaFor(clip) ?: return@forEach
                 val fade = fadeFor(clip)
                 val gap = clip.startTimeMs - cursor
-                if (gap > 0) { seq.addGap(gap * 1000); cursor += gap }
+                if (gap > 0) {
+                    seq.addGap(gap * 1000)
+                    cursor += gap
+                    presentationCursor += gap
+                }
                 if (media.kind == MediaKind.IMAGE) {
                     val dur = if (clip.durationMs > 0) clip.durationMs else 5_000L
                     val mediaItem = ExoMediaItem.Builder()
@@ -564,7 +587,16 @@ object Exporter {
                         EditedMediaItem.Builder(mediaItem).setFrameRate(30)
                             .setEffects(videoEffectsFor(clip, 0L, clip.startTimeMs, withOverlays, fade)).build(),
                     )
-                    added = true; cursor += dur
+                    captionTimelineSegments?.add(
+                        CaptionTimelineSegment(
+                            presentationStartMs = presentationCursor,
+                            presentationEndMs = presentationCursor + dur,
+                            timelineStartMs = clip.startTimeMs,
+                        ),
+                    )
+                    presentationCursor += dur
+                    added = true
+                    cursor += dur
                 } else {
                     for (range in TimelineMath.keptRanges(clip)) {
                         val startMs = range.first
@@ -585,7 +617,17 @@ object Exporter {
                             EditedMediaItem.Builder(mediaItem)
                                 .setEffects(videoEffectsFor(clip, clipLocalStart, timelineStart, withOverlays, fade)).build(),
                         )
-                        added = true; cursor += (endMs - startMs)
+                        val keptDuration = endMs - startMs
+                        captionTimelineSegments?.add(
+                            CaptionTimelineSegment(
+                                presentationStartMs = presentationCursor,
+                                presentationEndMs = presentationCursor + keptDuration,
+                                timelineStartMs = timelineStart,
+                            ),
+                        )
+                        presentationCursor += keptDuration
+                        added = true
+                        cursor += keptDuration
                     }
                 }
             }
@@ -616,10 +658,16 @@ object Exporter {
         val advanced = bgTracks.size >= 2 || sameTrackOverlap
         // Common zero across every composited clip (incl. foreground, whose matte overlay is timed
         // against it): composition time 0 == this timeline instant.
-        // Composition presentationTimeUs=0 maps to this timeline instant for all overlays (captions,
-        // mattes). In the non-advanced path the sequence also starts here (first clip's startTimeMs),
-        // so captions time correctly in both modes with the same reference point.
-        val globalZero = videoClips.filter { document.mediaFor(it) != null }.minOfOrNull { it.startTimeMs } ?: 0L
+        val globalZero = if (advanced) {
+            videoClips.filter { document.mediaFor(it) != null }.minOf { it.startTimeMs }
+        } else {
+            baseClips.firstOrNull()?.startTimeMs ?: 0L
+        }
+        // Simple export has one authoritative sequence, so record exactly how each real item maps
+        // composition presentation time back to the editor timeline. This preserves caption timing
+        // across a non-zero first clip and across REMOVE-range discontinuities. Advanced export keeps
+        // its existing common-zero clock because several parallel lanes do not have one unique item map.
+        val captionTimelineSegments = mutableListOf<CaptionTimelineSegment>()
 
         // Whether the composition has any real audio source. Video sequences declare an AUDIO
         // trackType only when this is true — otherwise Media3 would synthesise a silent audio
@@ -697,8 +745,9 @@ object Exporter {
             val any = appendVideoItems(
                 seq,
                 baseClips,
-                baseClips.firstOrNull()?.startTimeMs ?: 0L,
+                globalZero,
                 withOverlays = true,
+                captionTimelineSegments = captionTimelineSegments,
             )
             if (any) listOf(seq.build()) else emptyList()
         }
@@ -764,10 +813,15 @@ object Exporter {
             // transform remains the only per-clip scale/pan/rotation.
             .setVideoCompositorSettings(ProjectVideoCompositorSettings(canvas))
         // Captions always composite over the FINAL project canvas so their offsets are measured against
-        // the project frame rather than a source item's aspect. In advanced mode matte/face overlays also
-        // belong here because they must sit above the fully composited track stack; in the simple path
-        // those remain item-timed while only captions are promoted to composition level.
-        compositionOverlaysFor(globalZero, includeMatteAndFace = advanced)?.let {
+        // the project frame rather than a source item's aspect. The simple path supplies the exact
+        // presentation→timeline segment map recorded while its sequence was built, preserving non-zero
+        // starts and REMOVE discontinuities. Advanced mode retains its shared common-zero timeline and
+        // also puts matte/face overlays here because they must sit above the fully composited track stack.
+        compositionOverlaysFor(
+            timelineStartMs = globalZero,
+            includeMatteAndFace = advanced,
+            captionTimelineSegments = if (advanced) emptyList() else captionTimelineSegments,
+        )?.let {
             composition.setEffects(Effects(emptyList(), listOf(it)))
         }
         return composition.build()

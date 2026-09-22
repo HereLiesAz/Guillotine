@@ -15,3 +15,10 @@
 -keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
     <fields>;
 }
+
+# ML Kit uses reflection and ServiceLoader to discover its internal components at runtime.
+# R8 can strip or rename these classes, causing NullPointerException inside SegmenterImpl
+# (and similar internal factories) on release builds — observed in Play Console vitals on
+# Android 9 / SDK 28. Keep the public API surface and the GMS-internal glue classes.
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_** { *; }

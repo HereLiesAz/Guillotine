@@ -289,28 +289,33 @@ fun DesktopPreviewPlayer(
         // other active clip gets a plain outline. Both share the clip's own scale/rotate/pan (minus
         // rotation for the interactive one — see CropWireframe's own doc) so they track the clip
         // exactly; a plain resting clip's outline just coincides with the frame.
-        activeVideoClips.forEach { clip ->
-            key(clip.id) {
-                val relMs = now - clip.startTimeMs
-                val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
-                val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
-                val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX)
-                val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY)
-                SourceLayerBox(
-                    clip = clip,
-                    media = state.document.mediaFor(clip),
-                    projectCanvas = projectCanvas,
-                    alpha = 1f,
-                    scale = s,
-                    rotationDeg = if (clip.id == cropTargetClipId) 0f else rotationDeg,
-                    offsetXFrac = offXFrac,
-                    offsetYFrac = offYFrac,
-                    clipToFrame = false,
-                ) {
-                    if (clip.id == cropTargetClipId) {
-                        CropWireframe(scale = s, onCropTransform = onCropTransform)
-                    } else {
-                        Box(Modifier.fillMaxSize().border(1.dp, Red500))
+        // Measure outlines in the exact same aspect-locked project frame as the media layers.
+        // The wrapper is not clipped, so crop-mode overflow remains visible while its coordinates
+        // still come from the project canvas instead of the surrounding preview pane.
+        Box(modifier = aspectMod, contentAlignment = Alignment.Center) {
+            activeVideoClips.forEach { clip ->
+                key(clip.id) {
+                    val relMs = now - clip.startTimeMs
+                    val s = TimelineMath.valueAt(clip, KeyframeProperty.SCALE, relMs, clip.scale).coerceAtLeast(0f)
+                    val rotationDeg = TimelineMath.valueAt(clip, KeyframeProperty.ROTATION, relMs, clip.rotation)
+                    val offXFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_X, relMs, clip.offsetX)
+                    val offYFrac = TimelineMath.valueAt(clip, KeyframeProperty.OFFSET_Y, relMs, clip.offsetY)
+                    SourceLayerBox(
+                        clip = clip,
+                        media = state.document.mediaFor(clip),
+                        projectCanvas = projectCanvas,
+                        alpha = 1f,
+                        scale = s,
+                        rotationDeg = if (clip.id == cropTargetClipId) 0f else rotationDeg,
+                        offsetXFrac = offXFrac,
+                        offsetYFrac = offYFrac,
+                        clipToFrame = false,
+                    ) {
+                        if (clip.id == cropTargetClipId) {
+                            CropWireframe(scale = s, onCropTransform = onCropTransform)
+                        } else {
+                            Box(Modifier.fillMaxSize().border(1.dp, Red500))
+                        }
                     }
                 }
             }
