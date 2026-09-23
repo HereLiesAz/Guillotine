@@ -17,8 +17,8 @@ buildscript {
         resolutionStrategy {
             force("org.jdom:jdom2:2.0.6.1")
             force("org.apache.httpcomponents:httpclient:4.5.14")
-            force("com.google.protobuf:protobuf-javalite:4.36.0")
-            force("com.google.protobuf:protobuf-java:4.36.0")
+            force("com.google.protobuf:protobuf-javalite:4.36.2")
+            force("com.google.protobuf:protobuf-java:4.36.2")
             force("io.netty:netty-codec-http2:4.2.18.Final")
             force("io.netty:netty-handler:4.2.18.Final")
             force("io.netty:netty-codec-http:4.2.18.Final")
@@ -26,7 +26,7 @@ buildscript {
             force("org.bouncycastle:bcprov-jdk18on:1.85.2")
             force("org.bouncycastle:bcpkix-jdk18on:1.85")
             force("org.apache.commons:commons-lang3:3.20.0")
-            force("org.bitbucket.b_c:jose4j:0.9.6")
+            force("org.bitbucket.b_c:jose4j:0.9.7")
         }
     }
 }
