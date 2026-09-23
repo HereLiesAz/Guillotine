@@ -48,7 +48,7 @@ jobs:
         env:
           KEYSTORE_RAW: ${{ secrets.KEYSTORE_RAW }}
         run: |
-          echo "$KEYSTORE_RAW" | base64 -d > app/keystore.jks
+          printf '%s' "$KEYSTORE_RAW" | base64 -d > app/keystore.jks
 
       - name: Set up JDK 21
         uses: actions/setup-java@v6
