@@ -149,6 +149,9 @@ fun NleScreen(
         settings.modelFor(settings.provider),
         settings.agentModelPath,
         settings.cloudVision,
+        settings.azpLlmId,
+        settings.azpLlmKeys,
+        settings.azpLlmModels,
     ) { DesktopMcpAgent.forSettings(settings, mcpTools) }
     // Read through this in remembered lambdas (e.g. openLauncher) so they always reset the CURRENT backend,
     // not a stale one captured before a settings-driven rebuild.

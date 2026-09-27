@@ -166,7 +166,7 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
                 // Browsing shouldn't offer an "Install" button for something that can only ever land
                 // on AzpInstallSurfaces.Surface.NONE (code/app/mcp/pack packages — nothing in this
                 // build applies them to anything). See AzpInstallSurfaces.hasKnownConsumer.
-                AzpInstallSurfaces.hasKnownConsumer(e.types) &&
+                AzpInstallSurfaces.hasKnownConsumer(e.types, e.kind) &&
                 (category == null || e.category == category) &&
                 (query.isBlank() || e.name.contains(query, ignoreCase = true) || e.description.contains(query, ignoreCase = true))
         }?.sortedWith(compareBy({ it.id !in installedIds }, { it.name }))

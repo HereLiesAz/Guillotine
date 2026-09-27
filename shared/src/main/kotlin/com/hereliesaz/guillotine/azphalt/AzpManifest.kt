@@ -23,7 +23,7 @@ data class AzpManifest(
     val name: String,
     /** Semver of the package itself. */
     val version: String,
-    /** `asset` | `code` | `mixed` | `app` | `mcp` | `pack`. */
+    /** `asset` | `code` | `mixed` | `app` | `mcp` | `pack` | `llm` | … */
     val kind: String,
     /** SPDX license id. */
     val license: String,
@@ -64,6 +64,12 @@ data class AzpManifest(
      * `offers`. Free-form while pre-stable. See azphalt `spec/extension-manifest.md`.
      */
     val mcp: JsonElement? = null,
+    /**
+     * Off-device language-model header (required when `kind == "llm"`): tier, endpoint, inputs, setup
+     * and prompt-handling disclosure. Kept raw here; [AzpLlm.parse] validates and models it. See azphalt
+     * `spec/llm.md`.
+     */
+    val llm: JsonElement? = null,
 ) {
     val isAsset: Boolean get() = kind == "asset" || kind == "mixed"
     val isCode: Boolean get() = kind == "code" || kind == "mixed"
@@ -73,6 +79,9 @@ data class AzpManifest(
 
     /** A `kind == "mcp"` server package (the manifest is a header describing how to reach the server). */
     val isMcp: Boolean get() = kind == "mcp"
+
+    /** A `kind == "llm"` off-device language model (the manifest is a header; see [AzpLlm]). */
+    val isLlm: Boolean get() = kind == "llm"
 
     /**
      * Whether this package is offered to the host app [hostId]: true when it declares no [targetApps]

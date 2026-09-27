@@ -72,6 +72,7 @@ import com.hereliesaz.guillotine.model.AspectRatio
 import com.hereliesaz.guillotine.model.GlobalSettings
 import com.hereliesaz.guillotine.model.Quality
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
+import com.hereliesaz.guillotine.azphalt.AzpLlm
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
 import com.hereliesaz.guillotine.desktop.platform.DesktopDeviceModelProfile
@@ -137,7 +138,7 @@ private fun DesktopAiCapabilitySummary(settings: AiSettings) {
         com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve(slot).isNotBlank()
 
     val rows = listOf(
-        "Assistant brain" to (cloudConfigured || settings.agentModelPath.startsWith("ollama:")),
+        "Assistant brain" to (cloudConfigured || settings.agentModelPath.startsWith("ollama:") || settings.azpLlmId.isNotBlank()),
         "Frame vision" to (localMultimodal || installed("labelModelPath") || (cloudConfigured && settings.cloudVision)),
         "Transcription (Vosk)" to installed("speechModelPath"),
         "Text-to-speech (ONNX)" to installed("ttsModelPath"),
@@ -186,6 +187,9 @@ fun SettingsScreen(
     var leonardoModel by remember { mutableStateOf(current.leonardoModel) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var cloudVision by remember { mutableStateOf(current.cloudVision) }
+    var azpLlmId by remember { mutableStateOf(current.azpLlmId) }
+    var azpLlmKeys by remember { mutableStateOf(current.azpLlmKeys) }
+    var azpLlmModels by remember { mutableStateOf(current.azpLlmModels) }
 
     var agentModelPath by remember { mutableStateOf(current.agentModelPath) }
     var idEmbedModelPath by remember { mutableStateOf(current.idEmbedModelPath) }
@@ -258,6 +262,9 @@ fun SettingsScreen(
         leonardoKey = leonardoKey.trim(),
         leonardoModel = leonardoModel,
         cloudVision = cloudVision,
+        azpLlmId = azpLlmId,
+        azpLlmKeys = azpLlmKeys.filterValues { it.isNotEmpty() },
+        azpLlmModels = azpLlmModels.filterValues { it.isNotEmpty() },
         frameAnalysisCacheSize = frameAnalysisCacheSize,
         agentModelPath = agentModelPath,
         idEmbedModelPath = idEmbedModelPath,
@@ -438,6 +445,17 @@ fun SettingsScreen(
                             )
                         }
                     }
+
+                    AzpLlmSection(
+                        extensionsDir = remember { java.io.File(com.hereliesaz.guillotine.desktop.platform.DesktopStorage.dataDir, "extensions") },
+                        hostAppId = com.hereliesaz.guillotine.desktop.platform.DesktopPluginApplier.HOST_APP_ID,
+                        selectedId = azpLlmId,
+                        keys = azpLlmKeys,
+                        models = azpLlmModels,
+                        onSelect = { azpLlmId = it },
+                        onKey = { id, k -> azpLlmKeys = azpLlmKeys + (id to k) },
+                        onModel = { id, m -> azpLlmModels = azpLlmModels + (id to m) },
+                    )
 
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Frame-analysis cache", color = Neutral400, fontSize = 12.sp)
@@ -1211,4 +1229,61 @@ private fun Quality.label() = when (this) {
     Quality.UHD_4K -> "4K"
     Quality.FHD_1080P -> "1080p"
     Quality.HD_720P -> "720p"
+}
+
+/**
+ * **Azphalt model** — installed azphalt `kind: "llm"` packages (endpoint tier), offered as an extra
+ * assistant brain next to the providers above. Picking one makes it drive the editor; "None" leaves the
+ * provider selection exactly as it was. Each row shows the package's prompt-handling disclosure
+ * (`dataHandling`, required by azphalt `spec/llm.md`) before it can be picked. See [AzpLlm].
+ */
+@Composable
+private fun AzpLlmSection(
+    extensionsDir: java.io.File,
+    hostAppId: String,
+    selectedId: String,
+    keys: Map<String, String>,
+    models: Map<String, String>,
+    onSelect: (String) -> Unit,
+    onKey: (String, String) -> Unit,
+    onModel: (String, String) -> Unit,
+) {
+    val installed by androidx.compose.runtime.produceState<List<AzpLlm.Endpoint>?>(null, extensionsDir, hostAppId) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { AzpLlm.installed(extensionsDir, hostAppId) }
+    }
+    val list = installed ?: return
+    if (list.isEmpty() && selectedId.isBlank()) return
+    Text("Azphalt model (optional)", color = Neutral400, fontSize = 12.sp)
+    Text(
+        "Language models installed from the Azphalt Store. Picking one makes it the assistant brain; it " +
+            "gets the same text a cloud provider does, never your video or audio.",
+        color = Neutral500, fontSize = 10.sp,
+    )
+    ProviderRow("None", "Use the provider selected above.", selected = selectedId.isBlank()) { onSelect("") }
+    list.forEach { e ->
+        ProviderRow(e.name, e.disclosure, selected = selectedId == e.packageId) { onSelect(e.packageId) }
+    }
+    if (selectedId.isNotBlank() && list.none { it.packageId == selectedId }) {
+        Text(
+            "The picked package is no longer installed, so the provider above is used.",
+            color = Neutral500, fontSize = 10.sp,
+        )
+    }
+    val chosen = list.firstOrNull { it.packageId == selectedId } ?: return
+    chosen.keyInput?.let { input ->
+        val label = input.description.ifBlank { "${chosen.name} key" } + if (chosen.keyRequired) "" else " (optional)"
+        KeyField(label, keys[chosen.packageId].orEmpty()) { onKey(chosen.packageId, it.trim()) }
+        if (chosen.keyRequired && keys[chosen.packageId].isNullOrBlank()) {
+            Text("This model needs a key; until one is set the provider above is used.", color = Neutral500, fontSize = 10.sp)
+        }
+    }
+    Text("Model", color = Neutral500, fontSize = 10.sp)
+    OutlinedTextField(
+        value = models[chosen.packageId].orEmpty(),
+        onValueChange = { onModel(chosen.packageId, it.trim()) },
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text("Default: ${chosen.defaultModel}", color = Neutral500, fontSize = 12.sp) },
+        textStyle = TextStyle(color = White, fontSize = 12.sp),
+        singleLine = true,
+    )
 }

@@ -37,6 +37,9 @@ data class SettingsBundle(
     val diarizeEmbedModelPath: String = "",
     val stemModelPath: String = "",
     val denoiseModelPath: String = "",
+    val azpLlmId: String = "",
+    val azpLlmKeys: Map<String, String> = emptyMap(),
+    val azpLlmModels: Map<String, String> = emptyMap(),
 )
 
 object SettingsBackup {
@@ -75,6 +78,9 @@ object SettingsBackup {
             diarizeEmbedModelPath = settings.diarizeEmbedModelPath,
             stemModelPath = settings.stemModelPath,
             denoiseModelPath = settings.denoiseModelPath,
+            azpLlmId = settings.azpLlmId,
+            azpLlmKeys = settings.azpLlmKeys,
+            azpLlmModels = settings.azpLlmModels,
         )
         // Serialize BEFORE opening the destination stream — "wt" mode truncates the target the
         // moment it's opened, so serializing first means an encoding failure never touches the
@@ -130,6 +136,9 @@ object SettingsBackup {
             diarizeEmbedModelPath = bundle.diarizeEmbedModelPath,
             stemModelPath = bundle.stemModelPath,
             denoiseModelPath = bundle.denoiseModelPath,
+            azpLlmId = bundle.azpLlmId,
+            azpLlmKeys = bundle.azpLlmKeys,
+            azpLlmModels = bundle.azpLlmModels,
         )
         UserToolStore.save(context, bundle.userTools)
         return settings

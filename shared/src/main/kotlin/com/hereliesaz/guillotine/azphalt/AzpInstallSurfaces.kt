@@ -44,6 +44,13 @@ object AzpInstallSurfaces {
         LISTED_NOT_APPLICABLE,
 
         /**
+         * An off-device language model (`kind: "llm"`, endpoint tier over `openai-chat`): offered as an
+         * extra assistant brain under **Settings → AI Analyzer**, alongside the built-in providers. See
+         * [AzpLlm].
+         */
+        ASSISTANT_BRAIN,
+
+        /**
          * Nothing in this build surfaces it — a `code` package (the WASM sandbox isn't shipped; see
          * [AzpCodeRuntime]), or an `app` / `mcp` / `pack` package, which have no consumer here.
          */
@@ -58,6 +65,9 @@ object AzpInstallSurfaces {
      * `pack` kinds together, since what decides the answer is the payload, not the declared `kind`.
      */
     fun of(manifest: AzpManifest): List<Surface> {
+        if (manifest.isLlm) {
+            return listOf(if (AzpLlm.parse(manifest) is AzpLlm.Parsed.Ok) Surface.ASSISTANT_BRAIN else Surface.NONE)
+        }
         if (manifest.assets.isEmpty()) return listOf(Surface.NONE)
         val out = LinkedHashSet<Surface>()
         for (asset in manifest.assets) {
@@ -92,6 +102,10 @@ object AzpInstallSurfaces {
      * from the very browser meant to offer them. A false negative here — hiding something that
      * actually works — would mean a catalog entry's `types` doesn't reflect its own assets, a
      * registry-data problem rather than something to design around client-side.
+     *
+     * The one assetless exception is [kind] `llm`: it has a consumer ([Surface.ASSISTANT_BRAIN]). The
+     * summary can't tell an endpoint-tier package from a `sandbox-weights` one, so the latter is still
+     * offered and lands on [Surface.NONE]; the install notice says why.
      */
-    fun hasKnownConsumer(types: List<String>): Boolean = types.isNotEmpty()
+    fun hasKnownConsumer(types: List<String>, kind: String = ""): Boolean = types.isNotEmpty() || kind == "llm"
 }

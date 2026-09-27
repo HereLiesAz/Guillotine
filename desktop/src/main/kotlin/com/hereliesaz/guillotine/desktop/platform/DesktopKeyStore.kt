@@ -73,6 +73,9 @@ class DesktopKeyStore {
                     "frame_analysis_cache_size",
                     FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
                 ).coerceIn(FrameAnalysisCache.MIN_MAX_ENTRIES, FrameAnalysisCache.MAX_MAX_ENTRIES),
+                azpLlmId = json.optString("azp_llm_id", ""),
+                azpLlmKeys = json.optJSONObject("azp_llm_keys").toStringMap(),
+                azpLlmModels = json.optJSONObject("azp_llm_models").toStringMap(),
             )
         }.getOrDefault(AiSettings())
     }
@@ -89,6 +92,9 @@ class DesktopKeyStore {
 
             put("cloud_vision_optin", settings.cloudVision)
             put("frame_analysis_cache_size", settings.frameAnalysisCacheSize)
+            put("azp_llm_id", settings.azpLlmId)
+            put("azp_llm_keys", JSONObject(settings.azpLlmKeys.filterValues { it.isNotEmpty() }))
+            put("azp_llm_models", JSONObject(settings.azpLlmModels.filterValues { it.isNotEmpty() }))
         }
         val bytes = encrypt(json.toString())
         dataFile.parentFile?.mkdirs()
@@ -102,6 +108,9 @@ class DesktopKeyStore {
         lockDownFile(dataFile)
         java.nio.file.Files.move(tmp.toPath(), dataFile.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
     }
+
+    private fun JSONObject?.toStringMap(): Map<String, String> =
+        this?.keys()?.asSequence()?.associateWith { optString(it) }?.filterValues { it.isNotEmpty() }.orEmpty()
 
     private fun encrypt(plaintext: String): ByteArray {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

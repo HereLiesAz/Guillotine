@@ -596,7 +596,7 @@ private fun CatalogBrowser(
                 // Browsing shouldn't offer an "Install" button for something that can only ever land
                 // on AzpInstallSurfaces.Surface.NONE (code/app/mcp/pack packages — nothing in this
                 // build applies them to anything). See AzpInstallSurfaces.hasKnownConsumer.
-                AzpInstallSurfaces.hasKnownConsumer(e.types) &&
+                AzpInstallSurfaces.hasKnownConsumer(e.types, e.kind) &&
                 (category == null || e.category == category) &&
                 (query.isBlank() || e.name.contains(query, ignoreCase = true) || e.description.contains(query, ignoreCase = true))
         }?.sortedWith(compareBy({ it.id !in installedIds }, { it.name }))
@@ -876,10 +876,14 @@ private fun whereToFind(
     AzpInstallSurfaces.Surface.LISTED_NOT_APPLICABLE ->
         "It's listed in the clip panel, in a section named after it, whenever a clip is selected — but " +
             "Guillotine has no renderer for this asset type, so there's nothing to apply to a clip."
+    AzpInstallSurfaces.Surface.ASSISTANT_BRAIN ->
+        "It's an off-device language model. Pick it under Settings → AI Analyzer → Azphalt model to use it " +
+            "as the assistant brain. It sees your typed requests and the editor's text, never your video " +
+            "or audio. Settings shows who runs it and what they do with prompts before you turn it on."
     AzpInstallSurfaces.Surface.NONE ->
-        "Nothing in this build surfaces it yet: code extensions need the WASM sandbox (not shipped), and " +
-            "companion-app, MCP and pack packages have no consumer here. It's saved, and it'll be picked " +
-            "up when that lands."
+        "Nothing in this build surfaces it yet: code extensions need the WASM sandbox (not shipped), " +
+            "companion-app, MCP and pack packages have no consumer here, and language models that run in " +
+            "a GitHub sandbox aren't supported. It's saved, and it'll be picked up when that lands."
 }
 
 /**
