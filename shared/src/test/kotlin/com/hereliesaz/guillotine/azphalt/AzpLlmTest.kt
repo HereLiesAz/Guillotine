@@ -10,8 +10,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * `kind: "llm"` (azphalt `spec/llm.md`): only the endpoint tier over `openai-chat` becomes a brain; every
- * other shape is refused with a reason rather than half-driven.
+ * `kind: "llm"` (azphalt `spec/llm.md`): `openai-chat` packages become brains, runner packages (every
+ * `sandbox-weights` one) become sandbox text models, and malformed shapes are refused with a reason.
  */
 class AzpLlmTest {
 
@@ -56,13 +56,51 @@ class AzpLlmTest {
         assertTrue(e.disclosure.contains("may change"))
     }
 
-    @Test fun sandboxWeightsIsRefused() {
-        assertTrue(reason(edit { it["tier"] = "\"sandbox-weights\"" }).contains("sandbox"))
+    private val qwen = """
+        {
+          "tier": "sandbox-weights",
+          "setup": { "sandbox": "github-actions", "script": "setup/setup.sh",
+                     "requires": { "githubToken": ["contents:write", "actions:write"] },
+                     "fetches": [ { "url": "https://example.com/llama.tar.gz", "checksum": "sha256-00" } ] },
+          "weights": { "runtime": "llama.cpp",
+                       "files": [ { "name": "model.gguf", "remoteUrl": "https://example.com/m.gguf",
+                                    "checksum": "sha256-11", "byteSize": 1117320736 } ],
+                       "modelLicense": { "spdx": "Apache-2.0", "commercialUse": true } },
+          "endpoint": { "protocols": ["github-actions-runner"], "defaultModel": "model.gguf", "auth": "none" },
+          "run": { "permissions": { "contents": "read", "checks": "write" } }
+        }
+    """
+
+    @Test fun sandboxWeightsParsesAsRunnerOnly() {
+        val e = (AzpLlm.parse(manifest(qwen)) as AzpLlm.Parsed.Ok).endpoint
+        assertTrue(e.runsInSandbox)
+        assertTrue(e.supportsRunner)
+        assertFalse(e.supportsChat)
+        assertEquals(1117320736L, e.weightsBytes)
+        assertEquals(listOf("https://example.com/llama.tar.gz", "https://example.com/m.gguf"), e.fetches)
+        assertEquals(listOf("contents:write", "actions:write"), e.setupTokenPermissions)
+        assertTrue(e.disclosure.contains("private GitHub sandbox"))
+        assertTrue(e.disclosure.contains("Apache-2.0"))
     }
 
-    @Test fun runnerOnlyEndpointIsRefused() {
-        val llm = kilo.replace("\"openai-chat\", ", "")
-        assertTrue(reason(llm).contains("github-actions-runner"))
+    @Test fun sandboxWeightsMayNotSpeakOpenAiChat() {
+        val llm = qwen.replace("\"protocols\": [\"github-actions-runner\"]", "\"protocols\": [\"openai-chat\"], \"baseUrl\": \"https://x\"")
+        assertTrue(reason(llm).contains("only github-actions-runner"))
+    }
+
+    @Test fun sandboxWeightsNeedsWeights() {
+        val llm = Json.parseToJsonElement(qwen).jsonObject.toMutableMap().apply { remove("weights") }
+        assertTrue(reason(JsonObject(llm).toString()).contains("weights"))
+    }
+
+    @Test fun runnerOnlyEndpointIsABackgroundModel() {
+        val e = (AzpLlm.parse(manifest(kilo.replace("\"openai-chat\", ", ""))) as AzpLlm.Parsed.Ok).endpoint
+        assertFalse(e.supportsChat)
+        assertTrue(e.supportsRunner)
+    }
+
+    @Test fun unknownSandboxIsRefused() {
+        assertTrue(reason(kilo.replace("github-actions\"", "gitlab-ci\"")).contains("sandbox"))
     }
 
     @Test fun plainHttpIsRefused() {
@@ -86,11 +124,12 @@ class AzpLlmTest {
         assertNull((AzpLlm.parse(manifest(llm)) as AzpLlm.Parsed.Ok).endpoint.keyInput)
     }
 
-    @Test fun surfaceIsAssistantBrainOnlyWhenUsable() {
+    @Test fun surfaceFollowsTheProtocol() {
         assertEquals(listOf(AzpInstallSurfaces.Surface.ASSISTANT_BRAIN), AzpInstallSurfaces.of(manifest(kilo)))
+        assertEquals(listOf(AzpInstallSurfaces.Surface.BACKGROUND_TEXT), AzpInstallSurfaces.of(manifest(qwen)))
         assertEquals(
             listOf(AzpInstallSurfaces.Surface.NONE),
-            AzpInstallSurfaces.of(manifest(edit { it["tier"] = "\"sandbox-weights\"" })),
+            AzpInstallSurfaces.of(manifest(edit { it["tier"] = "\"bogus\"" })),
         )
     }
 

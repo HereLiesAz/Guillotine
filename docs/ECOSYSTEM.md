@@ -213,12 +213,15 @@ It's a separate repo (the `.azp` format, a TypeScript SDK, importers that normal
   its bytes are written into the clip's real render filters, so it takes effect in **both live preview and
   export**, and a shader package's UI-schema controls drive the clip's `shaderParams` live. No sandbox is
   needed — the asset is declarative data. This closes the loop end-to-end for asset extensions.
-- ✅ **Off-device language models (`kind: "llm"`, endpoint tier).** An installed `llm` package that
-  speaks `openai-chat` is parsed and validated by [`AzpLlm`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpLlm.kt)
-  and offered as an extra assistant brain ([`AzpLlmBrain`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/agent/AzpLlmBrain.kt))
-  under Settings → AI Analyzer → Azphalt model, next to the built-in providers. It gets text only; its
-  `setup` script is never run. `sandbox-weights` and runner-only packages install but aren't used. See
-  [PROVIDERS.md § Azphalt models](PROVIDERS.md#azphalt-models-installed-from-the-store).
+- ✅ **Off-device language models (`kind: "llm"`).** [`AzpLlm`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpLlm.kt)
+  parses both tiers. `openai-chat` packages become an extra assistant brain
+  ([`AzpLlmBrain`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/agent/AzpLlmBrain.kt)) with rolling
+  delimiters ([`AzpLlmDelimiters`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpLlmDelimiters.kt),
+  byte-compatible with the reference runner). `github-actions-runner` packages, `sandbox-weights`
+  included, install into the user's private GitHub sandbox and serve background text jobs
+  ([`AzpLlmSandbox`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpLlmSandbox.kt), a port of
+  `@azphalt/llm-host`; secrets sealed by [`AzpSealedBox`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpSealedBox.kt)).
+  See [PROVIDERS.md § Azphalt models](PROVIDERS.md#azphalt-models-installed-from-the-store).
 - ⏳ **Capabilities & WASM substrate for `code` extensions (jobs #2–#5).** The capability boundary and
   runtime seam are in place — [`AzpCodeRuntime`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzpCodeRuntime.kt)
   enforces least-privilege grants (`missingGrants`) and the shipped runtime honestly refuses to execute

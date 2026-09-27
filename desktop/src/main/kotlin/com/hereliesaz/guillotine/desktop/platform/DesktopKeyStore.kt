@@ -76,6 +76,10 @@ class DesktopKeyStore {
                 azpLlmId = json.optString("azp_llm_id", ""),
                 azpLlmKeys = json.optJSONObject("azp_llm_keys").toStringMap(),
                 azpLlmModels = json.optJSONObject("azp_llm_models").toStringMap(),
+                azpSandboxToken = json.optString("azp_sandbox_token", ""),
+                azpSandboxRepo = json.optString("azp_sandbox_repo", ""),
+                azpSandboxInstalls = json.optJSONObject("azp_sandbox_installs").toStringMap(),
+                azpLlmTextId = json.optString("azp_llm_text_id", ""),
             )
         }.getOrDefault(AiSettings())
     }
@@ -95,6 +99,10 @@ class DesktopKeyStore {
             put("azp_llm_id", settings.azpLlmId)
             put("azp_llm_keys", JSONObject(settings.azpLlmKeys.filterValues { it.isNotEmpty() }))
             put("azp_llm_models", JSONObject(settings.azpLlmModels.filterValues { it.isNotEmpty() }))
+            put("azp_sandbox_token", settings.azpSandboxToken)
+            put("azp_sandbox_repo", settings.azpSandboxRepo)
+            put("azp_sandbox_installs", JSONObject(settings.azpSandboxInstalls.filterValues { it.isNotEmpty() }))
+            put("azp_llm_text_id", settings.azpLlmTextId)
         }
         val bytes = encrypt(json.toString())
         dataFile.parentFile?.mkdirs()

@@ -76,6 +76,7 @@ import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
 import com.hereliesaz.guillotine.ai.ModelImport
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
 import com.hereliesaz.guillotine.azphalt.AzpLlm
+import com.hereliesaz.guillotine.azphalt.AzpLlmSandbox
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_RECOGNITION_MODELS
@@ -184,6 +185,10 @@ fun SettingsScreen(
     var azpLlmId by remember { mutableStateOf(current.azpLlmId) }
     var azpLlmKeys by remember { mutableStateOf(current.azpLlmKeys) }
     var azpLlmModels by remember { mutableStateOf(current.azpLlmModels) }
+    var azpLlmTextId by remember { mutableStateOf(current.azpLlmTextId) }
+    var azpSandboxToken by remember { mutableStateOf(current.azpSandboxToken) }
+    var azpSandboxRepo by remember { mutableStateOf(current.azpSandboxRepo) }
+    var azpSandboxInstalls by remember { mutableStateOf(current.azpSandboxInstalls) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -270,6 +275,10 @@ fun SettingsScreen(
         azpLlmId = azpLlmId,
         azpLlmKeys = azpLlmKeys.filterValues { it.isNotEmpty() },
         azpLlmModels = azpLlmModels.filterValues { it.isNotEmpty() },
+        azpLlmTextId = azpLlmTextId,
+        azpSandboxToken = azpSandboxToken,
+        azpSandboxRepo = azpSandboxRepo,
+        azpSandboxInstalls = azpSandboxInstalls,
         frameAnalysisCacheSize = frameAnalysisCacheSize,
         genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
         genModels = genModels,
@@ -396,6 +405,10 @@ fun SettingsScreen(
             azpLlmId = restored.azpLlmId
             azpLlmKeys = restored.azpLlmKeys
             azpLlmModels = restored.azpLlmModels
+            azpLlmTextId = restored.azpLlmTextId
+            azpSandboxToken = restored.azpSandboxToken
+            azpSandboxRepo = restored.azpSandboxRepo
+            azpSandboxInstalls = restored.azpSandboxInstalls
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -533,9 +546,17 @@ fun SettingsScreen(
                         selectedId = azpLlmId,
                         keys = azpLlmKeys,
                         models = azpLlmModels,
+                        textId = azpLlmTextId,
+                        sandboxToken = azpSandboxToken,
+                        sandboxRepo = azpSandboxRepo,
+                        sandboxInstalls = azpSandboxInstalls,
                         onSelect = { azpLlmId = it },
                         onKey = { id, k -> azpLlmKeys = azpLlmKeys + (id to k) },
                         onModel = { id, m -> azpLlmModels = azpLlmModels + (id to m) },
+                        onTextId = { azpLlmTextId = it },
+                        onSandboxToken = { azpSandboxToken = it },
+                        onSandboxRepo = { azpSandboxRepo = it },
+                        onSandboxInstalled = { id, json -> azpSandboxInstalls = azpSandboxInstalls + (id to json) },
                     )
 
                     // Frame-analysis cache: how many per-frame ML Kit results (per signal — object
@@ -1685,10 +1706,16 @@ private fun ModelPathField(
 }
 
 /**
- * **Azphalt model** — installed azphalt `kind: "llm"` packages (endpoint tier), offered as an extra
- * assistant brain next to the providers above. Picking one makes it drive the editor; "None" leaves the
- * provider selection exactly as it was. Each row shows the package's prompt-handling disclosure
- * (`dataHandling`, required by azphalt `spec/llm.md`) before it can be picked. See [AzpLlm].
+ * **Azphalt model** — installed azphalt `kind: "llm"` packages, in addition to the providers above.
+ *
+ * - **Assistant brain:** packages that speak `openai-chat`. Picking one makes it drive the editor; "None"
+ *   leaves the provider selection exactly as it was.
+ * - **Private sandbox:** packages that speak `github-actions-runner` (every `sandbox-weights` package) are
+ *   set up in the user's own private GitHub repository ([AzpLlmSandbox]) and can then take over the
+ *   background text jobs. Too slow (minutes per call) to drive the editor.
+ *
+ * Each row shows the package's disclosure (`dataHandling`, or the sandbox/weights/licence line) before it
+ * can be picked or set up, as azphalt `spec/llm.md` requires.
  */
 @Composable
 private fun AzpLlmSection(
@@ -1697,46 +1724,151 @@ private fun AzpLlmSection(
     selectedId: String,
     keys: Map<String, String>,
     models: Map<String, String>,
+    textId: String,
+    sandboxToken: String,
+    sandboxRepo: String,
+    sandboxInstalls: Map<String, String>,
     onSelect: (String) -> Unit,
     onKey: (String, String) -> Unit,
     onModel: (String, String) -> Unit,
+    onTextId: (String) -> Unit,
+    onSandboxToken: (String) -> Unit,
+    onSandboxRepo: (String) -> Unit,
+    onSandboxInstalled: (String, String) -> Unit,
 ) {
     val installed by androidx.compose.runtime.produceState<List<AzpLlm.Endpoint>?>(null, extensionsDir, hostAppId) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { AzpLlm.installed(extensionsDir, hostAppId) }
     }
     val list = installed ?: return
-    if (list.isEmpty() && selectedId.isBlank()) return
-    Text("Azphalt model (optional)", color = Neutral400, fontSize = 12.sp)
-    Text(
-        "Language models installed from the Azphalt Store. Picking one makes it the assistant brain; it " +
-            "gets the same text a cloud provider does, never your video or audio.",
-        color = Neutral500, fontSize = 10.sp,
-    )
-    ProviderRow("None", "Use the provider selected above.", selected = selectedId.isBlank()) { onSelect("") }
-    list.forEach { e ->
-        ProviderRow(e.name, e.disclosure, selected = selectedId == e.packageId) { onSelect(e.packageId) }
-    }
-    if (selectedId.isNotBlank() && list.none { it.packageId == selectedId }) {
+    if (list.isEmpty() && selectedId.isBlank() && textId.isBlank()) return
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var sandboxStatus by remember { mutableStateOf<String?>(null) }
+    var sandboxBusy by remember { mutableStateOf(false) }
+
+    val chat = list.filter { it.supportsChat }
+    if (chat.isNotEmpty() || selectedId.isNotBlank()) {
+        Text("Azphalt model (optional)", color = Neutral400, fontSize = 12.sp)
         Text(
-            "The picked package is no longer installed, so the provider above is used.",
+            "Language models installed from the Azphalt Store. Picking one makes it the assistant brain; it " +
+                "gets the same text a cloud provider does, never your video or audio.",
             color = Neutral500, fontSize = 10.sp,
         )
-    }
-    val chosen = list.firstOrNull { it.packageId == selectedId } ?: return
-    chosen.keyInput?.let { input ->
-        val label = input.description.ifBlank { "${chosen.name} key" } + if (chosen.keyRequired) "" else " (optional)"
-        KeyField(label, keys[chosen.packageId].orEmpty()) { onKey(chosen.packageId, it.trim()) }
-        if (chosen.keyRequired && keys[chosen.packageId].isNullOrBlank()) {
-            Text("This model needs a key; until one is set the provider above is used.", color = Neutral500, fontSize = 10.sp)
+        ProviderRow("None", "Use the provider selected above.", selected = selectedId.isBlank()) { onSelect("") }
+        chat.forEach { e ->
+            ProviderRow(e.name, e.disclosure, selected = selectedId == e.packageId) { onSelect(e.packageId) }
+        }
+        if (selectedId.isNotBlank() && chat.none { it.packageId == selectedId }) {
+            Text(
+                "The picked package is no longer installed, so the provider above is used.",
+                color = Neutral500, fontSize = 10.sp,
+            )
+        }
+        chat.firstOrNull { it.packageId == selectedId }?.let { chosen ->
+            chosen.keyInput?.let { input ->
+                val label = input.description.ifBlank { "${chosen.name} key" } + if (chosen.keyRequired) "" else " (optional)"
+                KeyField(label, keys[chosen.packageId].orEmpty()) { onKey(chosen.packageId, it.trim()) }
+                if (chosen.keyRequired && keys[chosen.packageId].isNullOrBlank()) {
+                    Text("This model needs a key; until one is set the provider above is used.", color = Neutral500, fontSize = 10.sp)
+                }
+            }
+            Text("Model", color = Neutral500, fontSize = 10.sp)
+            OutlinedTextField(
+                value = models[chosen.packageId].orEmpty(),
+                onValueChange = { onModel(chosen.packageId, it.trim()) },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Default: ${chosen.defaultModel}", color = Neutral500, fontSize = 12.sp) },
+                textStyle = TextStyle(color = White, fontSize = 12.sp),
+                singleLine = true,
+            )
         }
     }
-    Text("Model", color = Neutral500, fontSize = 10.sp)
+
+    val runner = list.filter { it.supportsRunner }
+    if (runner.isEmpty() && textId.isBlank()) return
+    Text("Azphalt models — private sandbox", color = Neutral400, fontSize = 12.sp)
+    Text(
+        "These run in your own private GitHub repository (GitHub Actions), not on this device and not on a " +
+            "model operator's servers. A run takes minutes, so they take over background text jobs only, " +
+            "never the assistant. Use a fine-grained token scoped to that one repository.",
+        color = Neutral500, fontSize = 10.sp,
+    )
+    KeyField("GitHub token for the sandbox", sandboxToken) { onSandboxToken(it.trim()) }
     OutlinedTextField(
-        value = models[chosen.packageId].orEmpty(),
-        onValueChange = { onModel(chosen.packageId, it.trim()) },
+        value = sandboxRepo,
+        onValueChange = { onSandboxRepo(it.trim()) },
         modifier = Modifier.fillMaxWidth(),
-        placeholder = { Text("Default: ${chosen.defaultModel}", color = Neutral500, fontSize = 12.sp) },
+        placeholder = { Text("Sandbox repository, owner/repo (created private if missing)", color = Neutral500, fontSize = 12.sp) },
         textStyle = TextStyle(color = White, fontSize = 12.sp),
         singleLine = true,
     )
+    runner.forEach { e ->
+        val setUp = sandboxInstalls[e.packageId]?.let { AzpLlmSandbox.Install.fromJson(it) }
+        val current = setUp?.version == e.version
+        Text(e.name, color = White, fontSize = 13.sp)
+        Text(e.disclosure, color = Neutral500, fontSize = 11.sp)
+        Text(
+            "Setup needs token permissions: ${e.setupTokenPermissions.joinToString().ifBlank { "none declared" }}. " +
+                "Downloads: ${e.fetches.size} pinned file(s)" +
+                (if (e.secrets.isNotEmpty()) "; your key is stored as an encrypted Actions secret there." else "."),
+            color = Neutral500, fontSize = 10.sp,
+        )
+        // A chat-capable package's key is entered above; a runner-only one needs its own field here.
+        if (!e.supportsChat) {
+            e.keyInput?.let { input ->
+                val label = input.description.ifBlank { "${e.name} key" } + if (e.keyRequired) "" else " (optional)"
+                KeyField(label, keys[e.packageId].orEmpty()) { onKey(e.packageId, it.trim()) }
+            }
+        }
+        ActionText(
+            when {
+                sandboxBusy -> "Working…"
+                current -> "Set up ✓ — set up again"
+                setUp != null -> "Update in sandbox (v${setUp.version} → v${e.version})"
+                else -> "Set up in sandbox"
+            },
+        ) {
+            if (sandboxBusy) return@ActionText
+            val parts = sandboxRepo.split('/')
+            if (sandboxToken.isBlank() || parts.size != 2 || parts.any { it.isBlank() }) {
+                sandboxStatus = "Enter a GitHub token and the sandbox repository as owner/repo first."
+                return@ActionText
+            }
+            sandboxBusy = true
+            sandboxStatus = "Setting up ${e.name}…"
+            scope.launch {
+                val outcome = runCatching {
+                    val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        AzpLlm.packageFile(extensionsDir, hostAppId, e.packageId)?.readBytes()
+                    } ?: error("the package file is gone")
+                    val inputs = e.keyInput?.let { k -> keys[e.packageId]?.takeIf { it.isNotBlank() }?.let { mapOf(k.id to it) } }.orEmpty()
+                    AzpLlmSandbox.install(
+                        AzpLlmSandbox.GitHub(sandboxToken), parts[0], parts[1], bytes, inputs,
+                    ) { _, message -> sandboxStatus = "${e.name}: $message" }
+                }
+                sandboxBusy = false
+                outcome.fold(
+                    onSuccess = { r ->
+                        onSandboxInstalled(e.packageId, r.install.toJson())
+                        val setup = r.setup
+                        sandboxStatus = if (setup == null || setup.completed) {
+                            "${e.name} is set up in ${sandboxRepo}."
+                        } else {
+                            "${e.name} was committed, but its setup run failed: ${setup.message}"
+                        }
+                    },
+                    onFailure = { sandboxStatus = "Setting up ${e.name} failed: ${it.message}" },
+                )
+            }
+        }
+    }
+    sandboxStatus?.let { Text(it, color = Neutral400, fontSize = 11.sp) }
+
+    val ready = runner.filter { sandboxInstalls.containsKey(it.packageId) }
+    if (ready.isNotEmpty() || textId.isNotBlank()) {
+        Text("Background text jobs", color = Neutral500, fontSize = 10.sp)
+        ProviderRow("Assistant brain", "Use the assistant brain for them, as before.", selected = textId.isBlank()) { onTextId("") }
+        ready.forEach { e ->
+            ProviderRow(e.name, "Runs in ${sandboxRepo.ifBlank { "the sandbox" }}.", selected = textId == e.packageId) { onTextId(e.packageId) }
+        }
+    }
 }

@@ -70,7 +70,10 @@ object DesktopMcpAgent {
             AiProviderType.LOCAL, AiProviderType.MLKIT -> localBackend
         }
 
-        return brain?.let { DesktopDelegatingAgentBackend(settings, it) }
+        return com.hereliesaz.guillotine.ai.agent.AzpLlmBrain.withSandboxTextJobs(
+            brain?.let { DesktopDelegatingAgentBackend(settings, it) },
+            settings,
+        )
     }
 
     private const val OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"

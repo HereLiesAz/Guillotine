@@ -40,6 +40,10 @@ data class SettingsBundle(
     val azpLlmId: String = "",
     val azpLlmKeys: Map<String, String> = emptyMap(),
     val azpLlmModels: Map<String, String> = emptyMap(),
+    val azpSandboxToken: String = "",
+    val azpSandboxRepo: String = "",
+    val azpSandboxInstalls: Map<String, String> = emptyMap(),
+    val azpLlmTextId: String = "",
 )
 
 object SettingsBackup {
@@ -81,6 +85,10 @@ object SettingsBackup {
             azpLlmId = settings.azpLlmId,
             azpLlmKeys = settings.azpLlmKeys,
             azpLlmModels = settings.azpLlmModels,
+            azpSandboxToken = settings.azpSandboxToken,
+            azpSandboxRepo = settings.azpSandboxRepo,
+            azpSandboxInstalls = settings.azpSandboxInstalls,
+            azpLlmTextId = settings.azpLlmTextId,
         )
         // Serialize BEFORE opening the destination stream — "wt" mode truncates the target the
         // moment it's opened, so serializing first means an encoding failure never touches the
@@ -139,6 +147,10 @@ object SettingsBackup {
             azpLlmId = bundle.azpLlmId,
             azpLlmKeys = bundle.azpLlmKeys,
             azpLlmModels = bundle.azpLlmModels,
+            azpSandboxToken = bundle.azpSandboxToken,
+            azpSandboxRepo = bundle.azpSandboxRepo,
+            azpSandboxInstalls = bundle.azpSandboxInstalls,
+            azpLlmTextId = bundle.azpLlmTextId,
         )
         UserToolStore.save(context, bundle.userTools)
         return settings

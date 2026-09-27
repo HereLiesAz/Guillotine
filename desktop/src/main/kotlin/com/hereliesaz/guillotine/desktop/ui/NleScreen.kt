@@ -152,6 +152,9 @@ fun NleScreen(
         settings.azpLlmId,
         settings.azpLlmKeys,
         settings.azpLlmModels,
+        settings.azpLlmTextId,
+        settings.azpSandboxInstalls,
+        settings.azpSandboxToken,
     ) { DesktopMcpAgent.forSettings(settings, mcpTools) }
     // Read through this in remembered lambdas (e.g. openLauncher) so they always reset the CURRENT backend,
     // not a stale one captured before a settings-driven rebuild.

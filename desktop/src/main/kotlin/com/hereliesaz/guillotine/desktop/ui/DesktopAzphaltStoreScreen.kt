@@ -125,7 +125,21 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
                 is AzpHandoffInstaller.InstallResult.Success -> {
                     installedIds = installedIds + result.id
                     val clipId = vm.uiState.value.selectedClipIds.firstOrNull()
-                    notice = if (clipId == null) {
+                    // A language model has nothing to apply to a clip; say where it went instead.
+                    val llmNotice = when {
+                        AzpInstallSurfaces.Surface.ASSISTANT_BRAIN in result.surfaces ->
+                            "Installed “${result.name}”, an off-device language model. Pick it under Settings → " +
+                                "AI Analyzer → Azphalt model to use it as the assistant brain. It sees your typed " +
+                                "requests and the editor's text, never your video or audio."
+                        AzpInstallSurfaces.Surface.BACKGROUND_TEXT in result.surfaces ->
+                            "Installed “${result.name}”, a language model that runs in your own private GitHub " +
+                                "sandbox. Set it up under Settings → AI Analyzer → Azphalt models — private sandbox, " +
+                                "then pick it for background text jobs."
+                        else -> null
+                    }
+                    notice = if (llmNotice != null) {
+                        llmNotice
+                    } else if (clipId == null) {
                         "Installed “${result.name}”. Select a clip, then use it from the clip panel."
                     } else {
                         when (val outcome = DesktopPluginApplier.apply(vm, clipId, result.id, extensionsDir)) {

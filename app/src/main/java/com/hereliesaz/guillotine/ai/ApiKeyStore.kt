@@ -80,6 +80,10 @@ class ApiKeyStore(context: Context) {
         azpLlmId = prefs.getString(KEY_AZP_LLM_ID, "").orEmpty(),
         azpLlmKeys = readMap(KEY_AZP_LLM_KEYS),
         azpLlmModels = readMap(KEY_AZP_LLM_MODELS),
+        azpSandboxToken = prefs.getString(KEY_AZP_SANDBOX_TOKEN, "").orEmpty(),
+        azpSandboxRepo = prefs.getString(KEY_AZP_SANDBOX_REPO, "").orEmpty(),
+        azpSandboxInstalls = readMap(KEY_AZP_SANDBOX_INSTALLS),
+        azpLlmTextId = prefs.getString(KEY_AZP_LLM_TEXT_ID, "").orEmpty(),
     )
 
     /** A string map persisted as one JSON object (the `llm` package ids aren't known up front). */
@@ -129,6 +133,10 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_AZP_LLM_ID, settings.azpLlmId)
                 putString(KEY_AZP_LLM_KEYS, writeMap(settings.azpLlmKeys))
                 putString(KEY_AZP_LLM_MODELS, writeMap(settings.azpLlmModels))
+                putString(KEY_AZP_SANDBOX_TOKEN, settings.azpSandboxToken)
+                putString(KEY_AZP_SANDBOX_REPO, settings.azpSandboxRepo)
+                putString(KEY_AZP_SANDBOX_INSTALLS, writeMap(settings.azpSandboxInstalls))
+                putString(KEY_AZP_LLM_TEXT_ID, settings.azpLlmTextId)
             }.apply()
         }
         _settings.value = settings
@@ -161,6 +169,10 @@ class ApiKeyStore(context: Context) {
         const val KEY_AZP_LLM_ID = "azp_llm_id"
         const val KEY_AZP_LLM_KEYS = "azp_llm_keys"
         const val KEY_AZP_LLM_MODELS = "azp_llm_models"
+        const val KEY_AZP_SANDBOX_TOKEN = "azp_sandbox_token"
+        const val KEY_AZP_SANDBOX_REPO = "azp_sandbox_repo"
+        const val KEY_AZP_SANDBOX_INSTALLS = "azp_sandbox_installs"
+        const val KEY_AZP_LLM_TEXT_ID = "azp_llm_text_id"
         val EFFECT_KEYS = listOf("superres", "style", "depth", "lowlight")
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"

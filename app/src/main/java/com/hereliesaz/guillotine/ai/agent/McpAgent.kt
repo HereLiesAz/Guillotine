@@ -61,7 +61,10 @@ object McpAgent {
 
         // One tiny local router fronts every planner. Its job is not to edit; it narrows the live MCP
         // catalog to the capabilities/models that fit this request, then hands those to the real brain.
-        return brain?.let { DelegatingAgentBackend(context.applicationContext, settings, it) }
+        return AzpLlmBrain.withSandboxTextJobs(
+            brain?.let { DelegatingAgentBackend(context.applicationContext, settings, it) },
+            settings,
+        )
     }
 
     private fun onDevice(context: Context, settings: AiSettings, frames: FrameProvider?): AgentBackend? =
