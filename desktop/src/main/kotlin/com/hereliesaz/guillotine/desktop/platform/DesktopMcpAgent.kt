@@ -42,7 +42,12 @@ object DesktopMcpAgent {
             DesktopOllamaAgentBackend(tag, frames = localFrames)
         }
 
-        val brain = when (provider) {
+        // An installed azphalt `llm` package the user picked comes first; otherwise the usual selection.
+        val brain = com.hereliesaz.guillotine.ai.agent.AzpLlmBrain.forSettings(
+            java.io.File(DesktopStorage.dataDir, "extensions"),
+            DesktopPluginApplier.HOST_APP_ID,
+            settings,
+        ) ?: when (provider) {
             AiProviderType.ANTHROPIC ->
                 if (key.isNotBlank()) AnthropicAgentBackend(key, model, cloudFrames) else localBackend
 

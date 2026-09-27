@@ -168,7 +168,8 @@ class OpenAiAgentBackend(
     private fun post(body: JSONObject): JSONObject {
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            setRequestProperty("Authorization", "Bearer $apiKey")
+            // Blank key = a keyless endpoint (an azphalt `llm` package with auth none/optional-bearer).
+            if (apiKey.isNotBlank()) setRequestProperty("Authorization", "Bearer $apiKey")
             setRequestProperty("Content-Type", "application/json")
             connectTimeout = 30_000
             readTimeout = 120_000

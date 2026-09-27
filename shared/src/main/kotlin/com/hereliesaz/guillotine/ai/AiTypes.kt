@@ -151,6 +151,16 @@ data class AiSettings(
     val stemModelPath: String = "",
     /** GTCRN speech-denoiser model (`.onnx`); blank = feature off. */
     val denoiseModelPath: String = "",
+
+    // ---- azphalt off-device language models (kind "llm"; see AzpLlm) -------------------------------
+    /** Installed `llm` package id chosen as the assistant brain; blank = use [provider] as before. An
+     *  addition, not a replacement: when set and still installed, it drives the editor instead of the
+     *  provider's brain; the provider still owns on-device analysis. */
+    val azpLlmId: String = "",
+    /** Bearer key per `llm` package id (only for packages whose auth isn't `none`). Encrypted like [keys]. */
+    val azpLlmKeys: Map<String, String> = emptyMap(),
+    /** Model override per `llm` package id; blank/absent = the package's `defaultModel`. */
+    val azpLlmModels: Map<String, String> = emptyMap(),
 ) {
     fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
     fun modelFor(p: AiProviderType): String =

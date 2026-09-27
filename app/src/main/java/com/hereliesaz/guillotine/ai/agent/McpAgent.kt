@@ -11,6 +11,7 @@ import com.hereliesaz.guillotine.mcp.McpToolsSurface
  * editor through the MCP tools.
  *
  * Selection (always-available, defaults to on-device):
+ *  0. An installed azphalt `llm` package the user picked ([AzpLlmBrain]) → that off-device brain.
  *  1. The selected provider, when it's a tool-calling LLM **and** its key is set → that cloud brain.
  *  2. Otherwise (the keyless on-device MLKit/Local analyzers, which can't tool-call) → the on-device
  *     LLM brain, if a `.task` model path is configured. On-device brain + on-device analysis =
@@ -29,7 +30,9 @@ object McpAgent {
         // (the on-device invariant: pixels never leave the device).
         val frames = tools as? FrameProvider
         val cloudFrames = if (settings.cloudVision) tools as? FrameImageSource else null
-        val brain = when (provider) {
+        val brain = AzpLlmBrain.forSettings(
+            java.io.File(context.filesDir, "extensions"), context.packageName, settings,
+        ) ?: when (provider) {
             AiProviderType.ANTHROPIC ->
                 if (key.isNotBlank()) AnthropicAgentBackend(key, model, cloudFrames) else onDevice(context, settings, frames)
 

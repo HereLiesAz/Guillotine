@@ -75,6 +75,7 @@ import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_FACE_MODELS
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_ON_DEVICE_MODELS
 import com.hereliesaz.guillotine.ai.ModelImport
 import com.hereliesaz.guillotine.azphalt.AzphaltTrust
+import com.hereliesaz.guillotine.azphalt.AzpLlm
 import com.hereliesaz.guillotine.azphalt.AzpModelInstall
 import com.hereliesaz.guillotine.azphalt.AzpModelInstaller
 import com.hereliesaz.guillotine.ai.agent.RECOMMENDED_RECOGNITION_MODELS
@@ -123,7 +124,7 @@ private fun SheetCard(content: @Composable () -> Unit) {
 private fun AiCapabilitySummary(settings: AiSettings) {
     val cloudConfigured = settings.provider != AiProviderType.MLKIT && settings.keyFor(settings.provider).isNotBlank()
     val rows = listOf(
-        "Assistant brain" to (cloudConfigured || settings.agentModelPath.isNotBlank()),
+        "Assistant brain" to (cloudConfigured || settings.agentModelPath.isNotBlank() || settings.azpLlmId.isNotBlank()),
         "Frame vision (recognition)" to true, // always on-device — bundled defaults if no path is set
         "Transcription" to (settings.speechModelPath.isNotBlank() || settings.asrModelPath.isNotBlank() || settings.keyFor(AiProviderType.OPENAI).isNotBlank()),
         "Text-to-speech" to settings.ttsModelPath.isNotBlank(),
@@ -180,6 +181,9 @@ fun SettingsScreen(
 
     var ffmpegPath by remember { mutableStateOf(current.ffmpegPath) }
     var cloudVision by remember { mutableStateOf(current.cloudVision) }
+    var azpLlmId by remember { mutableStateOf(current.azpLlmId) }
+    var azpLlmKeys by remember { mutableStateOf(current.azpLlmKeys) }
+    var azpLlmModels by remember { mutableStateOf(current.azpLlmModels) }
     var frameAnalysisCacheSize by remember { mutableIntStateOf(current.frameAnalysisCacheSize) }
     var genKeys by remember { mutableStateOf(current.genKeys) }
     var genModels by remember { mutableStateOf(current.genModels) }
@@ -263,6 +267,9 @@ fun SettingsScreen(
 
         ffmpegPath = ffmpegPath.trim(),
         cloudVision = cloudVision,
+        azpLlmId = azpLlmId,
+        azpLlmKeys = azpLlmKeys.filterValues { it.isNotEmpty() },
+        azpLlmModels = azpLlmModels.filterValues { it.isNotEmpty() },
         frameAnalysisCacheSize = frameAnalysisCacheSize,
         genKeys = genKeys.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() },
         genModels = genModels,
@@ -386,6 +393,9 @@ fun SettingsScreen(
 
             ffmpegPath = restored.ffmpegPath
             cloudVision = restored.cloudVision
+            azpLlmId = restored.azpLlmId
+            azpLlmKeys = restored.azpLlmKeys
+            azpLlmModels = restored.azpLlmModels
             frameAnalysisCacheSize = restored.frameAnalysisCacheSize
             genKeys = restored.genKeys
             genModels = restored.genModels
@@ -516,6 +526,17 @@ fun SettingsScreen(
                             )
                         }
                     }
+
+                    AzpLlmSection(
+                        extensionsDir = remember { java.io.File(context.filesDir, "extensions") },
+                        hostAppId = context.packageName,
+                        selectedId = azpLlmId,
+                        keys = azpLlmKeys,
+                        models = azpLlmModels,
+                        onSelect = { azpLlmId = it },
+                        onKey = { id, k -> azpLlmKeys = azpLlmKeys + (id to k) },
+                        onModel = { id, m -> azpLlmModels = azpLlmModels + (id to m) },
+                    )
 
                     // Frame-analysis cache: how many per-frame ML Kit results (per signal — object
                     // labels + scene labels) to keep in RAM so rescanning the same clip with a
@@ -1661,4 +1682,61 @@ private fun ModelPathField(
             )
         }
     }
+}
+
+/**
+ * **Azphalt model** — installed azphalt `kind: "llm"` packages (endpoint tier), offered as an extra
+ * assistant brain next to the providers above. Picking one makes it drive the editor; "None" leaves the
+ * provider selection exactly as it was. Each row shows the package's prompt-handling disclosure
+ * (`dataHandling`, required by azphalt `spec/llm.md`) before it can be picked. See [AzpLlm].
+ */
+@Composable
+private fun AzpLlmSection(
+    extensionsDir: java.io.File,
+    hostAppId: String,
+    selectedId: String,
+    keys: Map<String, String>,
+    models: Map<String, String>,
+    onSelect: (String) -> Unit,
+    onKey: (String, String) -> Unit,
+    onModel: (String, String) -> Unit,
+) {
+    val installed by androidx.compose.runtime.produceState<List<AzpLlm.Endpoint>?>(null, extensionsDir, hostAppId) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { AzpLlm.installed(extensionsDir, hostAppId) }
+    }
+    val list = installed ?: return
+    if (list.isEmpty() && selectedId.isBlank()) return
+    Text("Azphalt model (optional)", color = Neutral400, fontSize = 12.sp)
+    Text(
+        "Language models installed from the Azphalt Store. Picking one makes it the assistant brain; it " +
+            "gets the same text a cloud provider does, never your video or audio.",
+        color = Neutral500, fontSize = 10.sp,
+    )
+    ProviderRow("None", "Use the provider selected above.", selected = selectedId.isBlank()) { onSelect("") }
+    list.forEach { e ->
+        ProviderRow(e.name, e.disclosure, selected = selectedId == e.packageId) { onSelect(e.packageId) }
+    }
+    if (selectedId.isNotBlank() && list.none { it.packageId == selectedId }) {
+        Text(
+            "The picked package is no longer installed, so the provider above is used.",
+            color = Neutral500, fontSize = 10.sp,
+        )
+    }
+    val chosen = list.firstOrNull { it.packageId == selectedId } ?: return
+    chosen.keyInput?.let { input ->
+        val label = input.description.ifBlank { "${chosen.name} key" } + if (chosen.keyRequired) "" else " (optional)"
+        KeyField(label, keys[chosen.packageId].orEmpty()) { onKey(chosen.packageId, it.trim()) }
+        if (chosen.keyRequired && keys[chosen.packageId].isNullOrBlank()) {
+            Text("This model needs a key; until one is set the provider above is used.", color = Neutral500, fontSize = 10.sp)
+        }
+    }
+    Text("Model", color = Neutral500, fontSize = 10.sp)
+    OutlinedTextField(
+        value = models[chosen.packageId].orEmpty(),
+        onValueChange = { onModel(chosen.packageId, it.trim()) },
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text("Default: ${chosen.defaultModel}", color = Neutral500, fontSize = 12.sp) },
+        textStyle = TextStyle(color = White, fontSize = 12.sp),
+        singleLine = true,
+    )
 }

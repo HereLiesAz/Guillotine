@@ -77,7 +77,19 @@ class ApiKeyStore(context: Context) {
         diarizeEmbedModelPath = prefs.getString(KEY_DIARIZE_EMBED_MODEL_PATH, "").orEmpty(),
         stemModelPath = prefs.getString(KEY_STEM_MODEL_PATH, "").orEmpty(),
         denoiseModelPath = prefs.getString(KEY_DENOISE_MODEL_PATH, "").orEmpty(),
+        azpLlmId = prefs.getString(KEY_AZP_LLM_ID, "").orEmpty(),
+        azpLlmKeys = readMap(KEY_AZP_LLM_KEYS),
+        azpLlmModels = readMap(KEY_AZP_LLM_MODELS),
     )
+
+    /** A string map persisted as one JSON object (the `llm` package ids aren't known up front). */
+    private fun readMap(key: String): Map<String, String> = runCatching {
+        val o = org.json.JSONObject(prefs.getString(key, null) ?: return emptyMap())
+        o.keys().asSequence().associateWith { o.optString(it) }.filterValues { it.isNotEmpty() }
+    }.getOrDefault(emptyMap())
+
+    private fun writeMap(map: Map<String, String>): String =
+        org.json.JSONObject(map.filterValues { it.isNotEmpty() }).toString()
 
     suspend fun save(settings: AiSettings) {
         withContext(Dispatchers.IO) {
@@ -114,6 +126,9 @@ class ApiKeyStore(context: Context) {
                 putString(KEY_DIARIZE_EMBED_MODEL_PATH, settings.diarizeEmbedModelPath)
                 putString(KEY_STEM_MODEL_PATH, settings.stemModelPath)
                 putString(KEY_DENOISE_MODEL_PATH, settings.denoiseModelPath)
+                putString(KEY_AZP_LLM_ID, settings.azpLlmId)
+                putString(KEY_AZP_LLM_KEYS, writeMap(settings.azpLlmKeys))
+                putString(KEY_AZP_LLM_MODELS, writeMap(settings.azpLlmModels))
             }.apply()
         }
         _settings.value = settings
@@ -143,6 +158,9 @@ class ApiKeyStore(context: Context) {
         const val KEY_DIARIZE_EMBED_MODEL_PATH = "diarize_embed_model_path"
         const val KEY_STEM_MODEL_PATH = "stem_model_path"
         const val KEY_DENOISE_MODEL_PATH = "denoise_model_path"
+        const val KEY_AZP_LLM_ID = "azp_llm_id"
+        const val KEY_AZP_LLM_KEYS = "azp_llm_keys"
+        const val KEY_AZP_LLM_MODELS = "azp_llm_models"
         val EFFECT_KEYS = listOf("superres", "style", "depth", "lowlight")
         fun keyPref(p: AiProviderType) = "key_${p.name}"
         fun modelPref(p: AiProviderType) = "model_${p.name}"
