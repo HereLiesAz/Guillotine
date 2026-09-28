@@ -273,6 +273,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         settings.azpLlmId,
         settings.azpLlmKeys,
         settings.azpLlmModels,
+        settings.azpLlmTextId,
+        settings.azpSandboxInstalls,
+        settings.azpSandboxToken,
     ) {
         com.hereliesaz.guillotine.ai.agent.McpAgent.forSettings(context, settings, sharedMcpTools)
     }

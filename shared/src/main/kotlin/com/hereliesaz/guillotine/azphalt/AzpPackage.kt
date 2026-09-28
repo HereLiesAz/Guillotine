@@ -65,7 +65,12 @@ object AzpPackage {
     private const val SUPPORTED_AZPHALT_MAJOR = 0
 
     /** A parsed package: the manifest plus every payload entry (all entries except `manifest.json`). */
-    data class Loaded(val manifest: AzpManifest, val payload: Map<String, ByteArray>)
+    data class Loaded(
+        val manifest: AzpManifest,
+        val payload: Map<String, ByteArray>,
+        /** The manifest exactly as packaged (set by [load]); for re-publishing it byte-for-byte, e.g. into an llm sandbox. */
+        val manifestBytes: ByteArray? = null,
+    )
 
     /** Thrown by [load] when a package is malformed or fails integrity verification. */
     class AzpException(message: String) : Exception(message)
@@ -254,7 +259,7 @@ object AzpPackage {
         val errors = verify(entries)
         if (errors.isNotEmpty()) throw AzpException("Invalid .azp: ${errors.joinToString("; ")}")
         val raw = entries["manifest.json"] ?: throw AzpException("azp: manifest.json is missing")
-        return Loaded(parseManifest(raw), entries.filterKeys { it != "manifest.json" })
+        return Loaded(parseManifest(raw), entries.filterKeys { it != "manifest.json" }, raw)
     }
 
     private fun parseSignature(entries: Map<String, ByteArray>): AzpSignature? {

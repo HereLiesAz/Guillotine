@@ -23,6 +23,11 @@ class OpenAiAgentBackend(
     // Non-null ONLY when the user opted into cloud vision. When set, the model is offered look_at_frame
     // and the current frame is sent to the provider's vision API on demand. Null → strictly text-only.
     private val frames: FrameImageSource? = null,
+    // Non-null for an azphalt `llm` brain: this host is the rolling-delimiter translator (azphalt
+    // spec/llm.md § Rolling delimiters). Tool results are untrusted material — scrubbed of session tags
+    // and native control markers and kept in their own `tool` messages — and any output carrying a
+    // session tag is rejected. Null for the built-in providers, which behave exactly as before.
+    private val delimiters: com.hereliesaz.guillotine.azphalt.AzpLlmDelimiters.Session? = null,
 ) : AgentBackend {
 
     // Conversation memory kept across run() calls (see AgentBackend.reset). The system prompt is added once
@@ -46,6 +51,7 @@ class OpenAiAgentBackend(
             }
             messages.put(JSONObject().put("role", "user").put("content", instruction))
 
+            val tags = delimiters?.nextTurn().orEmpty()
             val guard = LoopGuard()
             var iterations = 0
             while (iterations++ < MAX_AGENT_ITERATIONS) {
@@ -59,6 +65,13 @@ class OpenAiAgentBackend(
                 val message = resp.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
                 val toolCalls = message.optJSONArray("tool_calls")
                 val text = message.optString("content").takeIf { it.isNotBlank() && it != "null" }
+                if (tags.isNotEmpty() &&
+                    com.hereliesaz.guillotine.azphalt.AzpLlmDelimiters.containsSessionTag(message.toString(), tags)
+                ) {
+                    messages = JSONArray()
+                    onEvent(AgentEvent.Failed("$label's reply contained a session delimiter tag, so it was rejected."))
+                    return@withContext
+                }
                 if (text != null) onEvent(AgentEvent.AssistantText(text.trim()))
 
                 // Append the assistant message verbatim (carries tool_calls the API must see echoed).
@@ -87,7 +100,11 @@ class OpenAiAgentBackend(
                         messages.put(JSONObject().apply {
                             put("role", "tool")
                             put("tool_call_id", tc.optString("id"))
-                            put("content", outcome.content())
+                            put(
+                                "content",
+                                if (tags.isEmpty()) outcome.content()
+                                else com.hereliesaz.guillotine.azphalt.AzpLlmDelimiters.scrub(outcome.content(), tags),
+                            )
                         })
                     }
                     continue

@@ -172,22 +172,33 @@ the editor** with no key and no network, add an **on-device LLM brain**:
 ### Azphalt models (installed from the store)
 
 Off-device language models published to the Azphalt Store as `kind: "llm"` packages (azphalt
-`spec/llm.md`). They're an **addition** to the providers above, not a replacement: install one from the
-store and it appears under **Settings → AI Analyzer → Azphalt model**. Pick it and it drives the editor;
-pick **None** and the provider selection above applies unchanged.
+`spec/llm.md`). They're an **addition** to the providers above, never a replacement. They get text
+only, like any controller LLM. They're never offered `look_at_frame`, even with cloud vision on,
+because a package doesn't declare image support.
 
-- **Supported:** the `endpoint` tier over `openai-chat`. Guillotine POSTs to `{baseUrl}/chat/completions`
-  through the same OpenAI-compatible loop as OpenRouter/Groq/xAI/Mistral.
-- **Not supported yet:** `sandbox-weights` and runner-only packages. They need a private GitHub Actions
-  sandbox Guillotine doesn't provision. They still install, and the install notice says why nothing uses
-  them. A package's `setup` script is never run.
-- **What it sees:** text only, same as any controller LLM. It is never offered `look_at_frame`, even with
-  cloud vision on, because a package doesn't declare image support.
-- **Disclosure:** each row shows the package's `dataHandling` (who runs it, whether prompts are retained
-  or may be used for training, whether the model behind it can change) before you pick it.
-- **Keys:** a package's `none` auth needs nothing; `optional-bearer` takes an optional key; for
-  `required-bearer`, the provider above stays in charge until a key is entered. Keys are stored encrypted,
-  per package, and included in Backup & Restore.
+**As the assistant brain** (packages that speak `openai-chat`): Settings → AI Analyzer → **Azphalt
+model**. Pick one and it drives the editor; pick **None** and the provider selection above applies
+unchanged. Guillotine calls `{baseUrl}/chat/completions` through the same OpenAI-compatible loop as
+OpenRouter/Groq/xAI/Mistral and acts as the spec's rolling-delimiter translator: tool results are
+scrubbed of session tags and chat-template control tokens and kept in their own messages, and a reply
+that carries a session tag is rejected.
+
+**In your private sandbox** (packages that speak `github-actions-runner`, which includes every
+`sandbox-weights` package): Settings → AI Analyzer → **Azphalt models — private sandbox**. Enter a
+GitHub token and a repository (`owner/repo`; created private if missing, refused if public), then
+**Set up in sandbox**. Guillotine commits the package to `llm/<id>/` and its runner to
+`.github/workflows/`, stores any key as an Actions secret sealed to the repository's key, and runs
+setup there once. Nothing runs on the device. A run takes minutes, so these models take over
+**background text jobs** (currently the one-time vocabulary expansion), picked under **Background text
+jobs**; they never drive the editor. A failed sandbox run falls back to the assistant brain.
+
+- **Token:** a fine-grained token scoped to the sandbox repository, with the permissions the package
+  lists (typically contents, actions, checks, workflows; secrets too for a keyed package). It is stored
+  encrypted and included in Backup & Restore.
+- **Disclosure:** each row shows its `dataHandling` (who runs it and what happens to prompts) or, for a
+  sandbox model, the weights size and licence, before you pick it or set it up.
+- **Keys:** `none` auth needs nothing; `optional-bearer` takes an optional key; for `required-bearer`,
+  the provider above stays in charge until a key is entered.
 
 ---
 

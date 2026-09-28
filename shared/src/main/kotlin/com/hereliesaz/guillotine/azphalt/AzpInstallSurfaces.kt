@@ -51,6 +51,13 @@ object AzpInstallSurfaces {
         ASSISTANT_BRAIN,
 
         /**
+         * An off-device language model that runs only in the user's private GitHub Actions sandbox
+         * (`sandbox-weights`, or a runner-only endpoint): set up under **Settings → AI Analyzer → Azphalt
+         * model**, then used for background text jobs. Too slow to drive the editor. See [AzpLlmSandbox].
+         */
+        BACKGROUND_TEXT,
+
+        /**
          * Nothing in this build surfaces it — a `code` package (the WASM sandbox isn't shipped; see
          * [AzpCodeRuntime]), or an `app` / `mcp` / `pack` package, which have no consumer here.
          */
@@ -66,7 +73,8 @@ object AzpInstallSurfaces {
      */
     fun of(manifest: AzpManifest): List<Surface> {
         if (manifest.isLlm) {
-            return listOf(if (AzpLlm.parse(manifest) is AzpLlm.Parsed.Ok) Surface.ASSISTANT_BRAIN else Surface.NONE)
+            val e = (AzpLlm.parse(manifest) as? AzpLlm.Parsed.Ok)?.endpoint ?: return listOf(Surface.NONE)
+            return listOf(if (e.supportsChat) Surface.ASSISTANT_BRAIN else Surface.BACKGROUND_TEXT)
         }
         if (manifest.assets.isEmpty()) return listOf(Surface.NONE)
         val out = LinkedHashSet<Surface>()
@@ -103,9 +111,8 @@ object AzpInstallSurfaces {
      * actually works — would mean a catalog entry's `types` doesn't reflect its own assets, a
      * registry-data problem rather than something to design around client-side.
      *
-     * The one assetless exception is [kind] `llm`: it has a consumer ([Surface.ASSISTANT_BRAIN]). The
-     * summary can't tell an endpoint-tier package from a `sandbox-weights` one, so the latter is still
-     * offered and lands on [Surface.NONE]; the install notice says why.
+     * The one assetless exception is [kind] `llm`: it has a consumer ([Surface.ASSISTANT_BRAIN] or
+     * [Surface.BACKGROUND_TEXT]).
      */
     fun hasKnownConsumer(types: List<String>, kind: String = ""): Boolean = types.isNotEmpty() || kind == "llm"
 }

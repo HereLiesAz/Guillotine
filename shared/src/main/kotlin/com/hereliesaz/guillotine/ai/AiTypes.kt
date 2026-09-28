@@ -161,6 +161,16 @@ data class AiSettings(
     val azpLlmKeys: Map<String, String> = emptyMap(),
     /** Model override per `llm` package id; blank/absent = the package's `defaultModel`. */
     val azpLlmModels: Map<String, String> = emptyMap(),
+    /** GitHub token for the private llm sandbox (fine-grained, scoped to [azpSandboxRepo]): sets packages
+     *  up and dispatches their runs. Encrypted like [keys]. See AzpLlmSandbox. */
+    val azpSandboxToken: String = "",
+    /** The sandbox repository, `owner/repo`; private, used only for azphalt llm packages. */
+    val azpSandboxRepo: String = "",
+    /** Package id → AzpLlmSandbox.Install JSON, for packages set up in the sandbox. */
+    val azpSandboxInstalls: Map<String, String> = emptyMap(),
+    /** Sandbox-installed `llm` package used for background text jobs (e.g. vocabulary expansion); blank =
+     *  those jobs use the assistant brain as before. */
+    val azpLlmTextId: String = "",
 ) {
     fun keyFor(p: AiProviderType): String = keys[p].orEmpty()
     fun modelFor(p: AiProviderType): String =

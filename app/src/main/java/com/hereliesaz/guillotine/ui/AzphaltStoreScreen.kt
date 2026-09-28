@@ -880,10 +880,14 @@ private fun whereToFind(
         "It's an off-device language model. Pick it under Settings → AI Analyzer → Azphalt model to use it " +
             "as the assistant brain. It sees your typed requests and the editor's text, never your video " +
             "or audio. Settings shows who runs it and what they do with prompts before you turn it on."
+    AzpInstallSurfaces.Surface.BACKGROUND_TEXT ->
+        "It's a language model that runs in your own private GitHub sandbox. Set it up under Settings → AI " +
+            "Analyzer → Azphalt models — private sandbox, then pick it for background text jobs. It's too " +
+            "slow to drive the editor, and it never sees your video or audio."
     AzpInstallSurfaces.Surface.NONE ->
-        "Nothing in this build surfaces it yet: code extensions need the WASM sandbox (not shipped), " +
-            "companion-app, MCP and pack packages have no consumer here, and language models that run in " +
-            "a GitHub sandbox aren't supported. It's saved, and it'll be picked up when that lands."
+        "Nothing in this build surfaces it yet: code extensions need the WASM sandbox (not shipped), and " +
+            "companion-app, MCP and pack packages have no consumer here. It's saved, and it'll be picked up " +
+            "when that lands."
 }
 
 /**
