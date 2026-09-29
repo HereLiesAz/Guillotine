@@ -20,6 +20,14 @@ object ModelResolver {
         return if (f.exists()) f.absolutePath else ""
     }
 
+    /**
+     * An installed sherpa-onnx Whisper bundle (encoder, decoder, tokens), flat in the models directory
+     * or in a `whisper` subdirectory of it. Null when none is complete.
+     */
+    fun whisperBundle(): com.hereliesaz.guillotine.desktop.media.DesktopWhisper.Bundle? =
+        com.hereliesaz.guillotine.desktop.media.DesktopWhisper.findBundle(File(modelsDir, "whisper"))
+            ?: com.hereliesaz.guillotine.desktop.media.DesktopWhisper.findBundle(modelsDir)
+
     /** The on-disk basename an `.azp` install produces for a slot, or null for an unsupported slot. */
     private fun fileNameFor(property: String): String? = when (property) {
         "labelModelPath" -> "mobilenetv3.onnx"

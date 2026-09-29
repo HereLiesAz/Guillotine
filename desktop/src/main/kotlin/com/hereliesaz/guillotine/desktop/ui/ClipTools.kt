@@ -180,7 +180,7 @@ private fun BackgroundToolButton(vm: EditorViewModel, state: EditorUiState, clip
         }
         if (clip.filters.removeBackground && media != null) {
             Text(
-                "Background removal preview not available on desktop",
+                "Exact when paused; during playback the cutout follows the subject with a short lag.",
                 color = Neutral500, fontSize = 11.sp,
             )
             Text(

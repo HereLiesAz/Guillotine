@@ -1654,10 +1654,17 @@ The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the
 - **Signing / notarization** — macOS Developer ID (Apple Developer account required), Windows
   code signing (CA certificate required). Without these, users see a "unknown developer" warning
   on first launch.
-- **Universal macOS binary** — `macos-latest` gives us Apple Silicon; Intel Macs need a second
-  runner (or `lipo`-ing two builds).
-- **AppImage / Flatpak / Snap** — `.deb` covers the mainstream case; broader Linux coverage is
-  open.
+- ~~**Universal macOS binary**~~ — **Done (2026-09-29):** two DMGs instead of one universal
+  binary, since the bundled JavaCPP/FFmpeg natives are host-arch only: `-arm64` from `macos-latest`
+  and `-x86_64` from `macos-15-intel`.
+- **AppImage / Flatpak / Snap** — **AppImage and RPM done (2026-09-29)** alongside the `.deb`
+  (`desktop/packaging/build-appimage.sh`, with `appimagetool` pinned by checksum). Flatpak and Snap
+  are still open.
+- **Desktop releases stopped on 2026-09-20.** The central workflow sync deleted
+  `release-desktop.yml` and then marked its binding obsolete, so no `.dmg`/`.msi`/`.deb` was attached
+  to any release after that. The workflow is restored locally from the registry snapshot. The next
+  central sync may re-centralize it onto `HereLiesAz/workflows` `desktop-package.yml`, which would
+  need the new matrix (Intel DMG, RPM, AppImage) carried over there.
 - ~~Auto-update framework~~ — **already shipped** (`DesktopUpdater.kt` + `UpdateChecker.kt` check
   GitHub Releases on launch and offer to download+run the installer). ~~The real remaining gap: no
   checksum/signature verification of the downloaded installer before launching it.~~
@@ -1675,6 +1682,11 @@ The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the
   `remove_fillers`) and GTCRN noise reduction (`denoise_clip`, via [`DesktopDenoiser`](../desktop/src/main/kotlin/com/hereliesaz/guillotine/desktop/media/DesktopDenoiser.kt)
   and the shared [`StreamingStft`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/StreamingStft.kt),
   checked against a NumPy reference on the real `gtcrn_simple.onnx`) all run through ONNX Runtime.
-  **Still open:** Whisper ASR (desktop `transcribe_precise` uses Vosk, since sherpa-onnx has no clean JVM
-  build), a multimodal VLM for `caption_frame` (desktop answers with image labels), and a live
-  background-removal preview (the matte applies on export only).
+  **Done 2026-09-29:** Whisper (`transcribe_precise`, [`DesktopWhisper`](../desktop/src/main/kotlin/com/hereliesaz/guillotine/desktop/media/DesktopWhisper.kt)
+  on the shared [`WhisperFrontend`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/WhisperFrontend.kt),
+  same transcripts as sherpa-onnx on its test clips) from a sherpa-onnx Whisper bundle in `azp-models/`
+  or `azp-models/whisper/`; `caption_frame` through the local multimodal Ollama model (Qwen 3.5 /
+  Gemma 4); background removal and bokeh during playback (`DesktopLiveMatte`, a mask refreshed off-thread).
+  **Still open:** the store's `com.hereliesaz.azphalt.whisper` package points at
+  `HereLiesAz/azphalt-whisper/releases/latest/download/whisper-base.onnx`, which returns 404, so it installs
+  nothing on either platform; it should ship the sherpa-onnx bundle (encoder, decoder, tokens) instead.

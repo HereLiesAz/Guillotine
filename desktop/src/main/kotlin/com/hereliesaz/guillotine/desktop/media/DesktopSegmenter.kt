@@ -61,7 +61,11 @@ object DesktopSegmenter {
         return big
     }
 
-    private fun matteInternal(img: BufferedImage, modelPath: String): BufferedImage {
+    /** A foreground-probability mask at the model's output resolution ([w]×[h], values in `[0,1]`). */
+    class Mask(val w: Int, val h: Int, val prob: FloatArray)
+
+    /** Run the model at [modelPath] on [img] and return its foreground mask, or null if the output is unusable. */
+    fun mask(img: BufferedImage, modelPath: String): Mask? {
         val session = DesktopOnnx.session(modelPath)
         val inShape = runCatching { (session.inputInfo.values.firstOrNull()?.info as? TensorInfo)?.shape }.getOrNull()
         val ih = inShape?.getOrNull(2)?.toInt()?.takeIf { it >= 2 } ?: 256
@@ -72,44 +76,61 @@ object DesktopSegmenter {
         OnnxTensor.createTensor(DesktopOnnx.environment, FloatBuffer.wrap(input), longArrayOf(1, 3, ih.toLong(), iw.toLong()))
             .use { tensor ->
                 session.run(mapOf(inputName to tensor)).use { result ->
-                    val first = result.iterator().asSequence().firstOrNull()?.value as? OnnxTensor ?: return img
-                    val shape = (first.info as? TensorInfo)?.shape ?: return img
+                    val first = result.iterator().asSequence().firstOrNull()?.value as? OnnxTensor ?: return null
+                    val shape = (first.info as? TensorInfo)?.shape ?: return null
                     val fb = first.floatBuffer
                     val flat = FloatArray(fb.remaining()).also { fb.get(it) }
                     // NCHW: channels, then spatial. length-3 = [1,h,w]; length-4 = [1,C,h,w].
                     val c = if (shape.size >= 4) shape[1].toInt() else 1
                     val mh = shape[shape.size - 2].toInt()
                     val mw = shape[shape.size - 1].toInt()
-                    if (mh < 1 || mw < 1 || flat.size < c * mh * mw) return img
-
-                    val w = img.width
-                    val h = img.height
-                    val out = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
-                    val src = IntArray(w * h)
-                    img.getRGB(0, 0, w, h, src, 0, w)
-                    val dst = IntArray(w * h)
-                    for (y in 0 until h) {
-                        val my = (y * mh / h).coerceIn(0, mh - 1)
-                        for (x in 0 until w) {
-                            val mx = (x * mw / w).coerceIn(0, mw - 1)
-                            val p = my * mw + mx
-                            val prob = if (c >= 2) {
-                                val bg = flat[p]
-                                val fg = flat[mh * mw + p]
-                                1f / (1f + exp(-(fg - bg)))
-                            } else {
-                                val v = flat[p]
-                                if (v in 0f..1f) v else 1f / (1f + exp(-v)) // sigmoid if it's a logit
-                            }
-                            val a = (prob.coerceIn(0f, 1f) * 255f).toInt()
-                            dst[y * w + x] = (a shl 24) or (src[y * w + x] and 0x00FFFFFF)
+                    if (mh < 1 || mw < 1 || flat.size < c * mh * mw) return null
+                    val prob = FloatArray(mh * mw) { p ->
+                        val v = if (c >= 2) {
+                            1f / (1f + exp(-(flat[mh * mw + p] - flat[p])))
+                        } else {
+                            val raw = flat[p]
+                            if (raw in 0f..1f) raw else 1f / (1f + exp(-raw)) // sigmoid if it's a logit
                         }
+                        v.coerceIn(0f, 1f)
                     }
-                    out.setRGB(0, 0, w, h, dst, 0, w)
-                    return out
+                    return Mask(mw, mh, prob)
                 }
             }
     }
+
+    /** ARGB copy of [img] with [mask] (nearest-neighbour scaled) as its alpha. Cheap: no inference. */
+    fun applyMask(img: BufferedImage, mask: Mask): BufferedImage {
+        val w = img.width
+        val h = img.height
+        val out = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+        val src = IntArray(w * h)
+        img.getRGB(0, 0, w, h, src, 0, w)
+        val dst = IntArray(w * h)
+        for (y in 0 until h) {
+            val my = (y * mask.h / h).coerceIn(0, mask.h - 1)
+            for (x in 0 until w) {
+                val mx = (x * mask.w / w).coerceIn(0, mask.w - 1)
+                val a = (mask.prob[my * mask.w + mx] * 255f).toInt()
+                dst[y * w + x] = (a shl 24) or (src[y * w + x] and 0x00FFFFFF)
+            }
+        }
+        out.setRGB(0, 0, w, h, dst, 0, w)
+        return out
+    }
+
+    /** Portrait bokeh from an existing [mask]: blurred [img] with the masked (sharp) subject on top. */
+    fun portraitBlurWith(img: BufferedImage, mask: Mask): BufferedImage {
+        val out = BufferedImage(img.width, img.height, BufferedImage.TYPE_INT_RGB)
+        val g = out.createGraphics()
+        g.drawImage(smoothBlur(img), 0, 0, img.width, img.height, null)
+        g.drawImage(applyMask(img, mask), 0, 0, null)
+        g.dispose()
+        return out
+    }
+
+    private fun matteInternal(img: BufferedImage, modelPath: String): BufferedImage =
+        mask(img, modelPath)?.let { applyMask(img, it) } ?: img
 
     /** Resize to [w]×[h], NCHW float, scaled to `[0,1]` (RGB) — the common selfie-seg preprocessing. */
     private fun preprocess(src: BufferedImage, w: Int, h: Int): FloatArray {

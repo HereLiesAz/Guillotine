@@ -14,6 +14,40 @@ object DesktopOllama {
     /** Dedicated desktop routing model. It is never used as the editing planner. */
     const val ROUTER_MODEL = "qwen3.5:0.8b"
 
+    /** Local Ollama tags that take images (Qwen 3.5 and Gemma 4 families). */
+    fun isMultimodal(tag: String): Boolean =
+        tag.startsWith("qwen3.5", ignoreCase = true) || tag.startsWith("gemma4", ignoreCase = true)
+
+    /**
+     * Ask the local multimodal [model] about one image ([jpegBase64]) via Ollama's `/api/generate`.
+     * Localhost only: the frame never leaves the machine. Throws with a readable message on failure.
+     */
+    fun describeImage(model: String, jpegBase64: String, prompt: String, timeoutMs: Int = 120_000): String {
+        check(ensureRunning()) { "Ollama isn't running and couldn't be started." }
+        val body = org.json.JSONObject()
+            .put("model", model)
+            .put("prompt", prompt)
+            .put("images", org.json.JSONArray().put(jpegBase64))
+            .put("stream", false)
+            .toString().toByteArray()
+        val conn = (URL("http://127.0.0.1:11434/api/generate").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Content-Type", "application/json")
+            connectTimeout = 5_000
+            readTimeout = timeoutMs
+            doOutput = true
+        }
+        try {
+            conn.outputStream.use { it.write(body) }
+            val code = conn.responseCode
+            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+            check(code in 200..299) { "Ollama answered HTTP $code: ${text.take(200)}" }
+            return org.json.JSONObject(text).optString("response").trim()
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     data class Status(
         val executableAvailable: Boolean,
         val serverRunning: Boolean,
