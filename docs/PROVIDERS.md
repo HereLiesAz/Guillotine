@@ -189,7 +189,7 @@ GitHub token and a repository (`owner/repo`; created private if missing, refused
 **Set up in sandbox**. Guillotine commits the package to `llm/<id>/` and its runner to
 `.github/workflows/`, stores any key as an Actions secret sealed to the repository's key, and runs
 setup there once. Nothing runs on the device. A run takes minutes, so these models take over
-**background text jobs** (currently the one-time vocabulary expansion), picked under **Background text
+**background text jobs** (the one-time vocabulary expansion, `summarize_transcript` and `rewrite_captions`), picked under **Background text
 jobs**; they never drive the editor. A failed sandbox run falls back to the assistant brain.
 
 - **Token:** a fine-grained token scoped to the sandbox repository, with the permissions the package

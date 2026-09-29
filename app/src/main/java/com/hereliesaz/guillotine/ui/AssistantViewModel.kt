@@ -159,6 +159,9 @@ class AssistantViewModel : ViewModel() {
         // pass in the background (once per process, non-blocking, silent on failure) so later turns and
         // lookup_vocabulary recognise more phrasings. Falls back to the built-in seed on any failure.
         maybeExpandVocabulary(agent)
+        // Background text jobs (summarize_transcript, rewrite_captions) run on the same brain, or on the
+        // sandbox package it routes complete() to.
+        com.hereliesaz.guillotine.mcp.TextJobTools.completer = { p -> agent.complete(p) }
         // Log only what the user actually typed (the raw reply on a reply, the raw prompt otherwise) —
         // the synthesized continuation prompt is verbose and belongs to the agent, not the user log.
         ActivityLog.user(logAs)

@@ -1685,8 +1685,9 @@ The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the
   **Done 2026-09-29:** Whisper (`transcribe_precise`, [`DesktopWhisper`](../desktop/src/main/kotlin/com/hereliesaz/guillotine/desktop/media/DesktopWhisper.kt)
   on the shared [`WhisperFrontend`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/WhisperFrontend.kt),
   same transcripts as sherpa-onnx on its test clips) from a sherpa-onnx Whisper bundle in `azp-models/`
-  or `azp-models/whisper/`; `caption_frame` through the local multimodal Ollama model (Qwen 3.5 /
+  or `azp-models/whisper/` or the folder a `sherpa-bundle` store package extracts to (`azp-models/whisper-*/`); `caption_frame` through the local multimodal Ollama model (Qwen 3.5 /
   Gemma 4); background removal and bokeh during playback (`DesktopLiveMatte`, a mask refreshed off-thread).
-  **Still open:** the store's `com.hereliesaz.azphalt.whisper` package points at
-  `HereLiesAz/azphalt-whisper/releases/latest/download/whisper-base.onnx`, which returns 404, so it installs
-  nothing on either platform; it should ship the sherpa-onnx bundle (encoder, decoder, tokens) instead.
+  **In progress:** the store's `com.hereliesaz.azphalt.whisper` package pointed at a 404
+  (`whisper-base.onnx`). [HereLiesAz/azphalt-whisper#2](https://github.com/HereLiesAz/azphalt-whisper/pull/2)
+  makes 1.1.0 a `sherpa-bundle` (`whisper-base.zip`: int8 encoder, decoder, tokens, verified here) and
+  restores its release workflows; after merge, tag `v1.1.0`, then refresh the storefront registry copy.
