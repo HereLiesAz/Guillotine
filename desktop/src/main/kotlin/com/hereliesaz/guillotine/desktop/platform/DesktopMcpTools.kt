@@ -105,7 +105,7 @@ class DesktopMcpTools(
         // Media-dependent tools: defined so the schema is discoverable, but return stubs on desktop.
         put(toolDefinition("analyze_clip", "Prompt-driven cut analysis ON-DEVICE: label the clip's frames and keep the parts matching its prompt (set_prompt first), cutting the rest. Label-based (needs the footage-search model).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
-        put(toolDefinition("analyze_clip_with_reference", "Analyze using reference frame (not yet available on desktop).",
+        put(toolDefinition("analyze_clip_with_reference", "Like analyze_clip, but uses the clip's CURRENT playhead frame as a visual reference: keeps the parts that look like it and cuts the rest, ON-DEVICE. Use when the user points at the current frame (e.g. \"this is my phone\"). Set the clip's prompt to the object first. Needs the concept-embedding model.",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition(
             "remove_object_generative",
@@ -136,9 +136,9 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "transcribe_precise",
-            "Transcribe a clip's audio ON-DEVICE with an offline Whisper (sherpa-onnx) model and return " +
-                "the transcript text. NOTE: not yet available on desktop — sherpa-onnx has no clean JVM " +
-                "distribution, so this returns an error pointing at transcribe_clip (Vosk) instead.",
+            "Transcribe a clip's audio ON-DEVICE and add timed captions. On desktop this runs the same " +
+                "offline Vosk model as transcribe_clip (sherpa-onnx Whisper has no clean JVM distribution). " +
+                "Requires a Vosk model in Settings → Transcription; relay its error if unset.",
             objSchema("clip_id" to stringProp("The clip whose audio to transcribe"), required = listOf("clip_id")),
         ))
         put(toolDefinition(
@@ -166,8 +166,7 @@ class DesktopMcpTools(
         put(toolDefinition(
             "remove_fillers",
             "Remove filler words (\"um\", \"uh\", \"er\", \"hmm\") from a clip ON-DEVICE using offline " +
-                "Whisper (sherpa-onnx) word timings. NOTE: not yet available on desktop (no clean " +
-                "sherpa-onnx JVM distribution); returns an error rather than faking it.",
+                "Vosk word timings. Requires a Vosk model in Settings → Transcription; relay its error if unset.",
             objSchema("clip_id" to stringProp("The clip to de-filler"), required = listOf("clip_id")),
         ))
         put(toolDefinition(
@@ -773,8 +772,7 @@ class DesktopMcpTools(
         "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
         // ---- vision (ML Kit labeling / MediaPipe VLM) → honest stubs ----
         "analyze_clip" -> analyzeClipByPrompt(args.getString("clip_id"))
-        "analyze_clip_with_reference" ->
-            visionToolUnavailable(name, "an on-device vision/labeling model")
+        "analyze_clip_with_reference" -> analyzeClipWithReference(args.getString("clip_id"))
         "analyze_clip_with_concept" -> analyzeClipWithConcept(
             args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false),
         )
@@ -802,8 +800,7 @@ class DesktopMcpTools(
         "remove_object_generative" -> removeObjectGenerative(args.optString("clip_id"))
         "apply_bokeh" -> applyBokehTool(args.optString("clip_id"))
         "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
-        "denoise_clip" ->
-            visionToolUnavailable(name, "the on-device GTCRN speech-denoiser model")
+        "denoise_clip" -> denoiseClip(args.getString("clip_id"))
         "apply_transition" -> applyTransition(
             args.getString("from_clip_id"), args.getString("to_clip_id"), args.optDouble("duration_sec", 1.0).toFloat(),
         )
@@ -972,6 +969,35 @@ class DesktopMcpTools(
     }
 
     /**
+     * On-device speech noise reduction ([DesktopDenoiser]: GTCRN through ONNX Runtime), the desktop
+     * analogue of Android's sherpa `denoise_clip`. Adds the cleaned voice as a new audio clip, as Android does.
+     */
+    private fun denoiseClip(clipId: String): JSONObject {
+        val model = ModelResolver.resolve("denoiseModelPath")
+        require(model.isNotBlank()) {
+            "No denoiser model set. Install the GTCRN noise-reduction .azp from the Azphalt Storefront, " +
+                "or set it in Settings → AI Analyzer → Noise reduction."
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId }
+            ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, com.hereliesaz.guillotine.desktop.media.DesktopDenoiser.SAMPLE_RATE) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to denoise.")
+        val clean = com.hereliesaz.guillotine.desktop.media.DesktopDenoiser.denoise(model, pcm.samples)
+        require(clean.isNotEmpty()) { "Denoiser produced no audio." }
+        val out = File(File(DesktopStorage.dataDir, "gen").apply { mkdirs() }, "denoise_${System.currentTimeMillis()}.wav")
+        com.hereliesaz.guillotine.desktop.media.DesktopDenoiser.writeWav(out, clean)
+        val probed = DesktopMediaImport.probe(out)
+            ?: throw IllegalStateException("The denoised audio couldn't be read.")
+        vm.addMedia(listOf(probed.copy(name = "clean: ${media.name}")))
+        return ok().apply {
+            put("clipCount", vm.uiState.value.document.clips.size)
+            put("humanSummary", "Removed background noise and added the cleaned voice as an audio clip.")
+        }
+    }
+
+    /**
      * On-device speaker diarization ([DesktopDiarizer]: energy VAD + ONNX speaker embeddings + clustering)
      * — desktop analogue of Android's sherpa `diarize_clip`. Returns speaker turns mapped to timeline ms.
      */
@@ -1007,18 +1033,6 @@ class DesktopMcpTools(
                 else "Found ${speakers.size} speaker(s) across ${turns.size} turn(s).",
             )
         }
-    }
-
-    /**
-     * Honest stub for the vision / face / segmentation / image-model / inpaint tools that depend on
-     * ML Kit, MediaPipe, or TFLite — all Android-only with no clean desktop-JVM equivalent. Never fakes
-     * success: returns a clear error naming what's missing, mirroring the sherpa speech stubs.
-     */
-    private fun visionToolUnavailable(tool: String, needs: String) = JSONObject().apply {
-        val msg = "$tool needs $needs. This heavy model is not bundled with Guillotine by default. " +
-            "Please open the Azphalt Storefront and install the `.azp` package for this model, which will download it to your local registry."
-        put("error", msg)
-        put("humanSummary", msg)
     }
 
     /**
@@ -1347,6 +1361,50 @@ class DesktopMcpTools(
         require(File(model).isFile) { "The concept-embedding model file does not exist at: $model" }
         val positives = concept.examples.map { it.toFloatArray() }
         val negatives = concept.negatives.map { it.toFloatArray() }
+        return cutBySimilarity(clipId, model, positives, negatives, keepOnly, "\"$name\"")
+    }
+
+    /**
+     * Desktop `analyze_clip_with_reference`: the frame at the playhead is the visual reference for the
+     * clip's prompt (e.g. "this is my phone"), and the clip is cut to the parts that look like it — the
+     * same keep-the-matches semantics as `analyze_clip`. Uses the concept-embedding model, as
+     * `analyze_clip_with_concept` does; nothing leaves the machine.
+     */
+    private fun analyzeClipWithReference(clipId: String): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        require(clip.prompt.isNotBlank()) { "Set the clip's prompt to the target object first (use set_prompt)." }
+        val model = com.hereliesaz.guillotine.desktop.platform.ModelResolver.resolve("idEmbedModelPath")
+        require(model.isNotBlank()) {
+            "No concept-embedding model set. Add an ONNX embedder in Settings → AI Analyzer → Concept matching."
+        }
+        require(File(model).isFile) { "The concept-embedding model file does not exist at: $model" }
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath
+            .sourceTimeMs(clip, vm.uiState.value.currentTimeMs).coerceAtLeast(0)
+        val reference = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs) }
+            ?: throw IllegalStateException("Could not read the current frame for reference matching.")
+        val refEmbedding = DesktopImageEmbedder.embed(model, reference)
+        return cutBySimilarity(clipId, model, listOf(refEmbedding), emptyList(), keepOnly = true, "\"${clip.prompt}\"")
+    }
+
+    /**
+     * Scan [clipId] every ~1/40th of its length, embed each frame with the concept-embedding [model], and
+     * cut by cosine similarity to [positives] (at least 0.55, and closer than any of [negatives]).
+     * [keepOnly] keeps the matching parts and removes the rest; otherwise it removes the matches.
+     * Shared by `analyze_clip_with_concept` and `analyze_clip_with_reference`.
+     */
+    private fun cutBySimilarity(
+        clipId: String,
+        model: String,
+        positives: List<FloatArray>,
+        negatives: List<FloatArray>,
+        keepOnly: Boolean,
+        name: String,
+    ): JSONObject {
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
         val dur = clip.durationMs
         require(dur > 0) { "Clip has no duration to analyze." }
         val step = maxOf(500L, dur / 40)
@@ -1370,14 +1428,14 @@ class DesktopMcpTools(
                 if (last != null && srcMs <= last.endMs) {
                     edits[edits.size - 1] = last.copy(endMs = maxOf(last.endMs, winEnd))
                 } else {
-                    edits += EditSegment(srcMs, winEnd, com.hereliesaz.guillotine.model.EditAction.REMOVE, if (keepOnly) "not \"$name\"" else "\"$name\"")
+                    edits += EditSegment(srcMs, winEnd, com.hereliesaz.guillotine.model.EditAction.REMOVE, if (keepOnly) "not $name" else name)
                 }
             }
             srcMs = winEnd
         }
         if (edits.isEmpty()) {
             return ok().apply {
-                put("humanSummary", if (keepOnly) "Every part matched \"$name\" — nothing removed." else "No part matched \"$name\" — nothing removed.")
+                put("humanSummary", if (keepOnly) "Every part matched $name — nothing removed." else "No part matched $name — nothing removed.")
             }
         }
         vm.applyCuts(clipId, edits)
@@ -1388,7 +1446,7 @@ class DesktopMcpTools(
             put("clipCount", n)
             put(
                 "humanSummary",
-                "${if (keepOnly) "Kept only" else "Removed"} \"$name\": cut ${edits.size} range(s) (${msFmt(removedMs)}). Timeline now $n clip(s).",
+                "${if (keepOnly) "Kept only" else "Removed"} $name: cut ${edits.size} range(s) (${msFmt(removedMs)}). Timeline now $n clip(s).",
             )
         }
     }
@@ -1663,17 +1721,6 @@ class DesktopMcpTools(
     }
 
     // ---- offline speech: transcription (Vosk) + honest stubs ----------------
-
-    /**
-     * Honest stub for the sherpa-onnx-backed speech tools that have no clean JVM distribution yet
-     * (transcribe_precise / add_voiceover / diarize_clip / remove_fillers). Never fakes success.
-     */
-    private fun speechToolUnavailable(tool: String, needs: String) = JSONObject().apply {
-        val msg = "$tool needs $needs. This heavy model is not bundled with Guillotine by default. " +
-            "Please open the Azphalt Storefront and install the `.azp` package for this model, which will download it to your local registry."
-        put("error", msg)
-        put("humanSummary", msg)
-    }
 
     /** Decode a clip's audio to 16 kHz mono, transcribe with the Vosk model, and add timed captions. */
     private fun transcribeClip(clipId: String): JSONObject {

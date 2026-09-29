@@ -147,7 +147,7 @@ private fun DesktopAiCapabilitySummary(settings: AiSettings) {
         "Audio highlight detection" to installed("audioEventModelPath"),
         "Speaker diarization" to installed("diarizeEmbedModelPath"),
         "Stem separation" to installed("stemModelPath"),
-        "Speech denoise (desktop)" to false, // GTCRN desktop executor is not wired yet; don't advertise a path as capability.
+        "Speech denoise" to installed("denoiseModelPath"),
         "Image/video/music generation" to (settings.genKeys.values.any { it.isNotBlank() } || settings.leonardoKey.isNotBlank()),
         "Cloud may see the current frame" to settings.cloudVision,
     )
