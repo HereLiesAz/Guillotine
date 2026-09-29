@@ -31,10 +31,7 @@ object DesktopMcpAgent {
             // Qwen3.5 and Gemma 4 Ollama variants are natively multimodal. Because this endpoint is
             // localhost, giving them FrameImageSource does NOT invoke the cloud-vision privacy path.
             // Text-only models (Phi-4 Mini / gpt-oss) keep vision delegated to specialist MCP tools.
-            val localFrames = if (
-                tag.startsWith("qwen3.5", ignoreCase = true) ||
-                tag.startsWith("gemma4", ignoreCase = true)
-            ) {
+            val localFrames = if (DesktopOllama.isMultimodal(tag)) {
                 tools as? FrameImageSource
             } else {
                 null

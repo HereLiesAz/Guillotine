@@ -702,13 +702,12 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "caption_frame",
-            "Describe a frame in rich natural language using the ON-DEVICE multimodal VLM (Gemma-3n). " +
+            "Describe a frame in rich natural language ON-DEVICE (desktop: the local multimodal Ollama model, " +
+                "Qwen 3.5 or Gemma 4; falls back to image labels without one). " +
                 "Prefer this over describe_current_frame when the user wants a real description / " +
                 "understanding of the scene (\"what's happening in this frame?\", \"describe this shot\", " +
                 "\"what is this a picture of?\") rather than just a list of detected objects. Optionally " +
-                "pass a specific question as prompt. Requires the VLM model in Settings → AI Analyzer → " +
-                "Frame captioning (VLM); if it isn't set it returns an error naming the setting — relay " +
-                "it, don't retry (you can still fall back to describe_current_frame).",
+                "pass a specific question as prompt.",
             objSchema(
                 "clip_id" to stringProp("Optional clip; defaults to the video clip at the playhead"),
                 "prompt" to stringProp("Optional question about the frame (default: describe it)"),
@@ -777,7 +776,7 @@ class DesktopMcpTools(
             args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false),
         )
         "describe_current_frame" -> describeCurrentFrame()
-        "caption_frame" -> captionFrameTool(args.optString("clip_id"))
+        "caption_frame" -> captionFrameTool(args.optString("clip_id"), args.optString("prompt"))
         "find_highlights" -> findHighlights(
             args.getString("clip_id"),
             args.optDouble("threshold", 0.3).toFloat(),
@@ -1617,7 +1616,44 @@ class DesktopMcpTools(
 
     /** Caption the playhead frame. Desktop has no on-device VLM, so this is the honest label-based
      *  description (same as describe_current_frame); [clipId] is accepted for API parity. */
-    private fun captionFrameTool(clipId: String): JSONObject = describeCurrentFrame()
+    /**
+     * `caption_frame` on desktop: a real natural-language description from the local multimodal Ollama
+     * model when one is the assistant's local model (Qwen 3.5 / Gemma 4). Localhost only. Without one it
+     * falls back to on-device image labels ([describeCurrentFrame]) and says so.
+     */
+    private fun captionFrameTool(clipId: String, prompt: String): JSONObject {
+        val tag = settingsProvider().agentModelPath.takeIf { it.startsWith("ollama:") }?.removePrefix("ollama:")
+        if (tag.isNullOrBlank() || !DesktopOllama.isMultimodal(tag)) {
+            return describeCurrentFrame().apply {
+                if (!has("error")) {
+                    put(
+                        "humanSummary",
+                        optString("humanSummary") + " (Image labels only: pick a Qwen 3.5 or Gemma 4 local model " +
+                            "in Settings → AI Analyzer for a full description.)",
+                    )
+                }
+            }
+        }
+        val st = vm.uiState.value
+        val clip = clipId.takeIf { it.isNotBlank() }?.let { id -> st.document.clips.firstOrNull { it.id == id } }
+            ?: com.hereliesaz.guillotine.model.TimelineMath.activeClip(st.document.clips, ClipType.VIDEO, st.currentTimeMs)
+            ?: return JSONObject().put("error", "No video clip at the playhead — scrub onto one.")
+        val media = st.document.mediaFor(clip) ?: return JSONObject().put("error", "Media missing for clip ${clip.id}.")
+        val sourceMs = com.hereliesaz.guillotine.model.TimelineMath.sourceTimeMs(clip, st.currentTimeMs)
+            .coerceIn(clip.trimStartMs, clip.trimStartMs + clip.durationMs)
+        val frame = runBlocking { DesktopMediaDecoder.grabFrame(media.uri, sourceMs, maxPx = 1024) }
+            ?: return JSONObject().put("error", "Could not extract the frame.")
+        val jpeg = java.io.ByteArrayOutputStream().use { out -> javax.imageio.ImageIO.write(frame, "jpg", out); out.toByteArray() }
+        val question = prompt.ifBlank { "Describe this video frame in two or three sentences: the subject, the action and the setting." }
+        val caption = DesktopOllama.describeImage(tag, java.util.Base64.getEncoder().encodeToString(jpeg), question)
+        require(caption.isNotBlank()) { "$tag returned no description." }
+        return ok().apply {
+            put("clipId", clip.id)
+            put("model", tag)
+            put("caption", caption)
+            put("humanSummary", caption)
+        }
+    }
 
     /**
      * Replace a clip's background: matte the subject via the on-device segmentation model (on export)
