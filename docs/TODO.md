@@ -1682,6 +1682,11 @@ The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the
   `remove_fillers`) and GTCRN noise reduction (`denoise_clip`, via [`DesktopDenoiser`](../desktop/src/main/kotlin/com/hereliesaz/guillotine/desktop/media/DesktopDenoiser.kt)
   and the shared [`StreamingStft`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/StreamingStft.kt),
   checked against a NumPy reference on the real `gtcrn_simple.onnx`) all run through ONNX Runtime.
-  **Still open:** Whisper ASR (desktop `transcribe_precise` uses Vosk, since sherpa-onnx has no clean JVM
-  build), a multimodal VLM for `caption_frame` (desktop answers with image labels), and a live
-  background-removal preview (the matte applies on export only).
+  **Done 2026-09-29:** Whisper (`transcribe_precise`, [`DesktopWhisper`](../desktop/src/main/kotlin/com/hereliesaz/guillotine/desktop/media/DesktopWhisper.kt)
+  on the shared [`WhisperFrontend`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/WhisperFrontend.kt),
+  same transcripts as sherpa-onnx on its test clips) from a sherpa-onnx Whisper bundle in `azp-models/`
+  or `azp-models/whisper/`; `caption_frame` through the local multimodal Ollama model (Qwen 3.5 /
+  Gemma 4); background removal and bokeh during playback (`DesktopLiveMatte`, a mask refreshed off-thread).
+  **Still open:** the store's `com.hereliesaz.azphalt.whisper` package points at
+  `HereLiesAz/azphalt-whisper/releases/latest/download/whisper-base.onnx`, which returns 404, so it installs
+  nothing on either platform; it should ship the sherpa-onnx bundle (encoder, decoder, tokens) instead.

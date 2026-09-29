@@ -136,9 +136,9 @@ class DesktopMcpTools(
         ))
         put(toolDefinition(
             "transcribe_precise",
-            "Transcribe a clip's audio ON-DEVICE and add timed captions. On desktop this runs the same " +
-                "offline Vosk model as transcribe_clip (sherpa-onnx Whisper has no clean JVM distribution). " +
-                "Requires a Vosk model in Settings → Transcription; relay its error if unset.",
+            "Transcribe a clip's audio ON-DEVICE with an offline Whisper model and return the transcript " +
+                "text (more accurate than transcribe_clip's Vosk, no per-word timing). Without an installed " +
+                "Whisper bundle it falls back to transcribe_clip (Vosk captions).",
             objSchema("clip_id" to stringProp("The clip whose audio to transcribe"), required = listOf("clip_id")),
         ))
         put(toolDefinition(
@@ -811,7 +811,7 @@ class DesktopMcpTools(
         "delete_concept" -> deleteConcept(args.getString("name"))
         "transcribe_clip" -> transcribeClip(args.getString("clip_id"))
         "animated_transcribe_clip" -> animatedTranscribeClip(args.getString("clip_id"))
-        "transcribe_precise" -> transcribeClip(args.getString("clip_id"))
+        "transcribe_precise" -> transcribePrecise(args.getString("clip_id"))
         "add_voiceover" -> addVoiceover(args.getString("text"), args.optDouble("speed", 1.0).toFloat())
         "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
         "remove_fillers" -> removeFillers(args.getString("clip_id"))
@@ -1757,6 +1757,30 @@ class DesktopMcpTools(
     }
 
     // ---- offline speech: transcription (Vosk) + honest stubs ----------------
+
+    /**
+     * `transcribe_precise`: offline Whisper ([com.hereliesaz.guillotine.desktop.media.DesktopWhisper])
+     * over the clip's trimmed audio, returning the transcript text as Android does. Falls back to the
+     * Vosk captions of [transcribeClip] when no Whisper bundle is installed.
+     */
+    private fun transcribePrecise(clipId: String): JSONObject {
+        val bundle = ModelResolver.whisperBundle() ?: return transcribeClip(clipId).apply {
+            put("humanSummary", optString("humanSummary") + " (Vosk: no Whisper model installed.)")
+        }
+        val doc = vm.uiState.value.document
+        val clip = doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
+        val media = doc.mediaFor(clip) ?: throw IllegalArgumentException("No media for clip: $clipId")
+        val pcm = runBlocking { DesktopMediaDecoder.decodePcmMono(media.uri, 16_000) }
+            ?: throw IllegalStateException("No audio track in \"${media.name}\" to transcribe.")
+        // Only the part of the source the clip actually uses.
+        val from = (clip.trimStartMs * 16).toInt().coerceIn(0, pcm.samples.size)
+        val to = ((clip.trimStartMs + clip.durationMs) * 16).toInt().coerceIn(from, pcm.samples.size)
+        val text = com.hereliesaz.guillotine.desktop.media.DesktopWhisper.transcribe(bundle, pcm.samples.copyOfRange(from, to))
+        return ok().apply {
+            put("transcript", text)
+            put("humanSummary", if (text.isBlank()) "No speech detected." else "Transcript: $text")
+        }
+    }
 
     /** Decode a clip's audio to 16 kHz mono, transcribe with the Vosk model, and add timed captions. */
     private fun transcribeClip(clipId: String): JSONObject {
