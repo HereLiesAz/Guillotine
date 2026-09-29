@@ -609,8 +609,9 @@ private fun VideoSlot(
         }
     }
 
-    // Playback: decode at ~30fps. Segmentation is skipped here (applySeg=false) so ONNX matting doesn't
-    // stall the frame rate; the segmented look reappears the moment playback pauses.
+    // Playback: decode at ~30fps. Exact segmentation is skipped here (applySeg=false) so ONNX matting
+    // doesn't stall the frame rate; a background-refreshed mask stands in (DesktopLiveMatte), and the
+    // exact matte returns the moment playback pauses.
     LaunchedEffect(clip.id, media.id, isPlaying) {
         if (!isPlaying) return@LaunchedEffect
         while (isActive) {
@@ -754,20 +755,23 @@ private fun applyColorEffects(
         DesktopLutCache.get(layer.path)?.let { DesktopColorMatrix.applyLut(img, it) }
     }
 
-    // Subject segmentation, matching the export path's order (after colour/LUT, before shaders). Only
-    // run when the caller opted in (paused), since ONNX matting is far too slow for live playback:
+    // Subject segmentation, matching the export path's order (after colour/LUT, before shaders). Paused
+    // frames segment exactly; playback reuses a recent mask refreshed off-thread (DesktopLiveMatte),
+    // since ONNX matting is far too slow to run on every played frame:
     //  • removeBackground → matte the subject to alpha so lower tracks / the letterbox show through
     //  • bokeh → keep the subject sharp and blur the background
-    val segged = if (applySeg) {
-        val segModel = DesktopRenderConfig.segModelPath
-        if (segModel.isNotBlank()) {
-            when {
-                f.removeBackground -> runCatching { DesktopSegmenter.matte(img, segModel) }.getOrDefault(img)
-                f.bokeh -> runCatching { DesktopSegmenter.portraitBlur(img, segModel) }.getOrDefault(img)
-                else -> img
-            }
-        } else img
-    } else img
+    val segModel = DesktopRenderConfig.segModelPath
+    val segged = when {
+        segModel.isBlank() || !(f.removeBackground || f.bokeh) -> img
+        applySeg -> when {
+            f.removeBackground -> runCatching { DesktopSegmenter.matte(img, segModel) }.getOrDefault(img)
+            else -> runCatching { DesktopSegmenter.portraitBlur(img, segModel) }.getOrDefault(img)
+        }
+        // Playback: reuse the clip's latest mask and refresh it in the background (DesktopLiveMatte).
+        else -> runCatching {
+            DesktopLiveMatte.apply(clip.id, img, sourceMs, segModel, bokeh = !f.removeBackground)
+        }.getOrDefault(img)
+    }
     // Custom GLSL/ISF shader layers, applied last in chain order (matches the export path). Rendered
     // via Skia's CPU raster runtime effect; a no-op if a shader can't be compiled to SkSL.
     var out = segged
