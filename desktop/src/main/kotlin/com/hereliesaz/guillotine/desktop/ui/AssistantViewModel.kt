@@ -106,6 +106,9 @@ class AssistantViewModel {
         // Grow the vocabulary graph via a one-time background LLM pass (guarded, non-blocking, silent on
         // failure) so later turns and lookup_vocabulary recognise more phrasings. Seed is the fallback.
         maybeExpandVocabulary(agent)
+        // Background text jobs (summarize_transcript, rewrite_captions) run on the same brain, or on the
+        // sandbox package it routes complete() to.
+        com.hereliesaz.guillotine.mcp.TextJobTools.completer = { p -> agent.complete(p) }
         ActivityLog.user(logAs)
         ActivityLog.info("Thinking…")
         if (!isReply) originalPrompt = logAs

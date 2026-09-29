@@ -27,6 +27,16 @@ object ModelResolver {
     fun whisperBundle(): com.hereliesaz.guillotine.desktop.media.DesktopWhisper.Bundle? =
         com.hereliesaz.guillotine.desktop.media.DesktopWhisper.findBundle(File(modelsDir, "whisper"))
             ?: com.hereliesaz.guillotine.desktop.media.DesktopWhisper.findBundle(modelsDir)
+            ?: extractedWhisperDirs().firstNotNullOfOrNull { com.hereliesaz.guillotine.desktop.media.DesktopWhisper.findBundle(it) }
+
+    /**
+     * Folders a `sherpa-bundle` store package extracted into (`azp-models/<zip name>/`, e.g. the
+     * `com.hereliesaz.azphalt.whisper` bundle), plus one nested level for zips with a top folder.
+     */
+    private fun extractedWhisperDirs(): List<File> {
+        val top = modelsDir.listFiles()?.filter { it.isDirectory && "whisper" in it.name.lowercase() }.orEmpty()
+        return top + top.flatMap { d -> d.listFiles()?.filter { it.isDirectory }.orEmpty() }
+    }
 
     /** The on-disk basename an `.azp` install produces for a slot, or null for an unsupported slot. */
     private fun fileNameFor(property: String): String? = when (property) {

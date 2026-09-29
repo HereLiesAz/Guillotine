@@ -758,6 +758,9 @@ class DesktopMcpTools(
         // platforms and backed by the editor view-model.
         val timelineFx = com.hereliesaz.guillotine.mcp.TimelineTools.toolDefinitions()
         for (i in 0 until timelineFx.length()) put(timelineFx.get(i))
+        // Background text jobs (summaries, caption rewrites) that land on the timeline when done.
+        val textJobs = com.hereliesaz.guillotine.mcp.TextJobTools.toolDefinitions()
+        for (i in 0 until textJobs.length()) put(textJobs.get(i))
     }
 
     override fun call(name: String, args: JSONObject): JSONObject = when (name) {
@@ -854,6 +857,8 @@ class DesktopMcpTools(
         "lookup_vocabulary" -> com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.lookupJson(args.getString("term"))
         in com.hereliesaz.guillotine.mcp.TimelineTools.names ->
             com.hereliesaz.guillotine.mcp.TimelineTools.call(vm, name, args)
+        in com.hereliesaz.guillotine.mcp.TextJobTools.names ->
+            com.hereliesaz.guillotine.mcp.TextJobTools.call(vm, name, args)
         in com.hereliesaz.guillotine.mcp.VideoFilterCatalog.names ->
             applyFfmpegFilter(args.getString("clip_id"), com.hereliesaz.guillotine.mcp.VideoFilterCatalog.graphFor(name, args))
                 .apply { put("humanSummary", com.hereliesaz.guillotine.mcp.VideoFilterCatalog.summaryFor(name)) }

@@ -394,6 +394,33 @@ in **Settings → AI Analyzer → Speech (ASR)**.
 | --- | --- | --- | --- | --- |
 | `clip_id` | string | required | — | The clip whose audio to transcribe. |
 
+### `summarize_transcript`
+Summarize a clip's captions **in the background** and drop the summary on the timeline as a text card at the
+clip's start (up to 6 s) when it's done. Returns at once with a job id. Runs on the assistant's brain, or on
+the sandbox `llm` package picked under **Background text jobs**. Needs captions first (`transcribe_clip`).
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `clip_id` | string | required | — | The captioned source clip, or one of its captions. |
+| `instruction` | string | optional | one or two sentences | How to summarize. |
+
+### `rewrite_captions`
+Rewrite every caption of a clip **in the background** (tighten, fix grammar, change tone, translate) and
+replace the text in place when done; timing is kept, and captions deleted meanwhile stay deleted. Returns at
+once with a job id. Fails without changes if the model drops lines.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `clip_id` | string | required | — | The captioned source clip, or one of its captions. |
+| `instruction` | string | required | — | How to rewrite, e.g. "shorter", "translate to Spanish". |
+
+### `text_job_status`
+State (`running`, `done`, `failed`) and outcome of background text jobs.
+
+| Argument | Type | Req. | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `job_id` | string | optional | all jobs | One job. |
+
 ### `remove_fillers`
 Remove filler words ("um", "uh", "er", "hmm") on-device using the offline Whisper word timings,
 ripple-deleting each filler so the timeline closes up. Requires the ASR model

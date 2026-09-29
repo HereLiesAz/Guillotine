@@ -858,6 +858,9 @@ class McpTools(
         // platforms and backed by the editor view-model.
         val timelineFx = TimelineTools.toolDefinitions()
         for (i in 0 until timelineFx.length()) put(timelineFx.get(i))
+        // Background text jobs (summaries, caption rewrites) that land on the timeline when done.
+        val textJobs = TextJobTools.toolDefinitions()
+        for (i in 0 until textJobs.length()) put(textJobs.get(i))
     }
 
     // ---- tool dispatch ------------------------------------------------------
@@ -936,6 +939,7 @@ class McpTools(
         "clear_azp_plugin" -> clearAzpPlugin(args.getString("clip_id"))
         "lookup_vocabulary" -> com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.lookupJson(args.getString("term"))
         in TimelineTools.names -> TimelineTools.call(vm, name, args)
+        in TextJobTools.names -> TextJobTools.call(vm, name, args)
         in VideoFilterCatalog.names ->
             applyFfmpegFilter(args.getString("clip_id"), VideoFilterCatalog.graphFor(name, args))
                 .apply { put("humanSummary", VideoFilterCatalog.summaryFor(name)) }
