@@ -11,8 +11,8 @@ buildscript {
             force("io.netty:netty-handler:4.2.18.Final")
             force("io.netty:netty-codec-http:4.2.18.Final")
             force("io.netty:netty-codec:4.2.18.Final")
-            force("org.bouncycastle:bcprov-jdk18on:1.85.2")
-            force("org.bouncycastle:bcpkix-jdk18on:1.85")
+            force("org.bouncycastle:bcprov-jdk18on:1.86.2")
+            force("org.bouncycastle:bcpkix-jdk18on:1.86")
             force("org.apache.commons:commons-lang3:3.20.0")
             force("org.bitbucket.b_c:jose4j:0.9.7")
         }
@@ -40,8 +40,8 @@ allprojects {
             force("io.netty:netty-handler:4.2.18.Final")
             force("io.netty:netty-codec-http:4.2.18.Final")
             force("io.netty:netty-codec:4.2.18.Final")
-            force("org.bouncycastle:bcprov-jdk18on:1.85.2")
-            force("org.bouncycastle:bcpkix-jdk18on:1.85")
+            force("org.bouncycastle:bcprov-jdk18on:1.86.2")
+            force("org.bouncycastle:bcpkix-jdk18on:1.86")
             force("org.apache.commons:commons-lang3:3.20.0")
             force("org.bitbucket.b_c:jose4j:0.9.7")
         }
@@ -71,8 +71,8 @@ allprojects {
                 // 1.85.2, but bcpkix-jdk18on's latest published version is still 1.85 (verified against
                 // Maven Central's maven-metadata.xml) — so each is pinned to its own latest patched release
                 // rather than forcing both to one shared version string.
-                g == "org.bouncycastle" && n == "bcprov-jdk18on" -> useVersion("1.85.2")
-                g == "org.bouncycastle" && n == "bcpkix-jdk18on" -> useVersion("1.85")
+                g == "org.bouncycastle" && n == "bcprov-jdk18on" -> useVersion("1.86.2")
+                g == "org.bouncycastle" && n == "bcpkix-jdk18on" -> useVersion("1.86")
                 g == "org.apache.httpcomponents" && n == "httpclient" -> useVersion("4.5.14")   // XSS
                 g == "org.apache.commons" && n == "commons-lang3" -> useVersion("3.20.0")       // uncontrolled recursion
                 g == "org.bitbucket.b_c" && n == "jose4j" -> useVersion("0.9.7")                // JWE decompression DoS
