@@ -92,7 +92,7 @@ compose.desktop {
         nativeDistributions {
             // Only the format matching the current runner runs; the others are skipped with
             // "task is not compatible with the current OS" — that's how jpackage matrix builds work.
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
             packageName = "Guillotine"
             packageVersion = desktopPackageVersion
             vendor = "HereLiesAz"

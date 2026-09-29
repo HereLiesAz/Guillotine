@@ -1,0 +1,169 @@
+name: Release Desktop Installers
+
+# Restored from the central registry snapshot (HereLiesAz/workflows
+# registry/1269434928/release-desktop-884eb667.source.yml) after the 2026-09-20 centralization
+# removed this file and the registry then marked the binding obsolete, so no desktop installer was
+# attached to any release after that. Runs locally again, per the catalog's documented rollback.
+#
+# Normally piggy-backs on the Android release tags: `latest-release-v<MAJOR>.<MINOR>` and
+# `latest-debug-v<MAJOR>.<MINOR>` each create (or update) a GitHub Release with the APK/AAB, and this
+# workflow attaches the desktop installers to the SAME release. Run on its own (workflow_dispatch
+# with no `tag`), `resolve-tag` derives `latest-release-v<major>.<minor>` from version.properties and
+# creates that tag if needed. softprops/action-gh-release upserts, so re-runs replace the installers.
+#
+# Installers: macOS DMG for Apple Silicon and for Intel (separate runners, because the bundled
+# JavaCPP/FFmpeg natives are host-arch only), Windows MSI, Linux DEB, RPM and AppImage.
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'latest-release-v*'
+      - 'latest-debug-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to attach installers to (leave blank to auto-derive latest-release-v<major>.<minor> from version.properties, creating it if it does not exist yet)'
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve or create the release tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            TAG_NAME="$INPUT_TAG"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            TAG_NAME="$REF_NAME"
+          else
+            MAJOR=$(grep 'versionMajor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
+            MINOR=$(grep 'versionMinor=' version.properties | cut -d'=' -f2 | tr -d '\r ')
+            TAG_NAME="latest-release-v${MAJOR}.${MINOR}"
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" > /dev/null 2>&1; then
+            echo "Using existing tag $TAG_NAME"
+          else
+            echo "Tag $TAG_NAME doesn't exist yet — creating it at $GITHUB_SHA"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG_NAME" -m "Desktop release" "$GITHUB_SHA"
+            git push origin "$TAG_NAME"
+          fi
+
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+  release-desktop:
+    needs: resolve-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            task: packageDeb
+            path: desktop/build/compose/binaries/main/deb/*.deb
+          - os: ubuntu-latest
+            task: packageRpm
+            path: desktop/build/compose/binaries/main/rpm/*.rpm
+          - os: ubuntu-latest
+            task: packageAppImage
+            path: desktop/build/dist/*.AppImage
+          - os: macos-latest
+            task: packageDmg
+            arch: arm64
+            path: desktop/build/dist/*.dmg
+          - os: macos-15-intel
+            task: packageDmg
+            arch: x86_64
+            path: desktop/build/dist/*.dmg
+          - os: windows-latest
+            task: packageMsi
+            path: desktop/build/compose/binaries/main/msi/*.msi
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: false
+          dependency-graph: disabled
+
+      - name: Grant execute permission for gradlew
+        if: runner.os != 'Windows'
+        run: chmod +x gradlew
+
+      # jpackage builds RPMs with rpmbuild, which the Ubuntu runner doesn't ship.
+      - name: Install rpmbuild
+        if: matrix.task == 'packageRpm'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: ${{ matrix.task }}
+        shell: bash
+        run: ./gradlew :desktop:${{ matrix.task }} --build-cache --stacktrace
+
+      # Both macOS runners produce the same DMG file name; suffix the architecture so the two
+      # uploads don't overwrite each other on the release.
+      - name: Name the DMG by architecture
+        if: matrix.task == 'packageDmg'
+        shell: bash
+        run: |
+          mkdir -p desktop/build/dist
+          for f in desktop/build/compose/binaries/main/dmg/*.dmg; do
+            base="$(basename "$f" .dmg)"
+            cp "$f" "desktop/build/dist/${base}-${{ matrix.arch }}.dmg"
+          done
+
+      # Compose's AppImage target emits the application directory; appimagetool turns it into a
+      # single runnable .AppImage. The tool is pinned by checksum and fails closed if upstream
+      # replaces the file (its only published build is the rolling "continuous" release).
+      - name: Assemble the AppImage
+        if: matrix.task == 'packageAppImage'
+        shell: bash
+        env:
+          APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          APPIMAGETOOL_SHA256: a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0
+        run: bash desktop/packaging/build-appimage.sh
+
+      - name: Attach installer to release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          files: ${{ matrix.path }}
+          fail_on_unmatched_files: true
+          body: |
+            ## Guillotine desktop installers
+
+            Unsigned builds. First-launch instructions:
+
+            - **macOS**: pick `-arm64` for Apple Silicon, `-x86_64` for Intel. Right-click the app in `/Applications` → **Open** → **Open** on the "unidentified developer" dialog.
+            - **Windows**: If SmartScreen blocks the installer, click **More info** → **Run anyway**.
+            - **Linux**: `sudo apt install ./guillotine_*.deb`, `sudo dnf install ./guillotine-*.rpm`, or `chmod +x Guillotine-*.AppImage` and run it.

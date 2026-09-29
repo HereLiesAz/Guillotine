@@ -1654,10 +1654,17 @@ The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the
 - **Signing / notarization** — macOS Developer ID (Apple Developer account required), Windows
   code signing (CA certificate required). Without these, users see a "unknown developer" warning
   on first launch.
-- **Universal macOS binary** — `macos-latest` gives us Apple Silicon; Intel Macs need a second
-  runner (or `lipo`-ing two builds).
-- **AppImage / Flatpak / Snap** — `.deb` covers the mainstream case; broader Linux coverage is
-  open.
+- ~~**Universal macOS binary**~~ — **Done (2026-09-29):** two DMGs instead of one universal
+  binary, since the bundled JavaCPP/FFmpeg natives are host-arch only: `-arm64` from `macos-latest`
+  and `-x86_64` from `macos-15-intel`.
+- **AppImage / Flatpak / Snap** — **AppImage and RPM done (2026-09-29)** alongside the `.deb`
+  (`desktop/packaging/build-appimage.sh`, with `appimagetool` pinned by checksum). Flatpak and Snap
+  are still open.
+- **Desktop releases stopped on 2026-09-20.** The central workflow sync deleted
+  `release-desktop.yml` and then marked its binding obsolete, so no `.dmg`/`.msi`/`.deb` was attached
+  to any release after that. The workflow is restored locally from the registry snapshot. The next
+  central sync may re-centralize it onto `HereLiesAz/workflows` `desktop-package.yml`, which would
+  need the new matrix (Intel DMG, RPM, AppImage) carried over there.
 - ~~Auto-update framework~~ — **already shipped** (`DesktopUpdater.kt` + `UpdateChecker.kt` check
   GitHub Releases on launch and offer to download+run the installer). ~~The real remaining gap: no
   checksum/signature verification of the downloaded installer before launching it.~~
