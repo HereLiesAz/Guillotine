@@ -301,8 +301,18 @@ fun NleScreen(
         vm.setAnalyzing(targets.map { it.id }, true)
         scope.launch {
             try {
-                // Analysis not available on desktop yet -- stub.
-                vm.setProcessing(false, "Analysis is not yet available on desktop.")
+                // Same on-device analysis the assistant's analyze_clip runs (ONNX image labeler vs the
+                // clip's prompt). Errors — e.g. no labeling model set — are relayed, not swallowed.
+                val messages = targets.map { clip ->
+                    withContext(Dispatchers.IO) {
+                        runCatching { mcpTools.call("analyze_clip", org.json.JSONObject().put("clip_id", clip.id)) }
+                            .fold(
+                                onSuccess = { it.optString("error").ifBlank { it.optString("humanSummary") } },
+                                onFailure = { it.message ?: "Analysis failed." },
+                            )
+                    }
+                }
+                vm.setProcessing(false, messages.filter { it.isNotBlank() }.joinToString("\n").ifBlank { null })
             } finally {
                 vm.setAnalyzing(targets.map { it.id }, false)
                 vm.setAnalysisProgress(null)

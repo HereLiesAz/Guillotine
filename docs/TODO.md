@@ -1669,10 +1669,12 @@ The desktop apps (`.dmg` / `.msi` / `.deb`) ship in every GitHub Release via the
   problem: the digest arrives over the same API connection as the download URL, so it proves the bytes
   are the ones GitHub meant to serve, not that they are ours. That needs the signing keys the
   notarization item above is already blocked on.
-- **On-device ML on desktop** — the ONNX-Runtime-for-JVM foundation has landed: stem separation
-  (Spleeter), speech captions (Vosk), audio sync, and the color/LUT render all run on-device on
-  desktop. The remaining on-device gap is the **vision / face / speech-model tools** (image
-  labeling, face detect/segment, Whisper ASR, TTS, diarization, VLM captioning). Each needs a
-  desktop ONNX model wired the same way as stems: a model path in Settings + an inference helper.
-  `search_clips` is the first wired (ONNX ImageNet labeler); the rest return an honest "needs a
-  model" stub until their model is bundled/pointed at. Cloud BYO still works for all.
+- **On-device ML on desktop** — largely done. Image labeling (footage search, `analyze_clip`, the
+  Analyze button), face detection/blur, segmentation, concept embeddings (`analyze_clip_with_concept`,
+  `analyze_clip_with_reference`), TTS, diarization, Vosk speech (captions, `transcribe_precise`,
+  `remove_fillers`) and GTCRN noise reduction (`denoise_clip`, via [`DesktopDenoiser`](../desktop/src/main/kotlin/com/hereliesaz/guillotine/desktop/media/DesktopDenoiser.kt)
+  and the shared [`StreamingStft`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/StreamingStft.kt),
+  checked against a NumPy reference on the real `gtcrn_simple.onnx`) all run through ONNX Runtime.
+  **Still open:** Whisper ASR (desktop `transcribe_precise` uses Vosk, since sherpa-onnx has no clean JVM
+  build), a multimodal VLM for `caption_frame` (desktop answers with image labels), and a live
+  background-removal preview (the matte applies on export only).
