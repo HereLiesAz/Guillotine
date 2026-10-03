@@ -115,7 +115,9 @@ object AzpHandoffInstaller {
         // match the pinned key, or the caller must have already confirmed the change. Checked before
         // the trust prompt so a hijacked update surfaces as a publisher change, not a generic warning.
         val pinnedKey = pins?.keyFor(manifest.id)
-        if (pinnedKey != null && trust.signerPublicKey != pinnedKey && !allowPublisherChange) {
+        // The flagship store's own key rotation is not a publisher change (see AzphaltTrust).
+        val rotation = AzphaltTrust.isFlagshipRotation(pinnedKey, trust.signerPublicKey)
+        if (pinnedKey != null && trust.signerPublicKey != pinnedKey && !allowPublisherChange && !rotation) {
             return InstallResult.PublisherChanged(manifest.id, pinnedKey, trust.signerPublicKey)
         }
         // Only a *signed* package with an unrecognized signer needs a confirmation — an unsigned
@@ -154,7 +156,7 @@ object AzpHandoffInstaller {
         writeAtomically(target, bytes)
         // Pin the publisher on first install, or when the caller approved a rotation. Only signed
         // packages pin — an unsigned package leaves no key to enforce against.
-        if (trust.signerPublicKey != null && pins != null && (pinnedKey == null || allowPublisherChange)) {
+        if (trust.signerPublicKey != null && pins != null && (pinnedKey == null || allowPublisherChange || rotation)) {
             pins.pin(manifest.id, trust.signerPublicKey)
         }
         // trust.signed only means "carries a signature.json", not "it was cryptographically verified"

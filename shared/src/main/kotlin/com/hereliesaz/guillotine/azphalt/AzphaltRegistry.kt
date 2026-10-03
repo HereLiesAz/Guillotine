@@ -31,7 +31,7 @@ object AzphaltRegistry {
      * be able to point Guillotine at an arbitrary download host. This is a deliberate v1 limit, removable
      * once `spec/repository-api.md` says how a host decides that some *other* repository is trustworthy
      * (the `/.well-known/azphalt-repository.json` trust bootstrap is the obvious hook, but its
-     * `signingKeys` field isn't populated yet — see [AzphaltTrust.FLAGSHIP_SIGNING_KEY]).
+     * `signingKeys` field is populated but not yet read by this host — see [AzphaltTrust.FLAGSHIP_SIGNING_KEY]).
      *
      * Not `…/api` — that's the storefront's internal Next.js route namespace, where the download path
      * falls through an SPA catch-all and returns `index.html` with HTTP 200. The Repository API root has
