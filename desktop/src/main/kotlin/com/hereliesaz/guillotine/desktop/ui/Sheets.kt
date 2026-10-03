@@ -319,7 +319,7 @@ fun SettingsScreen(
                 val dir = java.io.File(DesktopStorage.dataDir, "azp-models")
                 val result = withContext(Dispatchers.IO) {
                     AzpModelInstall.install(
-                        bytes, setOf(AzphaltTrust.FLAGSHIP_SIGNING_KEY), dir, allowUntrusted,
+                        bytes, AzphaltTrust.FLAGSHIP_SIGNING_KEYS, dir, allowUntrusted,
                         pins = publisherPins, allowPublisherChange = allowPublisherChange,
                     ) { p ->
                         val pct = p.bytesTotal?.takeIf { it > 0 }?.let { p.bytesDone * 100 / it }
