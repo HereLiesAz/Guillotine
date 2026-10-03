@@ -113,7 +113,7 @@ fun DesktopAzphaltStoreScreen(vm: EditorViewModel, onDismiss: () -> Unit) {
             val result = withContext(Dispatchers.IO) {
                 AzpHandoffInstaller.install(
                     bytes, extensionsDir.absolutePath,
-                    trustedKeys = setOf(AzphaltTrust.FLAGSHIP_SIGNING_KEY),
+                    trustedKeys = AzphaltTrust.FLAGSHIP_SIGNING_KEYS,
                     pins = publisherPins,
                     allowUntrusted = allowUntrusted,
                     allowPublisherChange = allowPublisherChange,

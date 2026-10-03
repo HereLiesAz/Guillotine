@@ -174,7 +174,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
             val result = withContext(Dispatchers.IO) {
                 AzpHandoffInstaller.install(
                     bytes, extensionsDir,
-                    trustedKeys = setOf(AzphaltTrust.FLAGSHIP_SIGNING_KEY),
+                    trustedKeys = AzphaltTrust.FLAGSHIP_SIGNING_KEYS,
                     pins = publisherPins,
                     allowUntrusted = allowUntrusted,
                     allowPublisherChange = allowPublisherChange,
@@ -194,7 +194,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
                             runCatching {
                                 AzpModelInstall.install(
                                     bytes,
-                                    trustedKeys = setOf(AzphaltTrust.FLAGSHIP_SIGNING_KEY),
+                                    trustedKeys = AzphaltTrust.FLAGSHIP_SIGNING_KEYS,
                                     modelsDir = modelsDir,
                                     // The trust gate already ran on these exact bytes moments ago, and the
                                     // user answered it. Re-prompting from here would ask the same question

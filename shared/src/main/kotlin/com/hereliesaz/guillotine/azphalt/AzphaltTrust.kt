@@ -17,13 +17,31 @@ object AzphaltTrust {
      * regressed from "fires on nothing" to "fires on everything" with no client-side change.
      *
      * The spec's proper trust-bootstrap channel for this is `/.well-known/azphalt-repository.json`'s
-     * `signingKeys` (`spec/repository-api.md` § Trust bootstrap) — but that field is not currently
-     * populated on this registry (it's wired to a *different* key, used for paid-download
-     * entitlement tokens, not content signing), so there's no in-band way to discover this key yet.
-     * Pinned here out-of-band until that's fixed upstream; safe to remove once discovery works and
-     * a caller fetches trusted keys from the well-known document instead of a hardcoded constant.
+     * `signingKeys` (`spec/repository-api.md` § Trust bootstrap). The store now lists this key there
+     * as `packages-v1` (azphalt#246), but Guillotine doesn't fetch it yet, so it stays pinned here.
+     *
+     * Rotated 2026-10: the previous store key's private half was lost and the catalog was re-signed
+     * with this one. See [RETIRED_FLAGSHIP_SIGNING_KEY] and [isFlagshipRotation].
      */
-    const val FLAGSHIP_SIGNING_KEY = "MCowBQYDK2VwAyEAzmko3VFIYjx0fhXcGUQVmTpBQc33OlfRdJZ03MirPjU="
+    const val FLAGSHIP_SIGNING_KEY = "MCowBQYDK2VwAyEAWNptGhJCdyjabJ/pEnw+nh41woxC01z6mS8XnL8Cv+M="
+
+    /**
+     * The key the flagship catalog was signed with before the 2026-10 rotation (its private half was
+     * lost, so nothing chains the new key to it). Still trusted, so packages installed earlier keep
+     * verifying, and recognised by [isFlagshipRotation] so their updates aren't refused.
+     */
+    const val RETIRED_FLAGSHIP_SIGNING_KEY = "MCowBQYDK2VwAyEAzmko3VFIYjx0fhXcGUQVmTpBQc33OlfRdJZ03MirPjU="
+
+    /** Every key the flagship registry has signed with: the `trustedKeys` for store installs. */
+    val FLAGSHIP_SIGNING_KEYS: Set<String> = setOf(FLAGSHIP_SIGNING_KEY, RETIRED_FLAGSHIP_SIGNING_KEY)
+
+    /**
+     * True when an update moves a package pinned to the retired flagship key onto the current one: the
+     * store's own rotation, not a third party taking the id. Installers accept it without a
+     * publisher-change prompt and re-pin. Any other key change still needs the user's approval.
+     */
+    fun isFlagshipRotation(pinnedKey: String?, signerKey: String?): Boolean =
+        pinnedKey == RETIRED_FLAGSHIP_SIGNING_KEY && signerKey == FLAGSHIP_SIGNING_KEY
 
     /** The flagship storefront's web URL — the fallback surface when no Azphalt Store app is installed. */
     const val STORE_WEB_URL = "https://azphalt.store"
