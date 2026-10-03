@@ -2,6 +2,15 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Flagship store signing key rotated (2026-10)
+
+**Done:** the store's original package-signing key (`…zmko3VFI…`) was lost, and the catalog is now
+signed with `MCowBQYDK2VwAyEAWNptGhJCdyjabJ/pEnw+nh41woxC01z6mS8XnL8Cv+M=` (also published as
+`packages-v1` in the store's well-known file, azphalt#246). [`AzphaltTrust`](../shared/src/main/kotlin/com/hereliesaz/guillotine/azphalt/AzphaltTrust.kt)
+trusts both keys, and both installers treat an update from a package pinned to the retired key to the
+current key as the store's own rotation: no publisher-change prompt, then re-pinned. Any other key
+change still asks. **Open:** read trusted keys from the well-known file instead of hardcoding them.
+
 ## Correction: kinetic-caption track allocation was needlessly wasteful, not just front/back wrong (2026-08-24)
 
 Direct feedback on the "Regression 2" fix in the entry further below ("Two regressions from the
