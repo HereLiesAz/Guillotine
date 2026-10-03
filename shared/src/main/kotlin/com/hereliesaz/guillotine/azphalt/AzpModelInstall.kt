@@ -132,7 +132,9 @@ object AzpModelInstall {
         // match the pinned key. Checked before the trust-store prompt so a hijacked update surfaces as a
         // publisher change, not a generic "untrusted signer". Dormant until packages are signed.
         val pinned = pins?.keyFor(packageId)
-        if (pinned != null && signer != pinned && !allowPublisherChange) {
+        // The flagship store's own key rotation is not a publisher change (see AzphaltTrust).
+        val rotation = AzphaltTrust.isFlagshipRotation(pinned, signer)
+        if (pinned != null && signer != pinned && !allowPublisherChange && !rotation) {
             throw PublisherChangedException(packageId, pinned, signer)
         }
 
@@ -144,7 +146,7 @@ object AzpModelInstall {
 
         // Pin the publisher on first install, or when the caller approved a rotation. Only signed
         // packages pin — an unsigned package leaves no key to enforce against.
-        if (signer != null && pins != null && (pinned == null || allowPublisherChange)) {
+        if (signer != null && pins != null && (pinned == null || allowPublisherChange || rotation)) {
             pins.pin(packageId, signer)
         }
         return Result(plan.trust, packageId, installed, signer)
