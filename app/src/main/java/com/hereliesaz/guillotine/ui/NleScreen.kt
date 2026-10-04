@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Link
@@ -947,13 +948,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         GenerateSheet(
             leonardoKey = settings.leonardoKey,
             leonardoModel = settings.leonardoModel,
-            onGenerateFree = { url, name ->
-                vm.addMedia(listOf(MediaItem(newId(), url, name, MediaKind.IMAGE, 5_000)))
-                showGenerate = false
+            onGenerateFree = { prompt ->
+                val url = ImageGen.Pollinations.url(prompt)
+                val provenance = com.hereliesaz.guillotine.model.AiProvenance(
+                    "Pollinations", "flux", prompt, System.currentTimeMillis(),
+                )
+                val item = com.hereliesaz.guillotine.ai.safety.AndroidContentSafety
+                    .fetchChecked(context, url, "Generated: ${prompt.take(20)}", provenance)
+                vm.addMedia(listOf(item))
             },
             onGenerateLeonardo = { prompt, modelId ->
                 val uri = ImageGen.Leonardo.generate(context, settings.leonardoKey, modelId, prompt)
-                vm.addMedia(listOf(MediaItem(newId(), uri.toString(), "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000)))
+                val provenance = com.hereliesaz.guillotine.model.AiProvenance(
+                    "Leonardo", modelId, prompt, System.currentTimeMillis(),
+                )
+                vm.addMedia(listOf(MediaItem(newId(), uri.toString(), "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000, aiProvenance = provenance)))
             },
             onDismiss = { showGenerate = false },
         )
@@ -1622,6 +1631,21 @@ private fun EditorToolStrip(
             }
             IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
                 vm.deleteSelected()
+            }
+            val reportCtx = androidx.compose.ui.platform.LocalContext.current
+            // Report AI-generated content (Play AI-Generated Content policy): removes it and emails a report.
+            val generated = selected.singleOrNull()?.let { state.document.mediaFor(it) }?.aiProvenance
+            if (generated != null) {
+                IconToolButton(Icons.Filled.Flag, "Report AI-generated content") {
+                    val p = vm.removeReportedGenerated(selected.single().id) ?: return@IconToolButton
+                    runCatching {
+                        reportCtx.startActivity(
+                            android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse(
+                                com.hereliesaz.guillotine.ai.safety.ContentReport.mailtoUri(p),
+                            )).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                }
             }
             // Group / ungroup — only meaningful with a multi-clip selection.
             if (selected.size > 1) {

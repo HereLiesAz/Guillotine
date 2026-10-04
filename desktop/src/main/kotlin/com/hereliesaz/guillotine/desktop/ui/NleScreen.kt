@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.HelpOutline
@@ -668,9 +669,15 @@ fun NleScreen(
         GenerateSheet(
             leonardoKey = settings.leonardoKey,
             leonardoModel = settings.leonardoModel,
-            onGenerateFree = { url, name ->
-                vm.addMedia(listOf(MediaItem(newId(), url, name, MediaKind.IMAGE, 5_000)))
-                showGenerate = false
+            onGenerateFree = { prompt ->
+                val url = com.hereliesaz.guillotine.ai.safety.ContentSafety.pollinationsUrl(prompt)
+                val provenance = com.hereliesaz.guillotine.model.AiProvenance(
+                    "Pollinations", "flux", prompt, System.currentTimeMillis(),
+                )
+                vm.addMedia(listOf(
+                    com.hereliesaz.guillotine.desktop.platform.DesktopContentSafety
+                        .fetchChecked(url, "Generated: ${prompt.take(20)}", provenance),
+                ))
             },
             onGenerateLeonardo = { prompt, modelId ->
                 val uri = com.hereliesaz.guillotine.desktop.platform.DesktopImageGen.Leonardo.generate(
@@ -678,7 +685,10 @@ fun NleScreen(
                     modelId = modelId,
                     prompt = prompt,
                 )
-                vm.addMedia(listOf(MediaItem(newId(), uri, "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000)))
+                val provenance = com.hereliesaz.guillotine.model.AiProvenance(
+                    "Leonardo", modelId, prompt, System.currentTimeMillis(),
+                )
+                vm.addMedia(listOf(MediaItem(newId(), uri, "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000, aiProvenance = provenance)))
             },
             onDismiss = { showGenerate = false },
         )
@@ -1020,6 +1030,18 @@ private fun EditorToolStrip(
             }
             IconToolButton(Icons.Filled.Delete, "Delete", enabled = state.selectedClipIds.isNotEmpty()) {
                 vm.deleteSelected()
+            }
+            // Report AI-generated content (Play AI-Generated Content policy): removes it and emails a report.
+            val generated = selected.singleOrNull()?.let { state.document.mediaFor(it) }?.aiProvenance
+            if (generated != null) {
+                IconToolButton(Icons.Filled.Flag, "Report AI-generated content") {
+                    val p = vm.removeReportedGenerated(selected.single().id) ?: return@IconToolButton
+                    runCatching {
+                        java.awt.Desktop.getDesktop().mail(java.net.URI(
+                            com.hereliesaz.guillotine.ai.safety.ContentReport.mailtoUri(p),
+                        ))
+                    }
+                }
             }
             // Group / ungroup -- only meaningful with a multi-clip selection.
             if (selected.size > 1) {

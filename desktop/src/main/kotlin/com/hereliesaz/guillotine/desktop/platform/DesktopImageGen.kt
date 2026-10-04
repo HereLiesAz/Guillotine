@@ -23,6 +23,7 @@ object DesktopImageGen {
         ): String = withContext(Dispatchers.IO) {
             val key = apiKey.trim()
             require(key.isNotEmpty()) { "Add your Leonardo API key in Settings to generate with Leonardo." }
+            com.hereliesaz.guillotine.ai.safety.ContentSafety.checkPrompt(prompt)
 
             val body = JSONObject().apply {
                 put("prompt", prompt)
@@ -75,8 +76,11 @@ object DesktopImageGen {
             return text
         }
 
+        /** Saves the result, then the on-device content check (ContentSafety layer 3). */
         private suspend fun download(url: String): String {
-            return DesktopGenSink().saveUrl(url, "png")
+            val local = DesktopGenSink().saveUrl(url, "png")
+            DesktopContentSafety.requireSafe(local, com.hereliesaz.guillotine.model.MediaKind.IMAGE)
+            return local
         }
     }
 }

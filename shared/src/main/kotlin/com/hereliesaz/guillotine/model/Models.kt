@@ -148,6 +148,8 @@ data class MediaItem(
      */
     val widthPx: Int? = null,
     val heightPx: Int? = null,
+    /** Set when this media was made by an AI generator: what made it, for in-app reporting. */
+    val aiProvenance: AiProvenance? = null,
 ) {
     /** [widthPx]/[heightPx] as a ratio, or null when either is unknown/non-positive. */
     val aspectRatioValue: Double?
@@ -157,6 +159,15 @@ data class MediaItem(
             return w.toDouble() / h.toDouble()
         }
 }
+
+/** Where an AI-generated [MediaItem] came from (see [com.hereliesaz.guillotine.ai.safety.ContentReport]). */
+@Serializable
+data class AiProvenance(
+    val provider: String,
+    val model: String = "",
+    val prompt: String,
+    val createdAtMs: Long = 0L,
+)
 
 /** Cubic-bezier easing control points (P1, P2); endpoints are fixed at (0,0)/(1,1). */
 @Serializable

@@ -69,9 +69,14 @@ object GenController {
             GenKind.VIDEO -> MediaKind.VIDEO
             GenKind.MUSIC -> MediaKind.AUDIO
         }
+        // ContentSafety layer 3: nothing reaches the project unchecked; a flagged result is deleted.
+        com.hereliesaz.guillotine.ai.safety.AndroidContentSafety.requireSafe(context, localUri, mediaKind)
         val (durationMs, hasAudio) = probe(context, localUri, kind, durationSec)
         val label = "${provider.meta.label}: ${prompt.trim().take(24)}"
-        return MediaItem(newId(), localUri, label, mediaKind, durationMs, hasAudio)
+        val provenance = com.hereliesaz.guillotine.model.AiProvenance(
+            provider.meta.label, model, prompt.trim(), System.currentTimeMillis(),
+        )
+        return MediaItem(newId(), localUri, label, mediaKind, durationMs, hasAudio, aiProvenance = provenance)
     }
 
     /** Probe a generated video/audio for real length + audio track; images use the addMedia default. */

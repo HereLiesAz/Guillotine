@@ -101,6 +101,12 @@ rights to. Do not use it to circumvent technical protection measures on media yo
 Because Guillotine runs entirely on your device, we generally cannot detect or prevent misuse — which
 makes it your responsibility, not a policy we enforce for you.
 
+**AI generation.** Guillotine's generators do not produce sexual or nude content. Prompts asking for it
+are refused, each provider's own safety filter is turned on, and every generated image or video is
+checked on your device before it reaches your project; anything flagged is discarded. If generated
+content slips through anyway, select the clip and use **Report** (the flag button): the clip is removed
+and a report is emailed to hereliesaz@gmail.com with the prompt and provider.
+
 ## 9. The embedded tool server
 
 Guillotine can expose an editing tool interface (MCP) so an AI assistant can drive the editor. It is

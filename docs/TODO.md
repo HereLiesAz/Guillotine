@@ -2,6 +2,15 @@
 
 Deferred work, newest at the top. Pick up when prioritized.
 
+## Play suspension: AI generation content safety (2026-10)
+
+Google Play suspended the app (Sexual Content / AI-Generated Content policy) after free Pollinations
+generation returned a nude image. **Done:** prompt refusal, provider filters on, an on-device NSFW
+check on every generated image and video before it reaches the timeline (fail-closed), AI provenance
+on generated media, an in-app **Report** button, and the policy in the generate dialogs, Settings and
+Terms (see `docs/PROVIDERS.md` § Content safety). **Open:** submit the Play appeal once a build with
+this ships; the classifier is 87 MB on first generation, so consider a smaller model later.
+
 ## Flagship store signing key rotated (2026-10)
 
 **Done:** the store's original package-signing key (`…zmko3VFI…`) was lost, and the catalog is now

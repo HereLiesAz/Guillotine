@@ -24,7 +24,13 @@ object GenBackends {
         GenKind.MUSIC -> "mp3"
     }
 
-    fun jobFor(req: GenRequest, sink: GenSink): GenJob = when (req.provider) {
+    /** The job for [req]. Refuses a blank or sexual prompt first ([ContentSafety.checkPrompt]). */
+    fun jobFor(req: GenRequest, sink: GenSink): GenJob {
+        com.hereliesaz.guillotine.ai.safety.ContentSafety.checkPrompt(req.prompt)
+        return backendFor(req, sink)
+    }
+
+    private fun backendFor(req: GenRequest, sink: GenSink): GenJob = when (req.provider) {
         GenProviderType.POLLINATIONS -> pollinations(req)
         GenProviderType.LEONARDO -> leonardo(req, sink)
         GenProviderType.OPENAI_IMAGE -> openAiImage(req, sink)
@@ -116,9 +122,9 @@ object GenBackends {
 
     /** Free, keyless: the prompt URL *is* the image. Returned remote so the sink downloads it. */
     private fun pollinations(req: GenRequest) = sync {
-        val model = req.model.ifBlank { "flux" }
-        "https://image.pollinations.ai/prompt/${GenHttp.urlEncode(req.prompt)}" +
-            "?width=${req.widthPx}&height=${req.heightPx}&model=$model&nologo=true"
+        com.hereliesaz.guillotine.ai.safety.ContentSafety.pollinationsUrl(
+            req.prompt, req.widthPx, req.heightPx, req.model.ifBlank { "flux" },
+        )
     }
 
     private fun leonardo(req: GenRequest, sink: GenSink) = object : GenJob {
@@ -152,6 +158,8 @@ object GenBackends {
         val size = openAiSize(req.widthPx, req.heightPx, model)
         val body = JSONObject().apply {
             put("model", model); put("prompt", req.prompt); put("n", 1); put("size", size)
+            // Strictest provider filter (ContentSafety layer 2); dall-e models don't take the field.
+            if (model.startsWith("gpt-image")) put("moderation", "auto")
             if (model != "gpt-image-1") put("response_format", "b64_json")
         }
         val resp = GenHttp.requestJson(
@@ -192,6 +200,7 @@ object GenBackends {
         override suspend fun submit(): String {
             val body = JSONObject().apply {
                 put("prompt", req.prompt); put("width", req.widthPx); put("height", req.heightPx)
+                put("safety_tolerance", 0) // strictest moderation (ContentSafety layer 2)
             }
             val resp = GenHttp.requestJson("POST", "https://api.bfl.ai/v1/$model", mapOf("x-key" to req.apiKey), body)
             return JSONObject(resp).optString("polling_url").ifBlank {
@@ -214,7 +223,8 @@ object GenBackends {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predict"
         val body = JSONObject().apply {
             put("instances", JSONArray().put(JSONObject().put("prompt", req.prompt)))
-            put("parameters", JSONObject().put("sampleCount", 1))
+            // Strictest safety filter (ContentSafety layer 2).
+            put("parameters", JSONObject().put("sampleCount", 1).put("safetySetting", "block_low_and_above"))
         }
         val resp = GenHttp.requestJson("POST", url, mapOf("x-goog-api-key" to req.apiKey), body)
         val b64 = JSONObject(resp).getJSONArray("predictions").getJSONObject(0).getString("bytesBase64Encoded")
@@ -248,6 +258,9 @@ object GenBackends {
     /** Guillotine's own free Hugging Face Space (ZeroGPU). Owner/space lowercased → the `.hf.space` host. */
     private const val DEFAULT_FREE_T2V_SPACE = "https://hereliesaz-guillotine-t2v.hf.space"
 
+    /** Steers the free video model away from sexual content (ContentSafety layer 2). */
+    private const val FREE_NEGATIVE_PROMPT = "nudity, naked, nsfw, sexual content, exposed body, lingerie"
+
     /**
      * Free, keyless text-to-video via the Guillotine HF Space's Gradio API. Two-step: POST the prompt
      * to `/gradio_api/call/generate` for an event id, then read the SSE result stream for the generated
@@ -259,7 +272,7 @@ object GenBackends {
         override suspend fun submit(): String {
             val body = JSONObject().put("data", JSONArray().apply {
                 put(req.prompt)                              // prompt
-                put("")                                      // negative prompt
+                put(FREE_NEGATIVE_PROMPT)                    // negative prompt
                 put(req.durationSec.coerceIn(1, 6))          // seconds (kept short for the free tier)
                 put(0)                                       // seed (0 = random on the Space)
             })
@@ -584,7 +597,8 @@ object GenBackends {
         val model = req.model.ifBlank { defaultFalModel(req.kind) }
         val hdr = mapOf("Authorization" to "Key ${req.apiKey}")
         override suspend fun submit(): String {
-            val body = JSONObject().put("prompt", req.prompt)
+            // fal's own safety checker on (ContentSafety layer 2); models without one ignore it.
+            val body = JSONObject().put("prompt", req.prompt).put("enable_safety_checker", true)
             val resp = GenHttp.requestJson("POST", "https://queue.fal.run/$model", hdr, body)
             return JSONObject(resp).optString("status_url").ifBlank {
                 "https://queue.fal.run/$model/requests/" + JSONObject(resp).getString("request_id") + "/status"

@@ -1195,6 +1195,20 @@ open class EditorViewModel {
         }
     }
 
+    /**
+     * Report the AI-generated media under [clipId]: removes every clip that uses it, and the media
+     * itself, and returns its provenance for the report ([com.hereliesaz.guillotine.ai.safety.ContentReport]).
+     * Null (and nothing removed) when the clip isn't AI-generated.
+     */
+    fun removeReportedGenerated(clipId: String): com.hereliesaz.guillotine.model.AiProvenance? {
+        val media = document.clips.firstOrNull { it.id == clipId }?.let { document.mediaFor(it) } ?: return null
+        val provenance = media.aiProvenance ?: return null
+        val ids = document.clips.filter { it.mediaId == media.id }.map { it.id }
+        ids.forEach { deleteClip(it) }
+        mutateDocument { doc -> doc.copy(mediaItems = doc.mediaItems.filter { it.id != media.id }) }
+        return provenance
+    }
+
     /** Delete a single clip by id, including its linked shadow audio and any group members. */
     fun deleteClip(clipId: String) {
         val c = document.clips.firstOrNull { it.id == clipId } ?: return
