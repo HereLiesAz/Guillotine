@@ -27,7 +27,12 @@ val computedVersionName = rootProject.extra["versionName"] as String
 
 android {
     namespace = "com.hereliesaz.guillotine"
-    compileSdk = 37
+    // 37.1: Compose UI 1.13.0-alpha03's AARs require compiling against android-37.1.
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
+    }
 
     defaultConfig {
         applicationId = "com.hereliesaz.guillotine"
