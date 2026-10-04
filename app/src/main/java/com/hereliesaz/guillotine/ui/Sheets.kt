@@ -763,6 +763,7 @@ fun SettingsScreen(
                             "offered when generating. Legacy Leonardo image key is picked up automatically.",
                         color = Neutral400, fontSize = 12.sp,
                     )
+                    Text(com.hereliesaz.guillotine.ai.safety.ContentSafety.NOTICE, color = Neutral500, fontSize = 11.sp)
                     GenCategorySection(
                         title = "Image", kind = GenKind.IMAGE,
                         genKeys = genKeys, genModels = genModels, genExtras = genExtras, uriHandler = uriHandler,
@@ -1415,7 +1416,7 @@ fun ExportSheet(
 fun GenerateSheet(
     leonardoKey: String,
     leonardoModel: String,
-    onGenerateFree: (url: String, name: String) -> Unit,
+    onGenerateFree: suspend (prompt: String) -> Unit,
     onGenerateLeonardo: suspend (prompt: String, modelId: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1432,7 +1433,7 @@ fun GenerateSheet(
             Text("Generate image", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             if (generating) {
                 LoadingIndicator()
-                Text("Generating with Leonardo… this can take a little while.", color = Neutral400, fontSize = 12.sp)
+                Text("Generating and checking the result… this can take a little while.", color = Neutral400, fontSize = 12.sp)
             } else {
                 OutlinedTextField(
                     value = prompt,
@@ -1455,26 +1456,27 @@ fun GenerateSheet(
                         color = Neutral500, fontSize = 11.sp,
                     )
                 }
+                Text(com.hereliesaz.guillotine.ai.safety.ContentSafety.NOTICE, color = Neutral500, fontSize = 10.sp)
                 error?.let { Text(it, color = Red500, fontSize = 11.sp) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                     Text("Cancel", color = Neutral400, fontSize = 12.sp, modifier = Modifier.padding(end = 16.dp).clickableText(onDismiss))
                     Button(
                         enabled = prompt.isNotBlank(),
                         onClick = {
-                            error = null
-                            if (useLeonardo) {
-                                generating = true
-                                scope.launch {
-                                    try {
-                                        onGenerateLeonardo(prompt.trim(), model)
-                                        onDismiss()
-                                    } catch (e: Exception) {
-                                        error = e.message ?: "Generation failed"
-                                        generating = false
-                                    }
+                            error = com.hereliesaz.guillotine.ai.safety.ContentSafety.promptRefusal(prompt)
+                            if (error != null) return@Button
+                            generating = true
+                            scope.launch {
+                                try {
+                                    if (useLeonardo) onGenerateLeonardo(prompt.trim(), model)
+                                    else onGenerateFree(prompt.trim())
+                                    onDismiss()
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    error = e.message ?: "Generation failed"
+                                    generating = false
                                 }
-                            } else {
-                                onGenerateFree(ImageGen.Pollinations.url(prompt), "Generated: ${prompt.take(20)}")
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Red500),

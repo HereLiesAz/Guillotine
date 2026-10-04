@@ -17,10 +17,9 @@ object ImageGen {
 
     /** Free, no-key generation: Pollinations serves the image directly from a prompt URL. */
     object Pollinations {
-        fun url(prompt: String, width: Int = 1280, height: Int = 720): String {
-            val encoded = URLEncoder.encode(prompt.trim(), "UTF-8")
-            return "https://image.pollinations.ai/prompt/$encoded?width=$width&height=$height&nologo=true"
-        }
+        /** Checks the prompt and turns Pollinations' own filter on (see [ContentSafety]). */
+        fun url(prompt: String, width: Int = 1280, height: Int = 720): String =
+            com.hereliesaz.guillotine.ai.safety.ContentSafety.pollinationsUrl(prompt, width, height)
     }
 
     /**
@@ -41,6 +40,7 @@ object ImageGen {
         ): Uri = withContext(Dispatchers.IO) {
             val key = apiKey.trim()
             require(key.isNotEmpty()) { "Add your Leonardo API key in Settings to generate with Leonardo." }
+            com.hereliesaz.guillotine.ai.safety.ContentSafety.checkPrompt(prompt)
 
             // 1. Kick off the generation.
             val body = JSONObject().apply {
@@ -65,7 +65,7 @@ object ImageGen {
                         val imgs = pk.optJSONArray("generated_images")
                         val url = if (imgs != null && imgs.length() > 0) imgs.getJSONObject(0).optString("url") else ""
                         if (url.isBlank()) throw IllegalStateException("Leonardo returned no image.")
-                        return@withContext download(context, url)
+                        return@withContext downloadChecked(context, url)
                     }
                     "FAILED" -> throw IllegalStateException("Leonardo generation failed.")
                 }
@@ -89,6 +89,7 @@ object ImageGen {
         ): Uri = withContext(Dispatchers.IO) {
             val key = apiKey.trim()
             require(key.isNotEmpty()) { "Add your Leonardo API key in Settings to generate replacements." }
+            com.hereliesaz.guillotine.ai.safety.ContentSafety.checkPrompt(prompt)
 
             val (w, h) = fitDims(frame.width, frame.height)
             val sf = scaleTo(frame, w, h)
@@ -119,7 +120,7 @@ object ImageGen {
                         val imgs = pk.optJSONArray("generated_images")
                         val url = if (imgs != null && imgs.length() > 0) imgs.getJSONObject(0).optString("url") else ""
                         if (url.isBlank()) throw IllegalStateException("Leonardo returned no image.")
-                        return@withContext download(context, url)
+                        return@withContext downloadChecked(context, url)
                     }
                     "FAILED" -> throw IllegalStateException("Leonardo inpainting failed.")
                 }
@@ -197,6 +198,15 @@ object ImageGen {
             conn.disconnect()
             if (!ok) throw IllegalStateException("Leonardo API error ($code): ${text.take(300)}")
             return text
+        }
+
+        /** [download], then the on-device content check (ContentSafety layer 3); flagged → deleted + thrown. */
+        private suspend fun downloadChecked(context: Context, url: String): Uri {
+            val uri = download(context, url)
+            com.hereliesaz.guillotine.ai.safety.AndroidContentSafety.requireSafe(
+                context, uri.toString(), com.hereliesaz.guillotine.model.MediaKind.IMAGE,
+            )
+            return uri
         }
 
         private fun download(context: Context, url: String): Uri {

@@ -2948,13 +2948,24 @@ class DesktopMcpTools(
         val localUri = runBlocking {
             val result = AsyncJobPoller.run(GenBackends.jobFor(req, sink), cfg)
             // Result is either an already-local uri (byte-returning backends) or a remote url to download.
-            if (result.startsWith("file:") || result.startsWith("content://")) result
+            val local = if (result.startsWith("file:") || result.startsWith("content://")) result
             else sink.saveUrl(result, GenBackends.extFor(kind))
+            // ContentSafety layer 3: nothing reaches the project unchecked; a flagged result is deleted.
+            val mediaKind = when (kind) {
+                GenKind.IMAGE -> MediaKind.IMAGE; GenKind.VIDEO -> MediaKind.VIDEO; GenKind.MUSIC -> MediaKind.AUDIO
+            }
+            DesktopContentSafety.requireSafe(local, mediaKind)
+            local
         }
         val file = File(URI(localUri))
         val probed = DesktopMediaImport.probe(file)
             ?: throw IllegalStateException("The generated $label couldn't be read.")
-        val item = probed.copy(name = "${resolved.meta.label}: ${prompt.trim().take(24)}")
+        val item = probed.copy(
+            name = "${resolved.meta.label}: ${prompt.trim().take(24)}",
+            aiProvenance = com.hereliesaz.guillotine.model.AiProvenance(
+                resolved.meta.label, modelId, prompt.trim(), System.currentTimeMillis(),
+            ),
+        )
         vm.addMedia(listOf(item))
         return ok().apply {
             put("mediaKind", item.kind.name)

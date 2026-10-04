@@ -204,6 +204,25 @@ jobs**; they never drive the editor. A failed sandbox run falls back to the assi
 
 ## Generation providers
 
+### Content safety
+
+Every provider, every route (the generate dialogs, the assistant, the MCP server) goes through
+[`ContentSafety`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/safety/ContentSafety.kt):
+
+1. **Prompt check:** blank prompts and prompts asking for sexual or nude content are refused before
+   anything is sent.
+2. **Provider filters on:** Pollinations `safe=true`, FLUX `safety_tolerance: 0`, Imagen
+   `block_low_and_above`, gpt-image `moderation: auto`, fal `enable_safety_checker`, and a negative
+   prompt on the free video Space.
+3. **On-device check:** [`NsfwModel`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/safety/NsfwModel.kt)
+   (Falconsai's ViT classifier, int8 ONNX, pinned by SHA-256, downloaded once on first generation)
+   scores the image, or five frames of a video; a score of 0.5 or more discards it. No classifier, no
+   generation.
+
+Generated media carries its provenance (provider, model, prompt). Selecting a generated clip shows a
+**Report** (flag) button that removes it and emails a report to hereliesaz@gmail.com
+([`ContentReport`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/safety/ContentReport.kt)).
+
 Generation is **capability-gated**: a category (Image / Video / Music) and each provider
 within it is only offered once it's usable — that means **keyless** providers are always
 available, and **BYO** providers appear as soon as you've entered their key. Configure as
