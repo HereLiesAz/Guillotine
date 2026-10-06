@@ -25,7 +25,7 @@ buildscript {
             force("io.netty:netty-codec:4.2.18.Final")
             force("org.bouncycastle:bcprov-jdk18on:1.86")
             force("org.bouncycastle:bcpkix-jdk18on:1.86")
-            force("org.apache.commons:commons-lang3:3.20.0")
+            force("org.apache.commons:commons-lang3:3.21.0")
             force("org.bitbucket.b_c:jose4j:0.9.7")
         }
     }
