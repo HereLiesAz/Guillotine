@@ -1,0 +1,19 @@
+# Guillotine: built, signed and published by HereLiesAz/workflows (.github/workflows/android-github-release.yml):
+# a GitHub Release with the signed, self-updating `github`-flavor APK (assembleGithubRelease) and its
+# R8 mapping.txt. Replaces the old local release-apk.yml. The Play AAB stays in release-aab.yml
+# (android-play-release). Runs on every push to main, like release-aab.yml, so the self-updating APK
+# never sits stale behind main.
+# This file is the trigger contract; the central sync replaces it with a tracker.
+name: Guillotine GitHub Release
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - version.properties
+  workflow_dispatch:
+permissions: {}
+jobs:
+  hand-off:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Guillotine's GitHub Release runs centrally in HereLiesAz/workflows."
