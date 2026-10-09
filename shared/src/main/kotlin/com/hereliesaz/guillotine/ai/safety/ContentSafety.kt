@@ -6,7 +6,9 @@ package com.hereliesaz.guillotine.ai.safety
  * assistant's tools, the MCP server). Three layers, applied in this order:
  *
  * 1. [checkPrompt] refuses a blank prompt or one asking for sexual content, before anything is sent.
- * 2. The provider's own filter, where it has one ([pollinationsUrl] always sets `safe=true`).
+ * 2. The provider's own filter, where it has one (fal's `enable_safety_checker`).
+ *
+ * Text-to-image generation is not offered at all.
  * 3. [NsfwModel] classifies the result on-device before it reaches the timeline; flagged output is
  *    deleted. Generation fails closed: no classifier, no image.
  *
@@ -54,13 +56,5 @@ object ContentSafety {
     /** Throws [BlockedException] when [promptRefusal] refuses [prompt]. */
     fun checkPrompt(prompt: String) {
         promptRefusal(prompt)?.let { throw BlockedException(it) }
-    }
-
-    /** The Pollinations image URL for [prompt], with its NSFW filter on. Checks the prompt first. */
-    fun pollinationsUrl(prompt: String, widthPx: Int = 1280, heightPx: Int = 720, model: String = ""): String {
-        checkPrompt(prompt)
-        val encoded = java.net.URLEncoder.encode(prompt.trim(), "UTF-8").replace("+", "%20")
-        val m = if (model.isBlank()) "" else "&model=${java.net.URLEncoder.encode(model, "UTF-8")}"
-        return "https://image.pollinations.ai/prompt/$encoded?width=$widthPx&height=$heightPx$m&nologo=true&safe=true"
     }
 }

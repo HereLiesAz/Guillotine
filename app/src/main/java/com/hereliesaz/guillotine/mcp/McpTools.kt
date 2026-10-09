@@ -690,19 +690,6 @@ class McpTools(
 
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
-            "generate_image",
-            "Generate a NEW image from a text prompt using the user's configured image provider and add " +
-                "it to the timeline as an image clip. Optionally pass provider/model to pick among " +
-                "configured providers. If no image provider is configured it returns an error telling " +
-                "the user to add a key in Settings — relay that, don't retry.",
-            objSchema(
-                "prompt" to stringProp("What to generate"),
-                "provider" to stringProp("Optional provider id (e.g. OPENAI_IMAGE, BFL_FLUX, FAL)"),
-                "model" to stringProp("Optional model id"),
-                required = listOf("prompt"),
-            ),
-        ))
-        put(toolDefinition(
             "generate_video",
             "Generate a NEW video clip from a text prompt (cloud, BYO key) and add it to the timeline. " +
                 "Async — may take a while. Optional provider/model/duration_sec.",
@@ -726,8 +713,8 @@ class McpTools(
         put(toolDefinition(
             "add_shape_layer",
             "Add a solid-color rectangle as a new opaque image clip on its own new video track, stacked " +
-                "at the very back — an instant, on-device \"shape layer\" (no provider/key, unlike " +
-                "generate_image). Use this to put an opaque background behind a text/caption clip that " +
+                "at the very back — an instant, on-device \"shape layer\" (no provider/key, no " +
+                "generation). Use this to put an opaque background behind a text/caption clip that " +
                 "needs to read over bright footage (text clips are transparent glyphs only and never " +
                 "bake in a background themselves), or as a plain colored background/wipe on its own. " +
                 "color is any CSS color name or hex code (#RRGGBB or #AARRGGBB).",
@@ -903,7 +890,6 @@ class McpTools(
         "list_concepts" -> listConcepts()
         "delete_concept" -> deleteConcept(args.getString("name"))
         "analyze_clip_with_concept" -> analyzeClipWithConcept(args.getString("clip_id"), args.getString("name"), args.optBoolean("keep_only", false))
-        "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
         "generate_video" -> generateMedia(GenKind.VIDEO, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
         "generate_music" -> generateMedia(GenKind.MUSIC, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
         "add_shape_layer" -> addShapeLayer(args.getString("color"), args.optDouble("opacity", 1.0).toFloat())
@@ -1276,7 +1262,7 @@ class McpTools(
         require(prompt.isNotBlank()) { "Enter a prompt to generate." }
         val providerType = provider.takeIf { it.isNotBlank() }
             ?.let { runCatching { GenProviderType.valueOf(it.uppercase()) }.getOrNull() }
-        val label = when (kind) { GenKind.IMAGE -> "image"; GenKind.VIDEO -> "video"; GenKind.MUSIC -> "music" }
+        val label = when (kind) { GenKind.VIDEO -> "video"; GenKind.MUSIC -> "music" }
         return OperationController.runBlocking(
             context, OperationKind.GENERATE, "Generating $label…", pausable = true,
         ) { sink ->
@@ -1285,7 +1271,7 @@ class McpTools(
                     context, settings, kind, prompt,
                     providerOverride = providerType,
                     modelOverride = model.takeIf { it.isNotBlank() },
-                    durationSec = durationSec ?: if (kind == GenKind.IMAGE) 0 else 8,
+                    durationSec = durationSec ?: 8,
                     onProgress = { p -> if (p != null) sink.report(p, "Generating $label…") },
                     checkpoint = { sink.checkpointBlocking() },
                 )
