@@ -10,8 +10,10 @@ check on every generated image and video before it reaches the timeline (fail-cl
 on generated media, an in-app **Report** button, and the policy in the generate dialogs, Settings and
 Terms (see `docs/PROVIDERS.md` § Content safety). Then **all text-to-image generation was removed**
 (Pollinations, the BYO image providers, aggregator image models, the Generate dialog, `generate_image`);
-Leonardo stays only for Android inpainting (object removal). **Open:** Play requires relaunching under a
-**new package name and new app name**; the classifier is 87 MB on first generation, so consider a
+Leonardo stays only for Android inpainting (object removal). Play never reissues a suspended package: the
+`play` flavor now ships as **`com.herelies.az.guillotine`**; the `github` flavor keeps
+`com.hereliesaz.guillotine` so sideloaded installs keep updating. **Open:** Play also requires a **new
+app name** (`fastlane/metadata/android/en-US/title.txt`); the classifier is 87 MB on first generation, so consider a
 smaller model later.
 
 ## Flagship store signing key rotated (2026-10)
