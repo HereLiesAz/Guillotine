@@ -124,7 +124,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.Analysis
 import com.hereliesaz.guillotine.ai.ApiKeyStore
-import com.hereliesaz.guillotine.ai.ImageGen
 import com.hereliesaz.aznavrail.AzDropdownMenu
 import com.hereliesaz.aznavrail.bottomsheet.rememberAzSheetController
 import com.hereliesaz.aznavrail.model.AzDropdownDesign
@@ -374,7 +373,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
     var showNewProjectConfirm by remember { mutableStateOf(false) }
-    var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
     // Full-screen "cinema mode" preview — hides the timeline/side panels behind a full-bleed preview
     // plus a floating bottom toolbar (see FullscreenPreviewOverlay). Overlays the normal editor
@@ -613,7 +611,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onZoomOut = vm::zoomOut,
             onFitAll = vm::fitAllToViewport,
             onImport = { importTargetTrack = null; importLauncher() },
-            onGenerate = { showGenerate = true },
             onNameProject = { showNameDialog = true },
             onNewProject = { showNewProjectConfirm = true },
             onOpenProject = { openLauncher() },
@@ -944,29 +941,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             containerColor = Neutral900,
         )
     }
-    if (showGenerate) {
-        GenerateSheet(
-            leonardoKey = settings.leonardoKey,
-            leonardoModel = settings.leonardoModel,
-            onGenerateFree = { prompt ->
-                val url = ImageGen.Pollinations.url(prompt)
-                val provenance = com.hereliesaz.guillotine.model.AiProvenance(
-                    "Pollinations", "flux", prompt, System.currentTimeMillis(),
-                )
-                val item = com.hereliesaz.guillotine.ai.safety.AndroidContentSafety
-                    .fetchChecked(context, url, "Generated: ${prompt.take(20)}", provenance)
-                vm.addMedia(listOf(item))
-            },
-            onGenerateLeonardo = { prompt, modelId ->
-                val uri = ImageGen.Leonardo.generate(context, settings.leonardoKey, modelId, prompt)
-                val provenance = com.hereliesaz.guillotine.model.AiProvenance(
-                    "Leonardo", modelId, prompt, System.currentTimeMillis(),
-                )
-                vm.addMedia(listOf(MediaItem(newId(), uri.toString(), "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000, aiProvenance = provenance)))
-            },
-            onDismiss = { showGenerate = false },
-        )
-    }
     if (showExport) {
         ExportSheet(
             totalDurationMs = state.document.totalDurationMs,
@@ -1142,7 +1116,6 @@ private fun TopBar(
     onZoomOut: () -> Unit,
     onFitAll: () -> Unit,
     onImport: () -> Unit,
-    onGenerate: () -> Unit,
     onNameProject: () -> Unit,
     onNewProject: () -> Unit,
     onOpenProject: () -> Unit,
@@ -1183,7 +1156,6 @@ private fun TopBar(
                 azItem("Rename") { onNameProject() }
                 azItem("Import") { onImport() }
                 azItem("Media Bin") { onOpenMediaBin() }
-                azItem("Generate") { onGenerate() }
                 azItem("Render") { onExport() }
                 azDivider()
                 azItem("Project") { onProjectSettings() }

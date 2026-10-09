@@ -10,68 +10,15 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 
-/** Image-clip generators: Pollinations is the free, no-key default; Leonardo.ai is BYO key. */
+/**
+ * Leonardo.ai inpainting for generative object removal (BYO key from https://app.leonardo.ai →
+ * Settings → API Access). Text-to-image was removed (Google Play AI-Generated Content policy).
+ */
 object ImageGen {
 
-    /** Free, no-key generation: Pollinations serves the image directly from a prompt URL. */
-    object Pollinations {
-        /** Checks the prompt and turns Pollinations' own filter on (see [ContentSafety]). */
-        fun url(prompt: String, width: Int = 1280, height: Int = 720): String =
-            com.hereliesaz.guillotine.ai.safety.ContentSafety.pollinationsUrl(prompt, width, height)
-    }
-
-    /**
-     * Leonardo.ai cloud generation (BYO API key from https://app.leonardo.ai → Settings → API
-     * Access). Generation is async: create a job, poll until COMPLETE, then download the first
-     * image to a cache file. The model is chosen by id from [LeonardoModels].
-     */
     object Leonardo {
         private const val BASE = "https://cloud.leonardo.ai/api/rest/v1"
-
-        suspend fun generate(
-            context: Context,
-            apiKey: String,
-            modelId: String,
-            prompt: String,
-            width: Int = 1280,
-            height: Int = 720,
-        ): Uri = withContext(Dispatchers.IO) {
-            val key = apiKey.trim()
-            require(key.isNotEmpty()) { "Add your Leonardo API key in Settings to generate with Leonardo." }
-            com.hereliesaz.guillotine.ai.safety.ContentSafety.checkPrompt(prompt)
-
-            // 1. Kick off the generation.
-            val body = JSONObject().apply {
-                put("prompt", prompt)
-                if (modelId.isNotBlank()) put("modelId", modelId)
-                put("width", width)
-                put("height", height)
-                put("num_images", 1)
-            }
-            val created = request("POST", "$BASE/generations", key, body)
-            val generationId = JSONObject(created)
-                .optJSONObject("sdGenerationJob")?.optString("generationId").orEmpty()
-            if (generationId.isEmpty()) throw IllegalStateException("Leonardo did not return a generation id.")
-
-            // 2. Poll until the images are ready (Leonardo is async; ~seconds to a couple minutes).
-            repeat(90) {
-                delay(2_000)
-                val pollText = request("GET", "$BASE/generations/$generationId", key, null)
-                val pk = JSONObject(pollText).optJSONObject("generations_by_pk") ?: return@repeat
-                when (pk.optString("status")) {
-                    "COMPLETE" -> {
-                        val imgs = pk.optJSONArray("generated_images")
-                        val url = if (imgs != null && imgs.length() > 0) imgs.getJSONObject(0).optString("url") else ""
-                        if (url.isBlank()) throw IllegalStateException("Leonardo returned no image.")
-                        return@withContext downloadChecked(context, url)
-                    }
-                    "FAILED" -> throw IllegalStateException("Leonardo generation failed.")
-                }
-            }
-            throw IllegalStateException("Leonardo generation timed out.")
-        }
 
         /**
          * Inpaint [frame] where [mask] is white, using Leonardo Canvas inpainting (BYO key). Uploads the

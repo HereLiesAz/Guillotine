@@ -19,7 +19,6 @@ object GenBackends {
 
     /** Default file extension for a generated result of this kind. */
     fun extFor(kind: GenKind): String = when (kind) {
-        GenKind.IMAGE -> "png"
         GenKind.VIDEO -> "mp4"
         GenKind.MUSIC -> "mp3"
     }
@@ -31,14 +30,7 @@ object GenBackends {
     }
 
     private fun backendFor(req: GenRequest, sink: GenSink): GenJob = when (req.provider) {
-        GenProviderType.POLLINATIONS -> pollinations(req)
-        GenProviderType.LEONARDO -> leonardo(req, sink)
-        GenProviderType.OPENAI_IMAGE -> openAiImage(req, sink)
-        GenProviderType.STABILITY_IMAGE -> stabilityImage(req, sink)
-        GenProviderType.BFL_FLUX -> bflFlux(req)
-        GenProviderType.GEMINI_IMAGEN -> geminiImagen(req, sink)
-        GenProviderType.IDEOGRAM -> ideogram(req)
-        GenProviderType.RECRAFT -> recraft(req)
+        GenProviderType.LEONARDO -> throw IllegalArgumentException("Leonardo is used for object removal only.")
         GenProviderType.GUILLOTINE_FREE -> guillotineFree(req)
         GenProviderType.RUNWAY -> runway(req)
         GenProviderType.LUMA -> luma(req)
@@ -116,141 +108,6 @@ object GenBackends {
             }
         }
         return null
-    }
-
-    // ============================================================ IMAGE
-
-    /** Free, keyless: the prompt URL *is* the image. Returned remote so the sink downloads it. */
-    private fun pollinations(req: GenRequest) = sync {
-        com.hereliesaz.guillotine.ai.safety.ContentSafety.pollinationsUrl(
-            req.prompt, req.widthPx, req.heightPx, req.model.ifBlank { "flux" },
-        )
-    }
-
-    private fun leonardo(req: GenRequest, sink: GenSink) = object : GenJob {
-        val base = "https://cloud.leonardo.ai/api/rest/v1"
-        override suspend fun submit(): String {
-            val body = JSONObject().apply {
-                put("prompt", req.prompt)
-                if (req.model.isNotBlank()) put("modelId", req.model)
-                put("width", req.widthPx); put("height", req.heightPx); put("num_images", 1)
-            }
-            val created = GenHttp.requestJson("POST", "$base/generations", GenHttp.bearer(req.apiKey), body)
-            return JSONObject(created).optJSONObject("sdGenerationJob")?.optString("generationId").orEmpty()
-                .ifBlank { throw GenException("Leonardo did not return a generation id.") }
-        }
-        override suspend fun poll(handle: String): JobStatus {
-            val txt = GenHttp.requestJson("GET", "$base/generations/$handle", GenHttp.bearer(req.apiKey))
-            val pk = JSONObject(txt).optJSONObject("generations_by_pk") ?: return JobStatus.Running()
-            return when (pk.optString("status")) {
-                "COMPLETE" -> {
-                    val url = pk.optJSONArray("generated_images")?.optJSONObject(0)?.optString("url").orEmpty()
-                    if (url.isBlank()) JobStatus.Failed("Leonardo returned no image.") else JobStatus.Done(url)
-                }
-                "FAILED" -> JobStatus.Failed("Leonardo generation failed.")
-                else -> JobStatus.Running()
-            }
-        }
-    }
-
-    private fun openAiImage(req: GenRequest, sink: GenSink) = sync {
-        val model = req.model.ifBlank { "gpt-image-1" }
-        val size = openAiSize(req.widthPx, req.heightPx, model)
-        val body = JSONObject().apply {
-            put("model", model); put("prompt", req.prompt); put("n", 1); put("size", size)
-            // Strictest provider filter (ContentSafety layer 2); dall-e models don't take the field.
-            if (model.startsWith("gpt-image")) put("moderation", "auto")
-            if (model != "gpt-image-1") put("response_format", "b64_json")
-        }
-        val resp = GenHttp.requestJson(
-            "POST", "https://api.openai.com/v1/images/generations", GenHttp.bearer(req.apiKey), body,
-        )
-        val d0 = JSONObject(resp).getJSONArray("data").getJSONObject(0)
-        val b64 = d0.optString("b64_json", "")
-        if (b64.isNotBlank()) sink.saveBytes(decodeB64(b64), "png")
-        else sink.saveUrl(d0.getString("url"), "png")
-    }
-
-    private fun openAiSize(w: Int, h: Int, model: String): String = when {
-        model == "dall-e-3" && w > h -> "1792x1024"
-        model == "dall-e-3" && h > w -> "1024x1792"
-        model == "gpt-image-1" && w > h -> "1536x1024"
-        model == "gpt-image-1" && h > w -> "1024x1536"
-        else -> "1024x1024"
-    }
-
-    private fun stabilityImage(req: GenRequest, sink: GenSink) = sync {
-        val model = req.model.ifBlank { "sd3.5-large" }
-        val path = when (model) {
-            "ultra" -> "ultra"; "core" -> "core"; else -> "sd3"
-        }
-        val fields = mutableMapOf("prompt" to req.prompt, "output_format" to "png")
-        if (path == "sd3") fields["model"] = model
-        val body = multipart(fields)
-        // Accept image/* → the API returns raw image bytes.
-        val bytes = GenHttp.getBytesViaMultipart(
-            "https://api.stability.ai/v2beta/stable-image/generate/$path",
-            GenHttp.bearer(req.apiKey) + ("Accept" to "image/*"), body.first, body.second,
-        )
-        sink.saveBytes(bytes, "png")
-    }
-
-    private fun bflFlux(req: GenRequest) = object : GenJob {
-        val model = req.model.ifBlank { "flux-pro-1.1" }
-        override suspend fun submit(): String {
-            val body = JSONObject().apply {
-                put("prompt", req.prompt); put("width", req.widthPx); put("height", req.heightPx)
-                put("safety_tolerance", 0) // strictest moderation (ContentSafety layer 2)
-            }
-            val resp = GenHttp.requestJson("POST", "https://api.bfl.ai/v1/$model", mapOf("x-key" to req.apiKey), body)
-            return JSONObject(resp).optString("polling_url").ifBlank {
-                "https://api.bfl.ai/v1/get_result?id=" + JSONObject(resp).optString("id")
-            }
-        }
-        override suspend fun poll(handle: String): JobStatus {
-            val resp = GenHttp.requestJson("GET", handle, mapOf("x-key" to req.apiKey))
-            val o = JSONObject(resp)
-            return when (o.optString("status")) {
-                "Ready" -> JobStatus.Done(o.getJSONObject("result").getString("sample"))
-                "Error", "Failed" -> JobStatus.Failed("FLUX generation failed.")
-                else -> JobStatus.Running()
-            }
-        }
-    }
-
-    private fun geminiImagen(req: GenRequest, sink: GenSink) = sync {
-        val model = req.model.ifBlank { "imagen-4.0-generate-001" }
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predict"
-        val body = JSONObject().apply {
-            put("instances", JSONArray().put(JSONObject().put("prompt", req.prompt)))
-            // Strictest safety filter (ContentSafety layer 2).
-            put("parameters", JSONObject().put("sampleCount", 1).put("safetySetting", "block_low_and_above"))
-        }
-        val resp = GenHttp.requestJson("POST", url, mapOf("x-goog-api-key" to req.apiKey), body)
-        val b64 = JSONObject(resp).getJSONArray("predictions").getJSONObject(0).getString("bytesBase64Encoded")
-        sink.saveBytes(decodeB64(b64), "png")
-    }
-
-    private fun ideogram(req: GenRequest) = sync {
-        val body = JSONObject().apply {
-            put("prompt", req.prompt)
-            put("rendering_speed", "DEFAULT")
-        }
-        val resp = GenHttp.requestJson(
-            "POST", "https://api.ideogram.ai/v1/ideogram-v3/generate",
-            mapOf("Api-Key" to req.apiKey), body,
-        )
-        JSONObject(resp).getJSONArray("data").getJSONObject(0).getString("url")
-    }
-
-    private fun recraft(req: GenRequest) = sync {
-        val body = JSONObject().apply {
-            put("prompt", req.prompt); put("model", req.model.ifBlank { "recraftv3" })
-        }
-        val resp = GenHttp.requestJson(
-            "POST", "https://external.api.recraft.ai/v1/images/generations", GenHttp.bearer(req.apiKey), body,
-        )
-        JSONObject(resp).getJSONArray("data").getJSONObject(0).getString("url")
     }
 
     // ============================================================ VIDEO
@@ -619,7 +476,6 @@ object GenBackends {
     }
 
     private fun defaultFalModel(kind: GenKind) = when (kind) {
-        GenKind.IMAGE -> "fal-ai/flux/dev"
         GenKind.VIDEO -> "fal-ai/minimax/hailuo-02/standard/text-to-video"
         GenKind.MUSIC -> "fal-ai/stable-audio"
     }
@@ -656,7 +512,6 @@ object GenBackends {
     }
 
     private fun defaultReplicateModel(kind: GenKind) = when (kind) {
-        GenKind.IMAGE -> "black-forest-labs/flux-dev"
         GenKind.VIDEO -> "minimax/video-01"
         GenKind.MUSIC -> "meta/musicgen"
     }
