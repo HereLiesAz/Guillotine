@@ -8,11 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import com.hereliesaz.guillotine.ai.gen.AndroidGenSink
-import com.hereliesaz.guillotine.model.AiProvenance
-import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
-import com.hereliesaz.guillotine.model.newId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -21,7 +17,7 @@ import java.nio.FloatBuffer
 /**
  * Android side of [ContentSafety] layer 3: runs [NsfwModel] over a generated image, or over frames
  * sampled from a generated video, and deletes the file when it's flagged. Every AI generation path
- * goes through [requireSafe] (or [fetchChecked] for a provider that hands back a URL) before its
+ * goes through [requireSafe] before its
  * result is added to the project.
  */
 object AndroidContentSafety {
@@ -74,16 +70,6 @@ object AndroidContentSafety {
         } catch (e: NsfwModel.FlaggedException) {
             delete(uri); throw e
         }
-    }
-
-    /**
-     * Downloads a generator's remote image [url] to the cache, checks it, and returns the media item
-     * carrying [provenance]. Used for providers whose result is only a URL (Pollinations).
-     */
-    suspend fun fetchChecked(context: Context, url: String, name: String, provenance: AiProvenance): MediaItem {
-        val local = AndroidGenSink(context).saveUrl(url, "jpg")
-        requireSafe(context, local, MediaKind.IMAGE)
-        return MediaItem(newId(), local, name, MediaKind.IMAGE, 5_000, aiProvenance = provenance)
     }
 
     private fun decode(uri: String): Bitmap? = Uri.parse(uri).path?.let { BitmapFactory.decodeFile(it) }

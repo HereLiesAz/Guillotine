@@ -91,10 +91,10 @@ GitHub Releases and offer to download and run the newer installer for your OS.
   [`docs/ECOSYSTEM.md`](docs/ECOSYSTEM.md).
 - **Transitions & beat-sync:** clip-to-clip transitions (crossfade / wipe / slide / dissolve, via
   FFmpeg `xfade`) and beat-synced editing tools (detect the beat map, cut and act on the beat).
-- **Media generation:** **images** — free **Pollinations.ai** (no key) or BYO-key (Leonardo, OpenAI,
-  Stability, FLUX, Imagen, Ideogram, Recraft); **video** — a free keyless **Guillotine** Hugging Face
+- **Media generation:** **video** — a free keyless **Guillotine** Hugging Face
   Space (LTX-Video) or BYO-key (Runway, Luma, Veo, Sora, Kling, Pika, …); **music / audio** — BYO-key
   (ElevenLabs, Stability Audio, Lyria, MusicGen, …). Only your text prompt is sent — never your media.
+  Guillotine does **not** generate images.
   See [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
 - **Real mp4 export** (Media3 Transformer on Android; FFmpeg on desktop): cuts removed ranges,
   composites every video track, positions clips on the timeline, applies per-clip filters
