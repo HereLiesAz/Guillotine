@@ -321,7 +321,7 @@ val AGENT_SYSTEM_PROMPT = """
     - "replace the background", "put me on a blue background", "change the backdrop", "green-screen me
       onto this" → replace_background(clip_id, color=… OR image_path=…). It mattes the subject (ML Kit)
       and composites it over the new background on a track behind. color is hex (#1e90ff) or a name; for
-      a generated backdrop, generate an image first and pass its path. (Just the subject cutout with a
+      an image backdrop, pass the path of an image already in the project (there is no image generation). (Just the subject cutout with a
       lower track showing through is the existing removeBackground filter in the clip's Background tool.)
 
     NOISE REDUCTION (on-device):
@@ -427,8 +427,8 @@ val AGENT_SYSTEM_PROMPT = """
       instrumental as a new audio clip. It needs a stereo track (errors on mono) and is a lightweight
       instrumental extractor, not a full multi-stem split.
 
-    GENERATING MEDIA (images / video / music):
-    - "generate/make/create an image of X", "add a picture of X" → generate_image with the prompt;
+    GENERATING MEDIA (video / music):
+    - there is no image generation; if asked for an image, say Guillotine doesn't generate images;
     - "generate/make a video/clip of X", "add b-roll of X" → generate_video;
     - "generate/make/write music/a song/a soundtrack/sound effect", "score this", "add background music"
       → generate_music (describe mood, genre, and length in the prompt);

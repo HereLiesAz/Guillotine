@@ -280,7 +280,6 @@ private fun getDynamicAiCommands(settings: AiSettings): String {
     b.appendLine("- \"Describe exactly what is happening in this scene.\"")
     
     val genFeatures = mutableListOf<String>()
-    if (settings.isKindOffered(GenKind.IMAGE)) genFeatures.add("- \"Generate an image of a cyberpunk city.\"")
     if (settings.isKindOffered(GenKind.VIDEO)) genFeatures.add("- \"Generate a video of a dog running.\"")
     if (settings.isKindOffered(GenKind.MUSIC)) genFeatures.add("- \"Generate an upbeat electronic background track.\"")
     

@@ -48,8 +48,8 @@ You can also aim an import at a specific track from that track's header popup (*
 clip…**), or create a new empty text clip on a video track (**Add text clip** / **Create
 clip…**). See [The timeline](#4-the-timeline) for track headers.
 
-No footage yet? Use **Generate** to make an image with AI — see
-[Generating media](#generating-media-image-video-music).
+No footage yet? Ask the assistant to generate a video clip — see
+[Generating media](#generating-media-video-music).
 
 ### The project model
 
@@ -415,14 +415,11 @@ You can also drive either style from the assistant ("add captions," "add kinetic
 Both are on-device per-clip effects in the **Background** popup — see
 [Background and privacy](#background-and-privacy).
 
-### Generating media (image, video, music)
+### Generating media (video, music)
 
-- **Image** — the menu's **Generate** opens a dialog: describe the image, then generate with
-  free **Pollinations.ai** (no key) or **Leonardo.ai** (bring-your-own-key, with a model
-  picker). The result drops onto the timeline as a 5-second image clip.
 - **Video and music** — ask the AI assistant (e.g. *"generate a video of…"*, *"add background
-  music that's…"*). These use cloud generation providers with your own key and add the result
-  to the timeline. (The in-app **Generate** dialog itself covers images.)
+  music that's…"*). These use cloud generation providers and add the result to the timeline.
+  Guillotine does not generate images.
 
 ### Voice commands
 
