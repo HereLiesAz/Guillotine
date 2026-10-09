@@ -29,6 +29,13 @@ class ContentSafetyTest {
         ).forEach { assertNull(it, ContentSafety.promptRefusal(it)) }
     }
 
+    @Test fun inpaintingNeverAddsPeople() {
+        assertTrue(ContentSafety.inpaintAddsPeople(before = 0, after = 1))
+        assertTrue(ContentSafety.inpaintAddsPeople(before = 2, after = 3))
+        assertEquals(false, ContentSafety.inpaintAddsPeople(before = 2, after = 2))
+        assertEquals(false, ContentSafety.inpaintAddsPeople(before = 1, after = 0))
+    }
+
     @Test fun nsfwVerdict() {
         assertEquals(0.5f, NsfwModel.nsfwProbability(floatArrayOf(1f, 1f)), 1e-6f)
         assertTrue(NsfwModel.nsfwProbability(floatArrayOf(-4f, 5f)) > 0.99f)

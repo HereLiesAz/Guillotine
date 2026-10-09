@@ -1215,6 +1215,20 @@ class McpTools(
                                         "remove the ${clip.prompt}, clean natural background, photorealistic",
                                     )
                                 }.getOrNull()
+                                    // Remove or change people, never add them: a result with more
+                                    // people than the source frame is discarded.
+                                    ?.takeUnless { out ->
+                                        val after = android.graphics.BitmapFactory.decodeFile(out.path)
+                                            ?: return@takeUnless true
+                                        try {
+                                            val people = { b: android.graphics.Bitmap -> ov.detect(b).count { it.label == "person" } }
+                                            com.hereliesaz.guillotine.ai.safety.ContentSafety
+                                                .inpaintAddsPeople(people(frame), people(after))
+                                                .also { if (it) ActivityLog.info(com.hereliesaz.guillotine.ai.safety.ContentSafety.INPAINT_ADDED_PERSON) }
+                                        } finally {
+                                            after.recycle()
+                                        }
+                                    }
                                 uri?.let {
                                     val relStart = (seg.startMs - clip.trimStartMs).coerceIn(0, clip.durationMs)
                                     val relEnd = (seg.endMs - clip.trimStartMs).coerceIn(0, clip.durationMs)

@@ -57,4 +57,14 @@ object ContentSafety {
     fun checkPrompt(prompt: String) {
         promptRefusal(prompt)?.let { throw BlockedException(it) }
     }
+
+    /**
+     * Inpainting may remove or change people, never add them. True when a repainted frame holds
+     * more people than the original did ([before]/[after] are person-detection counts).
+     */
+    fun inpaintAddsPeople(before: Int, after: Int): Boolean = after > before
+
+    /** Shown when an inpainted frame is discarded by [inpaintAddsPeople]. */
+    const val INPAINT_ADDED_PERSON =
+        "Inpainting can remove or change people, never add them. That result was discarded."
 }

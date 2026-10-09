@@ -238,7 +238,9 @@ listed default.
 
 Removed (2026-10, Play policy) — Guillotine does not generate images. **Leonardo.ai** remains only
 for **inpainting** (generative object removal, Android): one key under **Settings → Generation →
-Object removal**. Get a key: `app.leonardo.ai/api-access`. Desktop object removal is on-device LaMa.
+Object removal**. Get a key: `app.leonardo.ai/api-access`. Inpainting may remove or change
+people, never add them: a repainted frame with more people than the original is discarded
+(`ContentSafety.inpaintAddsPeople`). Desktop object removal is on-device LaMa.
 
 ### Video
 
