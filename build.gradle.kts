@@ -13,7 +13,7 @@ buildscript {
             force("io.netty:netty-codec:4.2.18.Final")
             force("org.bouncycastle:bcprov-jdk18on:1.86")
             force("org.bouncycastle:bcpkix-jdk18on:1.86")
-            force("org.apache.commons:commons-lang3:3.20.0")
+            force("org.apache.commons:commons-lang3:3.21.0")
             force("org.bitbucket.b_c:jose4j:0.9.7")
         }
     }
@@ -42,7 +42,7 @@ allprojects {
             force("io.netty:netty-codec:4.2.18.Final")
             force("org.bouncycastle:bcprov-jdk18on:1.86")
             force("org.bouncycastle:bcpkix-jdk18on:1.86")
-            force("org.apache.commons:commons-lang3:3.20.0")
+            force("org.apache.commons:commons-lang3:3.21.0")
             force("org.bitbucket.b_c:jose4j:0.9.7")
         }
     }
@@ -74,7 +74,7 @@ allprojects {
                 g == "org.bouncycastle" && n == "bcprov-jdk18on" -> useVersion("1.86")
                 g == "org.bouncycastle" && n == "bcpkix-jdk18on" -> useVersion("1.86")
                 g == "org.apache.httpcomponents" && n == "httpclient" -> useVersion("4.5.14")   // XSS
-                g == "org.apache.commons" && n == "commons-lang3" -> useVersion("3.20.0")       // uncontrolled recursion
+                g == "org.apache.commons" && n == "commons-lang3" -> useVersion("3.21.0")       // uncontrolled recursion
                 g == "org.bitbucket.b_c" && n == "jose4j" -> useVersion("0.9.7")                // JWE decompression DoS
                 g == "org.jdom" && n == "jdom2" -> useVersion("2.0.6.1")                        // XXE
                 // protobuf-javalite DoS (fixed in 3.25.5 / 4.27.5+). Only nudge a 3.x line up to the patched
