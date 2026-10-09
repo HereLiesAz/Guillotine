@@ -128,8 +128,10 @@ android {
         }
     }
 
-    // Two distributions of the SAME app (same applicationId + signing key, so either can update the
-    // other in place): `play` ships to Google Play; `github` is the direct-download build that
+    // Two distributions: `play` ships to Google Play under `com.hereliesaz.theguillotine` (the original
+    // `com.hereliesaz.guillotine` was suspended on Play, 2026-10, and Play never reissues a suspended
+    // package); `github` keeps the original id so existing sideloaded installs still update in place.
+    // The two are separate apps on a device and no longer update each other. `github` is the direct-download build that
     // self-updates from GitHub Releases (Play forbids self-updating APKs, so that path is
     // github-only). The distinction is a build-time BuildConfig flag the updater code path is gated
     // on. CI builds the AAB from `play` (bundlePlayRelease) and the APK from `github`
@@ -140,6 +142,7 @@ android {
         create("play") {
             dimension = "distribution"
             isDefault = true
+            applicationId = "com.hereliesaz.theguillotine"
             buildConfigField("boolean", "UPDATER_ENABLED", "false")
         }
         create("github") {

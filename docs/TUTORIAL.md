@@ -6,7 +6,7 @@ A quick, hands-on tour from getting media in to a finished video — each step b
 
 Open the menu (the app icon, top-left) and choose **Import media** to pull in video, audio, or images from your device. Each import lands on the timeline as a clip — a video with sound shows its audio as a linked waveform clip on an audio track.
 
-No footage yet? Choose **Generate image** to make one with AI: free **Pollinations.ai** (no key) or **Leonardo.ai** (bring your own key). You can also drop in still images and give them a duration.
+You can also drop in still images and give them a duration.
 
 ## 2. Learn the timeline
 

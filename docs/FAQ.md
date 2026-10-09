@@ -10,11 +10,11 @@ Yes — that's the whole idea. Guillotine is **on-device first**: all frame and 
 
 ## Do I need an API key or an account?
 
-No. There's a free, no-key, on-device path: ML Kit + MediaPipe vision for keep/remove analysis, an optional on-device LLM brain to drive the editor, a Local silence detector for audio, and free Pollinations.ai image generation. The app is fully usable with zero configuration. Cloud providers are bring-your-own-key and stored encrypted on-device if you choose to use them.
+No. There's a free, no-key, on-device path: ML Kit + MediaPipe vision for keep/remove analysis, an optional on-device LLM brain to drive the editor, a Local silence detector for audio, and free keyless video generation. The app is fully usable with zero configuration. Cloud providers are bring-your-own-key and stored encrypted on-device if you choose to use them.
 
-## Can I generate images or video for free?
+## Can I generate video for free?
 
-Yes — with no key and no account. Images use **Pollinations** (keyless); video uses **Guillotine (free)**, a text-to-video model running on Guillotine's own free Hugging Face Space. Both are cloud services, so **only your text prompt is sent** — never your footage — and they're tuned for short, quick results. Add your own key for a paid provider when you want longer or higher-quality output. See [PROVIDERS.md](PROVIDERS.md) for the full provider list.
+Yes — with no key and no account. Video uses **Guillotine (free)**, a text-to-video model running on Guillotine's own free Hugging Face Space. It's a cloud service, so **only your text prompt is sent** — never your footage — and they're tuned for short, quick results. Add your own key for a paid provider when you want longer or higher-quality output. Guillotine does not generate images. See [PROVIDERS.md](PROVIDERS.md) for the full provider list.
 
 ## How does "cut every frame with my phone" work?
 

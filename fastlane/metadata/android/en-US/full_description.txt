@@ -25,7 +25,6 @@ A built-in assistant turns your words into real edits — splitting clips, delet
 🪄 GENERATIVE & CREATIVE
 • Remove an unwanted object and repaint the background so it looks natural
 • Background removal: drop a clip’s background so the layer below shows through
-• Generate images from a prompt — free with no key, or bring a key for more models
 • Text and captions as overlays; auto-transcribe speech into timed caption clips (on-device or cloud)
 
 📼 REAL MP4 EXPORT

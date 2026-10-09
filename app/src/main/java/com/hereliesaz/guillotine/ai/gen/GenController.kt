@@ -24,7 +24,7 @@ object GenController {
         prompt: String,
         providerOverride: GenProviderType? = null,
         modelOverride: String? = null,
-        durationSec: Int = if (kind == GenKind.IMAGE) 0 else 8,
+        durationSec: Int = 8,
         widthPx: Int = 1280,
         heightPx: Int = 720,
         extra: Map<String, String> = emptyMap(),
@@ -54,7 +54,7 @@ object GenController {
         val sink = AndroidGenSink(context)
         val job = GenBackends.jobFor(req, sink)
         val cfg = PollConfig(
-            maxAttempts = if (kind == GenKind.IMAGE) 90 else 300,
+            maxAttempts = 300,
             intervalMs = 2_000,
             timeoutMessage = "${provider.meta.label} timed out generating.",
         )
@@ -65,7 +65,6 @@ object GenController {
         else sink.saveUrl(result, GenBackends.extFor(kind))
 
         val mediaKind = when (kind) {
-            GenKind.IMAGE -> MediaKind.IMAGE
             GenKind.VIDEO -> MediaKind.VIDEO
             GenKind.MUSIC -> MediaKind.AUDIO
         }
@@ -79,9 +78,8 @@ object GenController {
         return MediaItem(newId(), localUri, label, mediaKind, durationMs, hasAudio, aiProvenance = provenance)
     }
 
-    /** Probe a generated video/audio for real length + audio track; images use the addMedia default. */
+    /** Probe a generated video/audio for real length + audio track. */
     private fun probe(context: Context, uri: String, kind: GenKind, durationSec: Int): Pair<Long, Boolean> {
-        if (kind == GenKind.IMAGE) return 0L to false
         val fallback = (durationSec.coerceAtLeast(1)) * 1000L
         return runCatching {
             val r = MediaMetadataRetriever()

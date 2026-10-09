@@ -47,7 +47,7 @@ Add the adoption drivers *without* removing the pro depth.
   first-class flow.
 - **One-tap background removal** (already on-device — make it a button, not a setting).
 - **Kill setup friction:** feel powerful with **zero key** — lean hard on the keyless free tier
-  (Pollinations/Guillotine-free) + on-device brain; sensible defaults; no account, ever.
+  (Guillotine-free video) + on-device brain; sensible defaults; no account, ever.
 
 ### Phase 2 — The AI wedge, productized (the thing only Guillotine can honestly claim)
 - Make **"tell it what to cut, it cuts"** reliably the headline experience — the on-device analyzer +

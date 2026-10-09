@@ -22,7 +22,7 @@ the issue on GitHub — the app itself does not upload anything.
   recognition (Vosk) all run **locally on your device**. **Your video is never uploaded** for
   analysis — cloud AIs only ever act as text controllers (see below).
 - The app only sends data over the network when **you** trigger an action that uses a
-  third‑party service you configured (a cloud AI controller, image generation, or crash reporting).
+  third‑party service you configured (a cloud AI controller, video/music generation, or crash reporting).
 - API keys you enter are **encrypted on your device** and are sent only to the matching
   provider, only in requests you initiate.
 
@@ -62,8 +62,8 @@ the provider you selected** — it does not pass through any server we operate:
   MediaPipe). The free on‑device LLM brain keeps even that text local.
 - **Generative object removal** — the object is detected and masked **on‑device**; only the
   individual masked frame(s) + mask are sent to **Leonardo.ai** (with your key) to be repainted.
-- **Image generation** — your text prompt is sent to **Leonardo.ai** (with your key) or, for
-  the free no‑key option, to **Pollinations.ai**.
+- **Video / music generation** — only your text prompt is sent to the provider you chose.
+  Guillotine does not generate images.
 - **Transcription / captions** — handled **on‑device** with Vosk if you configure a local
   speech model; otherwise audio is sent to OpenAI Whisper using your key.
 
@@ -77,8 +77,7 @@ Google ([Gemini](https://ai.google.dev/gemini-api/terms)),
 [Groq](https://groq.com/privacy-policy/),
 [xAI](https://x.ai/legal/privacy-policy),
 [Mistral](https://mistral.ai/terms/),
-[Leonardo.ai](https://leonardo.ai/privacy-policy/),
-[Pollinations.ai](https://pollinations.ai/).
+[Leonardo.ai](https://leonardo.ai/privacy-policy/).
 
 ## Crash reporting (optional, off by default)
 

@@ -1,7 +1,7 @@
 package com.hereliesaz.guillotine.ai.gen
 
 /**
- * Registry of **generation** providers — the AIs that create new media (images, video, music) that
+ * Registry of **generation** providers — the AIs that create new media (video, music) that
  * the user brings their own key for. This parallels the agent-brain registry in
  * [com.hereliesaz.guillotine.ai.AiProviderType] / `ProviderMeta`, but is capability-typed by
  * [GenKind] so the app can *gate* what it offers: a category (and a provider within it) is only
@@ -11,8 +11,11 @@ package com.hereliesaz.guillotine.ai.gen
  * [AsyncJobPoller]. This file is the pure catalog + gating logic, shared across Android and desktop.
  */
 
-/** The three generation categories. */
-enum class GenKind { IMAGE, VIDEO, MUSIC }
+/**
+ * The generation categories. Text-to-image was removed (Google Play Sexual Content / AI-Generated
+ * Content policy); cloud image work is limited to Leonardo inpainting for object removal.
+ */
+enum class GenKind { VIDEO, MUSIC }
 
 /**
  * Every generation provider the app knows about. Aggregators ([FAL], [REPLICATE]) serve more than
@@ -20,8 +23,8 @@ enum class GenKind { IMAGE, VIDEO, MUSIC }
  * account-pooling wrappers — so they're exposed via a disclaimed "wrapper key" field.
  */
 enum class GenProviderType {
-    // ---- image ----
-    POLLINATIONS, LEONARDO, OPENAI_IMAGE, STABILITY_IMAGE, BFL_FLUX, GEMINI_IMAGEN, IDEOGRAM, RECRAFT,
+    // ---- inpainting only (object removal); serves no GenKind ----
+    LEONARDO,
     // ---- video ----
     GUILLOTINE_FREE, RUNWAY, LUMA, GEMINI_VEO, MINIMAX, OPENAI_SORA, KLING, PIKA, STABILITY_VIDEO,
     // ---- music / audio ----
@@ -36,7 +39,7 @@ data class GenModel(val id: String, val name: String)
 
 /**
  * Static metadata for a provider: which categories it serves, how to get a key, and a fallback list
- * of models. [needsKey] is false only for the free keyless providers (Pollinations). [disclaimer]
+ * of models. [needsKey] is false only for the free keyless providers (Guillotine free). [disclaimer]
  * surfaces caveats (e.g. Suno/Udio "no official API") inline in the settings row.
  */
 data class GenProviderMeta(
@@ -58,80 +61,11 @@ private fun img(vararg m: GenModel) = m.toList()
 
 val GenProviderType.meta: GenProviderMeta
     get() = when (this) {
-        // ---------------------------------------------------------------- image
-        GenProviderType.POLLINATIONS -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE), "Pollinations (free)",
-            "No key, works instantly. Great for quick placeholder images.",
-            keyUrl = null, needsKey = false,
-            models = img(GenModel("flux", "Flux"), GenModel("turbo", "Turbo")),
-        )
+        // ---------------------------------------------------------------- inpainting
         GenProviderType.LEONARDO -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE), "Leonardo.ai",
-            "High-quality image generation and inpainting (used for generative object removal).",
+            this, emptySet(), "Leonardo.ai",
+            "Inpainting for generative object removal. No text-to-image.",
             keyUrl = "https://app.leonardo.ai/api-access", needsKey = true,
-            models = img(
-                GenModel("de7d3faf-762f-48e0-b3b7-9d0ac3a3fcf3", "Leonardo Phoenix 1.0"),
-                GenModel("b2614463-296c-462a-9586-aafdb8f00e36", "FLUX.1 Dev (Precision)"),
-                GenModel("1dd50843-d653-4516-a8e3-f0238ee453ff", "FLUX.1 Schnell (Speed)"),
-                GenModel("aa77f04e-3eec-4034-9c07-d0f619684628", "Leonardo Kino XL (cinematic)"),
-            ),
-        )
-        GenProviderType.OPENAI_IMAGE -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE), "OpenAI Images",
-            "gpt-image-1 / DALL·E 3. Strong prompt adherence.",
-            keyUrl = "https://platform.openai.com/api-keys", needsKey = true,
-            models = img(
-                GenModel("gpt-image-1", "gpt-image-1"),
-                GenModel("dall-e-3", "DALL·E 3"),
-                GenModel("dall-e-2", "DALL·E 2"),
-            ),
-        )
-        GenProviderType.STABILITY_IMAGE -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE), "Stability AI (image)",
-            "Stable Image Ultra/Core and SD 3.5.",
-            keyUrl = "https://platform.stability.ai/account/keys", needsKey = true,
-            models = img(
-                GenModel("sd3.5-large", "SD 3.5 Large"),
-                GenModel("sd3.5-large-turbo", "SD 3.5 Large Turbo"),
-                GenModel("sd3.5-medium", "SD 3.5 Medium"),
-                GenModel("ultra", "Stable Image Ultra"),
-                GenModel("core", "Stable Image Core"),
-            ),
-        )
-        GenProviderType.BFL_FLUX -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE), "Black Forest Labs (FLUX)",
-            "FLUX.1/1.1 and FLUX.1 Kontext (prompt-based editing). Free key, pay-per-image.",
-            keyUrl = "https://docs.bfl.ai", needsKey = true,
-            models = img(
-                GenModel("flux-pro-1.1", "FLUX 1.1 [pro]"),
-                GenModel("flux-pro-1.1-ultra", "FLUX 1.1 [pro] Ultra"),
-                GenModel("flux-pro", "FLUX.1 [pro]"),
-                GenModel("flux-dev", "FLUX.1 [dev]"),
-                GenModel("flux-kontext-pro", "FLUX.1 Kontext [pro] (edit)"),
-                GenModel("flux-kontext-max", "FLUX.1 Kontext [max] (edit)"),
-            ),
-        )
-        GenProviderType.GEMINI_IMAGEN -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE), "Google Imagen",
-            "Imagen 3/4 via a Gemini API key (the same key can drive the editor).",
-            keyUrl = "https://aistudio.google.com/app/apikey", needsKey = true,
-            models = img(
-                GenModel("imagen-4.0-generate-001", "Imagen 4"),
-                GenModel("imagen-3.0-generate-002", "Imagen 3"),
-            ),
-        )
-        GenProviderType.IDEOGRAM -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE), "Ideogram",
-            "Best-in-class text rendering in images.",
-            keyUrl = "https://developer.ideogram.ai", needsKey = true,
-            models = img(GenModel("V_3", "Ideogram 3.0"), GenModel("V_2", "Ideogram 2.0"),
-                GenModel("V_2_TURBO", "Ideogram 2.0 Turbo")),
-        )
-        GenProviderType.RECRAFT -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE), "Recraft",
-            "Raster and vector/SVG output, brand styles.",
-            keyUrl = "https://www.recraft.ai/profile/api", needsKey = true,
-            models = img(GenModel("recraftv3", "Recraft V3"), GenModel("recraftv2", "Recraft V2")),
         )
         // ---------------------------------------------------------------- video
         GenProviderType.GUILLOTINE_FREE -> GenProviderMeta(
@@ -265,12 +199,10 @@ val GenProviderType.meta: GenProviderMeta
         )
         // ---------------------------------------------------------------- aggregators
         GenProviderType.FAL -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE, GenKind.VIDEO, GenKind.MUSIC), "fal.ai (aggregator)",
-            "One key → many image/video/music models. Enter the fal model id as the model.",
+            this, setOf(GenKind.VIDEO, GenKind.MUSIC), "fal.ai (aggregator)",
+            "One key → many video/music models. Enter the fal model id as the model.",
             keyUrl = "https://fal.ai/dashboard/keys", needsKey = true,
             models = img(
-                GenModel("fal-ai/flux/dev", "FLUX.1 [dev] (image)"),
-                GenModel("fal-ai/flux-pro/v1.1", "FLUX 1.1 [pro] (image)"),
                 GenModel("fal-ai/kling-video/v2/master/text-to-video", "Kling 2 (video)"),
                 GenModel("fal-ai/minimax/hailuo-02/standard/text-to-video", "Hailuo 02 (video)"),
                 GenModel("fal-ai/luma-dream-machine", "Luma (video)"),
@@ -279,12 +211,10 @@ val GenProviderType.meta: GenProviderMeta
             ),
         )
         GenProviderType.REPLICATE -> GenProviderMeta(
-            this, setOf(GenKind.IMAGE, GenKind.VIDEO, GenKind.MUSIC), "Replicate (aggregator)",
+            this, setOf(GenKind.VIDEO, GenKind.MUSIC), "Replicate (aggregator)",
             "One key → any hosted model. Enter the Replicate model (owner/name) as the model.",
             keyUrl = "https://replicate.com/account/api-tokens", needsKey = true,
             models = img(
-                GenModel("black-forest-labs/flux-dev", "FLUX.1 [dev] (image)"),
-                GenModel("stability-ai/stable-diffusion-3.5-large", "SD 3.5 Large (image)"),
                 GenModel("kwaivgi/kling-v2.1", "Kling 2.1 (video)"),
                 GenModel("minimax/video-01", "MiniMax Video (video)"),
                 GenModel("meta/musicgen", "MusicGen (music)"),
