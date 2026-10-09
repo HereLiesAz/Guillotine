@@ -853,15 +853,6 @@ key** — key-gated at call time; if no provider is configured the tool returns 
 user to add a key in Settings (relay it, don't retry). Only the prompt text is sent to the provider —
 your timeline media is not. See [PROVIDERS.md](PROVIDERS.md) and [MODELS.md](MODELS.md).
 
-### `generate_image`
-Generate a new image from a text prompt and add it to the timeline as an image clip.
-
-| Argument | Type | Req. | Default | Meaning |
-| --- | --- | --- | --- | --- |
-| `prompt` | string | required | — | What to generate. |
-| `provider` | string | optional | — | Optional provider id (e.g. `OPENAI_IMAGE`, `BFL_FLUX`, `FAL`). |
-| `model` | string | optional | — | Optional model id. |
-
 ### `generate_video`
 Generate a new video clip from a text prompt and add it to the timeline. Async — may take a while.
 

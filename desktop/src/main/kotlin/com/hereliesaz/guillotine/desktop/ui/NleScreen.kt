@@ -204,7 +204,6 @@ fun NleScreen(
     var showProjectSettings by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
     var showNewProjectConfirm by remember { mutableStateOf(false) }
-    var showGenerate by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
     // Full-screen "cinema mode" preview — hides the timeline/side panels behind a full-bleed preview
     // plus a floating bottom toolbar (see FullscreenPreviewOverlay). Overlays the normal editor
@@ -414,7 +413,6 @@ fun NleScreen(
             onZoomOut = vm::zoomOut,
             onFitAll = vm::fitAllToViewport,
             onImport = { importTargetTrack = null; importLauncher() },
-            onGenerate = { showGenerate = true },
             onNewProject = { showNewProjectConfirm = true },
             onOpenProject = { openLauncher() },
             onSaveProject = { saveLauncher() },
@@ -665,34 +663,6 @@ fun NleScreen(
             containerColor = Neutral900,
         )
     }
-    if (showGenerate) {
-        GenerateSheet(
-            leonardoKey = settings.leonardoKey,
-            leonardoModel = settings.leonardoModel,
-            onGenerateFree = { prompt ->
-                val url = com.hereliesaz.guillotine.ai.safety.ContentSafety.pollinationsUrl(prompt)
-                val provenance = com.hereliesaz.guillotine.model.AiProvenance(
-                    "Pollinations", "flux", prompt, System.currentTimeMillis(),
-                )
-                vm.addMedia(listOf(
-                    com.hereliesaz.guillotine.desktop.platform.DesktopContentSafety
-                        .fetchChecked(url, "Generated: ${prompt.take(20)}", provenance),
-                ))
-            },
-            onGenerateLeonardo = { prompt, modelId ->
-                val uri = com.hereliesaz.guillotine.desktop.platform.DesktopImageGen.Leonardo.generate(
-                    apiKey = settings.leonardoKey,
-                    modelId = modelId,
-                    prompt = prompt,
-                )
-                val provenance = com.hereliesaz.guillotine.model.AiProvenance(
-                    "Leonardo", modelId, prompt, System.currentTimeMillis(),
-                )
-                vm.addMedia(listOf(MediaItem(newId(), uri, "Leonardo: ${prompt.take(20)}", MediaKind.IMAGE, 5_000, aiProvenance = provenance)))
-            },
-            onDismiss = { showGenerate = false },
-        )
-    }
     if (showExport) {
         // Export at the project's aspect ratio (what the preview already shows) instead of a fixed
         // 1920x1080 — otherwise a 9:16 vertical or 1:1 square project exports as letterboxed landscape.
@@ -768,7 +738,6 @@ private fun TopBar(
     onZoomOut: () -> Unit,
     onFitAll: () -> Unit,
     onImport: () -> Unit,
-    onGenerate: () -> Unit,
     onNewProject: () -> Unit,
     onOpenProject: () -> Unit,
     onSaveProject: () -> Unit,
@@ -798,7 +767,6 @@ private fun TopBar(
                 DropdownMenuItem(text = { Text("Save") }, onClick = { menuExpanded = false; onSaveProject() })
                 DropdownMenuItem(text = { Text("Import") }, onClick = { menuExpanded = false; onImport() })
                 DropdownMenuItem(text = { Text("Media Bin") }, onClick = { menuExpanded = false; onOpenMediaBin() })
-                DropdownMenuItem(text = { Text("Generate") }, onClick = { menuExpanded = false; onGenerate() })
                 DropdownMenuItem(text = { Text("Render") }, onClick = { menuExpanded = false; onExport() })
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text("Project") }, onClick = { menuExpanded = false; onProjectSettings() })

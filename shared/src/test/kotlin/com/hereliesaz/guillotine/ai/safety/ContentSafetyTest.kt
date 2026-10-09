@@ -29,12 +29,11 @@ class ContentSafetyTest {
         ).forEach { assertNull(it, ContentSafety.promptRefusal(it)) }
     }
 
-    @Test fun pollinationsUrlHasTheSafetyFilterAndChecksThePrompt() {
-        val url = ContentSafety.pollinationsUrl("a red fox", 640, 360, "flux")
-        assertTrue(url, url.startsWith("https://image.pollinations.ai/prompt/a%20red%20fox?"))
-        assertTrue(url, "safe=true" in url && "width=640" in url && "model=flux" in url)
-        assertThrows(ContentSafety.BlockedException::class.java) { ContentSafety.pollinationsUrl("nude") }
-        assertThrows(ContentSafety.BlockedException::class.java) { ContentSafety.pollinationsUrl("") }
+    @Test fun inpaintingNeverAddsPeople() {
+        assertTrue(ContentSafety.inpaintAddsPeople(before = 0, after = 1))
+        assertTrue(ContentSafety.inpaintAddsPeople(before = 2, after = 3))
+        assertEquals(false, ContentSafety.inpaintAddsPeople(before = 2, after = 2))
+        assertEquals(false, ContentSafety.inpaintAddsPeople(before = 1, after = 0))
     }
 
     @Test fun nsfwVerdict() {

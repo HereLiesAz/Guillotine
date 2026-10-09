@@ -483,19 +483,6 @@ class DesktopMcpTools(
 
         // ---- generative media (cloud, BYO key; key-gated at call time) ----
         put(toolDefinition(
-            "generate_image",
-            "Generate a NEW image from a text prompt using the user's configured image provider and add " +
-                "it to the timeline as an image clip. Optionally pass provider/model to pick among " +
-                "configured providers. If no image provider is configured it returns an error telling " +
-                "the user to add a key in Settings — relay that, don't retry.",
-            objSchema(
-                "prompt" to stringProp("What to generate"),
-                "provider" to stringProp("Optional provider id (e.g. OPENAI_IMAGE, BFL_FLUX, FAL)"),
-                "model" to stringProp("Optional model id"),
-                required = listOf("prompt"),
-            ),
-        ))
-        put(toolDefinition(
             "generate_video",
             "Generate a NEW video clip from a text prompt (cloud, BYO key) and add it to the timeline. " +
                 "Async — may take a while. Optional provider/model/duration_sec.",
@@ -519,8 +506,8 @@ class DesktopMcpTools(
         put(toolDefinition(
             "add_shape_layer",
             "Add a solid-color rectangle as a new opaque image clip on its own new video track, stacked " +
-                "at the very back — an instant, on-device \"shape layer\" (no provider/key, unlike " +
-                "generate_image). Use this to put an opaque background behind a text/caption clip that " +
+                "at the very back — an instant, on-device \"shape layer\" (no provider/key, no " +
+                "generation). Use this to put an opaque background behind a text/caption clip that " +
                 "needs to read over bright footage (text clips are transparent glyphs only and never " +
                 "bake in a background themselves), or as a plain colored background/wipe on its own. " +
                 "color is any CSS color name or hex code (#RRGGBB or #AARRGGBB).",
@@ -850,7 +837,6 @@ class DesktopMcpTools(
         "separate_stems" -> separateStems(args.getString("clip_id"))
         "detect_scenes" -> detectScenes(args.getString("clip_id"), args.optDouble("sensitivity", 0.5).toFloat(), args.optBoolean("split", true))
         "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
-        "generate_image" -> generateMedia(GenKind.IMAGE, args.getString("prompt"), args.optString("provider"), args.optString("model"), null)
         "generate_video" -> generateMedia(GenKind.VIDEO, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
         "generate_music" -> generateMedia(GenKind.MUSIC, args.getString("prompt"), args.optString("provider"), args.optString("model"), args.optInt("duration_sec", 8))
         "add_shape_layer" -> addShapeLayer(args.getString("color"), args.optDouble("opacity", 1.0).toFloat())
@@ -2928,8 +2914,8 @@ class DesktopMcpTools(
                 "No ${kind.name.lowercase()} generator is set up. Add a key for one in Settings → Generation.",
             )
         val modelId = model.takeIf { it.isNotBlank() } ?: settings.genModelFor(resolved)
-        val dur = durationSec ?: if (kind == GenKind.IMAGE) 0 else 8
-        val label = when (kind) { GenKind.IMAGE -> "image"; GenKind.VIDEO -> "video"; GenKind.MUSIC -> "music" }
+        val dur = durationSec ?: 8
+        val label = when (kind) { GenKind.VIDEO -> "video"; GenKind.MUSIC -> "music" }
         val req = GenRequest(
             kind = kind,
             provider = resolved,
@@ -2941,7 +2927,7 @@ class DesktopMcpTools(
         )
         val sink = DesktopGenSink()
         val cfg = PollConfig(
-            maxAttempts = if (kind == GenKind.IMAGE) 90 else 300,
+            maxAttempts = 300,
             intervalMs = 2_000,
             timeoutMessage = "${resolved.meta.label} timed out generating.",
         )
@@ -2952,7 +2938,7 @@ class DesktopMcpTools(
             else sink.saveUrl(result, GenBackends.extFor(kind))
             // ContentSafety layer 3: nothing reaches the project unchecked; a flagged result is deleted.
             val mediaKind = when (kind) {
-                GenKind.IMAGE -> MediaKind.IMAGE; GenKind.VIDEO -> MediaKind.VIDEO; GenKind.MUSIC -> MediaKind.AUDIO
+                GenKind.VIDEO -> MediaKind.VIDEO; GenKind.MUSIC -> MediaKind.AUDIO
             }
             DesktopContentSafety.requireSafe(local, mediaKind)
             local

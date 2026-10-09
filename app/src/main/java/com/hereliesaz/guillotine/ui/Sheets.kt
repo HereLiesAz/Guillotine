@@ -62,7 +62,6 @@ import androidx.compose.ui.window.Dialog
 import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.FrameAnalysisCache
-import com.hereliesaz.guillotine.ai.ImageGen
 import kotlin.math.roundToInt
 import com.hereliesaz.guillotine.ai.ModelCatalog
 import com.hereliesaz.guillotine.ai.agent.AndroidDeviceModelProfile
@@ -756,21 +755,19 @@ fun SettingsScreen(
                         color = Neutral500, fontSize = 10.sp,
                     )
                 }
-                1 -> { // Generation (image / video / music)
+                1 -> { // Generation (video / music)
                     Text(
-                        "Bring your own AI keys to generate images, video, and music. Configure as many " +
+                        "Bring your own AI keys to generate video and music. Configure as many " +
                             "providers as you like — only the categories and providers you set up are " +
-                            "offered when generating. Legacy Leonardo image key is picked up automatically.",
+                            "offered when generating.",
                         color = Neutral400, fontSize = 12.sp,
                     )
                     Text(com.hereliesaz.guillotine.ai.safety.ContentSafety.NOTICE, color = Neutral500, fontSize = 11.sp)
-                    GenCategorySection(
-                        title = "Image", kind = GenKind.IMAGE,
-                        genKeys = genKeys, genModels = genModels, genExtras = genExtras, uriHandler = uriHandler,
-                        onKey = { p, v -> genKeys = genKeys + (p to v) },
-                        onModel = { p, v -> genModels = genModels + (p to v) },
-                        onExtra = { p, v -> genExtras = genExtras + (p to v) },
-                        legacyLeonardoKey = leonardoKey, onLegacyLeonardoKey = { leonardoKey = it },
+                    Text("Object removal", color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
+                    KeyField("Leonardo.ai API key (inpainting)", leonardoKey) { leonardoKey = it }
+                    Text(
+                        "Used only to repaint the background after removing an object. No text-to-image.",
+                        color = Neutral500, fontSize = 10.sp,
                     )
                     GenCategorySection(
                         title = "Video", kind = GenKind.VIDEO,
@@ -1171,9 +1168,9 @@ private fun ProviderRow(label: String, blurb: String, selected: Boolean, onClick
 }
 
 /**
- * One generation category (Image / Video / Music): lists every provider that serves [kind] as a
+ * One generation category (Video / Music): lists every provider that serves [kind] as a
  * collapsible card with a key field, model field, and a "get a key" link. A red dot marks configured
- * providers. Leonardo reuses the legacy top-level key so existing users don't have to re-enter it.
+ * providers.
  */
 @Composable
 private fun GenCategorySection(
@@ -1186,15 +1183,12 @@ private fun GenCategorySection(
     onKey: (GenProviderType, String) -> Unit,
     onModel: (GenProviderType, String) -> Unit,
     onExtra: (GenProviderType, String) -> Unit,
-    legacyLeonardoKey: String = "",
-    onLegacyLeonardoKey: ((String) -> Unit)? = null,
 ) {
     Text(title, color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
     providersFor(kind).forEach { p ->
         val meta = genMeta(p)
         var expanded by remember(p) { mutableStateOf(false) }
-        val isLeonardo = p == GenProviderType.LEONARDO
-        val keyValue = if (isLeonardo) legacyLeonardoKey else genKeys[p].orEmpty()
+        val keyValue = genKeys[p].orEmpty()
         val configured = !meta.needsKey || keyValue.isNotBlank()
         Column(
             Modifier
@@ -1223,7 +1217,7 @@ private fun GenCategorySection(
                     Text("Free — no key needed.", color = Neutral500, fontSize = 11.sp)
                 } else {
                     KeyField("${meta.label} API key", keyValue) { v ->
-                        if (isLeonardo) onLegacyLeonardoKey?.invoke(v) else onKey(p, v)
+                        onKey(p, v)
                     }
                 }
                 if (p == GenProviderType.SUNO_WRAPPER || p == GenProviderType.UDIO_WRAPPER) {
@@ -1406,116 +1400,6 @@ fun ExportSheet(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-fun GenerateSheet(
-    leonardoKey: String,
-    leonardoModel: String,
-    onGenerateFree: suspend (prompt: String) -> Unit,
-    onGenerateLeonardo: suspend (prompt: String, modelId: String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var prompt by remember { mutableStateOf("") }
-    val leonardoAvailable = leonardoKey.isNotBlank()
-    var useLeonardo by remember { mutableStateOf(leonardoAvailable) }
-    var model by remember { mutableStateOf(leonardoModel.ifBlank { com.hereliesaz.guillotine.ai.LeonardoDefaultModel }) }
-    var generating by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-
-    Dialog(onDismissRequest = { if (!generating) onDismiss() }) {
-        SheetCard {
-            Text("Generate image", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            if (generating) {
-                LoadingIndicator()
-                Text("Generating and checking the result… this can take a little while.", color = Neutral400, fontSize = 12.sp)
-            } else {
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Describe the image…", color = Neutral500, fontSize = 12.sp) },
-                    textStyle = TextStyle(color = White, fontSize = 12.sp),
-                    minLines = 2,
-                )
-                if (leonardoAvailable) {
-                    BackendRow("Free (Pollinations.ai, no key)", !useLeonardo) { useLeonardo = false }
-                    BackendRow("Leonardo.ai (your key)", useLeonardo) { useLeonardo = true }
-                    if (useLeonardo) {
-                        Text("Model", color = Neutral500, fontSize = 10.sp)
-                        LeonardoModelDropdown(leonardoKey, model) { model = it }
-                    }
-                } else {
-                    Text(
-                        "Pollinations.ai — no key required. Add a Leonardo API key in Settings to pick from Leonardo's models.",
-                        color = Neutral500, fontSize = 11.sp,
-                    )
-                }
-                Text(com.hereliesaz.guillotine.ai.safety.ContentSafety.NOTICE, color = Neutral500, fontSize = 10.sp)
-                error?.let { Text(it, color = Red500, fontSize = 11.sp) }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Cancel", color = Neutral400, fontSize = 12.sp, modifier = Modifier.padding(end = 16.dp).clickableText(onDismiss))
-                    Button(
-                        enabled = prompt.isNotBlank(),
-                        onClick = {
-                            error = com.hereliesaz.guillotine.ai.safety.ContentSafety.promptRefusal(prompt)
-                            if (error != null) return@Button
-                            generating = true
-                            scope.launch {
-                                try {
-                                    if (useLeonardo) onGenerateLeonardo(prompt.trim(), model)
-                                    else onGenerateFree(prompt.trim())
-                                    onDismiss()
-                                } catch (e: kotlinx.coroutines.CancellationException) {
-                                    throw e
-                                } catch (e: Exception) {
-                                    error = e.message ?: "Generation failed"
-                                    generating = false
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Red500),
-                    ) { Text("Generate", fontSize = 12.sp, color = White) }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Picks a Leonardo platform model. Fetches Leonardo's live model list on first open (when a
- * key is present); falls back to the curated [ImageGen.LeonardoModels] if that's unavailable.
- */
-@Composable
-private fun LeonardoModelDropdown(apiKey: String, selectedId: String, onSelect: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    // Keyed on apiKey so editing the key in the same dialog re-fetches instead of showing a stale list.
-    var live by remember(apiKey) { mutableStateOf<List<com.hereliesaz.guillotine.ai.LeonardoModel>?>(null) }
-    var loading by remember(apiKey) { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val models = live?.takeIf { it.isNotEmpty() } ?: com.hereliesaz.guillotine.ai.LeonardoModels
-    val name = models.firstOrNull { it.id == selectedId }?.name
-        ?: com.hereliesaz.guillotine.ai.LeonardoModels.firstOrNull { it.id == selectedId }?.name ?: "Select a model"
-    Box {
-        DropdownAnchor(name) {
-            open = true
-            if (live == null && !loading && apiKey.isNotBlank()) {
-                loading = true
-                scope.launch { live = ModelCatalog.leonardoModels(apiKey); loading = false }
-            }
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (loading) MenuLabel("Loading…")
-            models.forEach { m ->
-                DropdownMenuItem(
-                    text = { Text(m.name, color = White, fontSize = 12.sp) },
-                    onClick = { onSelect(m.id); open = false },
-                )
             }
         }
     }

@@ -112,15 +112,14 @@ music providers are **async (submit → poll → download)**; Guillotine's share
 `AsyncJobPoller` handles that uniformly. Generated media is downloaded to a local
 file and imported as an ordinary timeline clip.
 
-Two **keyless free** tiers need no account at all: **Pollinations** (image) and **Guillotine (free)**
-(video — LTX-Video on a shared Hugging Face ZeroGPU Space). Only the prompt is ever sent. The full,
+One **keyless free** tier needs no account at all: **Guillotine (free)** (video — LTX-Video on a
+shared Hugging Face ZeroGPU Space). Text-to-image generation was removed (2026-10, Play policy). Only the prompt is ever sent. The full,
 shipped provider matrix — enums, default model ids, and get-a-key links — is in
 **[PROVIDERS.md](PROVIDERS.md)**.
 
 ### 2.1 Image
-Pollinations (free, keyless) · Leonardo · OpenAI `gpt-image-1`/DALL·E 3 · Stability
-(Stable Image / SD 3.5) · **Black Forest Labs FLUX** (+ FLUX.1 Kontext editing) ·
-Google Imagen (Gemini key) · Ideogram (best text rendering) · Recraft (raster+vector).
+Removed. Guillotine does not generate images; Leonardo.ai is kept only for inpainting (object
+removal, Android).
 
 ### 2.2 Video (async)
 **Guillotine (free)** (keyless — LTX-Video on Guillotine's Hugging Face ZeroGPU Space) · Runway (Gen-4) ·
@@ -264,8 +263,8 @@ are honest stubs (a clear "needs an on-device model" error) because they require
 desktop-JVM form, and we do **not** cloud-fake them — keeping the on-device/private invariant is the
 point. They are enumerated at the end of this section.
 
-**Functional on desktop:** the timeline/edit/user-tool tools; cloud generation (`generate_image` /
-`generate_video` / `generate_music`); the beat suite (`get_beat_map`, `cut_to_beats`, `apply_on_beat`,
+**Functional on desktop:** the timeline/edit/user-tool tools; cloud generation (`generate_video` /
+`generate_music`); the beat suite (`get_beat_map`, `cut_to_beats`, `apply_on_beat`,
 `align_clips_to_beats`, `assemble_music_video`, on shared pure-JVM DSP); FFmpeg/DSP (`normalize_levels`,
 `normalize_loudness`, `detect_scenes`, `auto_duck`, `apply_ffmpeg_filter` via in-process JavaCV); the
 color/LUT render (`apply_lut` / `clear_lut` sampling a `.cube` through the shared `CubeLut` into the
