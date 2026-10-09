@@ -24,8 +24,7 @@ Two things are always free and require no account at all:
 - A **fully-local on-device LLM brain** — a downloaded `.task` model that drives the editor
   with no key and no network, pairing with the free on-device analyzers for a completely
   offline assistant. A tiny starter model ships bundled in the app.
-- A **keyless free tier** for generation — **Pollinations** for images and
-  **Guillotine (free)** for video, neither of which needs a key.
+- A **keyless free tier** for generation — **Guillotine (free)** for video, no key needed.
 
 Everything else is **bring-your-own-key (BYO)**: you paste your own provider API key, and it
 is **stored encrypted on-device** (see below). No key is ever required to use Guillotine —
@@ -113,7 +112,7 @@ the editor** with no key and no network, add an **on-device LLM brain**:
 - **Default model:** `gemini-2.5-flash` (editable). **API:** native Google Generative
   Language API (not OpenAI-compatible).
 - **Where:** Settings → AI Analyzer → select **Gemini** → paste the key.
-- The same Gemini key can also drive image (Imagen), video (Veo), and music (Lyria)
+- The same Gemini key can also drive video (Veo) and music (Lyria)
   generation — see below.
 
 ### OpenAI
@@ -211,25 +210,23 @@ Every provider, every route (the generate dialogs, the assistant, the MCP server
 
 1. **Prompt check:** blank prompts and prompts asking for sexual or nude content are refused before
    anything is sent.
-2. **Provider filters on:** Pollinations `safe=true`, FLUX `safety_tolerance: 0`, Imagen
-   `block_low_and_above`, gpt-image `moderation: auto`, fal `enable_safety_checker`, and a negative
+2. **Provider filters on:** fal `enable_safety_checker` and a negative
    prompt on the free video Space.
 3. **On-device check:** [`NsfwModel`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/safety/NsfwModel.kt)
    (Falconsai's ViT classifier, int8 ONNX, pinned by SHA-256, downloaded once on first generation)
-   scores the image, or five frames of a video; a score of 0.5 or more discards it. No classifier, no
+   scores five frames of a video; a score of 0.5 or more discards it. No classifier, no
    generation.
 
 Generated media carries its provenance (provider, model, prompt). Selecting a generated clip shows a
 **Report** (flag) button that removes it and emails a report to hereliesaz@gmail.com
 ([`ContentReport`](../shared/src/main/kotlin/com/hereliesaz/guillotine/ai/safety/ContentReport.kt)).
 
-Generation is **capability-gated**: a category (Image / Video / Music) and each provider
+Generation is **capability-gated**: a category (Video / Music) and each provider
 within it is only offered once it's usable — that means **keyless** providers are always
 available, and **BYO** providers appear as soon as you've entered their key. Configure as
 many as you like; the app remembers your preferred provider per category across sessions.
 
-Enter generation keys in **Settings → Generation**, grouped into **Image**, **Video**, and
-**Music**. Each provider is a collapsible card with a dot that lights up once it's
+Enter generation keys in **Settings → Generation**, grouped into **Video** and **Music**. Each provider is a collapsible card with a dot that lights up once it's
 configured. Keyless providers simply say *"Free — no key needed."* BYO providers show a key
 field (*"Stored encrypted on this device."*), an optional **Model** field (with the default
 and the list of options), a **"Get a … key ↗"** link, and any provider disclaimer.
@@ -239,24 +236,11 @@ listed default.
 
 ### Image
 
-| Provider | Enum | Key | Default model | Notes |
-|---|---|---|---|---|
-| **Pollinations (free)** | `POLLINATIONS` | **None (keyless)** | `flux` (also `turbo`) | No key, instant. Great for quick placeholder images. Served from `image.pollinations.ai`. |
-| Leonardo.ai | `LEONARDO` | BYO | `Leonardo Phoenix 1.0` | High-quality generation + inpainting (used for generative object removal). Also FLUX.1 Dev/Schnell, Kino XL. |
-| OpenAI Images | `OPENAI_IMAGE` | BYO | `gpt-image-1` | gpt-image-1 / DALL·E 3 / DALL·E 2. Strong prompt adherence. |
-| Stability AI (image) | `STABILITY_IMAGE` | BYO | `sd3.5-large` | Stable Image Ultra/Core and SD 3.5 (Large / Turbo / Medium). |
-| Black Forest Labs (FLUX) | `BFL_FLUX` | BYO | `flux-pro-1.1` | FLUX.1/1.1 and FLUX.1 Kontext (prompt-based editing). *Free key, pay-per-image.* |
-| Google Imagen | `GEMINI_IMAGEN` | BYO | `imagen-4.0-generate-001` | Imagen 3/4 via a Gemini API key (same key can drive the editor). |
-| Ideogram | `IDEOGRAM` | BYO | `V_3` | Best-in-class text rendering in images (3.0 / 2.0 / 2.0 Turbo). |
-| Recraft | `RECRAFT` | BYO | `recraftv3` | Raster and vector/SVG output, brand styles. |
-
-> **Keyless free tier — Pollinations.** Always available with no account. Default model
-> `flux` (or `turbo`). Ideal for quick placeholders while you iterate.
-
-Get-a-key links: Leonardo `app.leonardo.ai/api-access` · OpenAI `platform.openai.com/api-keys`
-· Stability `platform.stability.ai/account/keys` · BFL `docs.bfl.ai` · Imagen
-`aistudio.google.com/app/apikey` · Ideogram `developer.ideogram.ai` · Recraft
-`recraft.ai/profile/api`.
+Removed (2026-10, Play policy) — Guillotine does not generate images. **Leonardo.ai** remains only
+for **inpainting** (generative object removal, Android): one key under **Settings → Generation →
+Object removal**. Get a key: `app.leonardo.ai/api-access`. Inpainting may remove or change
+people, never add them: a repainted frame with more people than the original is discarded
+(`ContentSafety.inpaintAddsPeople`). Desktop object removal is on-device LaMa.
 
 ### Video
 
@@ -309,13 +293,13 @@ Get-a-key links: ElevenLabs `elevenlabs.io/app/settings/api-keys` · Stability
 
 ### Aggregators (one key, many models)
 
-Two providers serve **all three** categories through a single key, so they appear in the
-Image, Video, *and* Music sections:
+Two providers serve both categories through a single key, so they appear in the Video *and* Music
+sections:
 
 | Provider | Enum | Key | Default model | Notes |
 |---|---|---|---|---|
-| fal.ai | `FAL` | BYO | `fal-ai/flux/dev` | One key → many image/video/music models. Enter the **fal model id** as the model. Get a key: `fal.ai/dashboard/keys`. |
-| Replicate | `REPLICATE` | BYO | `black-forest-labs/flux-dev` | One key → any hosted model. Enter the **Replicate model (`owner/name`)** as the model. Get a key: `replicate.com/account/api-tokens`. |
+| fal.ai | `FAL` | BYO | `fal-ai/kling-video/v2/master/text-to-video` | One key → many video/music models. Enter the **fal model id** as the model. Get a key: `fal.ai/dashboard/keys`. |
+| Replicate | `REPLICATE` | BYO | `kwaivgi/kling-v2.1` | One key → any hosted model. Enter the **Replicate model (`owner/name`)** as the model. Get a key: `replicate.com/account/api-tokens`. |
 
 Because they're generic, the "model" field is where you name the exact model you want
 (e.g. `fal-ai/kling-video/v2/master/text-to-video`, or `minimax/video-01` on Replicate).
@@ -329,22 +313,20 @@ Because they're generic, the "model" field is where you name the exact model you
 | Zero setup, maximum privacy, works offline | On-device analyzers (`MLKIT` default / `LOCAL`) + on-device LLM brain (`.task`) | **No key** | On device |
 | A capable cloud brain to drive edits | Gemini · OpenAI · Anthropic | BYO | Cloud (text only) |
 | Many brains behind one key | OpenRouter (or Groq for speed) | BYO | Cloud (text only) |
-| A free image with no account | **Pollinations** | **No key** | Cloud (prompt only) |
 | A free video clip with no account | **Guillotine (free)** | **No key** | Cloud (prompt only) |
-| High-quality images | Leonardo · BFL FLUX · Stability · Ideogram · Recraft · OpenAI Images | BYO | Cloud (prompt only) |
 | High-quality / longer video | Runway · Luma · Veo · Sora · Kling · Pika · MiniMax | BYO | Cloud (prompt only) |
 | Music, songs, or SFX | ElevenLabs · Stability Audio · Lyria · MusicGen · Mubert · Beatoven · Loudly · Cassette | BYO | Cloud (prompt only) |
 | Full songs with vocals | Suno / Udio (via wrapper) | BYO + base URL | Cloud (prompt only) |
-| One key across image + video + music | fal.ai · Replicate | BYO | Cloud (prompt only) |
+| One key across video + music | fal.ai · Replicate | BYO | Cloud (prompt only) |
 
 **Rules of thumb:**
 
 - **Private and free?** Stay on-device: the default `MLKIT` vision + a downloaded on-device
   `.task` brain never touch the network.
-- **Free but cloud?** Pollinations (image) and Guillotine (video) need no key; only your
+- **Free but cloud?** Guillotine (video) needs no key; only your
   prompt is sent.
 - **Controller vs. generation are independent.** You can run a fully on-device brain *and*
-  still call a BYO image/video/music provider — the brain drives the edit, the generation
+  still call a BYO video/music provider — the brain drives the edit, the generation
   provider makes the new asset.
 - Every BYO key is **encrypted on-device** and only ever used in the request you initiate.
 

@@ -52,9 +52,6 @@ import androidx.compose.ui.window.Dialog
 import com.hereliesaz.guillotine.ai.AiProviderType
 import com.hereliesaz.guillotine.ai.AiSettings
 import com.hereliesaz.guillotine.ai.FrameAnalysisCache
-import com.hereliesaz.guillotine.ai.LeonardoDefaultModel
-import com.hereliesaz.guillotine.ai.LeonardoModel
-import com.hereliesaz.guillotine.ai.LeonardoModels
 import com.hereliesaz.guillotine.ai.ModelCatalog
 import com.hereliesaz.guillotine.ai.meta
 import com.hereliesaz.guillotine.ai.agent.DeviceModelAdvisor
@@ -148,7 +145,7 @@ private fun DesktopAiCapabilitySummary(settings: AiSettings) {
         "Speaker diarization" to installed("diarizeEmbedModelPath"),
         "Stem separation" to installed("stemModelPath"),
         "Speech denoise" to installed("denoiseModelPath"),
-        "Image/video/music generation" to (settings.genKeys.values.any { it.isNotBlank() } || settings.leonardoKey.isNotBlank()),
+        "Video/music generation" to (settings.genKeys.values.any { it.isNotBlank() } || settings.leonardoKey.isNotBlank()),
         "Cloud may see the current frame" to settings.cloudVision,
     )
     Column(
@@ -359,7 +356,7 @@ fun SettingsScreen(
         }
     }
 
-    val tabs = listOf("AI Analyzer", "Image Gen", "Transcription", "Advanced")
+    val tabs = listOf("AI Analyzer", "Generation", "Transcription", "Advanced")
     val visibleTabs = restrictToTabs ?: tabs.indices.toList()
     var selectedTab by remember { mutableStateOf(visibleTabs.first()) }
 
@@ -789,17 +786,12 @@ fun SettingsScreen(
                     )
                 }
                 1 -> {
-                    Text("Image generation — Leonardo.ai (optional)", color = Neutral400, fontSize = 12.sp)
-                    KeyField("Leonardo API key", leonardoKey) { leonardoKey = it }
-                    Text("Default model", color = Neutral500, fontSize = 10.sp)
-                    LeonardoModelDropdown(leonardoKey, leonardoModel) { leonardoModel = it }
-                    Text("Leave the key blank to generate with free Pollinations.ai.", color = Neutral500, fontSize = 10.sp)
-                    Text(com.hereliesaz.guillotine.ai.safety.ContentSafety.NOTICE, color = Neutral500, fontSize = 10.sp)
+                    Text("Generation", color = Neutral400, fontSize = 12.sp)
                     Text(
-                        "Get a Leonardo API key  ↗",
-                        color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickable { uriHandler.openUri("https://app.leonardo.ai/api-access") },
+                        "Guillotine doesn't generate images. Object removal runs on-device (LaMa .azp).",
+                        color = Neutral500, fontSize = 10.sp,
                     )
+                    Text(com.hereliesaz.guillotine.ai.safety.ContentSafety.NOTICE, color = Neutral500, fontSize = 10.sp)
                 }
                 2 -> {
                 }
@@ -1013,110 +1005,6 @@ fun ExportSheet(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun GenerateSheet(
-    leonardoKey: String,
-    leonardoModel: String,
-    onGenerateFree: suspend (prompt: String) -> Unit,
-    onGenerateLeonardo: suspend (prompt: String, modelId: String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var prompt by remember { mutableStateOf("") }
-    val leonardoAvailable = leonardoKey.isNotBlank()
-    var useLeonardo by remember { mutableStateOf(leonardoAvailable) }
-    var model by remember { mutableStateOf(leonardoModel.ifBlank { LeonardoDefaultModel }) }
-    var generating by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-
-    Dialog(onDismissRequest = { if (!generating) onDismiss() }) {
-        SheetCard {
-            Text("Generate image", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            if (generating) {
-                Text("Generating and checking the result… this can take a little while.", color = Neutral400, fontSize = 12.sp)
-            } else {
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Describe the image…", color = Neutral500, fontSize = 12.sp) },
-                    textStyle = TextStyle(color = White, fontSize = 12.sp),
-                    minLines = 2,
-                )
-                if (leonardoAvailable) {
-                    BackendRow("Free (Pollinations.ai, no key)", !useLeonardo) { useLeonardo = false }
-                    BackendRow("Leonardo.ai (your key)", useLeonardo) { useLeonardo = true }
-                    if (useLeonardo) {
-                        Text("Model", color = Neutral500, fontSize = 10.sp)
-                        LeonardoModelDropdown(leonardoKey, model) { model = it }
-                    }
-                } else {
-                    Text(
-                        "Pollinations.ai — no key required. Add a Leonardo API key in Settings to pick from Leonardo's models.",
-                        color = Neutral500, fontSize = 11.sp,
-                    )
-                }
-                Text(com.hereliesaz.guillotine.ai.safety.ContentSafety.NOTICE, color = Neutral500, fontSize = 10.sp)
-                error?.let { Text(it, color = Red500, fontSize = 11.sp) }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Cancel", color = Neutral400, fontSize = 12.sp, modifier = Modifier.padding(end = 16.dp).clickable(onClick = onDismiss))
-                    Button(
-                        enabled = prompt.isNotBlank(),
-                        onClick = {
-                            error = com.hereliesaz.guillotine.ai.safety.ContentSafety.promptRefusal(prompt)
-                            if (error == null) {
-                                generating = true
-                                scope.launch {
-                                    try {
-                                        if (useLeonardo) onGenerateLeonardo(prompt.trim(), model)
-                                        else onGenerateFree(prompt.trim())
-                                        onDismiss()
-                                    } catch (e: kotlinx.coroutines.CancellationException) {
-                                        throw e
-                                    } catch (e: Exception) {
-                                        error = e.message ?: "Generation failed"
-                                        generating = false
-                                    }
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Red500),
-                    ) { Text("Generate", fontSize = 12.sp, color = White) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LeonardoModelDropdown(apiKey: String, selectedId: String, onSelect: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    var live by remember(apiKey) { mutableStateOf<List<LeonardoModel>?>(null) }
-    var loading by remember(apiKey) { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val modelList = live?.takeIf { it.isNotEmpty() } ?: LeonardoModels
-    val name = modelList.firstOrNull { it.id == selectedId }?.name
-        ?: LeonardoModels.firstOrNull { it.id == selectedId }?.name ?: "Select a model"
-    Box {
-        DropdownAnchor(name) {
-            open = true
-            if (live == null && !loading && apiKey.isNotBlank()) {
-                loading = true
-                scope.launch { live = ModelCatalog.leonardoModels(apiKey); loading = false }
-            }
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (loading) MenuLabel("Loading…")
-            modelList.forEach { m ->
-                DropdownMenuItem(
-                    text = { Text(m.name, color = White, fontSize = 12.sp) },
-                    onClick = { onSelect(m.id); open = false },
-                )
             }
         }
     }

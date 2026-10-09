@@ -4,8 +4,6 @@ import com.hereliesaz.guillotine.ai.safety.NsfwModel
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaDecoder
 import com.hereliesaz.guillotine.desktop.media.DesktopMediaImport
 import com.hereliesaz.guillotine.desktop.media.DesktopOnnx
-import com.hereliesaz.guillotine.model.AiProvenance
-import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
 import java.awt.image.BufferedImage
 import java.io.File
@@ -57,14 +55,5 @@ object DesktopContentSafety {
         } catch (e: NsfwModel.FlaggedException) {
             file.delete(); throw e
         }
-    }
-
-    /** Downloads a generator's remote image [url], checks it, and returns it as media with [provenance]. */
-    suspend fun fetchChecked(url: String, name: String, provenance: AiProvenance): MediaItem {
-        val local = DesktopGenSink().saveUrl(url, "jpg")
-        requireSafe(local, MediaKind.IMAGE)
-        val item = DesktopMediaImport.probe(File(URI(local)))
-            ?: throw NsfwModel.FlaggedException("The generated image couldn't be read.")
-        return item.copy(name = name, aiProvenance = provenance)
     }
 }

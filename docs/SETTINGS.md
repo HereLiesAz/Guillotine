@@ -232,16 +232,19 @@ Enables "who speaks when?". Both **default empty**.
 
 ## 2. Generation
 
-Bring your own AI keys to generate **images, video, and music**. Configure as many providers as you
-like — only the categories and providers you set up are offered when generating. This tab is three
-sections (**Image**, **Video**, **Music**), each a list of collapsible provider cards.
+Bring your own AI keys to generate **video and music** (Guillotine does not generate images).
+Configure as many providers as you like — only the categories and providers you set up are offered
+when generating. This tab has **Video** and **Music** sections of collapsible provider cards, plus
+**Object removal** (Android): a single **Leonardo.ai API key (inpainting)** field that writes
+[`AiSettings.leonardoKey`](#5-aisettings-field-reference). On desktop the tab is just a note that
+Guillotine doesn't generate images; desktop object removal is on-device LaMa.
 
 **Every provider card has the same controls:**
 
 - **Expand / collapse** (`+` / `–`) and a small **dot** that turns red once the provider is
   *configured* (keyless, or a key entered).
 - **API key** field — text, encrypted, empty by default. Keyless providers instead read "Free — no key
-  needed." Writes [`AiSettings.genKeys`](#5-aisettings-field-reference) (except Leonardo — see below).
+  needed." Writes [`AiSettings.genKeys`](#5-aisettings-field-reference).
 - **Model** field — free-text model id, with an inline "Options:" hint listing suggested model names.
   **Default:** the provider's first/default model (blank uses it). Writes
   [`AiSettings.genModels`](#5-aisettings-field-reference).
@@ -250,21 +253,6 @@ sections (**Image**, **Video**, **Music**), each a list of collapsible provider 
 - A **disclaimer** line where relevant, and a **"Get a … key ↗"** link.
 
 Providers offered per category (enum order):
-
-**Image**
-
-| Provider | Needs key? | Notes |
-| --- | --- | --- |
-| Pollinations (free) | No | Keyless, instant. |
-| Leonardo.ai | Yes | Key reuses the legacy `leonardoKey` field (see note). |
-| OpenAI Images | Yes | |
-| Stability AI (image) | Yes | |
-| Black Forest Labs (FLUX) | Yes | |
-| Google Imagen | Yes | Same key can drive the editor as Gemini. |
-| Ideogram | Yes | |
-| Recraft | Yes | |
-| fal.ai (aggregator) | Yes | Enter the fal model id as the model. |
-| Replicate (aggregator) | Yes | Enter the `owner/name` model as the model. |
 
 **Video**
 
@@ -298,11 +286,6 @@ Providers offered per category (enum order):
 | Udio (via wrapper) | Yes | No official API — needs a wrapper key **and** base URL; disclaimed. |
 | fal.ai (aggregator) | Yes | |
 | Replicate (aggregator) | Yes | |
-
-> **Leonardo note.** Leonardo's key field is bound to the legacy top-level
-> [`AiSettings.leonardoKey`](#5-aisettings-field-reference) so existing users don't re-enter it; its
-> companion [`AiSettings.leonardoModel`](#5-aisettings-field-reference) is chosen from the
-> **Generate image** dialog, not this screen.
 
 Full per-provider key URLs and model catalogs are in [PROVIDERS.md](PROVIDERS.md).
 
@@ -376,8 +359,8 @@ and the control that sets it.
 | `provider` | `AiProviderType` | `MLKIT` (On-device vision) | Which AI drives the editor/analyzer | §1 Analyzer provider |
 | `keys` | `Map<AiProviderType, String>` | `{}` | Per-provider API keys (encrypted) | §1 Provider API key |
 | `models` | `Map<AiProviderType, String>` | `{}` | Per-provider analyzer model; blank = provider default | §1 Model |
-| `leonardoKey` | `String` | `""` | Legacy Leonardo image key (reused by Generation → Image → Leonardo) | §2 Image → Leonardo key |
-| `leonardoModel` | `String` | `LeonardoDefaultModel` (Leonardo Phoenix 1.0) | Legacy Leonardo model id | **Generate image** dialog (not this screen) |
+| `leonardoKey` | `String` | `""` | Leonardo key, used only for inpainting (object removal) | §2 Object removal |
+| `leonardoModel` | `String` | `LeonardoDefaultModel` (Leonardo Phoenix 1.0) | Leonardo model id; still stored, no longer user-pickable | — |
 | `speechModelPath` | `String` | `""` | Vosk model folder; blank = OpenAI Whisper | §3 Transcription |
 | `agentModelPath` | `String` | `""` | On-device assistant LLM (`.task`); blank = use provider key | §1 AI assistant |
 | `frameAnalysisCacheSize` | `Int` | `4096` | Per-frame vision cache size; `0` = off (range 0–32768) | §1 Frame-analysis cache slider |
