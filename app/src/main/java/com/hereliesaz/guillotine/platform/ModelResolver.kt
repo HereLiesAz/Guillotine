@@ -53,6 +53,9 @@ object ModelResolver {
         return ""
     }
 
+    /** [resolve] for a slot with no [AiSettings] field (installed-only, e.g. `objectDetectModelPath`). */
+    fun resolve(context: Context, property: String): String = resolve(context, AiSettings(), property)
+
     /** The explicit path the user chose for [property], straight off [AiSettings] — no existence check. */
     private fun pathFromSettings(settings: AiSettings, property: String): String? = when (property) {
         "agentModelPath" -> settings.agentModelPath
@@ -91,6 +94,9 @@ object ModelResolver {
         "diarizeEmbedModelPath" -> ModelCategory.DIARIZE_EMBED
         "stemModelPath" -> ModelCategory.STEM
         "denoiseModelPath" -> ModelCategory.DENOISE
+        // No settings field: resolved only from what's installed (azphalt store or download).
+        "objectDetectModelPath" -> ModelCategory.OBJECT_DETECTION
+        "sceneModelPath" -> ModelCategory.SCENE
         // Image→image effect models, requested as effect_<name> by apply_image_effect / apply_bokeh.
         "effect_depth" -> ModelCategory.DEPTH
         "effect_superres" -> ModelCategory.SUPERRES

@@ -12,27 +12,22 @@ import java.io.Closeable
 /**
  * On-device image embedder (MediaPipe + bundled MobileNet-V3) for "is this the same object?" matching.
  * Used by reference cuts: embed the crop of the object the user pointed at, then compare it against the
- * same-class detections in every frame by cosine similarity. Loads a model bundled in assets (offline);
+ * same-class detections in every frame by cosine similarity. Loads the model the caller resolved (`idEmbedModelPath`, installed from the azphalt store);
  * degrades to "unavailable" if it can't load so callers fall back to plain class matching.
  */
 class ImageEmbed(context: Context, modelPath: String? = null) : Closeable {
 
     private val embedder: ImageEmbedder? = runCatching {
-        // A user-configured model file (a stronger embedder like MobileCLIP-S0 / EfficientNet-Lite0)
-        // takes precedence; otherwise the bundled MobileNet-V3-small asset. Any MediaPipe
-        // ImageEmbedder-compatible .tflite (single image input + NormalizationOptions metadata) works.
-        // External files are loaded via a byte buffer (setModelAssetPath is assets-only).
-        val base = BaseOptions.builder().apply {
-            val f = modelPath?.trim().orEmpty().takeIf { it.isNotEmpty() }?.let { java.io.File(it) }
-            if (f != null && f.exists()) {
-                val bytes = f.readBytes()
-                val buf = java.nio.ByteBuffer.allocateDirect(bytes.size)
-                buf.put(bytes); buf.rewind()
-                setModelAssetBuffer(buf)
-            } else {
-                setModelAssetPath(MODEL_ASSET)
-            }
-        }.build()
+        // Any MediaPipe ImageEmbedder-compatible .tflite (single image input + NormalizationOptions
+        // metadata) works. Nothing is bundled: no installed model ⇒ unavailable.
+        val base = BaseOptions.builder()
+            .setModelAssetBuffer(
+                ModelBuffer.load(
+                    modelPath?.takeIf { it.isNotBlank() }
+                        ?: com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "idEmbedModelPath"),
+                ) ?: return@runCatching null,
+            )
+            .build()
         ImageEmbedder.createFromOptions(
             context,
             ImageEmbedder.ImageEmbedderOptions.builder()
@@ -60,9 +55,5 @@ class ImageEmbed(context: Context, modelPath: String? = null) : Closeable {
 
     override fun close() {
         runCatching { embedder?.close() }
-    }
-
-    private companion object {
-        const val MODEL_ASSET = "mobilenet_v3_small.tflite"
     }
 }

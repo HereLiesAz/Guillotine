@@ -9,22 +9,25 @@ import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import java.io.Closeable
 
 /**
- * On-device COCO object detector (MediaPipe + bundled EfficientDet-Lite2). Unlike whole-image
+ * On-device COCO object detector (MediaPipe + EfficientDet-Lite2). Unlike whole-image
  * labeling, this returns bounding-box detections, so it reliably flags objects that aren't the
  * dominant thing in frame — a phone in someone's hand, a car at the edge, etc. Lite2 trades
  * ~2x model size over Lite0 for significantly better mAP (33 vs 26 on COCO).
  *
- * Loads a model bundled in app assets (offline, no key/download). If the model or native libs
- * can't load (older device), it degrades to "unavailable" so callers fall back to image labeling
- * instead of crashing the analysis.
+ * The model is installed from the azphalt store (`com.hereliesaz.guillotine.efficientdet-lite2`) and
+ * resolved via `objectDetectModelPath`; it is not bundled. If it isn't installed or can't load, this
+ * degrades to "unavailable" so callers fall back to image labeling instead of crashing the analysis.
  */
 class ObjectVision(context: Context) : Closeable {
 
     private val detector: ObjectDetector? = runCatching {
+        val model = ModelBuffer.load(
+            com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "objectDetectModelPath"),
+        ) ?: return@runCatching null
         ObjectDetector.createFromOptions(
             context,
             ObjectDetector.ObjectDetectorOptions.builder()
-                .setBaseOptions(BaseOptions.builder().setModelAssetPath(MODEL_ASSET).build())
+                .setBaseOptions(BaseOptions.builder().setModelAssetBuffer(model).build())
                 .setRunningMode(RunningMode.IMAGE)
                 .setScoreThreshold(SCORE_THRESHOLD)
                 .setMaxResults(MAX_RESULTS)
@@ -66,7 +69,6 @@ class ObjectVision(context: Context) : Closeable {
     }
 
     companion object {
-        private const val MODEL_ASSET = "efficientdet_lite2.tflite"
         private const val SCORE_THRESHOLD = 0.35f
         private const val MAX_RESULTS = 25
 

@@ -18,11 +18,15 @@ import java.io.Closeable
  */
 class SceneClassifier(context: Context) : Closeable {
 
+    // Installed from the azphalt store (`com.hereliesaz.guillotine.efficientnet-lite0`), not bundled.
     private val classifier: ImageClassifier? = runCatching {
+        val model = ModelBuffer.load(
+            com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "sceneModelPath"),
+        ) ?: return@runCatching null
         ImageClassifier.createFromOptions(
             context,
             ImageClassifier.ImageClassifierOptions.builder()
-                .setBaseOptions(BaseOptions.builder().setModelAssetPath(MODEL_ASSET).build())
+                .setBaseOptions(BaseOptions.builder().setModelAssetBuffer(model).build())
                 .setRunningMode(RunningMode.IMAGE)
                 .setScoreThreshold(SCORE_THRESHOLD)
                 .setMaxResults(MAX_RESULTS)
@@ -51,7 +55,6 @@ class SceneClassifier(context: Context) : Closeable {
     }
 
     private companion object {
-        const val MODEL_ASSET = "efficientnet_lite0.tflite"
         const val SCORE_THRESHOLD = 0.15f
         const val MAX_RESULTS = 15
     }

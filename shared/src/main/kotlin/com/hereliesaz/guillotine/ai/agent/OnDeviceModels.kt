@@ -40,6 +40,10 @@ enum class ModelCategory {
     LOWLIGHT,
     /** sherpa-onnx offline speech-denoiser `.onnx` (GTCRN) — clean up noisy speech audio. */
     DENOISE,
+    /** MediaPipe ObjectDetector `.tflite` (COCO, with boxes) — "find the phone in frame". */
+    OBJECT_DETECTION,
+    /** MediaPipe ImageClassifier `.tflite` (ImageNet labels) — scene/content tags per frame. */
+    SCENE,
     // --- reserved for upcoming runtimes (not yet shown in the picker) ---
     STYLE, STEM,
 }
@@ -367,7 +371,7 @@ val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
         gated = false,
         repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder",
         downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_large/float32/1/mobilenet_v3_large.tflite",
-        abilities = "A stronger, still-fast general embedder — better \"same thing?\" matching than the bundled small model. MediaPipe-native (has embedding metadata).",
+        abilities = "A stronger, still-fast general embedder — better \"same thing?\" matching than the small model. MediaPipe-native (has embedding metadata).",
         limitations = "Slightly larger/slower than the default.",
         category = ModelCategory.RECOGNITION,
     ),
@@ -382,7 +386,7 @@ val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
         gated = false,
         repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder",
         downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/mobilenet_v3_small.tflite",
-        abilities = "The lightweight reference embedder (same family as the bundled default) — handy if you want an explicit copy on disk.",
+        abilities = "The default embedder (no longer bundled; install it from the azphalt store or here).",
         limitations = "Lower quality than MobileNet-V3-Large.",
         category = ModelCategory.RECOGNITION,
     ),
@@ -715,6 +719,47 @@ val RECOMMENDED_DENOISE_MODELS: List<OnDeviceModel> = listOf(
 )
 
 /** All catalogs a given [ModelCategory] draws from (for the Model Manager). */
+/**
+ * Object detection for frame analysis. Delivered by the azphalt store
+ * (`com.hereliesaz.guillotine.efficientdet-lite2`), no longer bundled in the APK; the same file is the
+ * direct download below. Until it's installed, analysis falls back to ML Kit image labeling.
+ */
+val RECOMMENDED_OBJECT_DETECTION_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "efficientdet-lite2",
+        label = "EfficientDet-Lite2 — object detection",
+        fileName = "efficientdet_lite2.tflite",
+        sizeBytes = 23_096_891L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/object_detector",
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float32/1/efficientdet_lite2.tflite",
+        abilities = "Finds the 80 COCO object classes with boxes, even small or off-centre ones (a phone in a hand, a car at the edge).",
+        limitations = "COCO classes only; anything else falls back to image labeling.",
+        category = ModelCategory.OBJECT_DETECTION,
+    ),
+)
+
+/**
+ * Scene/content classification for frame analysis. Delivered by the azphalt store
+ * (`com.hereliesaz.guillotine.efficientnet-lite0`), no longer bundled in the APK.
+ */
+val RECOMMENDED_SCENE_MODELS: List<OnDeviceModel> = listOf(
+    OnDeviceModel(
+        id = "efficientnet-lite0-classifier",
+        label = "EfficientNet-Lite0 — scene tags",
+        fileName = "efficientnet_lite0.tflite",
+        sizeBytes = 18_582_189L,
+        license = "Apache-2.0",
+        gated = false,
+        repoUrl = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_classifier",
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/float32/1/efficientnet_lite0.tflite",
+        abilities = "Tags each frame with ImageNet labels (beach, stage, kitchen…) for scene-based keep/remove.",
+        limitations = "ImageNet's 1,000 labels; abstract scenes map loosely.",
+        category = ModelCategory.SCENE,
+    ),
+)
+
 fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (category) {
     ModelCategory.LOWLIGHT -> RECOMMENDED_LOWLIGHT_MODELS
     ModelCategory.DENOISE -> RECOMMENDED_DENOISE_MODELS
@@ -730,5 +775,7 @@ fun recommendedModelsFor(category: ModelCategory): List<OnDeviceModel> = when (c
     ModelCategory.DIARIZE_SEG -> RECOMMENDED_DIARIZE_SEG_MODELS
     ModelCategory.DIARIZE_EMBED -> RECOMMENDED_DIARIZE_EMBED_MODELS
     ModelCategory.STEM -> RECOMMENDED_STEM_MODELS
+    ModelCategory.OBJECT_DETECTION -> RECOMMENDED_OBJECT_DETECTION_MODELS
+    ModelCategory.SCENE -> RECOMMENDED_SCENE_MODELS
     else -> emptyList()
 }
