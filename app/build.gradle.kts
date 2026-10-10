@@ -219,6 +219,12 @@ configurations.all {
     // JitPack group for multi-module repos is "com.github.USER.REPO"; the JVM jar duplicates
     // classes already bundled in the AAR.
     exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
+    // Its POM also pulls desktop native libs (Windows/macOS/Linux onnxruntime). On Android they
+    // land in the APK root as ~37 MB of dead weight on every install; the AAR's jni/ libs are
+    // the ones that load.
+    listOf("linux-aarch64", "linux-x64", "osx-aarch64", "osx-x64", "win-x64", "win-arm64").forEach {
+        exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-native-lib-$it")
+    }
 }
 
 dependencies {
