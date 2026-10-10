@@ -361,6 +361,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
 
     var showOnboarding by remember { mutableStateOf(!keyStore.onboardingDone) }
+    // The vision models stopped shipping in the APK: offer them once, after onboarding for a new
+    // install and on the first launch after updating for everyone else.
+    var showVisionModels by remember { mutableStateOf(!keyStore.visionModelsOffered) }
     var showSettings by remember { mutableStateOf(false) }
     var showAiSettings by remember { mutableStateOf(false) }
     // Cloudflare relay config; loaded off the main thread (EncryptedSharedPreferences touches the
@@ -1077,6 +1080,13 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     keyStore.markOnboardingDone()
                 }
                 showOnboarding = false
+            },
+        )
+    } else if (showVisionModels) {
+        VisionModelsDialog(
+            onDone = {
+                keyStore.markVisionModelsOffered()
+                showVisionModels = false
             },
         )
     }

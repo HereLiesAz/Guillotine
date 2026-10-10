@@ -146,6 +146,11 @@ class ApiKeyStore(context: Context) {
 
     fun markOnboardingDone() { prefs.edit().putBoolean(KEY_ONBOARDING_DONE, true).apply() }
 
+    /** Whether the vision-models walkthrough has been shown (new installs and existing users alike). */
+    val visionModelsOffered: Boolean get() = prefs.getBoolean(KEY_VISION_MODELS_OFFERED, false)
+
+    fun markVisionModelsOffered() { prefs.edit().putBoolean(KEY_VISION_MODELS_OFFERED, true).apply() }
+
     private companion object {
         const val KEY_PROVIDER = "ai_provider"
         const val KEY_LEONARDO_KEY = "leonardo_key"
@@ -154,6 +159,7 @@ class ApiKeyStore(context: Context) {
         const val KEY_CLOUD_VISION = "cloud_vision_optin"
         const val KEY_FRAME_CACHE_SIZE = "frame_analysis_cache_size"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
+        const val KEY_VISION_MODELS_OFFERED = "vision_models_offered"
         const val KEY_SPEECH_MODEL_PATH = "speech_model_path"
         const val KEY_AGENT_MODEL_PATH = "agent_model_path"
         const val KEY_ID_EMBED_MODEL_PATH = "id_embed_model_path"

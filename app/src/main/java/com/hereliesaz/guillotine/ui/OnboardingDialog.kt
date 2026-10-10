@@ -503,3 +503,167 @@ private fun StepIndicator(current: Int, total: Int) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Vision models (azphalt store)
+// ---------------------------------------------------------------------------
+
+private sealed interface PackState {
+    data object Missing : PackState
+    data class Installing(val fraction: Float?) : PackState
+    data object Installed : PackState
+    data class Failed(val message: String) : PackState
+}
+
+/**
+ * Full-screen walkthrough of the vision models Guillotine no longer bundles: what each one unlocks,
+ * what you lose without it, and an Install that pulls it from the azphalt store
+ * ([com.hereliesaz.guillotine.azphalt.VisionModelPacks]). Shown once after first-launch onboarding, and
+ * once to existing users after the update that unbundled them. Everything here stays optional.
+ */
+@Composable
+fun VisionModelsDialog(onDone: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val packs = com.hereliesaz.guillotine.azphalt.VisionModelPacks.PACKS
+    val states = remember {
+        androidx.compose.runtime.mutableStateMapOf<String, PackState>().apply {
+            packs.forEach {
+                put(it.id, if (com.hereliesaz.guillotine.azphalt.VisionModelPacks.isInstalled(context, it)) PackState.Installed else PackState.Missing)
+            }
+        }
+    }
+
+    fun install(pack: com.hereliesaz.guillotine.azphalt.VisionModelPacks.Pack) {
+        if (states[pack.id] is PackState.Installing || states[pack.id] == PackState.Installed) return
+        states[pack.id] = PackState.Installing(null)
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.hereliesaz.guillotine.azphalt.VisionModelPacks.install(context, pack) { f ->
+                        scope.launch { states[pack.id] = PackState.Installing(f) }
+                    }
+                }
+            }
+            states[pack.id] = result.fold(
+                onSuccess = { PackState.Installed },
+                onFailure = { PackState.Failed(it.message ?: "Couldn't install from azphalt.store.") },
+            )
+        }
+    }
+
+    val missing = packs.filter { states[it.id] !is PackState.Installed }
+    val busy = states.values.any { it is PackState.Installing }
+
+    Dialog(
+        onDismissRequest = { /* explicit choice below */ },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(Neutral900)
+                .systemBarsPadding()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text("Teach it to see", color = White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Guillotine's vision runs on this device. Three optional models make it sharper; " +
+                        "they come from the azphalt store so the app itself stays small. Install what you'll " +
+                        "use now, or any time later from Settings → AI Analyzer or the Store.",
+                    color = Neutral400, fontSize = 12.sp,
+                )
+                packs.forEach { pack ->
+                    VisionPackCard(pack, states[pack.id] ?: PackState.Missing) { install(pack) }
+                }
+                Text(
+                    "Downloads are model weights only. Your footage never leaves the device.",
+                    color = Neutral500, fontSize = 10.sp,
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (missing.isEmpty()) "" else "Not now", color = Neutral500, fontSize = 12.sp,
+                    modifier = Modifier
+                        .clickable(enabled = missing.isNotEmpty() && !busy) { onDone() }
+                        .padding(12.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                if (missing.isEmpty()) {
+                    Button(
+                        onClick = onDone,
+                        colors = ButtonDefaults.buttonColors(containerColor = Red500),
+                    ) { Text("Done", fontSize = 12.sp, color = White) }
+                } else {
+                    val total = missing.sumOf { it.model.sizeBytes }
+                    Button(
+                        onClick = { missing.forEach(::install) },
+                        enabled = !busy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Red500),
+                    ) {
+                        Text(
+                            "Install all (${"%.0f".format(total / 1_000_000.0)} MB)",
+                            fontSize = 12.sp, color = White,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisionPackCard(
+    pack: com.hereliesaz.guillotine.azphalt.VisionModelPacks.Pack,
+    state: PackState,
+    onInstall: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, if (state == PackState.Installed) Red500 else Neutral800, RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(pack.title, color = White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text("${pack.model.label} · ${pack.model.sizeLabel} · ${pack.model.license}", color = Neutral500, fontSize = 10.sp)
+            }
+            when (state) {
+                PackState.Installed -> Text("Installed", color = Color(0xFF4ADE80), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                is PackState.Installing -> Text("Installing…", color = Neutral400, fontSize = 11.sp)
+                else -> Text(
+                    if (state is PackState.Failed) "Retry" else "Install",
+                    color = Red500, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable(onClick = onInstall).padding(start = 12.dp),
+                )
+            }
+        }
+        Text(pack.why, color = Neutral400, fontSize = 11.sp)
+        Text("Without it: ${pack.without}", color = Neutral500, fontSize = 10.sp)
+        when (state) {
+            is PackState.Installing -> state.fraction?.let {
+                LinearProgressIndicator(progress = { it }, color = Red500, modifier = Modifier.fillMaxWidth())
+            } ?: LinearProgressIndicator(color = Red500, modifier = Modifier.fillMaxWidth())
+            is PackState.Failed -> Text(state.message, color = Red500, fontSize = 10.sp)
+            else -> Unit
+        }
+    }
+}
