@@ -12,7 +12,7 @@ Terms (see `docs/PROVIDERS.md` § Content safety). Then **all text-to-image gene
 (Pollinations, the BYO image providers, aggregator image models, the Generate dialog, `generate_image`);
 Leonardo stays only for Android inpainting (object removal). Play never reissues a suspended package: the
 `play` flavor now ships as **`com.hereliesaz.theguillotine`**; the `github` flavor keeps
-`com.hereliesaz.guillotine` so sideloaded installs keep updating. New app name: **The Guillotine** (listing title "The Guillotine: AI Video Editor"). **Open:** the classifier is 87 MB on first generation, so consider a
+`com.hereliesaz.guillotine` so sideloaded installs keep updating. Releases publish to `com.hereliesaz.theguillotine` via HereLiesAz/workflows (registry renamed with the repo, 2026-10-10); the first AAB must be uploaded by hand in Play Console. New app name: **The Guillotine** (listing title "The Guillotine: AI Video Editor"). **Open:** the classifier is 87 MB on first generation, so consider a
 smaller model later.
 
 ## Flagship store signing key rotated (2026-10)
