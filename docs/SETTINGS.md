@@ -139,7 +139,7 @@ A radio list — pick exactly one. This sets [`AiSettings.provider`](#5-aisettin
 
 - **Type:** model-path field (`.tflite`) + [model picker](#model-picker) ("Recognition models").
 - A stronger MediaPipe-compatible image embedder sharpens instance matching ("is this the same
-  thing?"). **Blank = the bundled MobileNet-V3-small.** Writes
+  thing?"). **Blank = MobileNet-V3-small if installed (azphalt store), else recognition is off.** Writes
   [`AiSettings.idEmbedModelPath`](#5-aisettings-field-reference).
 
 ### Face model — for identifying a specific person (optional)
@@ -364,7 +364,7 @@ and the control that sets it.
 | `speechModelPath` | `String` | `""` | Vosk model folder; blank = OpenAI Whisper | §3 Transcription |
 | `agentModelPath` | `String` | `""` | On-device assistant LLM (`.task`); blank = use provider key | §1 AI assistant |
 | `frameAnalysisCacheSize` | `Int` | `4096` | Per-frame vision cache size; `0` = off (range 0–32768) | §1 Frame-analysis cache slider |
-| `idEmbedModelPath` | `String` | `""` | Recognition embedder (`.tflite`); blank = bundled MobileNet-V3-small | §1 Recognition model |
+| `idEmbedModelPath` | `String` | `""` | Recognition embedder (`.tflite`); blank = installed MobileNet-V3-small (azphalt store) | §1 Recognition model |
 | `faceEmbedModelPath` | `String` | `""` | Face embedder (`.tflite`); blank = general recognition model | §1 Face model |
 | `effectModelPaths` | `Map<String, String>` | `{}` | Image-effect models keyed `superres`/`style`/`depth`/`lowlight` | §1 Image effects (4 fields) |
 | `audioEventModelPath` | `String` | `""` | YAMNet audio-event (`.tflite`) for highlights; blank = off | §1 Audio highlights |

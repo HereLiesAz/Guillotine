@@ -24,6 +24,7 @@ object AzpModelInstaller {
     /** An AI model role that a delivered model can declare. */
     enum class ModelSlot {
         IMAGE_LABELING,
+        OBJECT_DETECTION,
         FACE_DETECTION,
         FACE_EMBEDDING,
         SUBJECT_SEGMENTATION,
@@ -35,6 +36,7 @@ object AzpModelInstaller {
     /** Map an asset's semantic `role` to the [ModelSlot] it drives (null ⇒ unknown; host may prompt). */
     fun slotForRole(role: String?): ModelSlot? = when (role?.trim()?.lowercase()) {
         "image-labeling", "labeling", "classification", "tagging" -> ModelSlot.IMAGE_LABELING
+        "object-detection", "object-detector", "detection" -> ModelSlot.OBJECT_DETECTION
         "face-detection", "face-detect", "face" -> ModelSlot.FACE_DETECTION
         "face-embedding", "face-id", "face-recognition" -> ModelSlot.FACE_EMBEDDING
         "subject-segmentation", "segmentation", "matting", "background-removal" -> ModelSlot.SUBJECT_SEGMENTATION

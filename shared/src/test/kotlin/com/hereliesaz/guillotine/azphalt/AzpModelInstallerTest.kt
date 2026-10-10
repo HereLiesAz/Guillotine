@@ -72,6 +72,7 @@ class AzpModelInstallerTest {
         assertEquals(AzpModelInstaller.ModelSlot.SPEECH_TO_TEXT, AzpModelInstaller.slotForRole("speech-to-text"))
         assertEquals(AzpModelInstaller.ModelSlot.FACE_DETECTION, AzpModelInstaller.slotForRole("Face-Detection"))
         assertEquals(AzpModelInstaller.ModelSlot.SUBJECT_SEGMENTATION, AzpModelInstaller.slotForRole("matting"))
+        assertEquals(AzpModelInstaller.ModelSlot.OBJECT_DETECTION, AzpModelInstaller.slotForRole("object-detection"))
         assertNull(AzpModelInstaller.slotForRole("something-unknown"))
         assertNull(AzpModelInstaller.slotForRole(null))
     }
