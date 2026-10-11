@@ -628,7 +628,25 @@ fun SettingsScreen(
                     ModelPathField(value = idEmbedModelPath, hint = "recognition .tflite model", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { idEmbedModelPath = it }
                     ModelPicker(context, "Recognition models", RECOMMENDED_RECOGNITION_MODELS, idEmbedModelPath) { idEmbedModelPath = it }
                     Text(
-                        "A stronger embedder sharpens \"is this the same thing?\" matching. Blank = the bundled MobileNet-V3-small.",
+                        "A stronger embedder sharpens \"is this the same thing?\" matching. Blank = MobileNet-V3-small if installed.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
+
+                    // No path field: these resolve from whatever is installed (azphalt store or download).
+                    Text("Object detection — find things in frame (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPicker(
+                        context, "Object detection models",
+                        com.hereliesaz.guillotine.ai.agent.RECOMMENDED_OBJECT_DETECTION_MODELS,
+                        com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "objectDetectModelPath"),
+                    ) {}
+                    Text("Scene tags — name what a shot is of (optional)", color = Neutral400, fontSize = 12.sp)
+                    ModelPicker(
+                        context, "Scene models",
+                        com.hereliesaz.guillotine.ai.agent.RECOMMENDED_SCENE_MODELS,
+                        com.hereliesaz.guillotine.platform.ModelResolver.resolve(context, "sceneModelPath"),
+                    ) {}
+                    Text(
+                        "Without these, analysis falls back to the basic built-in labeler. Also in the Store.",
                         color = Neutral500, fontSize = 10.sp,
                     )
 
