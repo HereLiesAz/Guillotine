@@ -1,10 +1,10 @@
 # Pinned for reproducible Space builds. gradio must match `sdk_version` in README.md.
-gradio==5.9.1
+gradio==6.16.0
 spaces==0.30.4
-torch==2.5.1
-diffusers==0.32.2
-transformers==4.47.1
-accelerate==1.2.1
-sentencepiece==0.2.0
+torch==2.13.0
+diffusers==0.38.0
+transformers==5.10.1
+accelerate==1.15.0
+sentencepiece==0.2.1
 imageio==2.36.1
 imageio-ffmpeg==0.5.1
