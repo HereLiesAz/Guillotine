@@ -6,11 +6,12 @@ package com.hereliesaz.guillotine.azphalt
  * only the [AzpManifest.capabilities] the user approved. Guillotine exchanges JSON with it — never media,
  * the engine, the filesystem, sensors, or the network (azphalt's "never-list").
  *
- * This file is the **capability boundary and runtime seam**, which are real and enforced. The actual
- * sandbox — a WASM engine hosting QuickJS-in-WASM for `js`, or a WASM module against the host ABI — is
- * not bundled in this build, so the shipped [runtime] is [Unavailable]: it refuses to execute rather than
- * pretend. Capability gating ([missingGrants]) is live now, so when a real engine is dropped in behind
- * this interface it is already least-privilege by construction.
+ * This file is the **capability boundary and runtime seam**. The actual sandbox — a WASM engine hosting
+ * QuickJS-in-WASM for `js`, or a WASM module against the host ABI — is not bundled in this build, so the
+ * only implementation is [UnavailableAzpCodeRuntime], which refuses to execute rather than pretend.
+ * Nothing in the app or desktop host calls this seam yet: it is unwired scaffolding, kept (and tested)
+ * so that when a real engine is dropped in, capability gating ([missingGrants]) is already
+ * least-privilege by construction.
  */
 interface AzpCodeRuntime {
 

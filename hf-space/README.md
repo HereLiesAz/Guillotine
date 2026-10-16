@@ -43,7 +43,9 @@ provider's extra field) — point it at any compatible public Gradio text-to-vid
 
 ## Deploying
 
-Pushed from the [Guillotine repo](https://github.com/HereLiesAz/Guillotine) `hf-space/` folder via the
-**Deploy T2V Space** GitHub Action (uses the `HF_TOKEN` repository secret — the token is never printed).
+Source lives in the [Guillotine repo](https://github.com/HereLiesAz/Guillotine) `hf-space/` folder.
+There is currently no automated deploy workflow: push the folder's contents to the Space manually
+(e.g. `huggingface-cli upload HereLiesAz/<space> hf-space . --repo-type space`). Dependencies are
+pinned in `requirements.txt`; keep `gradio` there in sync with `sdk_version` above.
 
 Built with LTX-Video by Lightricks.

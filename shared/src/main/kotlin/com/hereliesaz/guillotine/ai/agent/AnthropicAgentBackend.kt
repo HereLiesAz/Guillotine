@@ -70,6 +70,17 @@ class AnthropicAgentBackend(
                 }
                 if (text.isNotBlank()) onEvent(AgentEvent.AssistantText(text.toString().trim()))
 
+                // A reply that carries tool_use blocks but did NOT stop for tool use (e.g. it hit
+                // max_tokens mid-call) can't be answered with tool_results; appending it would leave an
+                // orphan tool_use in history and every later request would 400. Drop the turn instead.
+                if (toolUses.isNotEmpty() && resp.optString("stop_reason") != "tool_use") {
+                    messages = JSONArray()
+                    val why = if (resp.optString("stop_reason") == "max_tokens") "the reply was cut off (max_tokens)"
+                    else "the reply ended mid tool call (${resp.optString("stop_reason")})"
+                    onEvent(AgentEvent.Failed("Anthropic: $why. Try a shorter request."))
+                    return@withContext
+                }
+
                 // Append the assistant turn verbatim (tool_use blocks must round-trip unchanged).
                 messages.put(JSONObject().put("role", "assistant").put("content", content))
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ backup / device-transfer rules. The EncryptedSharedPreferences files are keyed by a
+     Keystore master key that never leaves the device, so a restored copy can't be decrypted — exclude
+     them (API keys, the MCP bearer token, the relay access key) from both cloud backup and transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="guillotine_secure_settings.xml" />
+        <exclude domain="sharedpref" path="guillotine_mcp_secure.xml" />
+        <exclude domain="sharedpref" path="guillotine_mcp_relay.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="guillotine_secure_settings.xml" />
+        <exclude domain="sharedpref" path="guillotine_mcp_secure.xml" />
+        <exclude domain="sharedpref" path="guillotine_mcp_relay.xml" />
+    </device-transfer>
+</data-extraction-rules>

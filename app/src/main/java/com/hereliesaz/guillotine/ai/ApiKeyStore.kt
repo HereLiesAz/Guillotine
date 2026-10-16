@@ -3,7 +3,6 @@ package com.hereliesaz.guillotine.ai
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.hereliesaz.guillotine.ai.gen.GenKind
 import com.hereliesaz.guillotine.ai.gen.GenProviderType
 import kotlinx.coroutines.Dispatchers
@@ -20,18 +19,7 @@ import kotlinx.coroutines.withContext
  */
 class ApiKeyStore(context: Context) {
 
-    private val prefs: SharedPreferences = run {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            "guillotine_secure_settings",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    }
+    private val prefs: SharedPreferences = SecurePrefs.open(context, "guillotine_secure_settings")
 
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AiSettings> = _settings.asStateFlow()

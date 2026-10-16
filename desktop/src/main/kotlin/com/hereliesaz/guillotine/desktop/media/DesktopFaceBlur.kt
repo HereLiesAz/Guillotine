@@ -1,6 +1,7 @@
 package com.hereliesaz.guillotine.desktop.media
 
 import com.hereliesaz.guillotine.model.TimelineClip
+import com.hereliesaz.guillotine.model.TimelineMath
 import kotlinx.coroutines.runBlocking
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
@@ -33,30 +34,44 @@ object DesktopFaceBlur {
     /**
      * Sample [clip]'s frames from [uri], track the largest face, write a blurred patch into [outDir],
      * and return the follow keyframes. Returns null when no face is found in the clip.
+     *
+     * Keyframe times are TIMELINE-relative (ms from the clip's start), and each sample's source time
+     * is mapped through [TimelineMath.sourceTimeMs], so the patch follows the face on sped-up/slowed
+     * clips too. Positions and SCALE are expressed in the overlay's own render space: an image layer
+     * is drawn at canvas height × SCALE, centred at (0.5 + OFFSET_X) × canvas width — so the patch's
+     * SCALE is its share of the frame height (not 1, which drew it full-frame), and horizontal offsets
+     * are converted through the video's and the canvas's aspect ratios ([canvasAspect] = width / height).
+     * The source clip's own static scale/offset is folded in; its rotation is not.
      */
-    fun build(model: String, uri: String, clip: TimelineClip, outDir: File): Track? {
+    fun build(model: String, uri: String, clip: TimelineClip, outDir: File, canvasAspect: Float): Track? {
         val dur = clip.durationMs
         if (dur <= 0) return null
-        val step = maxOf(300L, dur / 60) // ~every 0.3s, capped ~60 samples
+        val step = maxOf(300L, dur / 60) // ~every 0.3s of timeline, capped ~60 samples
         val samples = ArrayList<Sample>()
-        var srcMs = clip.trimStartMs
-        val end = clip.trimStartMs + dur
-        while (srcMs <= end) {
+        var frameAspect = 0f
+        var frameH = 0
+        var relMs = 0L
+        while (relMs <= dur) {
+            val srcMs = TimelineMath.sourceTimeMs(clip, clip.startTimeMs + relMs)
             val frame = runBlocking { DesktopMediaDecoder.grabFrame(uri, srcMs, maxPx = 640) }
             if (frame != null) {
+                if (frameH == 0) {
+                    frameH = frame.height
+                    frameAspect = frame.width.toFloat() / frame.height.coerceAtLeast(1)
+                }
                 val face = DesktopFaceDetector.detect(model, frame).maxByOrNull { it.area }
                 if (face != null) {
                     val cx = (face.x1 + face.x2) / 2f
                     val cy = (face.y1 + face.y2) / 2f
                     val size = (face.x2 - face.x1).coerceAtLeast(0.01f)
-                    samples += Sample(srcMs - clip.trimStartMs, srcMs, cx, cy, size, face)
+                    samples += Sample(relMs, srcMs, cx, cy, size, face)
                 }
             }
-            srcMs += step
+            relMs += step
         }
-        if (samples.isEmpty()) return null
+        if (samples.isEmpty() || frameH == 0) return null
 
-        // Base = the frame where the face is largest → the sharpest crop to blur, and the SCALE=1 anchor.
+        // Base = the frame where the face is largest → the sharpest crop to blur.
         val base = samples.maxByOrNull { it.size }!!
         val baseFrame = runBlocking { DesktopMediaDecoder.grabFrame(uri, base.srcMs, maxPx = 640) } ?: return null
         val patchImg = makeBlurPatch(baseFrame, base.face) ?: return null
@@ -64,11 +79,14 @@ object DesktopFaceBlur {
         val patchFile = File(outDir, "faceblur_${clip.id}.png")
         ImageIO.write(patchImg, "png", patchFile)
 
+        val clipScale = clip.scale.takeIf { it > 0f } ?: 1f
+        val aspect = canvasAspect.takeIf { it > 0f } ?: frameAspect
+        // Patch height as a fraction of the (clip-scaled) frame height, at the base face size.
+        val patchFrac = patchImg.height.toFloat() / baseFrame.height.coerceAtLeast(1) * clipScale
         return Track(
-            offsetX = samples.map { it.relMs to (it.cx - 0.5f) },
-            offsetY = samples.map { it.relMs to (it.cy - 0.5f) },
-            // Relative to the base face size, so SCALE=1 covers the base face and grows/shrinks with it.
-            scale = samples.map { it.relMs to (it.size / base.size) },
+            offsetX = samples.map { it.relMs to (clip.offsetX + (it.cx - 0.5f) * clipScale * frameAspect / aspect) },
+            offsetY = samples.map { it.relMs to (clip.offsetY + (it.cy - 0.5f) * clipScale) },
+            scale = samples.map { it.relMs to patchFrac * (it.size / base.size) },
             patch = patchFile,
         )
     }

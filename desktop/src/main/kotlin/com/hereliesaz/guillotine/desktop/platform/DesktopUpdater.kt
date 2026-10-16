@@ -12,7 +12,8 @@ import java.util.Properties
  * Self-update for the desktop installers. Compares this build's version (baked into the classpath as
  * `/guillotine-version.properties` by the Gradle `writeVersionResource` task) against the host-OS
  * installer attached to the latest GitHub Release — `.deb` on Linux, `.dmg` on macOS, `.msi` on
- * Windows. When newer, it downloads the installer to a temp dir and launches it through the desktop's
+ * Windows. When newer, it downloads the installer to a temp dir and — once it has passed the SHA-256
+ * check, or the user explicitly accepted an unverified (size-only) download — launches it through the desktop's
  * file association (jpackage's per-user MSI / the DMG / the .deb software-installer GUI). Every path
  * fails soft: a failed check must never disturb the editor.
  */

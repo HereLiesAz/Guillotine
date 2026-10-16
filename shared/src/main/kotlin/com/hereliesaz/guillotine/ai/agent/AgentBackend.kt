@@ -558,8 +558,12 @@ inline fun frameLookOutcome(
  * emit a syntactically-valid tool call with a missing required field; letting JSONObject.get* throw obscures
  * the actual problem and wastes another inference turn. Unknown tools are still forwarded so routed/stateful
  * backends can recover with a previously-seen valid tool name.
+ *
+ * A blank string normally counts as missing, except for the (tool, argument) pairs in
+ * [BLANK_ALLOWED_ARGS] where an empty string is a documented, meaningful value (e.g.
+ * `select_clip("")` clears the selection).
  */
-private fun missingRequiredToolArgs(tools: McpToolsSurface, name: String, args: JSONObject): List<String> {
+internal fun missingRequiredToolArgs(tools: McpToolsSurface, name: String, args: JSONObject): List<String> {
     val definitions = try {
         tools.definitions()
     } catch (_: Exception) {
@@ -583,10 +587,19 @@ private fun missingRequiredToolArgs(tools: McpToolsSurface, name: String, args: 
             val key = required.optString(i)
             if (key.isBlank()) continue
             val value = if (args.has(key) && !args.isNull(key)) args.opt(key) else null
-            if (value == null || (value is String && value.isBlank())) add(key)
+            if (value == null) {
+                add(key)
+            } else if (value is String && value.isBlank() && key !in BLANK_ALLOWED_ARGS[name].orEmpty()) {
+                add(key)
+            }
         }
     }
 }
+
+/** Required string arguments for which an empty value is a valid, documented input. */
+private val BLANK_ALLOWED_ARGS: Map<String, Set<String>> = mapOf(
+    "select_clip" to setOf("clip_id"), // "empty string to clear"
+)
 
 /** Execute one MCP tool in-process, capturing thrown errors as a result the model can recover from. */
 fun callTool(tools: McpToolsSurface, name: String, args: JSONObject): ToolOutcome {

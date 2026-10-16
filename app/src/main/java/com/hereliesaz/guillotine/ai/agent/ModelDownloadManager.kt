@@ -3,6 +3,7 @@ package com.hereliesaz.guillotine.ai.agent
 import android.content.Context
 import android.os.StatFs
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -120,9 +121,18 @@ object ModelDownloadManager {
         if (_state.value is DownloadState.Downloading) _state.value = DownloadState.Idle
     }
 
+    /**
+     * Writes [s] only while [owner] is still the current download. A cancelled job's late writes (its
+     * catch/finally run after [cancel] returned, possibly after a new [start]) must not clobber the
+     * state of the download that replaced it.
+     */
+    private fun setStateIfCurrent(owner: Job?, s: DownloadState) = synchronized(this) {
+        if (owner != null && job === owner) _state.value = s
+    }
+
     /** Start (or resume) downloading [model]; no-op if a download is already running or the model is gated. */
-    fun start(context: Context, model: OnDeviceModel) {
-        synchronized(this) { if (job?.isActive == true) return }
+    fun start(context: Context, model: OnDeviceModel): Unit = synchronized(this) {
+        if (job?.isActive == true) return
         val url = model.downloadUrl ?: run {
             val msg = "This model must be downloaded from Hugging Face."
             _state.value = DownloadState.Failed(model.id, msg)
@@ -133,7 +143,9 @@ object ModelDownloadManager {
         val finalFile = File(dir, model.fileName)
         val partFile = File(dir, "${model.fileName}.part")
 
-        job = scope.launch {
+        // LAZY so [job] is assigned (under the lock) before the body can run and reach its finally.
+        val launched = scope.launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]
             // Resume point: bytes already on disk from a previous interrupted attempt. A stale `.part`
             // larger than the expected size is bogus — discard it and start clean.
             var resumeFrom = if (partFile.isFile) partFile.length() else 0L
@@ -141,8 +153,11 @@ object ModelDownloadManager {
                 runCatching { partFile.delete() }
                 resumeFrom = 0L
             }
-            _state.value = DownloadState.Downloading(
-                model.id, (resumeFrom.toFloat() / model.sizeBytes).coerceIn(0f, 1f), resumeFrom, model.sizeBytes,
+            setStateIfCurrent(
+                self,
+                DownloadState.Downloading(
+                    model.id, (resumeFrom.toFloat() / model.sizeBytes).coerceIn(0f, 1f), resumeFrom, model.sizeBytes,
+                ),
             )
             try {
                 // Only the still-missing bytes need to fit on disk. An archive also needs room for its
@@ -151,10 +166,20 @@ object ModelDownloadManager {
                 if (availableBytes(dir) < (model.sizeBytes - resumeFrom) + extractHeadroom + SAFETY_MARGIN) {
                     throw IllegalStateException("Not enough free space for ${model.sizeLabel}.")
                 }
-                val request = Request.Builder().url(url).apply {
-                    if (resumeFrom > 0) header("Range", "bytes=$resumeFrom-")
+                fun request(from: Long) = Request.Builder().url(url).apply {
+                    if (from > 0) header("Range", "bytes=$from-")
                 }.build()
-                client.newCall(request).execute().use { resp ->
+                var response = client.newCall(request(resumeFrom)).execute()
+                if (response.code == 416 && resumeFrom > 0) {
+                    // Range Not Satisfiable: the `.part` is already as long as (or longer than) what the
+                    // server now serves — a stale/changed file. Retrying the same range would fail forever,
+                    // so drop the partial and fetch the whole file again.
+                    response.close()
+                    runCatching { partFile.delete() }
+                    resumeFrom = 0L
+                    response = client.newCall(request(0L)).execute()
+                }
+                response.use { resp ->
                     if (!resp.isSuccessful) throw IllegalStateException("Download failed (HTTP ${resp.code}).")
                     val body = resp.body ?: throw IllegalStateException("Empty response.")
                     // 206 => server honoured the range, body is the tail to append. Anything else (e.g. 200)
@@ -175,8 +200,11 @@ object ModelDownloadManager {
                                 done += n
                                 if (done - lastEmit >= PROGRESS_STEP) {
                                     lastEmit = done
-                                    _state.value = DownloadState.Downloading(
-                                        model.id, (done.toFloat() / total).coerceIn(0f, 1f), done, total,
+                                    setStateIfCurrent(
+                                        self,
+                                        DownloadState.Downloading(
+                                            model.id, (done.toFloat() / total).coerceIn(0f, 1f), done, total,
+                                        ),
                                     )
                                 }
                             }
@@ -193,7 +221,7 @@ object ModelDownloadManager {
                     if (!File(destDir, model.archiveMarker).isFile) {
                         throw IllegalStateException("Model archive did not contain ${model.archiveMarker}.")
                     }
-                    _state.value = DownloadState.Done(model.id, destDir.absolutePath)
+                    setStateIfCurrent(self, DownloadState.Done(model.id, destDir.absolutePath))
                 } else {
                     // Enforce an exact-size match only when we trust the published size.
                     if (model.verifyBySize && partFile.length() != model.sizeBytes) {
@@ -201,23 +229,26 @@ object ModelDownloadManager {
                     }
                     finalFile.delete()
                     if (!partFile.renameTo(finalFile)) throw IllegalStateException("Could not save the model file.")
-                    _state.value = DownloadState.Done(model.id, finalFile.absolutePath)
+                    setStateIfCurrent(self, DownloadState.Done(model.id, finalFile.absolutePath))
                 }
             } catch (e: Throwable) {
                 // Keep the `.part` file so the next start resumes — both on user cancel and on transient
                 // network failure. (A size-mismatch "incomplete" is also resumable: the tail is retried.)
                 if (e is kotlinx.coroutines.CancellationException) {
-                    _state.value = DownloadState.Idle
+                    setStateIfCurrent(self, DownloadState.Idle)
                     throw e
                 }
                 val msg = e.message ?: "${e.javaClass.simpleName} (no detail)"
-                _state.value = DownloadState.Failed(model.id, msg)
+                setStateIfCurrent(self, DownloadState.Failed(model.id, msg))
                 // Mirror to ActivityLog so the failure survives closing the model-picker sheet.
                 ActivityLog.error("Model download for \"${model.id}\" failed — $msg")
             } finally {
-                job = null
+                synchronized(this@ModelDownloadManager) { if (job === self) job = null }
             }
         }
+        job = launched
+        launched.start()
+        Unit
     }
 
     /**
@@ -234,7 +265,7 @@ object ModelDownloadManager {
                         // Drop the leading path component ("sherpa-onnx-.../foo" -> "foo").
                         val rel = entry.name.substringAfter('/', "")
                         if (rel.isNotEmpty()) {
-                            val out = File(destDir, rel)
+                            val out = safeArchiveTarget(destDir, rel)
                             if (entry.isDirectory) {
                                 out.mkdirs()
                             } else {
@@ -247,6 +278,20 @@ object ModelDownloadManager {
                 }
             }
         }
+    }
+
+    /**
+     * Where archive entry [rel] may be written: [destDir]/[rel], but only if it canonicalizes to a path
+     * inside [destDir]. A `../` or absolute entry name (zip-slip) would otherwise write anywhere the app
+     * can — e.g. over its own code cache or prefs — so it fails the extraction instead.
+     */
+    internal fun safeArchiveTarget(destDir: File, rel: String): File {
+        val root = destDir.canonicalFile
+        val out = File(root, rel).canonicalFile
+        require(out != root && out.path.startsWith(root.path + File.separator)) {
+            "Model archive entry escapes the model directory: $rel"
+        }
+        return out
     }
 
     private fun availableBytes(dir: File): Long =

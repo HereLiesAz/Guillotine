@@ -915,7 +915,7 @@ class McpTools(
         "separate_stems" -> separateStems(args.getString("clip_id"))
         "denoise_clip" -> denoiseClip(args.getString("clip_id"))
         "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
-        "apply_transition" -> applyTransition(args.getString("from_clip_id"), args.getString("to_clip_id"), args.optString("type", "fade"), args.optDouble("duration_sec", 1.0).toFloat())
+        "apply_transition" -> applyTransition(args.getString("from_clip_id"), args.getString("to_clip_id"), args.optString("type", "fade").trim().lowercase().ifBlank { "fade" }, args.optDouble("duration_sec", 1.0).toFloat())
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
         "set_frame_step" -> setFrameStep(args.getString("clip_id"), args.getInt("step"))
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
@@ -2144,6 +2144,12 @@ class McpTools(
 
     /** Build a GL-style transition between two clips via FFmpeg xfade, adding the result as a new clip. */
     private fun applyTransition(fromClipId: String, toClipId: String, type: String, durationSec: Float): JSONObject {
+        // `type` is interpolated straight into the -filter_complex graph, so it must be a real xfade name —
+        // otherwise `fade:...;movie=/private/file` would smuggle extra filters past the filter guard.
+        require(FfmpegFilterGuard.isValidXfadeTransition(type)) {
+            "Unknown transition type: \"$type\". Use an FFmpeg xfade transition such as fade, fadeblack, " +
+                "dissolve, wipeleft, slideup, circleopen, pixelize or radial."
+        }
         val ffmpeg = settingsProvider().ffmpegPath
         require(ffmpeg.isNotBlank()) {
             "No ffmpeg set. Set an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters."
@@ -2484,44 +2490,21 @@ class McpTools(
      * `/system/...`, another app's storage, a `../` escape — is rejected with a clear MCP-facing error
      * instead of being handed to a `File`/`ffmpeg` read and silently composited into the export.
      */
-    private fun resolveAssetPath(rawPath: String, whatFor: String): java.io.File {
-        require(rawPath.isNotBlank()) { "Provide the path to $whatFor." }
-        val canonical = runCatching { java.io.File(rawPath).canonicalFile }
-            .getOrElse { throw IllegalArgumentException("Not a valid path: $rawPath") }
-        val allowedRoots = listOf(context.filesDir, context.cacheDir)
-            .mapNotNull { root -> runCatching { root.canonicalFile }.getOrNull() }
-        val allowed = allowedRoots.any { root ->
-            canonical == root || canonical.path.startsWith(root.path + java.io.File.separator)
-        }
-        require(allowed) {
-            "Path outside the app's own storage isn't allowed: $rawPath. Import it into the app first " +
-                "(e.g. via the LUT picker on the clip, or the media importer) so it lives under the " +
-                "app's own storage, then pass that path."
-        }
-        require(canonical.isFile) { "No file at: $rawPath" }
-        return canonical
-    }
+    private fun resolveAssetPath(rawPath: String, whatFor: String): java.io.File =
+        AssetPathGuard.resolve(rawPath, whatFor, listOf(context.filesDir, context.cacheDir))
 
     /**
-     * Reject an FFmpeg filtergraph that opens its own arbitrary local file instead of the clip's own
-     * media. `movie=`/`amovie=` are the canonical filter *sources* that read a path directly from the
-     * graph string; `subtitles=`/`ass=` and `afir=` accept a `filename=`/bare-path argument too. All
-     * five are legitimate FFmpeg filters otherwise, so we don't ban FFmpeg-filter syntax generally —
-     * just the specific filter names that would let `filter` smuggle in a path this tool never
-     * validated against [resolveAssetPath]'s allowlist. A filter node starts at the beginning of the
-     * graph or right after a `,`/`;`/`]` link, so match the name there followed by `=`.
+     * Reject any FFmpeg filtergraph that isn't made purely of vetted, file-free processing filters.
+     * Delegates to the shared allowlist [FfmpegFilterGuard] (a denylist of `movie=`/`subtitles=`… missed
+     * `drawtext=textfile=`, `lut3d`, `haldclut`, `sendcmd`, `curves=psfile=`, `sofalizer`, `frei0r`, and
+     * the file-WRITING `metadata=file=` / `stats_file=` options).
      */
     private fun rejectUnsafeFfmpegFilterSources(filterGraph: String) {
-        val unsafeSource = Regex("""(?i)(?:^|[,;\]])\s*(movie|amovie|subtitles|ass|afir)\s*=""")
-        val match = unsafeSource.find(filterGraph)
-        if (match != null) {
-            val name = match.groupValues[1]
-            throw IllegalArgumentException(
-                "The \"$name\" filter reads its own file path and isn't allowed in apply_ffmpeg_filter " +
-                    "— it can read any file on the device, not just this clip's media. Use a filter that " +
-                    "operates only on the clip's own video/audio streams.",
-            )
-        }
+        val reason = FfmpegFilterGuard.check(filterGraph) ?: return
+        throw IllegalArgumentException(
+            "This FFmpeg filtergraph isn't allowed in apply_ffmpeg_filter: $reason. Only filters that " +
+                "process the clip's own video/audio streams (no file, device or command-channel options) are accepted.",
+        )
     }
 
     /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). Stacks onto the clip's
@@ -2584,9 +2567,7 @@ class McpTools(
 
     /** Stacks a GLSL/ISF shader effect onto a clip's FX chain, with optional scalar-input overrides. */
     private fun applyShader(clipId: String, path: String, params: JSONObject?): JSONObject {
-        require(path.isNotBlank()) { "Provide the path to an .isf / .fs / .glsl shader file." }
-        val file = java.io.File(path)
-        require(file.isFile) { "No shader file at: $path" }
+        val file = resolveAssetPath(path, "an .isf / .fs / .glsl shader file")
         // Parse up front so unsupported/malformed shaders fail here with a clear message.
         val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
             .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
@@ -2618,8 +2599,7 @@ class McpTools(
 
     /** List a shader's adjustable scalar inputs (name, type, default, min, max). */
     private fun listShaderParams(path: String): JSONObject {
-        val file = java.io.File(path)
-        require(file.isFile) { "No shader file at: $path" }
+        val file = resolveAssetPath(path, "an .isf / .fs / .glsl shader file")
         val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
             .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
         val arr = JSONArray()

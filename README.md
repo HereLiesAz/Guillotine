@@ -19,7 +19,7 @@ is fully usable with zero configuration.
 
 - **Android** — [latest APK](https://github.com/HereLiesAz/Guillotine/releases/latest): the
   direct-download build is **ad-free** and **updates itself** from GitHub Releases (you're prompted
-  when a newer version is available). The [Google Play](https://github.com/HereLiesAz/Guillotine/releases/latest)
+  when a newer version is available). The [Google Play](https://play.google.com/store/apps/details?id=com.hereliesaz.theguillotine)
   build (internal / alpha tracks) is ad-supported and updates through Play.
 - **macOS** — [`.dmg`](https://github.com/HereLiesAz/Guillotine/releases/latest) (Apple Silicon;
   unsigned — right-click → Open on first launch).

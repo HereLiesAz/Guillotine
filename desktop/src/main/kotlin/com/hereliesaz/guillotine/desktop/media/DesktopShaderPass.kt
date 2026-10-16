@@ -29,8 +29,16 @@ object DesktopShaderPass {
 
     private class Compiled(val effect: RuntimeEffect, val uniforms: List<GlslShader.ShaderUniform>)
 
+    /** A compile result plus the file's (mtime, size) when it was read. */
+    private class PathEntry(val stamp: Pair<Long, Long>, val compiled: Optional<Compiled>)
+
     // path -> compiled effect (Optional.empty caches a failed compile so we don't retry every frame).
-    private val cache = ConcurrentHashMap<String, Optional<Compiled>>()
+    // Keyed with the file's mtime+size, so editing a shader on disk recompiles it instead of serving
+    // the stale effect for the rest of the session.
+    private val cache = ConcurrentHashMap<String, PathEntry>()
+
+    /** Bound on the source-text cache (store previews can feed many distinct shaders). */
+    private const val MAX_SOURCE_ENTRIES = 32
 
     // shader source text -> compiled effect, for callers that have the GLSL in hand rather than a path
     // on disk (e.g. a not-yet-installed store package's shader asset, extracted straight from its .azp
@@ -42,15 +50,22 @@ object DesktopShaderPass {
     fun canRender(shaderPath: String): Boolean =
         shaderPath.isNotBlank() && compiled(shaderPath) != null
 
-    private fun compiled(path: String): Compiled? =
-        cache.getOrPut(path) {
-            Optional.ofNullable(runCatching { compileText(java.io.File(path).readText()) }.getOrNull())
-        }.orElse(null)
+    private fun compiled(path: String): Compiled? {
+        val f = java.io.File(path)
+        val stamp = f.lastModified() to f.length()
+        cache[path]?.let { if (it.stamp == stamp) return it.compiled.orElse(null) }
+        val fresh = Optional.ofNullable(runCatching { compileText(f.readText()) }.getOrNull())
+        cache[path] = PathEntry(stamp, fresh)
+        return fresh.orElse(null)
+    }
 
-    private fun compiledFromSource(source: String): Compiled? =
-        sourceCache.getOrPut(source) {
+    private fun compiledFromSource(source: String): Compiled? {
+        sourceCache[source]?.let { return it.orElse(null) }
+        if (sourceCache.size >= MAX_SOURCE_ENTRIES) sourceCache.clear()
+        return sourceCache.getOrPut(source) {
             Optional.ofNullable(runCatching { compileText(source) }.getOrNull())
         }.orElse(null)
+    }
 
     private fun compileText(source: String): Compiled {
         val program = GlslShader.parse(source)

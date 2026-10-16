@@ -5,6 +5,7 @@ import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.LogSeverity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
 
@@ -76,6 +77,8 @@ object LiteRtLmTextEngine {
             }
         }
 
+        // runCatching would also swallow cancellation; let it propagate instead of falling back to CPU.
+        gpuAttempt.exceptionOrNull()?.let { if (it is CancellationException) throw it }
         val chosen = gpuAttempt.getOrElse {
             Engine(
                 EngineConfig(

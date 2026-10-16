@@ -69,6 +69,10 @@ object FfmpegFilter {
             "No ffmpeg set. Point Settings → AI Analyzer → FFmpeg filters at an ffmpeg executable."
         }
         require(File(ffmpegPath).let { it.isFile || ffmpegPath == "ffmpeg" }) { "ffmpeg not found at: $ffmpegPath" }
+        // [transition] is interpolated into the filter_complex graph — only a known xfade name may pass.
+        require(com.hereliesaz.guillotine.mcp.FfmpegFilterGuard.isValidXfadeTransition(transition)) {
+            "Unknown xfade transition: \"$transition\""
+        }
         // The transition must fit inside BOTH clips (offset = A − dur stays valid; B isn't shorter than dur).
         val maxDur = maxOf(0.1f, minOf(from.durSec, to.durSec) - 0.05f)
         val dur = durationSec.coerceIn(0.05f, maxDur)

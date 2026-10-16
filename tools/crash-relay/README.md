@@ -24,18 +24,28 @@ means end users can hit **Report** on an export failure and land a real issue in
    wrangler secret put GH_TOKEN     # paste a fine-grained PAT: Issues read & write on the repo
    ```
    `GH_REPO` is set in `wrangler.toml` (default `HereLiesAz/Guillotine`).
-3. Copy the deployed URL (e.g. `https://guillotine-crash-relay.<you>.workers.dev`).
-4. Bake it into release builds so end users don't need any configuration. Add a line to
-   `~/.gradle/gradle.properties` (or set as a CI secret exposed via `-P`):
+3. Recommended — set a shared header secret and (optionally) a KV namespace for rate limiting:
    ```
-   guillotine.crashRelayUrl=https://guillotine-crash-relay.<you>.workers.dev
+   wrangler secret put RELAY_SECRET   # clients must send it as X-Guillotine-Relay-Key
    ```
-   `app/build.gradle.kts` picks it up as `BuildConfig.DEFAULT_CRASH_RELAY_URL`. Alternately,
-   power users can override at runtime via **Menu → Settings → Crash reporting**.
+   This secret is **weak**: any app build that sends it carries it, so it only deters casual
+   abuse of a known URL. The relay additionally enforces a per-IP rate limit (10/hour; shared
+   across isolates when a `RATE_KV` binding is configured in `wrangler.toml`, best-effort
+   in-memory otherwise), a 64 KB body cap, and a label allowlist (`crash`, `bug`, `export`).
+4. Copy the deployed URL (e.g. `https://guillotine-crash-relay.<you>.workers.dev`).
 
-That's it — crashes captured on one run are POSTed automatically on the next launch,
-recurring crashes (same title) are added as comments instead of new issues, and the manual
-Report button on the ExportSheet files `bug,export`-labelled issues in one tap.
+Crash reporting is **strictly opt-in**. No relay URL is baked into the app: nothing is sent
+unless the user turns crash reporting on and enters a relay URL in **Menu → Settings → Crash
+reporting**. Once enabled, crashes captured on one run are POSTed on the next launch, recurring
+crashes (same title) are added as comments instead of new issues, and the manual Report button
+on the ExportSheet files `bug,export`-labelled issues.
+
+## What gets published
+
+Issues land in a **public** tracker. Before filing, the relay applies basic redaction to the
+title and body: email addresses, common API-token / bearer / JWT shapes, and `content://`,
+`file://` and on-device storage paths are replaced with placeholders. This is best-effort — it
+is not a guarantee that a log contains no personal data.
 
 ## Request shape
 
@@ -44,14 +54,16 @@ POST /
 {
   "title":  "<fingerprint or short summary>",
   "body":   "<markdown body>",
-  "labels": ["bug", "export"]      // optional; defaults to ["crash"]
+  "labels": ["bug", "export"]      // optional; allowlist crash|bug|export, defaults to ["crash"]
 }
 ```
 
 The Worker wraps a crash body in a fenced code block (it's raw text); manual reports pass a
-pre-formatted markdown body and are used as-is.
+pre-formatted markdown body and are used as-is. Each new issue ends with a
+`Relay fingerprint: guillotine-relay-<hash>` line (a hash of the title); de-duplication searches
+for that marker rather than the raw title.
 
 ## Other hosts
 
 Any endpoint that accepts that POST works (Vercel/Netlify function, Deno Deploy, etc.).
-Port `worker.js` — the only platform-specific bits are reading `env.GH_TOKEN` / `env.GH_REPO`.
+Port `worker.js` — the only platform-specific bits are reading `env.GH_TOKEN` / `env.GH_REPO` / `env.RELAY_SECRET` and the optional `RATE_KV` binding.

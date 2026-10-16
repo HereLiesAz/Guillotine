@@ -43,12 +43,14 @@ object AzpPackage {
      * [MAX_TOTAL_BYTES] caps the sum across the whole archive, and [MAX_ENTRIES] caps entry *count* —
      * a highly-compressible archive of a million empty-ish entries can exhaust memory/CPU on bookkeeping
      * alone even if no single entry is large. All three fail the install/verify cleanly (an
-     * [AzpException], never an OOM or a hang), well above any legitimate package: `AzphaltRegistry`
-     * itself caps a downloaded `.azp` at 128 MiB, so even a fully-legitimate max-size package inflates
-     * to a small multiple of that at most.
+     * [AzpException], never an OOM or a hang). Every entry is inflated into the heap, so the byte caps
+     * also scale down to the heap actually available: a fixed 512 MiB / 2 GiB pair is fine on a desktop
+     * JVM but would OOM an Android app (a few hundred MiB of heap) long before it tripped. A package
+     * that wouldn't fit is refused with a message instead; legitimate packages — `AzphaltRegistry` caps
+     * a download at 128 MiB — stay well within either bound.
      */
-    private const val MAX_ENTRY_BYTES = 512L * 1024 * 1024
-    private const val MAX_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
+    private val MAX_ENTRY_BYTES = minOf(512L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 4)
+    private val MAX_TOTAL_BYTES = minOf(2L * 1024 * 1024 * 1024, Runtime.getRuntime().maxMemory() / 2)
     private const val MAX_ENTRIES = 10_000
 
     /**

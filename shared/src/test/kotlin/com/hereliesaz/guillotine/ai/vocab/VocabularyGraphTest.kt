@@ -74,4 +74,26 @@ class VocabularyGraphTest {
     @Test fun normalize_strips_punctuation_and_case() {
         assertEquals("make it warm", VocabularyGraph.normalize("  Make it, WARM!!  "))
     }
+
+    @Test fun no_seed_belongs_to_two_concepts() {
+        // The reverse index is first-wins, so a seed shared by two concepts silently routes to one of them.
+        val owners = HashMap<String, MutableList<String>>()
+        for (c in VocabularyGraph.concepts) for (s in c.seeds) {
+            owners.getOrPut(VocabularyGraph.normalize(s)) { mutableListOf() }.add(c.id)
+        }
+        val dupes = owners.filterValues { it.size > 1 }
+        assertTrue("seeds in more than one concept: $dupes", dupes.isEmpty())
+    }
+
+    @Test fun formerly_colliding_terms_route_to_their_tools() {
+        assertEquals("trim", VocabularyGraph.lookup("trim")!!.conceptId)
+        assertEquals("mute", VocabularyGraph.lookup("mute")!!.conceptId)
+        assertEquals("reframe", VocabularyGraph.lookup("punch in")!!.conceptId)
+        assertEquals("stabilize", VocabularyGraph.lookup("smooth")!!.conceptId)
+    }
+
+    @Test fun prompt_appendix_does_not_invert_content_removal() {
+        val text = VocabularyGraph.promptAppendix()
+        assertTrue(text.contains("does NOT"))
+    }
 }
