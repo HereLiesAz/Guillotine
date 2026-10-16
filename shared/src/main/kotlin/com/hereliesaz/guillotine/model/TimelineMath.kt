@@ -74,24 +74,79 @@ object TimelineMath {
         return kfs.last().value
     }
 
-    /** Convert a timeline time to the corresponding source-media time for [clip]. */
+    /**
+     * Convert a timeline time to the corresponding source-media time for [clip], honouring
+     * [ClipFilters.speed] and SPEED keyframes. Constant stretches (no keyframes, before the first /
+     * after the last keyframe, hold or flat segments) integrate in O(1); only eased ramps between two
+     * different speeds are sampled numerically (10 ms steps), so a long clip no longer costs
+     * O(length / 10 ms) per frame.
+     */
     fun sourceTimeMs(clip: TimelineClip, timelineMs: Long): Long {
         val relMs = (timelineMs - clip.startTimeMs).coerceAtLeast(0L)
         val speedKfs = clip.keyframes.filter { it.property == KeyframeProperty.SPEED }.sortedBy { it.timeMs }
-        if (speedKfs.isEmpty() && clip.filters.speed == 1f) {
-            return clip.trimStartMs + relMs
+        if (speedKfs.isEmpty()) {
+            if (clip.filters.speed == 1f) return clip.trimStartMs + relMs
+            return clip.trimStartMs + (clip.filters.speed.toDouble() * relMs).toLong()
         }
-        
+
         var sourceAdvance = 0.0
-        val step = 10L
-        var t = 0L
-        while (t < relMs) {
-            val dt = if (t + step > relMs) relMs - t else step
-            val speed = if (speedKfs.isEmpty()) clip.filters.speed else interpolateSorted(speedKfs, t + dt / 2, clip.filters.speed)
-            sourceAdvance += speed * dt
-            t += dt
+        // Before the first keyframe the curve holds its first value.
+        var t = speedKfs.first().timeMs.coerceIn(0L, relMs)
+        sourceAdvance += speedKfs.first().value.toDouble() * t
+        for (i in 0 until speedKfs.size - 1) {
+            val a = speedKfs[i]
+            val b = speedKfs[i + 1]
+            val segEnd = b.timeMs.coerceAtMost(relMs)
+            if (segEnd <= t) continue
+            if (a.hold || a.value == b.value) {
+                sourceAdvance += a.value.toDouble() * (segEnd - t)
+                t = segEnd
+                continue
+            }
+            val step = 10L
+            while (t < segEnd) {
+                val dt = if (t + step > segEnd) segEnd - t else step
+                sourceAdvance += interpolateSorted(speedKfs, t + dt / 2, clip.filters.speed) * dt
+                t += dt
+            }
         }
+        // After the last keyframe the curve holds its last value.
+        if (t < relMs) sourceAdvance += speedKfs.last().value.toDouble() * (relMs - t)
         return clip.trimStartMs + sourceAdvance.toLong()
+    }
+
+    /** Source-media time at the clip's out point — `trimStartMs + durationMs` only at 1x speed. */
+    fun sourceEndMs(clip: TimelineClip): Long = sourceTimeMs(clip, clip.endTimeMs)
+
+    /** The clip's playback speed at [relMs] (ms from clip start): its SPEED curve, else [ClipFilters.speed]. */
+    fun speedAt(clip: TimelineClip, relMs: Long): Float {
+        val kfs = clip.keyframes.filter { it.property == KeyframeProperty.SPEED }.sortedBy { it.timeMs }
+        return interpolateSorted(kfs, relMs, clip.filters.speed)
+    }
+
+    /**
+     * Inverse of [sourceTimeMs]: the smallest clip-relative timeline offset at which [clip] reaches
+     * source time [sourceMs] (0 when [sourceMs] is at or before [TimelineClip.trimStartMs]). Not bounded
+     * by the clip's duration — the speed curve holds past its end, as [sourceTimeMs] does — so callers
+     * clamp to their own range.
+     */
+    fun timelineRelMs(clip: TimelineClip, sourceMs: Long): Long {
+        val delta = sourceMs - clip.trimStartMs
+        if (delta <= 0L) return 0L
+        val hasCurve = clip.keyframes.any { it.property == KeyframeProperty.SPEED }
+        if (!hasCurve) {
+            if (clip.filters.speed == 1f) return delta
+            return kotlin.math.ceil(delta / clip.filters.speed.toDouble()).toLong()
+        }
+        // Speed is always positive, so source time is monotonic in timeline time: bracket, then bisect.
+        var hi = 1L
+        while (sourceTimeMs(clip, clip.startTimeMs + hi) < sourceMs && hi < Long.MAX_VALUE / 4) hi *= 2
+        var lo = 0L
+        while (lo < hi) {
+            val mid = lo + (hi - lo) / 2
+            if (sourceTimeMs(clip, clip.startTimeMs + mid) >= sourceMs) hi = mid else lo = mid + 1
+        }
+        return lo
     }
 
     /**
@@ -148,10 +203,6 @@ object TimelineMath {
         clip.edits.any { it.action == EditAction.REMOVE && sourceMs >= it.startMs && sourceMs < it.endMs }
 
     /**
-     * The 'keep' ranges of a clip in source-media ms. If the clip has no edits,
-     * the whole trimmed range is kept. Used to build export cut lists.
-     */
-    /**
      * The source time the **preview** should show for [clip] at [timelineMs] — [sourceTimeMs], advanced
      * past any AI-edit REMOVE it lands in.
      *
@@ -175,9 +226,14 @@ object TimelineMath {
         return kept.last().last
     }
 
+    /**
+     * The 'keep' ranges of a clip in source-media ms. If the clip has no edits,
+     * the whole trimmed range is kept. Used to build export cut lists. The range ends at
+     * [sourceEndMs], so a sped-up or slowed clip covers the source it actually plays.
+     */
     fun keptRanges(clip: TimelineClip): List<LongRange> {
         val clipStart = clip.trimStartMs
-        val clipEnd = clip.trimStartMs + clip.durationMs
+        val clipEnd = sourceEndMs(clip)
         val removes = clip.edits
             .filter { it.action == EditAction.REMOVE }
             .map { it.startMs.coerceAtLeast(clipStart)..it.endMs.coerceAtMost(clipEnd) }

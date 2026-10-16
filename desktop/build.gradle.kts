@@ -64,6 +64,8 @@ dependencies {
     // javacv-platform. Producers of installers for a different OS must run on that OS.
     implementation(variantOf(libs.javacpp) { classifier(javacppClassifier) })
     implementation(variantOf(libs.ffmpeg) { classifier(javacppClassifier) })
+
+    testImplementation(libs.junit)
 }
 
 // Bake the full four-part version (single source of truth: version.properties) into a resource so the

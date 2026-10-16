@@ -40,6 +40,7 @@ import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.ui.ActivityLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -148,52 +149,21 @@ object Exporter {
             val outFile = File(context.cacheDir, "guillotine_export_${System.currentTimeMillis()}.mp4")
 
             phase("Encoding video and audio…")
-            coroutineScope {
-                var poller: Job? = null
-                try {
-                    suspendCancellableCoroutine { cont ->
-                        val builder = Transformer.Builder(context)
-                            .setVideoMimeType(MimeTypes.VIDEO_H264)
-                        // Media3's MP4 muxer rejects Opus/Vorbis/FLAC source audio; force AAC
-                        // re-encode so mixed-codec projects don't die with a bare "Export failed".
-                        // Skip the call entirely when the composition has no audio — the muxer
-                        // otherwise raises IllegalStateException with no message.
-                        if (hasAudio) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
-                        val transformer = builder
-                            .addListener(object : Transformer.Listener {
-                                override fun onCompleted(c: Composition, result: ExportResult) {
-                                    if (cont.isActive) cont.resume(Unit)
-                                }
-
-                                override fun onError(c: Composition, result: ExportResult, e: ExportException) {
-                                    if (cont.isActive) cont.resumeWithException(e)
-                                }
-                            })
-                            .build()
-
-                        poller = launch {
-                            val holder = ProgressHolder()
-                            var lastMilestone = -1
-                            while (isActive) {
-                                transformer.getProgress(holder)
-                                val p = (holder.progress / 100f).coerceIn(0f, 1f)
-                                onProgress(p, (p * document.totalDurationMs).toLong())
-                                // Emit at 25/50/75/100 so the log tells a story without spamming it.
-                                val ms = (p * 4).toInt()
-                                if (ms > lastMilestone && ms in 1..4) {
-                                    lastMilestone = ms
-                                    ActivityLog.progress("Encoding ${ms * 25}%…")
-                                }
-                                delay(200)
-                            }
-                        }
-
-                        cont.invokeOnCancellation { runCatching { transformer.cancel() } }
-                        transformer.start(composition, outFile.absolutePath)
+            var lastMilestone = -1
+            try {
+                runTransformer(context, composition, hasAudio, outFile, pollMs = 200) { p ->
+                    onProgress(p, (p * document.totalDurationMs).toLong())
+                    // Emit at 25/50/75/100 so the log tells a story without spamming it.
+                    val ms = (p * 4).toInt()
+                    if (ms > lastMilestone && ms in 1..4) {
+                        lastMilestone = ms
+                        ActivityLog.progress("Encoding ${ms * 25}%…")
                     }
-                } finally {
-                    poller?.cancel()
                 }
+            } catch (e: Throwable) {
+                // Failed or cancelled: don't leak a partial MP4 in the cache dir.
+                runCatching { outFile.delete() }
+                throw e
             }
 
             onProgress(1f, document.totalDurationMs)
@@ -289,44 +259,8 @@ object Exporter {
                 "guillotine_preview_${System.currentTimeMillis()}.mp4",
             )
             try {
-                coroutineScope {
-                    var poller: Job? = null
-                    try {
-                        suspendCancellableCoroutine<Unit> { cont ->
-                            val builder = Transformer.Builder(context)
-                                .setVideoMimeType(MimeTypes.VIDEO_H264)
-                            if (hasAudio) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
-                            val transformer = builder
-                                .addListener(object : Transformer.Listener {
-                                    override fun onCompleted(c: Composition, result: ExportResult) {
-                                        if (cont.isActive) cont.resume(Unit)
-                                    }
-
-                                    override fun onError(c: Composition, result: ExportResult, e: ExportException) {
-                                        if (cont.isActive) cont.resumeWithException(e)
-                                    }
-                                })
-                                .build()
-
-                            poller = launch {
-                                val holder = ProgressHolder()
-                                while (isActive) {
-                                    transformer.getProgress(holder)
-                                    onProgress((holder.progress / 100f).coerceIn(0f, 1f))
-                                    delay(150)
-                                }
-                            }
-                            cont.invokeOnCancellation {
-                                runCatching { transformer.cancel() }
-                                runCatching { outFile.delete() }
-                            }
-                            transformer.start(composition, outFile.absolutePath)
-                        }
-                    } finally {
-                        poller?.cancel()
-                    }
-                }
-            } catch (e: Exception) {
+                runTransformer(context, composition, hasAudio, outFile, pollMs = 150, onTick = onProgress)
+            } catch (e: Throwable) {
                 runCatching { outFile.delete() }
                 throw e
             }
@@ -335,6 +269,78 @@ object Exporter {
         } finally {
             mattes.values.forEach { runCatching { it.recycle() } }
             faceBlur.values.forEach { runCatching { it.recycle() } }
+        }
+    }
+
+    /**
+     * Run one Transformer encode of [composition] into [outFile] (must be called on Main —
+     * Transformer requires its application looper), polling progress into [onTick].
+     *
+     * Returns only once the Transformer has fully stopped — completed, failed, or (on coroutine
+     * cancellation) synchronously cancelled on Main in a NonCancellable block. Callers recycle the
+     * matte / face-blur bitmaps the composition's effects read on the GL thread right after this
+     * returns; the previous `invokeOnCancellation { transformer.cancel() }` ran on whatever thread
+     * cancelled the job and returned immediately, so the bitmaps could be recycled while the GL
+     * thread was still drawing them.
+     */
+    private suspend fun runTransformer(
+        context: Context,
+        composition: Composition,
+        hasAudio: Boolean,
+        outFile: File,
+        pollMs: Long,
+        onTick: (Float) -> Unit,
+    ) {
+        var transformer: Transformer? = null
+        var stopped = false
+        try {
+            coroutineScope {
+                var poller: Job? = null
+                try {
+                    suspendCancellableCoroutine<Unit> { cont ->
+                        val builder = Transformer.Builder(context)
+                            .setVideoMimeType(MimeTypes.VIDEO_H264)
+                        // Media3's MP4 muxer rejects Opus/Vorbis/FLAC source audio; force AAC
+                        // re-encode so mixed-codec projects don't die with a bare "Export failed".
+                        // Skip the call entirely when the composition has no audio — the muxer
+                        // otherwise raises IllegalStateException with no message.
+                        if (hasAudio) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        val t = builder
+                            .addListener(object : Transformer.Listener {
+                                override fun onCompleted(c: Composition, result: ExportResult) {
+                                    stopped = true
+                                    if (cont.isActive) cont.resume(Unit)
+                                }
+
+                                override fun onError(c: Composition, result: ExportResult, e: ExportException) {
+                                    stopped = true
+                                    if (cont.isActive) cont.resumeWithException(e)
+                                }
+                            })
+                            .build()
+                        transformer = t
+
+                        poller = launch {
+                            val holder = ProgressHolder()
+                            while (isActive) {
+                                t.getProgress(holder)
+                                onTick((holder.progress / 100f).coerceIn(0f, 1f))
+                                delay(pollMs)
+                            }
+                        }
+                        t.start(composition, outFile.absolutePath)
+                    }
+                } finally {
+                    poller?.cancel()
+                }
+            }
+        } finally {
+            if (!stopped) {
+                // Cancelled (or start() threw): stop the pipeline on Main and wait for it.
+                withContext(NonCancellable + Dispatchers.Main) {
+                    runCatching { transformer?.cancel() }
+                }
+            }
         }
     }
 

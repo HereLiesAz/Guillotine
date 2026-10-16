@@ -148,12 +148,19 @@ object AzpLlmSandbox {
     /**
      * Install [azp] into the private sandbox `owner/repo`. The token needs what the package's
      * `setup.requires.githubToken` declares. Throws with a readable message on any refusal.
+     *
+     * Install commits a workflow that runs with the token's reach and stores the user's key as a
+     * secret, so the package must be signed by a key in [trustedKeys], or by the publisher key [pins]
+     * already holds for its id (one the user approved when the package was installed). Unsigned or
+     * unrecognised packages are refused — there is deliberately no override here.
      */
     suspend fun install(
         github: GitHub,
         owner: String,
         repo: String,
         azp: ByteArray,
+        trustedKeys: Set<String>,
+        pins: AzpPublisherPins? = null,
         inputs: Map<String, String> = emptyMap(),
         createIfMissing: Boolean = true,
         runSetup: Boolean = true,
@@ -161,6 +168,10 @@ object AzpLlmSandbox {
     ): InstallResult = withContext(Dispatchers.IO) {
         val loaded = AzpPackage.load(azp) // integrity; throws on a bad package
         val manifest = loaded.manifest
+        val trust = AzpPackage.verifyTrust(azp, trustedKeys + listOfNotNull(pins?.keyFor(manifest.id)))
+        if (!trust.ok || !trust.trusted) {
+            throw IllegalArgumentException("${manifest.name} is not from a trusted publisher (${trust.reason}); refusing to set it up in the sandbox")
+        }
         val endpoint = (AzpLlm.parse(manifest) as? AzpLlm.Parsed.Ok)?.endpoint
             ?: throw IllegalArgumentException((AzpLlm.parse(manifest) as AzpLlm.Parsed.Unsupported).reason)
         if (!endpoint.supportsRunner) throw IllegalArgumentException("${manifest.name} doesn't run in a sandbox")

@@ -65,8 +65,8 @@ bring-your-own-key generation providers (a separate, opt-in system), see [PROVID
 ### The Gemma mirror
 
 Google's Gemma LiteRT models (`.task`) are normally **gated** — they require accepting the Gemma
-license and signing in to Hugging Face before download. To keep the one-tap flow working, the
-`.github/workflows/mirror-models.yml` GitHub Action **re-hosts the Gemma weights into public,
+license and signing in to Hugging Face before download. To keep the one-tap flow working, a
+maintainer-run mirroring job (not a workflow in this repository) **re-hosts the Gemma weights into public,
 un-gated repositories in the project's own `HereLiesAz` Hugging Face namespace**. It runs entirely on
 a GitHub runner (using a maintainer's Gemma-accepted `HF_TOKEN`); nothing passes through a user's
 machine. The mirror currently covers:

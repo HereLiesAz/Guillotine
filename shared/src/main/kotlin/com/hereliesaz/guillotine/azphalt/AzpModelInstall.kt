@@ -142,7 +142,17 @@ object AzpModelInstall {
         if (!modelsDir.isDirectory && !modelsDir.mkdirs()) {
             throw AzpPackage.AzpException("azp: cannot create models directory ${modelsDir.absolutePath}")
         }
-        val installed = plan.models.map { model -> installOne(plan, model, modelsDir, onProgress) }
+        // All-or-nothing across the package's models: download and verify every one into its `.part`
+        // and check every slot for collisions BEFORE promoting any of them, so a failure on the second
+        // model can't leave the first one already swapped in (a half-installed, mixed-version package).
+        val staged = ArrayList<Pair<AzpModelInstaller.PlannedModel, File>>()
+        val installed = try {
+            for (model in plan.models) staged += model to stage(plan, model, modelsDir, onProgress)
+            for ((model, _) in staged) checkSlotCollision(modelsDir, slotKey(model), model.packageId)
+            staged.map { (model, part) -> Installed(model, model.slot, finalize(modelsDir, model, part)) }
+        } finally {
+            staged.forEach { it.second.delete() }
+        }
 
         // Pin the publisher on first install, or when the caller approved a rotation. Only signed
         // packages pin — an unsigned package leaves no key to enforce against.
@@ -152,14 +162,17 @@ object AzpModelInstall {
         return Result(plan.trust, packageId, installed, signer)
     }
 
-    private fun installOne(
+    /**
+     * Land [model]'s verified bytes in a `.part` file and return it; only a fully-verified download is
+     * later promoted to its final name ([finalize]), so a crash mid-download never leaves a truncated
+     * model wired in. The caller owns (and deletes) the returned file; on failure it is deleted here.
+     */
+    private fun stage(
         plan: AzpModelInstaller.InstallPlan,
         model: AzpModelInstaller.PlannedModel,
         modelsDir: File,
         onProgress: (Progress) -> Unit,
-    ): Installed {
-        // Land the bytes in a `.part` file first; only a fully-verified download is promoted to its final
-        // name, so a crash mid-download never leaves a truncated model wired in.
+    ): File {
         val part = File(modelsDir, sanitizeFilename(model.filename) + ".part")
         part.parentFile?.mkdirs()
         try {
@@ -183,11 +196,17 @@ object AzpModelInstall {
                     )
                 }
             }
-            return Installed(model, model.slot, finalize(modelsDir, model, part))
-        } finally {
+            return part
+        } catch (e: Throwable) {
             part.delete()
+            throw e
         }
     }
+
+    /** The on-disk name [model] occupies under the models dir — the key its ownership is recorded under. */
+    private fun slotKey(model: AzpModelInstaller.PlannedModel): String =
+        if (model.type.trim().lowercase() == "sherpa-bundle") sanitizeFilename(model.filename).removeSuffix(".zip")
+        else sanitizeFilename(model.filename)
 
     /**
      * Stream [url] into [dest] while hashing, returning the `sha256-<hex>` of what was written. Retries
@@ -354,8 +373,8 @@ object AzpModelInstall {
      * by a different package id, and [recordProvenance] keeps that ownership record current for next time.
      */
     private fun finalize(modelsDir: File, model: AzpModelInstaller.PlannedModel, part: File): String {
+        val key = slotKey(model)
         if (model.type.trim().lowercase() == "sherpa-bundle") {
-            val key = sanitizeFilename(model.filename).removeSuffix(".zip")
             checkSlotCollision(modelsDir, key, model.packageId)
             val outDir = File(modelsDir, key)
             if (outDir.exists()) outDir.deleteRecursively()
@@ -364,7 +383,6 @@ object AzpModelInstall {
             recordProvenance(modelsDir, key, model.packageId)
             return outDir.absolutePath
         }
-        val key = sanitizeFilename(model.filename)
         checkSlotCollision(modelsDir, key, model.packageId)
         val target = File(modelsDir, key)
         if (target.exists()) target.delete()
@@ -390,11 +408,13 @@ object AzpModelInstall {
             for (k in o.keys()) o.optString(k).takeIf { it.isNotBlank() }?.let { m[k] = it }
             m
         } catch (e: Exception) {
-            // Best-effort: a corrupt provenance file must not block every future install. Losing the
-            // ownership record just means the next write to a colliding name won't be caught — no worse
-            // than the guard not existing at all, and strictly better than refusing every install because
-            // one bookkeeping file got corrupted.
-            emptyMap()
+            // Fail closed, like AzpPublisherPins: reading a corrupt file as empty would both skip the
+            // collision check and let recordProvenance overwrite the file with a single entry, silently
+            // discarding every other package's ownership record.
+            throw AzpPackage.AzpException(
+                "azp: the model ownership record ${f.absolutePath} is unreadable — refusing to install. " +
+                    "Move it aside to reset it.",
+            )
         }
     }
 
@@ -496,10 +516,14 @@ object AzpModelInstall {
         return total
     }
 
-    /** Strip any path component from a suggested filename so it can only land directly in the models dir. */
+    /**
+     * Strip any path component from a suggested filename so it can only land directly in the models dir.
+     * Leading dots are stripped too: a dot-name is hidden, and could otherwise target the installer's
+     * own bookkeeping files (`.azp-model-provenance.json` and its `.tmp`).
+     */
     private fun sanitizeFilename(name: String): String {
         val base = name.replace('\\', '/').substringAfterLast('/').trim()
-        val cleaned = base.filter { it.isLetterOrDigit() || it == '.' || it == '-' || it == '_' }
+        val cleaned = base.filter { it.isLetterOrDigit() || it == '.' || it == '-' || it == '_' }.trimStart('.')
         return cleaned.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "model.bin"
     }
 

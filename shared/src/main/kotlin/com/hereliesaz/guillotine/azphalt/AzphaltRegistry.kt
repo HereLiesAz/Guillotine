@@ -195,28 +195,56 @@ object AzphaltRegistry {
         }
     }
 
+    /**
+     * GET [url], following at most [MAX_REDIRECTS] redirects by hand. `HttpURLConnection` would follow
+     * one to any host, which would quietly hand the "this host only" guarantee in [BASE_URL]'s doc to
+     * whoever controls a redirect — so only an https hop that stays on azphalt.store (apex or a
+     * subdomain, e.g. azphalt.store → www.azphalt.store) is followed.
+     */
     private fun getBytes(url: String, maxBytes: Long): ByteArray {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            instanceFollowRedirects = true // azphalt.store → www.azphalt.store
-            setRequestProperty("Accept", "*/*")
-        }
-        try {
-            val code = try {
-                conn.responseCode
-            } catch (e: IOException) {
-                throw RegistryException("Couldn't reach azphalt.store — ${e.message ?: "no connection"}.")
+        var current = URL(url)
+        repeat(MAX_REDIRECTS + 1) {
+            val conn = (current.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "*/*")
             }
-            if (code != HttpURLConnection.HTTP_OK) {
-                conn.errorStream?.use { runCatching { it.readBounded(maxBytes) } }
-                throw RegistryException(describe(code))
+            try {
+                val code = try {
+                    conn.responseCode
+                } catch (e: IOException) {
+                    throw RegistryException("Couldn't reach azphalt.store — ${e.message ?: "no connection"}.")
+                }
+                if (code in 300..399 && code != HttpURLConnection.HTTP_NOT_MODIFIED) {
+                    val location = conn.getHeaderField("Location")
+                        ?: throw RegistryException("azphalt.store returned HTTP $code with no redirect target.")
+                    val next = runCatching { URL(current, location) }.getOrNull()
+                    if (next == null || !isRegistryHost(next)) {
+                        throw RegistryException("azphalt.store redirected somewhere other than azphalt.store — refusing to follow.")
+                    }
+                    current = next
+                    return@repeat
+                }
+                if (code != HttpURLConnection.HTTP_OK) {
+                    conn.errorStream?.use { runCatching { it.readBounded(maxBytes) } }
+                    throw RegistryException(describe(code))
+                }
+                return conn.inputStream.use { it.readBounded(maxBytes) }
+            } finally {
+                conn.disconnect()
             }
-            return conn.inputStream.use { it.readBounded(maxBytes) }
-        } finally {
-            conn.disconnect()
         }
+        throw RegistryException("azphalt.store redirected too many times.")
+    }
+
+    private const val MAX_REDIRECTS = 5
+
+    /** An https URL on azphalt.store itself or one of its subdomains. */
+    internal fun isRegistryHost(u: URL): Boolean {
+        val host = u.host.lowercase()
+        return u.protocol == "https" && (host == "azphalt.store" || host.endsWith(".azphalt.store"))
     }
 
     private fun describe(code: Int): String = when (code) {

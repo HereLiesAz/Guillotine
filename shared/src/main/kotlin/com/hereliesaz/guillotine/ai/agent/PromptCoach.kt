@@ -137,7 +137,9 @@ object PromptCoach {
         if (q.contains("slow motion") || containsAny(q, "make it slower", "slow it down", "slower pacing")) {
             return false
         }
-        val action = containsAny(
+        // Whole words only: this path deletes footage without the LLM, so "cute"/"trimmed hedge"-style
+        // substrings must not count as an editing verb.
+        val action = containsAnyWord(
             q,
             "cut", "remove", "delete", "trim", "shorten", "tighten", "speed up", "faster",
         )
@@ -233,7 +235,14 @@ object PromptCoach {
     private fun containsAny(text: String, vararg needles: String): Boolean =
         needles.any(text::contains)
 
-    private val BORING_PREFIX_REGEX = Regex("\\bbor(?:$|i|e)")
+    private fun containsAnyWord(text: String, vararg needles: String): Boolean =
+        needles.any { Regex("(?<![a-z])${Regex.escape(it)}(?![a-z])").containsMatchIn(text) }
+
+    // "boring" and its common forms/typos as a whole word, plus a still-being-typed "bor"/"bori" at the
+    // very end of the input. A bare `bor` prefix anywhere also matched names and words like "Boris" and
+    // "borealis", which made "cut Boris's intro" run the deterministic dead-air cut.
+    private val BORING_PREFIX_REGEX =
+        Regex("\\b(?:bor(?:e|ed|es|ing|in|ign|nig|edom)|boirng)\\b|\\bbor(?:i|in)?$")
     private val TOOL_NAME_REGEX = Regex("^[a-z0-9]+(?:_[a-z0-9]+)+$")
 
     private fun normalize(text: String): String =

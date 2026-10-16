@@ -56,7 +56,17 @@ it to the phone, and returns the decrypted response — a drop-in replacement fo
 ## Security notes
 
 - **End-to-end:** only the app and this proxy (both holding the token) can read traffic. Cloudflare
-  relays opaque `{rid, iv, ct}` frames.
+  relays opaque `{v, rid, ctr, ts, iv, ct}` frames. Each direction has its own key, and the routing id,
+  direction, counter and timestamp are authenticated (AES-GCM AAD), so the Worker can't swap a response
+  onto another request, reflect a frame back, or re-stamp an old one.
+- **Replay protection:** the app runs each request once — it rejects a repeated `rid` and any request
+  whose timestamp is more than 10 minutes off its clock (keep the phone's and computer's clocks roughly
+  right). The proxy accepts a response only for a still-pending request with the matching `rid`/`ctr`.
+- **Local endpoint hardening:** the proxy only answers requests with `Host: 127.0.0.1:<PORT>` (or
+  `localhost:<PORT>`), `Content-Type: application/json` and **no** `Origin` header, so a web page in
+  your browser can't drive the editor through it (CSRF / DNS rebinding). JSON-RPC notifications are
+  acknowledged with `202` immediately.
+- **Version:** this is frame format v2; an older app or proxy (v1) won't interoperate — update both.
 - **Token = secret.** Anyone with it can drive the editor. Rotate it any time with **Regenerate**
   in the app's Settings (instantly invalidates old proxies).
 - `RELAY_ACCESS_KEY` is a separate, optional gate that just stops strangers from using *your*

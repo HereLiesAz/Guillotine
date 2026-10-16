@@ -149,6 +149,10 @@
     the endpoint <strong>you</strong> set up; if you never set a relay URL, nothing is sent. The
     credential used to file issues lives in your relay’s server-side secret and is <strong>never</strong>
     included in the app.</p>
+    <p>No relay is configured by default — the app ships without one. If you use the reference relay
+    (<code>tools/crash-relay</code>), it files reports to a <strong>public</strong> issue tracker and
+    applies basic redaction first (email addresses, common token formats, and <code>content://</code> /
+    file paths), but that redaction is best-effort.</p>
 
     <h2>Automation interface (MCP) and optional cloud relay</h2>
     <p>For power users and AI tooling, Guillotine runs a small <strong>local automation server</strong>

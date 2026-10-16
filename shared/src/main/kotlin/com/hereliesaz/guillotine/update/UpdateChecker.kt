@@ -137,11 +137,6 @@ object UpdateChecker {
         Regex("""\d+""").findAll(v).map { it.value.toLongOrNull() ?: 0L }.toList()
 
     /**
-     * Stream [url] to [dest], reporting (bytesRead, totalBytes) as it goes (totalBytes is -1 if the
-     * server omits Content-Length). Returns true on success; on any failure the partial file is
-     * deleted and false returned.
-     */
-    /**
      * Check [file] against what [asset] advertises, before it is handed to an installer.
      *
      * Size is always checked — it is free and catches the common real failure, a partial download.
@@ -180,6 +175,11 @@ object UpdateChecker {
         md.digest().joinToString("") { "%02x".format(it) }
     }.getOrNull()
 
+    /**
+     * Stream [url] to [dest], reporting (bytesRead, totalBytes) as it goes (totalBytes is -1 if the
+     * server omits Content-Length). Returns true on success; on any failure the partial file is
+     * deleted and false returned.
+     */
     fun download(url: String, dest: File, onProgress: (Long, Long) -> Unit = { _, _ -> }): Boolean {
         return runCatching {
             val req = Request.Builder().url(url).header("User-Agent", "Guillotine-Updater").build()

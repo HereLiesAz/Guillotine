@@ -2,13 +2,15 @@ package com.hereliesaz.guillotine.desktop.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import com.hereliesaz.guillotine.desktop.platform.DesktopAssetPaths
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
 import javax.swing.JFileChooser
 
 /**
- * Open the native file picker and return the chosen file, or null if cancelled. Blocking/modal — call
+ * Open the native file picker and return the chosen file, or null if cancelled. The file's folder is
+ * recorded as a user-picked root ([DesktopAssetPaths.addUserRoot]) so MCP asset tools may read it. Blocking/modal — call
  * from a UI onClick (Compose Desktop dispatches those on the AWT thread).
  */
 fun pickFile(title: String): File? {
@@ -16,7 +18,7 @@ fun pickFile(title: String): File? {
     fd.isVisible = true
     val dir = fd.directory
     val name = fd.file
-    return if (dir != null && name != null) File(dir, name) else null
+    return if (dir != null && name != null) File(dir, name).also(DesktopAssetPaths::addUserRoot) else null
 }
 
 /**
@@ -28,7 +30,11 @@ fun pickFolder(title: String): File? {
         dialogTitle = title
         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
     }
-    return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
+    return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+        chooser.selectedFile.also(DesktopAssetPaths::addUserRoot)
+    } else {
+        null
+    }
 }
 
 @Composable
@@ -86,7 +92,10 @@ fun rememberMediaImportLauncher(onPicked: (List<File>) -> Unit): () -> Unit {
             fd.isMultipleMode = true
             fd.isVisible = true
             val files = fd.files
-            if (files != null && files.isNotEmpty()) onPicked(files.toList())
+            if (files != null && files.isNotEmpty()) {
+                files.forEach(DesktopAssetPaths::addUserRoot)
+                onPicked(files.toList())
+            }
         }
     }
 }

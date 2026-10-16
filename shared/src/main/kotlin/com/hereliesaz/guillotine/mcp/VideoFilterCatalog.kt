@@ -142,8 +142,12 @@ object VideoFilterCatalog {
             "Pixelate / mosaic the whole frame ('pixelate', 'mosaic', '8-bit blocky look', 'censor-blocks').",
             listOf(pPixel), "Pixelated the clip and added the result as a new clip.",
             // Downscale-then-upscale with nearest-neighbour: works on every ffmpeg build (unlike the newer
-            // `pixelize` filter). The second scale multiplies the already-downscaled iw/ih back up by n.
-        ) { val n = it.i(pPixel).coerceIn(2, 256); "scale=iw/$n:ih/$n:flags=neighbor,scale=iw*$n:ih*$n:flags=neighbor" },
+            // `pixelize` filter). Upscaling with `scale2ref` against an untouched copy of the input lands
+            // on the ORIGINAL size exactly — `iw/n … iw*n` rounded, so e.g. 1080/16*16 = 1088 and the clip's
+            // resolution changed whenever a dimension wasn't a multiple of n.
+        ) { val n = it.i(pPixel).coerceIn(2, 256)
+            "split=2[px_a][px_ref];[px_a]scale=iw/$n:ih/$n:flags=neighbor[px_s];" +
+                "[px_s][px_ref]scale2ref=flags=neighbor[px_o][px_r];[px_r]nullsink;[px_o]null" },
         Spec(
             "warm",
             "Warm the colour up, toward orange/gold ('warmer', 'warm tone', 'golden hour look').",

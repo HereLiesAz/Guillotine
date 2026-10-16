@@ -122,4 +122,17 @@ class GlslShaderTest {
         assertEquals(1, Regex("#version").findAll(p.fragmentShader).count())
         assertTrue(p.fragmentShader.trimStart().startsWith("#version 100"))
     }
+
+    @Test fun nonIdentifierInputNameIsRejected() {
+        val injected = """
+            /*{ "INPUTS": [ {"NAME":"x; } void evil() {","TYPE":"float"} ] }*/
+            void main() { gl_FragColor = vec4(0.0); }
+        """.trimIndent()
+        assertThrows(IllegalArgumentException::class.java) { GlslShader.parse(injected) }
+        val regexy = """
+            /*{ "INPUTS": [ {"NAME":"img(","TYPE":"image"} ] }*/
+            void main() { gl_FragColor = vec4(0.0); }
+        """.trimIndent()
+        assertThrows(IllegalArgumentException::class.java) { GlslShader.parse(regexy) }
+    }
 }

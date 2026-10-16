@@ -31,16 +31,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Setup Pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
         # enablement: true switches the repo's Pages source to "GitHub Actions" if it's currently
         # set to "Deploy from a branch" — that setting is what causes deploy-pages to return
         # "Deployment failed, try again later" no matter how well-formed the artifact is.
         with:
           enablement: true
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           # Upload docs folder
           path: './docs/'
@@ -51,7 +51,7 @@ jobs:
       - name: Deploy to GitHub Pages (attempt 1)
         id: deploy1
         continue-on-error: true
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
 
       - name: Pause before retry
         if: steps.deploy1.outcome == 'failure'
@@ -61,7 +61,7 @@ jobs:
         id: deploy2
         if: steps.deploy1.outcome == 'failure'
         continue-on-error: true
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
 
       - name: Pause before final retry
         if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
@@ -70,4 +70,4 @@ jobs:
       - name: Deploy to GitHub Pages (final attempt)
         id: deployment
         if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
