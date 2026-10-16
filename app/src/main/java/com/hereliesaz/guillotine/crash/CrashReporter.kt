@@ -20,17 +20,14 @@ object CrashConfig {
     private const val KEY_RELAY = "relay_url"
 
     /**
-     * The relay endpoint used for both automatic crash reports and manual "Report" button posts.
-     * User setting wins so anyone can point at their own fork of the Worker; otherwise falls back
-     * to the BuildConfig-embedded default so end users don't need any configuration OR a GH
-     * account for the Report button to file issues on the maintainer's repo.
+     * The relay endpoint used for both automatic crash reports and manual "Report" posts — ONLY the
+     * URL the user entered in Settings. Blank means crash reporting is off (the default), exactly as
+     * PRIVACY.md and the Settings text promise: there is deliberately no build-time default relay to
+     * fall back to, since that would send reports from users who never opted in.
      */
-    fun relayUrl(context: Context): String {
-        val userSet = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    fun relayUrl(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_RELAY, "").orEmpty()
-        return if (userSet.isNotBlank()) userSet
-        else com.hereliesaz.guillotine.BuildConfig.DEFAULT_CRASH_RELAY_URL
-    }
 
     fun setRelayUrl(context: Context, url: String) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_RELAY, url.trim()).apply()

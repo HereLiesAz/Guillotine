@@ -127,7 +127,9 @@ object FaceBlurrer {
                 val r = MediaMetadataRetriever()
                 try {
                     r.setDataSource(context, parsed)
-                    r.getFrameAtTime(atMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    // OPTION_CLOSEST (exact frame), not CLOSEST_SYNC: the nearest keyframe can be
+                    // seconds away, so the blur patch would track a face from a different frame.
+                    r.getFrameAtTime(atMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
                 } finally {
                     r.release()
                 }

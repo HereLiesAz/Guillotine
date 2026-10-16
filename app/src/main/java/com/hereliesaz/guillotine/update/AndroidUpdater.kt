@@ -27,15 +27,32 @@ object AndroidUpdater {
         val asset: ReleaseAsset,
     )
 
-    /** The latest release's APK, if it is strictly newer than this build; else null. */
-    suspend fun check(): Available? = withContext(Dispatchers.IO) {
-        val release = UpdateChecker.fetchLatest() ?: return@withContext null
-        val apk = release.asset { it.endsWith(".apk", ignoreCase = true) } ?: return@withContext null
-        val latest = UpdateChecker.versionIn(apk.name) ?: return@withContext null
-        if (UpdateChecker.isNewer(current = BuildConfig.VERSION_NAME, latest = latest)) {
-            Available(latest, release.notes, release.htmlUrl, apk)
+    /**
+     * Outcome of [check]. Distinguishes "up to date" from "couldn't tell" — a manual check used to
+     * report "You're on the latest version" when it was merely offline.
+     */
+    sealed interface CheckResult {
+        data object UpToDate : CheckResult
+        data class Update(val available: Available) : CheckResult
+        data class Failed(val reason: String) : CheckResult
+    }
+
+    /** Check the latest GitHub release against this build. Never throws. */
+    suspend fun check(): CheckResult = withContext(Dispatchers.IO) {
+        classify(UpdateChecker.fetchLatest(), BuildConfig.VERSION_NAME)
+    }
+
+    /** Pure decision behind [check]; [release] is null when the fetch failed. */
+    internal fun classify(release: ReleaseInfo?, currentVersion: String): CheckResult {
+        if (release == null) return CheckResult.Failed("Couldn't reach GitHub to check for updates.")
+        val apk = release.asset { it.endsWith(".apk", ignoreCase = true) }
+            ?: return CheckResult.Failed("The latest release has no APK to compare against.")
+        val latest = UpdateChecker.versionIn(apk.name)
+            ?: return CheckResult.Failed("Couldn't read the version of the latest release.")
+        return if (UpdateChecker.isNewer(current = currentVersion, latest = latest)) {
+            CheckResult.Update(Available(latest, release.notes, release.htmlUrl, apk))
         } else {
-            null
+            CheckResult.UpToDate
         }
     }
 

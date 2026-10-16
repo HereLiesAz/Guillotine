@@ -378,13 +378,17 @@ fun SettingsScreen(
         }
     }
 
-    // Settings backup/restore via SAF
+    // Settings backup/restore via SAF. Secrets (API keys, sandbox token) are excluded unless the
+    // user explicitly opts in — the file is plaintext JSON.
+    var backupIncludeSecrets by remember { mutableStateOf(false) }
     val backupLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         runCatching {
-            com.hereliesaz.guillotine.data.SettingsBackup.export(context, uri, buildSettings())
+            com.hereliesaz.guillotine.data.SettingsBackup.export(context, uri, buildSettings(), includeSecrets = backupIncludeSecrets)
+        }.onFailure {
+            android.widget.Toast.makeText(context, "Couldn't export settings: ${it.message ?: it.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
         }
     }
     val restoreLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -392,7 +396,7 @@ fun SettingsScreen(
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         runCatching {
-            val restored = com.hereliesaz.guillotine.data.SettingsBackup.`import`(context, uri)
+            val restored = com.hereliesaz.guillotine.data.SettingsBackup.`import`(context, uri, buildSettings())
             provider = restored.provider
             keys = restored.keys
             models = restored.models
@@ -426,6 +430,8 @@ fun SettingsScreen(
             diarizeEmbedModelPath = restored.diarizeEmbedModelPath
             stemModelPath = restored.stemModelPath
             denoiseModelPath = restored.denoiseModelPath
+        }.onFailure {
+            android.widget.Toast.makeText(context, "Couldn't import settings: ${it.message ?: it.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
@@ -823,7 +829,12 @@ fun SettingsScreen(
                         textStyle = TextStyle(color = White, fontSize = 12.sp),
                         singleLine = true,
                     )
-                    Text("Set the URL of your crash-relay (see tools/crash-relay) to auto-file issues.", color = Neutral500, fontSize = 10.sp)
+                    Text(
+                        "Off unless you enter a URL. When set, crash reports (stack trace, device/app version, " +
+                            "recent app log) are sent to this relay on the next launch to file issues " +
+                            "(see tools/crash-relay). Clear it to stop.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
 
                     Text("MCP access token (external AI tools)", color = Neutral400, fontSize = 12.sp)
                     OutlinedTextField(
@@ -903,7 +914,23 @@ fun SettingsScreen(
                             modifier = Modifier.clickableText { restoreLauncher.launch(arrayOf("application/json", "*/*")) },
                         )
                     }
-                    Text("Export saves all AI settings and user-defined tools to a file. Import restores them (overwriting current settings).", color = Neutral500, fontSize = 10.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(checked = backupIncludeSecrets, onCheckedChange = { backupIncludeSecrets = it })
+                        Text("Include API keys and tokens", color = Neutral400, fontSize = 11.sp)
+                    }
+                    if (backupIncludeSecrets) {
+                        Text(
+                            "Warning: keys are written UNENCRYPTED. Anyone (or any app/cloud sync) that can read " +
+                                "the file can use your accounts. Store it somewhere private.",
+                            color = Red500, fontSize = 10.sp,
+                        )
+                    }
+                    Text(
+                        "Export saves AI settings and user-defined tools to a file — without API keys unless " +
+                            "included above. Import restores them, overwriting current settings; keys missing " +
+                            "from the file are kept as they are on this device.",
+                        color = Neutral500, fontSize = 10.sp,
+                    )
 
                     // Direct-download (github) build only: manual "check for updates" — the mounted
                     // UpdatePrompt (near the app root) watches UpdateSignals and shows the dialog.
@@ -1282,6 +1309,8 @@ fun ExportSheet(
     onDismiss: () -> Unit,
     /** Share the just-exported video; null until the export produced a shareable file. */
     onShare: (() -> Unit)? = null,
+    /** Cancel the in-flight render; shown while [isExporting] (the dialog itself is undismissable then). */
+    onCancelExport: (() -> Unit)? = null,
 ) {
     var name by remember { mutableStateOf("guillotine_export") }
     var regionOnly by remember { mutableStateOf(false) }
@@ -1313,6 +1342,13 @@ fun ExportSheet(
                     // The user reported "no idea why it failed" — showing the current phase means
                     // they can also tell WHEN it's slow and WHERE it dies if it fails.
                     exportPhase?.let { Text(it, color = Neutral500, fontSize = 11.sp) }
+                    if (onCancelExport != null) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Button(onClick = onCancelExport, colors = ButtonDefaults.buttonColors(containerColor = Neutral800)) {
+                                Text("Cancel render", fontSize = 12.sp, color = White)
+                            }
+                        }
+                    }
                 }
                 else -> {
                     OutlinedTextField(

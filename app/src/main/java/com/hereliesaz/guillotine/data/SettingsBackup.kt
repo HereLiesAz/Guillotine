@@ -54,7 +54,31 @@ object SettingsBackup {
         coerceInputValues = true
     }
 
-    fun export(context: Context, uri: Uri, settings: AiSettings) {
+    /**
+     * Write [settings] (plus user-defined tools) to [uri].
+     *
+     * Secrets — every API key and the sandbox token — are written in PLAINTEXT JSON, so they are
+     * left out unless [includeSecrets] is explicitly set (the Settings UI defaults it off and warns
+     * when it's on). A backup without secrets restores everything else; [import] then keeps the
+     * keys already on the device.
+     */
+    fun export(context: Context, uri: Uri, settings: AiSettings, includeSecrets: Boolean = false) {
+        val bundle = toBundle(settings, UserToolStore.load(context), includeSecrets)
+        // Serialize BEFORE opening the destination stream — "wt" mode truncates the target the
+        // moment it's opened, so serializing first means an encoding failure never touches the
+        // file at the user's chosen location (see ProjectStore.save for the same reasoning; SAF
+        // has no portable atomic-replace primitive, so this only covers encode failures, not a
+        // genuine I/O error mid-write).
+        val text = encode(bundle)
+        context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
+            out.write(text.toByteArray())
+        } ?: throw IllegalStateException("Could not open file for writing.")
+    }
+
+    internal fun encode(bundle: SettingsBundle): String = json.encodeToString(SettingsBundle.serializer(), bundle)
+
+    /** Pure mapping behind [export]; secrets are blanked unless [includeSecrets]. */
+    internal fun toBundle(settings: AiSettings, userTools: List<UserTool>, includeSecrets: Boolean): SettingsBundle {
         val bundle = SettingsBundle(
             provider = settings.provider.name,
             keys = settings.keys.mapKeys { it.key.name },
@@ -68,7 +92,7 @@ object SettingsBackup {
             genModels = settings.genModels.mapKeys { it.key.name },
             genExtras = settings.genExtras.mapKeys { it.key.name },
             genDefaults = settings.genDefaults.entries.associate { it.key.name to it.value.name },
-            userTools = UserToolStore.load(context),
+            userTools = userTools,
             speechModelPath = settings.speechModelPath,
             agentModelPath = settings.agentModelPath,
             idEmbedModelPath = settings.idEmbedModelPath,
@@ -90,21 +114,36 @@ object SettingsBackup {
             azpSandboxInstalls = settings.azpSandboxInstalls,
             azpLlmTextId = settings.azpLlmTextId,
         )
-        // Serialize BEFORE opening the destination stream — "wt" mode truncates the target the
-        // moment it's opened, so serializing first means an encoding failure never touches the
-        // file at the user's chosen location (see ProjectStore.save for the same reasoning; SAF
-        // has no portable atomic-replace primitive, so this only covers encode failures, not a
-        // genuine I/O error mid-write).
-        val text = json.encodeToString(SettingsBundle.serializer(), bundle)
-        context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
-            out.write(text.toByteArray())
-        } ?: throw IllegalStateException("Could not open file for writing.")
+        return if (includeSecrets) {
+            bundle
+        } else {
+            bundle.copy(
+                keys = emptyMap(),
+                leonardoKey = "",
+                genKeys = emptyMap(),
+                azpLlmKeys = emptyMap(),
+                azpSandboxToken = "",
+            )
+        }
     }
 
-    fun `import`(context: Context, uri: Uri): AiSettings {
+    /**
+     * Restore settings from [uri]. Secrets absent from the file (a backup made without secrets, or
+     * individual blank keys) are taken from [current], so restoring a secret-free backup never
+     * wipes the keys already on this device.
+     */
+    fun `import`(context: Context, uri: Uri, current: AiSettings): AiSettings {
         val text = context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
             ?: throw IllegalStateException("Could not read settings file.")
         val bundle = json.decodeFromString(SettingsBundle.serializer(), text)
+        UserToolStore.save(context, bundle.userTools)
+        return fromBundle(bundle, current)
+    }
+
+    internal fun decode(text: String): SettingsBundle = json.decodeFromString(SettingsBundle.serializer(), text)
+
+    /** Pure mapping behind [import]. */
+    internal fun fromBundle(bundle: SettingsBundle, current: AiSettings): AiSettings {
         val settings = AiSettings(
             provider = runCatching { AiProviderType.valueOf(bundle.provider) }
                 .getOrDefault(AiProviderType.MLKIT),
@@ -152,7 +191,12 @@ object SettingsBackup {
             azpSandboxInstalls = bundle.azpSandboxInstalls,
             azpLlmTextId = bundle.azpLlmTextId,
         )
-        UserToolStore.save(context, bundle.userTools)
-        return settings
+        return settings.copy(
+            keys = current.keys + settings.keys.filterValues { it.isNotBlank() },
+            leonardoKey = settings.leonardoKey.ifBlank { current.leonardoKey },
+            genKeys = current.genKeys + settings.genKeys.filterValues { it.isNotBlank() },
+            azpLlmKeys = current.azpLlmKeys + settings.azpLlmKeys.filterValues { it.isNotBlank() },
+            azpSandboxToken = settings.azpSandboxToken.ifBlank { current.azpSandboxToken },
+        )
     }
 }

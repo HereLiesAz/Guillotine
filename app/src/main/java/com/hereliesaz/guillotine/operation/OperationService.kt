@@ -87,7 +87,7 @@ class OperationService : Service() {
      */
     private fun startForegroundWith(state: OperationState?): Boolean {
         if (started) return true
-        val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING else 0
+        val type = foregroundType(Build.VERSION.SDK_INT)
         return try {
             ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(state), type)
             started = true
@@ -95,6 +95,25 @@ class OperationService : Service() {
         } catch (_: Exception) {
             false
         }
+    }
+
+    /**
+     * The platform's FGS time limit for this type ran out (mediaProcessing: 6h per 24h on API 35+).
+     * The service must stop within seconds or the app is ANR'd/killed, so cancel the running
+     * operation (its caller is notified through OperationController's onCancel) and stop now.
+     */
+    @Deprecated("API 34 variant; API 35+ calls the two-argument overload")
+    override fun onTimeout(startId: Int) {
+        handleTimeout()
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleTimeout()
+    }
+
+    private fun handleTimeout() {
+        OperationController.cancel()
+        stopEverything()
     }
 
     private fun stopEverything() {
@@ -180,6 +199,18 @@ class OperationService : Service() {
         const val ACTION_PAUSE = "com.hereliesaz.guillotine.operation.PAUSE"
         const val ACTION_RESUME = "com.hereliesaz.guillotine.operation.RESUME"
         const val ACTION_CANCEL = "com.hereliesaz.guillotine.operation.CANCEL"
+
+        /**
+         * FGS type to request for [sdk]. `mediaProcessing` was added in API 35 — passing it on
+         * Android 14 (API 34) is an unknown type there and the start is rejected, so API 34 uses
+         * `dataSync` (also declared in the manifest, with its permission). Below 34, 0 = "use the
+         * manifest's declared types".
+         */
+        internal fun foregroundType(sdk: Int): Int = when {
+            sdk >= 35 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
+            sdk == 34 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            else -> 0
+        }
         private const val MAX_WAKELOCK_MS = 6 * 60 * 60 * 1000L // 6h safety cap, matches FGS limit
     }
 }
