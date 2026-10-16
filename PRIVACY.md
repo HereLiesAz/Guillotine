@@ -42,8 +42,9 @@ The app stores the following **locally** (in app‑private storage), not on any 
   stored as plain JSON in app‑private storage. These contain only the tool names and parameters
   (e.g. "split at 3000 ms") — no media data.
 - **Settings backup files** — when you export your AI configuration, the app writes a JSON file
-  to a location you choose via the system file picker. That file includes your encrypted API keys
-  in their stored form. Treat it like a password export.
+  to a location you choose via the system file picker. API keys are **left out** of that file
+  unless you explicitly opt in to including them when exporting; if you do, treat the file like a
+  password export.
 
 Uninstalling the app removes all app‑private local data (projects, settings, keys, and
 user‑defined tools). Backup files you saved outside the app remain where you put them.
@@ -93,6 +94,10 @@ issue tracker. A report contains:
 These technical logs could incidentally include text relevant to the crash. Reports go only to
 the endpoint **you** set up; if you never set a relay URL, nothing is sent. The credential used
 to file issues lives in your relay’s server‑side secret and is **never** included in the app.
+No relay is configured by default — the app ships without one. If you use the reference relay
+(`tools/crash-relay`), it files reports to a **public** issue tracker and applies basic redaction
+first (email addresses, common token formats, and `content://` / file paths), but that redaction is
+best-effort.
 
 ## Automation interface (MCP) and optional cloud relay
 

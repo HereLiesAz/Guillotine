@@ -6,3 +6,11 @@ compatibility_date = "2024-11-01"
 GH_REPO = "HereLiesAz/Guillotine"
 
 # GH_TOKEN is a secret — set it with:  wrangler secret put GH_TOKEN
+
+# Recommended: shared header secret (weak — it ships inside any build that sends it):
+#   wrangler secret put RELAY_SECRET
+# Optional: cross-isolate per-IP rate limiting. Create a namespace and uncomment:
+#   wrangler kv namespace create RATE_KV
+# [[kv_namespaces]]
+# binding = "RATE_KV"
+# id = "<namespace id>"
