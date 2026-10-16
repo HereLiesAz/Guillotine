@@ -16,20 +16,21 @@ object DesktopUserToolStore {
     private const val FILE = "user_tools.json"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
 
-    fun load(): List<UserTool> {
-        val f = File(DesktopStorage.dataDir, FILE)
-        if (!f.exists()) return emptyList()
-        return runCatching {
-            json.decodeFromString(ListSerializer(UserTool.serializer()), f.readText())
-        }.getOrDefault(emptyList())
-    }
+    /** The saved tools; a corrupt file falls back to its `.bak` ([AtomicFiles.readWithRecovery]). */
+    fun load(): List<UserTool> =
+        AtomicFiles.readWithRecovery(File(DesktopStorage.dataDir, FILE)) {
+            json.decodeFromString(ListSerializer(UserTool.serializer()), it)
+        } ?: emptyList()
 
+    /**
+     * Atomic write with a `.bak` of the previous list. Throws on failure so add/remove callers report it
+     * instead of claiming success.
+     */
     fun save(tools: List<UserTool>) {
-        runCatching {
-            File(DesktopStorage.dataDir, FILE).writeText(
-                json.encodeToString(ListSerializer(UserTool.serializer()), tools),
-            )
-        }
+        AtomicFiles.writeAtomic(
+            File(DesktopStorage.dataDir, FILE),
+            json.encodeToString(ListSerializer(UserTool.serializer()), tools),
+        )
     }
 
     fun add(tool: UserTool) {

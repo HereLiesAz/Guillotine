@@ -35,7 +35,7 @@ object AzpHandoffInstaller {
             val surfaces: List<AzpInstallSurfaces.Surface>,
         ) : InstallResult()
         data class Failure(val message: String) : InstallResult()
-        /** Integrity-sound, but not from a trusted signer (or unsigned) and not yet approved by the user. */
+        /** Integrity-sound, but unsigned or not from a trusted signer, and not yet approved by the user. */
         data class Untrusted(val reason: String) : InstallResult()
         /** [packageId] was previously installed from a different publisher key than this update carries. */
         data class PublisherChanged(val packageId: String, val pinnedKey: String, val newSignerKey: String?) : InstallResult()
@@ -120,9 +120,10 @@ object AzpHandoffInstaller {
         if (pinnedKey != null && trust.signerPublicKey != pinnedKey && !allowPublisherChange && !rotation) {
             return InstallResult.PublisherChanged(manifest.id, pinnedKey, trust.signerPublicKey)
         }
-        // Only a *signed* package with an unrecognized signer needs a confirmation — an unsigned
-        // package has no provenance claim to be suspicious of.
-        if (trust.signed && !trust.trusted && !allowUntrusted) {
+        // Anything not from a trusted signer needs the user's confirmation — unsigned included, exactly
+        // as AzpModelInstall gates it. An unsigned package carries no provenance at all, and what lands
+        // here can run (GLSL, a sandbox runner workflow), so "no claim" is not a pass.
+        if (!trust.trusted && !allowUntrusted) {
             return InstallResult.Untrusted(trust.reason)
         }
         val dir = File(extensionsDirPath).apply { mkdirs() }

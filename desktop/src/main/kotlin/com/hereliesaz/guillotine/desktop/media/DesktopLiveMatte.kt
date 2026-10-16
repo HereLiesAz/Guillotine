@@ -1,7 +1,6 @@
 package com.hereliesaz.guillotine.desktop.media
 
 import java.awt.image.BufferedImage
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -19,9 +18,17 @@ object DesktopLiveMatte {
 
     private const val REFRESH_MS = 120L
 
-    private class Cached(val sourceMs: Long, val mask: DesktopSegmenter.Mask)
+    /** Most clips whose masks are kept; older ones are dropped (a mask is a full-frame float plane). */
+    private const val MAX_CLIPS = 8
 
-    private val masks = ConcurrentHashMap<String, Cached>()
+    private class Cached(val sourceMs: Long, val modelPath: String, val mask: DesktopSegmenter.Mask)
+
+    // Access-ordered LRU, bounded by MAX_CLIPS, so masks of deleted/no-longer-playing clips don't pile up.
+    private val masks = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, Cached>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?) = size > MAX_CLIPS
+        },
+    )
     private val busy = AtomicBoolean(false)
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "live-matte").apply { isDaemon = true } }
 
@@ -30,7 +37,8 @@ object DesktopLiveMatte {
      * mask exists yet. May schedule a background refresh from a copy of [img].
      */
     fun apply(clipId: String, img: BufferedImage, sourceMs: Long, modelPath: String, bokeh: Boolean): BufferedImage {
-        val cached = masks[clipId]
+        // A mask made by a different model (the setting changed) is discarded, not reused.
+        val cached = masks[clipId]?.takeIf { it.modelPath == modelPath }
         val stale = cached == null || kotlin.math.abs(sourceMs - cached.sourceMs) > REFRESH_MS
         if (stale && busy.compareAndSet(false, true)) {
             val copy = BufferedImage(img.width, img.height, BufferedImage.TYPE_INT_RGB).also {
@@ -39,7 +47,7 @@ object DesktopLiveMatte {
             worker.execute {
                 try {
                     runCatching { DesktopSegmenter.mask(copy, modelPath) }.getOrNull()
-                        ?.let { masks[clipId] = Cached(sourceMs, it) }
+                        ?.let { masks[clipId] = Cached(sourceMs, modelPath, it) }
                 } finally {
                     busy.set(false)
                 }
@@ -52,5 +60,10 @@ object DesktopLiveMatte {
     /** Drop a clip's cached mask (e.g. after a seek far away), so stale shapes don't linger. */
     fun forget(clipId: String) {
         masks.remove(clipId)
+    }
+
+    /** Drop masks for every clip not in [clipIds] (called when the document changes). */
+    fun retainOnly(clipIds: Set<String>) {
+        synchronized(masks) { masks.keys.retainAll(clipIds) }
     }
 }

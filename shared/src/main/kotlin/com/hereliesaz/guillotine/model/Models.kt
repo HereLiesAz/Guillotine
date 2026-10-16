@@ -274,11 +274,26 @@ data class ClipFilters(
             fxChain
         } else {
             buildList {
-                if (lutPath.isNotBlank()) add(FxLayer(kind = FxLayer.KIND_LUT, path = lutPath))
-                if (shaderPath.isNotBlank()) add(FxLayer(kind = FxLayer.KIND_SHADER, path = shaderPath, params = shaderParams))
+                // Fixed ids, not newId(): this list is rebuilt on every read, and an id-addressed edit
+                // (remove/toggle/params) must find the same layer the UI was shown.
+                if (lutPath.isNotBlank()) add(FxLayer(id = LEGACY_LUT_LAYER_ID, kind = FxLayer.KIND_LUT, path = lutPath))
+                if (shaderPath.isNotBlank()) {
+                    add(FxLayer(id = LEGACY_SHADER_LAYER_ID, kind = FxLayer.KIND_SHADER, path = shaderPath, params = shaderParams))
+                }
             }
         }
+
+    /**
+     * Writes [chain] as the clip's FX chain and clears the legacy single-slot fields, which from then on
+     * are migrated into it. Every chain edit must go through this: writing an EMPTY [fxChain] alone
+     * would make [effectiveFxChain] fall back to the legacy fields and resurrect the layer just removed.
+     */
+    fun withFxChain(chain: List<FxLayer>): ClipFilters =
+        copy(fxChain = chain, lutPath = "", shaderPath = "", shaderParams = emptyMap())
 }
+
+private const val LEGACY_LUT_LAYER_ID = "legacy-lut"
+private const val LEGACY_SHADER_LAYER_ID = "legacy-shader"
 
 /**
  * One layer in a [ClipFilters.fxChain] — either a `.cube` LUT or a GLSL/ISF shader, azphalt's two

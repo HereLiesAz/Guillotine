@@ -7,10 +7,10 @@ buildscript {
             force("org.apache.httpcomponents:httpclient:4.5.14")
             force("com.google.protobuf:protobuf-javalite:4.36.2")
             force("com.google.protobuf:protobuf-java:4.36.2")
-            force("io.netty:netty-codec-http2:4.2.18.Final")
-            force("io.netty:netty-handler:4.2.18.Final")
-            force("io.netty:netty-codec-http:4.2.18.Final")
-            force("io.netty:netty-codec:4.2.18.Final")
+            force("io.netty:netty-codec-http2:4.2.19.Final")
+            force("io.netty:netty-handler:4.2.19.Final")
+            force("io.netty:netty-codec-http:4.2.19.Final")
+            force("io.netty:netty-codec:4.2.19.Final")
             force("org.bouncycastle:bcprov-jdk18on:1.86")
             force("org.bouncycastle:bcpkix-jdk18on:1.86")
             force("org.apache.commons:commons-lang3:3.21.0")
@@ -36,10 +36,10 @@ allprojects {
             force("org.apache.httpcomponents:httpclient:4.5.14")
             force("com.google.protobuf:protobuf-javalite:4.36.2")
             force("com.google.protobuf:protobuf-java:4.36.2")
-            force("io.netty:netty-codec-http2:4.2.18.Final")
-            force("io.netty:netty-handler:4.2.18.Final")
-            force("io.netty:netty-codec-http:4.2.18.Final")
-            force("io.netty:netty-codec:4.2.18.Final")
+            force("io.netty:netty-codec-http2:4.2.19.Final")
+            force("io.netty:netty-handler:4.2.19.Final")
+            force("io.netty:netty-codec-http:4.2.19.Final")
+            force("io.netty:netty-codec:4.2.19.Final")
             force("org.bouncycastle:bcprov-jdk18on:1.86")
             force("org.bouncycastle:bcpkix-jdk18on:1.86")
             force("org.apache.commons:commons-lang3:3.21.0")
@@ -63,9 +63,10 @@ allprojects {
             when {
                 // Netty — ~30 CVEs across codec/http/http2/handler/common/proxy (smuggling, DoS, request
                 // smuggling, the late-2025 HttpProxyHandler injection). netty-tcnative is on its own 2.0.x
-                // line, so never rewrite it.
+                // line, so never rewrite it. Single source of truth for project configurations; the
+                // buildscript block above forces the same version for the plugin classpath.
                 g == "io.netty" && n.startsWith("netty-") && !n.contains("tcnative") ->
-                    useVersion("4.2.16.Final")
+                    useVersion("4.2.18.Final")
                 // Bouncy Castle — GOST CTR keystream reuse (critical), bcpkix broken algorithm, LDAP injection.
                 // bcprov and bcpkix don't always cut patch releases in lockstep — bcprov-jdk18on has a
                 // 1.85.2, but bcpkix-jdk18on's latest published version is still 1.85 (verified against

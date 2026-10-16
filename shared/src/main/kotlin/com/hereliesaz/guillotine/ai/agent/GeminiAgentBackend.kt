@@ -65,6 +65,24 @@ class GeminiAgentBackend(
                 val modelContent = candidate?.optJSONObject("content")
                 val parts = modelContent?.optJSONArray("parts") ?: JSONArray()
 
+                // A blocked prompt comes back with no candidates (promptFeedback.blockReason), and a
+                // blocked/aborted reply as a candidate with a non-STOP finishReason and no parts. Neither is
+                // a successful "Done" — surface it and drop the unanswered user turn.
+                if (parts.length() == 0) {
+                    val blockReason = resp.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty()
+                    val finish = candidate?.optString("finishReason").orEmpty()
+                    if (blockReason.isNotEmpty() || (finish.isNotEmpty() && finish != "STOP") || candidate == null) {
+                        contents = JSONArray()
+                        val why = when {
+                            blockReason.isNotEmpty() -> "the request was blocked ($blockReason)"
+                            finish.isNotEmpty() -> "the reply was stopped ($finish)"
+                            else -> "no reply was returned"
+                        }
+                        onEvent(AgentEvent.Failed("Gemini: $why."))
+                        return@withContext
+                    }
+                }
+
                 val text = StringBuilder()
                 val calls = mutableListOf<JSONObject>()
                 for (i in 0 until parts.length()) {
@@ -153,7 +171,10 @@ class GeminiAgentBackend(
             put(JSONObject().apply {
                 put("name", d.getString("name"))
                 put("description", d.optString("description"))
-                put("parameters", toGeminiSchema(d.getJSONObject("inputSchema")))
+                // Gemini rejects an OBJECT schema with empty `properties`; a no-argument tool simply
+                // omits `parameters`.
+                val params = toGeminiSchema(d.getJSONObject("inputSchema"))
+                if (params.has("properties")) put("parameters", params)
             })
         }
     }
@@ -166,9 +187,9 @@ class GeminiAgentBackend(
         schema.optJSONObject("properties")?.let { props ->
             val out = JSONObject()
             props.keys().forEach { k -> out.put(k, toGeminiSchema(props.getJSONObject(k))) }
-            put("properties", out)
+            if (out.length() > 0) put("properties", out)
         }
-        schema.optJSONArray("required")?.let { put("required", it) }
+        schema.optJSONArray("required")?.takeIf { it.length() > 0 && has("properties") }?.let { put("required", it) }
         schema.optJSONObject("items")?.let { put("items", toGeminiSchema(it)) }
     }
 
@@ -211,7 +232,11 @@ class GeminiAgentBackend(
             ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
         conn.disconnect()
         if (code !in 200..299) {
-            if (code == 400 || code == 403) throw IllegalStateException("Check your Gemini API key in Settings.")
+            // Only blame the key when Google says it's the key: a 400 is far more often a schema/argument
+            // problem, and hiding its message behind "check your key" makes it undiagnosable.
+            val keyProblem = code == 401 || code == 403 ||
+                (code == 400 && (text.contains("API_KEY_INVALID") || text.contains("API key not valid", ignoreCase = true)))
+            if (keyProblem) throw IllegalStateException("Check your Gemini API key in Settings.")
             throw IllegalStateException("Gemini request failed ($code): ${text.take(300)}")
         }
         return JSONObject(text)

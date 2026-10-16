@@ -54,10 +54,13 @@ object VocabularyGraph {
     )
 
     // ---- seed lexicon (editing domain) --------------------------------------
+    // Each seed belongs to exactly ONE concept (the reverse index is first-wins, so a shared seed would
+    // silently route to whichever concept is listed first): "trim" → trim, "mute" → mute, "punch in" →
+    // reframe, "smooth" → stabilize. VocabularyGraphTest guards this.
     // Antonym links are declared on one side; [concepts] wires them both ways at load.
     private val seedConcepts: List<Concept> = listOf(
         Concept("sharpen", listOf("sharpen", "sharp", "crisp", "crisper", "clarity", "clearer", "detail"), tool = "sharpen", antonym = "soften"),
-        Concept("soften", listOf("soften", "soft", "blur", "blurry", "dreamy", "hazy", "smooth"), tool = "glow"),
+        Concept("soften", listOf("soften", "soft", "blur", "blurry", "dreamy", "hazy"), tool = "glow"),
         Concept("brighter", listOf("brighter", "bright", "brighten", "lighter", "lighten", "lift"), tool = "brighter", antonym = "darker"),
         Concept("darker", listOf("darker", "dark", "darken", "dim", "dimmer", "underexpose"), tool = "darker"),
         Concept("warm", listOf("warm", "warmer", "orange", "golden", "cozy", "toasty"), tool = "warm", antonym = "cool"),
@@ -65,7 +68,7 @@ object VocabularyGraph {
         Concept("contrast", listOf("contrast", "punchy", "punch", "pop"), tool = "increase_contrast", antonym = "flat"),
         Concept("flat", listOf("flat", "flatten", "muted", "washed", "faded", "dull"), tool = "vintage"),
         Concept("grain", listOf("grain", "grainy", "noise", "noisy", "texture", "film"), tool = "film_grain", antonym = "denoise"),
-        Concept("denoise", listOf("denoise", "clean", "cleaner", "smooth", "grainless"), tool = "denoise_video"),
+        Concept("denoise", listOf("denoise", "clean", "cleaner", "grainless"), tool = "denoise_video"),
         Concept("stabilize", listOf("stabilize", "stabilise", "steady", "steadier", "smooth", "shake", "shaky", "jittery"), tool = "stabilize"),
         Concept("vignette", listOf("vignette", "vignetting", "darkened edges", "darken edges", "framing"), tool = "vignette"),
         Concept("mirror", listOf("mirror", "flip", "flop", "reverse horizontally", "left right"), tool = "mirror"),
@@ -80,13 +83,13 @@ object VocabularyGraph {
         Concept("chromatic_aberration", listOf("chromatic aberration", "chroma shift", "colour fringe", "color fringe", "rgb split"), tool = "chromatic_aberration"),
         Concept("motion_trail", listOf("motion trail", "echo", "ghosting", "smear", "trails"), tool = "motion_trail"),
         // Action / timeline concepts (no dedicated bake tool; help the model map intent + opposites).
-        Concept("cut", listOf("cut", "remove", "delete", "trim", "erase", "drop"), antonym = "keep"),
+        Concept("cut", listOf("cut", "remove", "delete", "erase", "drop"), antonym = "keep"),
         Concept("keep", listOf("keep", "retain", "isolate", "only", "preserve")),
         Concept("faster", listOf("faster", "speed up", "quicker", "fast forward", "accelerate"), antonym = "slower"),
         Concept("slower", listOf("slower", "slow down", "slow motion", "slomo", "slo mo")),
         Concept("louder", listOf("louder", "volume up", "amplify", "boost audio", "turn up"), antonym = "quieter"),
-        Concept("quieter", listOf("quieter", "volume down", "softer audio", "turn down", "mute")),
-        Concept("zoom_in", listOf("zoom in", "closer", "punch in", "tighter"), antonym = "zoom_out"),
+        Concept("quieter", listOf("quieter", "volume down", "softer audio", "turn down")),
+        Concept("zoom_in", listOf("zoom in", "closer", "tighter"), antonym = "zoom_out"),
         Concept("zoom_out", listOf("zoom out", "wider", "pull back", "further")),
         Concept("longer", listOf("longer", "extend", "lengthen", "stretch"), antonym = "shorter"),
         Concept("shorter", listOf("shorter", "shorten", "tighten", "condense")),
@@ -98,7 +101,7 @@ object VocabularyGraph {
         Concept("undo", listOf("undo", "revert", "take it back", "go back"), tool = "undo", antonym = "redo"),
         Concept("redo", listOf("redo", "put it back", "restore"), tool = "redo"),
         Concept("add_track", listOf("new track", "add track", "add layer", "another track"), tool = "add_track"),
-        Concept("mute", listOf("mute", "silence", "unmute", "hide track", "solo"), tool = "set_track"),
+        Concept("mute", listOf("mute", "silence", "hide track", "solo"), tool = "set_track"),
         Concept("reframe", listOf("reframe", "crop the clip", "punch in", "scale the clip", "reposition the frame"), tool = "transform_clip"),
     )
 
@@ -253,8 +256,10 @@ object VocabularyGraph {
             if (opp != null) append("  (opposite → ${opp.tool ?: opp.id})")
             append("\n")
         }
-        append("    A negation before a term (\"less/not/reduce/remove …\") means the OPPOSITE — route it to ")
-        append("the opposite tool, not the named one.")
+        append("    A reduction word before an adjustable LOOK term (\"less sharp\", \"not so warm\", \"reduce the ")
+        append("grain\") means the OPPOSITE look — route it to the opposite tool, not the named one. This does NOT ")
+        append("apply to removing CONTENT (\"remove/cut/delete the part with X\", \"remove X\") — follow the ")
+        append("CUT / ERASE rules above for those.")
     }
 }
 

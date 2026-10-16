@@ -29,6 +29,19 @@ class ContentSafetyTest {
         ).forEach { assertNull(it, ContentSafety.promptRefusal(it)) }
     }
 
+    @Test fun evasionsAreRefused() {
+        listOf("p0rn clip", "n u d e beach", "s3xy pose", "ｎｕｄｅ", "see through dress").forEach {
+            assertNotNull(it, ContentSafety.promptRefusal(it))
+        }
+    }
+
+    @Test fun benignUsesOfFlaggedWordsPass() {
+        listOf(
+            "grilled chicken breast on a plate", "breast cancer awareness walk", "a blue tit on a branch",
+            "graduated summa cum laude", "explicit lyrics warning card",
+        ).forEach { assertNull(it, ContentSafety.promptRefusal(it)) }
+    }
+
     @Test fun inpaintingNeverAddsPeople() {
         assertTrue(ContentSafety.inpaintAddsPeople(before = 0, after = 1))
         assertTrue(ContentSafety.inpaintAddsPeople(before = 2, after = 3))

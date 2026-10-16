@@ -44,10 +44,13 @@ object ActivityLog {
             // feed doesn't stutter, then cap to the newest MAX_ENTRIES.
             val last = cur.lastOrNull()
             if (last != null && last.level == level && last.text == t) return@update cur
-            // takeLast returns a fresh, independent list (subList would return a view that
-            // pins the parent list alive).
-            (cur + Entry(ids.incrementAndGet(), level, t, System.currentTimeMillis()))
-                .takeLast(MAX_ENTRIES)
+            // One fresh list per post (a StateFlow value must not be mutated after emission), built
+            // directly at its final size rather than `cur + e` followed by a second takeLast copy.
+            val drop = (cur.size + 1 - MAX_ENTRIES).coerceAtLeast(0)
+            ArrayList<Entry>(cur.size + 1 - drop).apply {
+                for (i in drop until cur.size) add(cur[i])
+                add(Entry(ids.incrementAndGet(), level, t, System.currentTimeMillis()))
+            }
         }
     }
 

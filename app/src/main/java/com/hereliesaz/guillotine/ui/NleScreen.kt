@@ -423,34 +423,59 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // The project is auto-saved internally; "Rename" only names it. Load imports a .gilt copy.
     val openLauncher = rememberOpenProjectLauncher { uri ->
         scope.launch {
-            val doc = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) }.getOrNull() }
-            if (doc != null) {
+            val result = withContext(Dispatchers.IO) { runCatching { ProjectStore.load(context, uri) } }
+            result.onSuccess { doc ->
                 vm.loadDocument(doc)
+                ProjectAutosave.resume() // a real project is loaded — safe to autosave again
                 currentAgentBackend?.reset() // new project → fresh conversation (don't carry prior edits over)
+            }.onFailure { e ->
+                val msg = "Couldn't open project: ${e.message ?: e.javaClass.simpleName}"
+                ActivityLog.error(msg)
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }
     
     val saveLauncher = rememberSaveProjectLauncher { uri ->
         scope.launch {
-            withContext(Dispatchers.IO) { runCatching { ProjectStore.save(context, uri, vm.uiState.value.document) } }
+            val result = withContext(Dispatchers.IO) { runCatching { ProjectStore.save(context, uri, vm.uiState.value.document) } }
+            result.onSuccess {
+                ActivityLog.success("Project saved.")
+            }.onFailure { e ->
+                val msg = "Couldn't save project: ${e.message ?: e.javaClass.simpleName}"
+                ActivityLog.error(msg)
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 
     // Auto-save / restore: load the autosaved project on launch (fresh editor only), then
     // continuously persist the document to internal storage on every change (debounced via
     // collectLatest — a new edit cancels the pending write). The user never has to save.
+    // If the autosave exists but is unreadable, ProjectAutosave moves it aside and suppresses
+    // autosave; the first real edit (a document different from the empty one shown after the
+    // failure) re-enables it, so the empty editor never overwrites the user's project.
     androidx.compose.runtime.LaunchedEffect(Unit) {
         if (vm.uiState.value.document.clips.isEmpty()) {
-            val doc = withContext(Dispatchers.IO) { ProjectAutosave.load(context) }
-            if (doc != null) vm.loadDocument(doc)
+            when (val r = withContext(Dispatchers.IO) { ProjectAutosave.load(context) }) {
+                is ProjectAutosave.LoadResult.Loaded -> vm.loadDocument(r.document)
+                is ProjectAutosave.LoadResult.Corrupt -> {
+                    val where = r.movedTo?.let { " A copy was kept as ${it.name}." } ?: ""
+                    val msg = "Your autosaved project couldn't be read.$where Autosave is paused until you edit or open a project."
+                    ActivityLog.error(msg)
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                }
+                ProjectAutosave.LoadResult.None -> Unit
+            }
         }
+        val baseline = vm.uiState.value.document
         vm.uiState
             .map { it.document }
             .distinctUntilChanged()
             .collectLatest { doc ->
+                if (ProjectAutosave.isSuppressed && doc != baseline) ProjectAutosave.resume()
                 kotlinx.coroutines.delay(800)
-                withContext(Dispatchers.IO) { runCatching { ProjectAutosave.save(context, doc) } }
+                withContext(Dispatchers.IO) { ProjectAutosave.save(context, doc) }
             }
     }
 
@@ -480,8 +505,16 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         val ids = targets.map { it.id }
         // Run in the background via the foreground service so it survives backgrounding and can be
         // paused/cancelled from the notification; results + status still flow into the editor state.
+        // Application context only: the operation (and these callbacks) can outlive the Activity.
+        val appContext = context.applicationContext
         val started = OperationController.start(
-            context, OperationKind.ANALYZE, "Analyzing\u2026", pausable = true,
+            appContext, OperationKind.ANALYZE, "Analyzing\u2026", pausable = true,
+            onCancel = {
+                vm.setAnalyzing(ids, false)
+                vm.setProcessing(false, "Analysis cancelled.")
+                vm.setAnalysisProgress(null)
+                ActivityLog.info("Analysis cancelled.")
+            },
             onError = { e ->
                 vm.setAnalyzing(ids, false)
                 vm.setProcessing(false, e.message ?: "Analysis failed")
@@ -500,7 +533,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             for (clip in targets) {
                 val media = vm.uiState.value.document.mediaFor(clip) ?: continue
                 val edits = Analysis.run(
-                    context, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
+                    appContext, settings, Uri.parse(media.uri), media.kind, clip.prompt, clip.durationMs,
                     onProgress = { progress ->
                         vm.setAnalysisProgress(progress)
                         sink.report(progress.fraction, progress.stage)
@@ -960,8 +993,15 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 ActivityLog.info("Exporting \"$name\"…")
                 // Export in the background via the foreground service (cancel-only — Media3 can't pause
                 // an encode). Progress feeds the in-app sheet and the notification.
+                // Application context only: the operation (and these callbacks) can outlive the Activity.
+                val appContext = context.applicationContext
                 val startedExport = OperationController.start(
-                    context, OperationKind.EXPORT, "Exporting…", pausable = false,
+                    appContext, OperationKind.EXPORT, "Exporting…", pausable = false,
+                    onCancel = {
+                        exportError = "Export cancelled."; exporting = false
+                        vm.setExportPhase(null)
+                        ActivityLog.info("Export cancelled.")
+                    },
                     onError = { e ->
                         val detail = Exporter.describeExportError(e)
                         exportError = detail; exporting = false
@@ -975,7 +1015,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     },
                 ) { sink ->
                     val uri = Exporter.export(
-                        context,
+                        appContext,
                         vm.uiState.value.document,
                         name,
                         onProgress = { p, ms ->
@@ -995,6 +1035,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 if (!startedExport) { exportError = "Another operation is already running."; exporting = false }
             },
             onDismiss = { if (!exporting) showExport = false },
+            onCancelExport = { OperationController.cancel() },
         )
     }
     if (showAiComparison) {
@@ -1101,9 +1142,16 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
 
     // Optional outbound, end-to-end-encrypted Cloudflare relay. Re-read on Settings close so
-    // toggling it on/off (or editing the Worker URL) restarts the bridge.
-    DisposableEffect(relayConfig) {
-        val client = if (relayConfig.isUsable) {
+    // toggling it on/off (or editing the Worker URL) restarts the bridge. The room is derived from the
+    // MCP token at connect time, so also key on the token (re-read whenever Settings closes): a
+    // Regenerate there must move the relay to the new room now, not after an app restart.
+    val relayToken by androidx.compose.runtime.produceState("", relayConfig, showSettings) {
+        if (!showSettings) {
+            value = withContext(Dispatchers.IO) { com.hereliesaz.guillotine.mcp.McpAuth.token(context) }
+        }
+    }
+    DisposableEffect(relayConfig, relayToken) {
+        val client = if (relayConfig.isUsable && relayToken.isNotEmpty()) {
             com.hereliesaz.guillotine.mcp.McpRelayClient(
                 sharedMcpTools,
                 { com.hereliesaz.guillotine.mcp.McpAuth.token(context) },

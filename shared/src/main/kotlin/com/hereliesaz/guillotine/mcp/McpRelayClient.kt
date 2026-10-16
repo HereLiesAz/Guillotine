@@ -21,9 +21,11 @@ import java.util.concurrent.TimeUnit
  * opaque [McpCrypto]-sealed frames between them, so the channel is encrypted in transit **and**
  * end-to-end (the Worker only sees ciphertext).
  *
- * Frame shape (JSON, both directions): `{"rid":"<correlation>","iv":"<b64>","ct":"<b64>"}` where
- * the plaintext is a JSON-RPC request (tool→device) or response (device→tool). The device echoes
- * the request's `rid` so the proxy can match responses.
+ * Frame shape (JSON, both directions): `{"v":2,"rid":"<correlation>","ctr":<n>,"ts":<ms>,"iv":"<b64>",
+ * "ct":"<b64>"}` where the plaintext is a JSON-RPC request (tool→device) or response (device→tool),
+ * sealed under a per-direction key with `rid`/direction/`ctr`/`ts` bound as AAD (see [McpCrypto]). The
+ * device rejects replayed requests ([McpCrypto.ReplayGuard]) and echoes the request's `rid` and `ctr`
+ * so the proxy can match (and authenticate) the response. A JSON-RPC notification gets no reply.
  */
 class McpRelayClient(
     private val tools: McpToolsSurface,
@@ -38,6 +40,7 @@ class McpRelayClient(
     @Volatile private var running = false
     @Volatile private var ws: WebSocket? = null
     @Volatile private var attempt = 0
+    private val replayGuard = McpCrypto.ReplayGuard()
 
     fun start() {
         if (running || !config.isUsable) return
@@ -107,24 +110,34 @@ class McpRelayClient(
         scope.launch {
             try {
                 val frame = JSONObject(text)
+                if (frame.optInt("v") != McpCrypto.VERSION) return@launch
                 val rid = frame.optString("rid")
                 val iv = frame.optString("iv")
                 val ct = frame.optString("ct")
-                if (iv.isEmpty() || ct.isEmpty()) return@launch
-                val requestBody = McpCrypto.open(token, iv, ct)
+                if (rid.isEmpty() || iv.isEmpty() || ct.isEmpty() || !frame.has("ctr") || !frame.has("ts")) return@launch
+                val ctr = frame.getLong("ctr")
+                val ts = frame.getLong("ts")
+                // Authenticate first (throws on a forged/misrouted frame), then refuse replays.
+                val requestBody = McpCrypto.open(token, McpCrypto.DIR_TO_DEVICE, rid, ctr, ts, iv, ct)
+                if (!replayGuard.accept(rid, ts)) return@launch
                 val responseBody = McpDispatcher.handle(tools, requestBody)
                 // A notification yields an empty body — there is nothing to echo back to the relay.
                 if (responseBody.isEmpty()) return@launch
-                val sealed = McpCrypto.seal(token, responseBody)
+                val now = System.currentTimeMillis()
+                val sealed = McpCrypto.seal(token, McpCrypto.DIR_TO_TOOL, rid, ctr, now, responseBody)
                 webSocket.send(
                     JSONObject().apply {
+                        put("v", McpCrypto.VERSION)
                         put("rid", rid)
+                        put("ctr", ctr)
+                        put("ts", now)
                         put("iv", sealed.ivB64)
                         put("ct", sealed.ctB64)
                     }.toString(),
                 )
             } catch (_: Exception) {
-                // Wrong token / tampered frame / dispatch failure — drop it; the caller times out.
+                // Wrong token / tampered, replayed or old-format frame / dispatch failure — drop it; the
+                // caller times out.
             }
         }
     }

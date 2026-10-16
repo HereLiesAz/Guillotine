@@ -2,8 +2,6 @@ package com.hereliesaz.guillotine.mcp
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 /**
  * Persists [RelayConfig] encrypted on-device. The Worker URL/access key aren't the end-to-end
@@ -32,16 +30,6 @@ object McpRelayConfig {
             .apply()
     }
 
-    private fun prefs(context: Context): SharedPreferences {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            PREFS,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    }
+    private fun prefs(context: Context): SharedPreferences =
+        com.hereliesaz.guillotine.ai.SecurePrefs.open(context, PREFS)
 }
