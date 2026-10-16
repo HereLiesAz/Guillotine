@@ -1648,6 +1648,9 @@ private fun AzpLlmSection(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var sandboxStatus by remember { mutableStateOf<String?>(null) }
     var sandboxBusy by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // The sandbox install accepts the flagship keys, or the publisher the user already approved for an id.
+    val sandboxPins = remember { com.hereliesaz.guillotine.azphalt.AzpPublisherPins(java.io.File(context.filesDir, "azp-publishers.json")) }
 
     val chat = list.filter { it.supportsChat }
     if (chat.isNotEmpty() || selectedId.isNotBlank()) {
@@ -1746,7 +1749,8 @@ private fun AzpLlmSection(
                     } ?: error("the package file is gone")
                     val inputs = e.keyInput?.let { k -> keys[e.packageId]?.takeIf { it.isNotBlank() }?.let { mapOf(k.id to it) } }.orEmpty()
                     AzpLlmSandbox.install(
-                        AzpLlmSandbox.GitHub(sandboxToken), parts[0], parts[1], bytes, inputs,
+                        AzpLlmSandbox.GitHub(sandboxToken), parts[0], parts[1], bytes,
+                        trustedKeys = AzphaltTrust.FLAGSHIP_SIGNING_KEYS, pins = sandboxPins, inputs = inputs,
                     ) { _, message -> sandboxStatus = "${e.name}: $message" }
                 }
                 sandboxBusy = false

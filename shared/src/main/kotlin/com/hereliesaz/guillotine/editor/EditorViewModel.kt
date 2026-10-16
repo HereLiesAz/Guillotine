@@ -12,6 +12,7 @@ import com.hereliesaz.guillotine.model.KeyframeProperty
 import com.hereliesaz.guillotine.model.MediaItem
 import com.hereliesaz.guillotine.model.MediaKind
 import com.hereliesaz.guillotine.model.TimelineClip
+import com.hereliesaz.guillotine.model.TimelineMath
 import com.hereliesaz.guillotine.model.newId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,9 +22,10 @@ import kotlinx.coroutines.flow.update
 enum class EditorTool { SELECT, SPLIT, KEYFRAME, CROP, MARQUEE }
 
 /**
- * Preview render quality: caps the resolution the preview players decode/scale to. Lower levels trade
- * clarity for smoother playback (lighter decode/composite); [FULL] leaves the source untouched.
- * [maxDimension] is the longest-edge pixel cap fed to the player's track-selection parameters.
+ * Preview quality preference. [maxDimension] is fed (as both width and height) to the Android preview
+ * player's track-selection `setMaxVideoSize` — it chooses among a source's video tracks, so it only
+ * changes anything for media that carries several renditions; an ordinary single-track file still
+ * decodes at full size. The desktop preview doesn't read it. [FULL] applies no cap.
  */
 enum class PreviewQuality(val label: String, val maxDimension: Int) {
     P240("240p", 426),
@@ -149,6 +151,31 @@ const val MAX_TRACK_HEIGHT = 240f
 const val MINIMIZED_TRACK_HEIGHT = 22f
 private const val MAX_PROMPT_HISTORY = 7
 
+/**
+ * Every recordable [ClipFilters] field, by its recorded name. Keep this in step with [ClipFilters] — a
+ * field missing here (as speed, frameStep, the FX chain and the face/bokeh toggles once were) is
+ * silently dropped from a recorded filter edit.
+ */
+private val FILTER_FIELDS: List<Pair<String, (ClipFilters) -> Any>> = listOf(
+    "brightness" to { f: ClipFilters -> f.brightness },
+    "contrast" to { f: ClipFilters -> f.contrast },
+    "saturation" to { f: ClipFilters -> f.saturation },
+    "sepia" to { f: ClipFilters -> f.sepia },
+    "blur" to { f: ClipFilters -> f.blur },
+    "volume" to { f: ClipFilters -> f.volume },
+    "pan" to { f: ClipFilters -> f.pan },
+    "normalize" to { f: ClipFilters -> f.normalize },
+    "hue_rotate" to { f: ClipFilters -> f.hueRotate },
+    "invert" to { f: ClipFilters -> f.invert },
+    "grayscale" to { f: ClipFilters -> f.grayscale },
+    "speed" to { f: ClipFilters -> f.speed },
+    "frame_step" to { f: ClipFilters -> f.frameStep },
+    "remove_background" to { f: ClipFilters -> f.removeBackground },
+    "blur_faces" to { f: ClipFilters -> f.blurFaces },
+    "bokeh" to { f: ClipFilters -> f.bokeh },
+    "fx_chain" to { f: ClipFilters -> f.effectiveFxChain.map { it.path } },
+)
+
 /** Animated caption scale range: syllables start at BASE and grow to PEAK when spoken. */
 private const val BASE_SCALE = 0.6f
 private const val PEAK_SCALE = 1.2f
@@ -178,19 +205,12 @@ open class EditorViewModel {
 
     val actionRecorder = ActionRecorder()
 
+    /** The [FILTER_FIELDS] that differ between two filter states, for [ActionRecorder]. */
     private fun describeFilterDiff(before: com.hereliesaz.guillotine.model.ClipFilters, after: com.hereliesaz.guillotine.model.ClipFilters): Map<String, Any> = buildMap {
-        if (before.brightness != after.brightness) put("brightness", after.brightness)
-        if (before.contrast != after.contrast) put("contrast", after.contrast)
-        if (before.saturation != after.saturation) put("saturation", after.saturation)
-        if (before.sepia != after.sepia) put("sepia", after.sepia)
-        if (before.blur != after.blur) put("blur", after.blur)
-        if (before.volume != after.volume) put("volume", after.volume)
-        if (before.pan != after.pan) put("pan", after.pan)
-        if (before.normalize != after.normalize) put("normalize", after.normalize)
-        if (before.hueRotate != after.hueRotate) put("hue_rotate", after.hueRotate)
-        if (before.invert != after.invert) put("invert", after.invert)
-        if (before.grayscale != after.grayscale) put("grayscale", after.grayscale)
-        if (before.removeBackground != after.removeBackground) put("remove_background", after.removeBackground)
+        for ((name, get) in FILTER_FIELDS) {
+            val a = get(after)
+            if (get(before) != a) put(name, a)
+        }
     }
 
     // ---- undo/redo plumbing ------------------------------------------------
@@ -224,15 +244,34 @@ open class EditorViewModel {
         _uiState.update { it.copy(document = transform(it.document)) }
     }
 
+    /**
+     * [restored] (a history snapshot) with the live document's non-undoable fields carried over: the
+     * UI zoom, and everything [updateDocumentTransient]/[rememberPrompt] write outside history — the
+     * project name, prompt history and per-clip [TimelineClip.isAnalyzing]. Without this, undo/redo
+     * would silently revert a rename or resurrect a stale "analyzing" spinner.
+     */
+    private fun withLiveTransients(restored: Document, live: Document, pps: Float): Document {
+        val analyzing = live.clips.associate { it.id to it.isAnalyzing }
+        return restored.copy(
+            pixelsPerSecond = pps,
+            name = live.name,
+            promptHistory = live.promptHistory,
+            clips = restored.clips.map { c ->
+                val a = analyzing[c.id] ?: false
+                if (c.isAnalyzing == a) c else c.copy(isAnalyzing = a)
+            },
+        )
+    }
+
     fun undo() = synchronized(historyLock) {
         if (past.isEmpty()) return@synchronized
         val prev = past.removeLast()
         future.addLast(document)
         _uiState.update {
             // Restore content, but keep the current UI zoom (undo shouldn't change how you're looking
-            // at the timeline, only what's on it).
+            // at the timeline, only what's on it) and the other non-undoable fields.
             it.copy(
-                document = prev.copy(pixelsPerSecond = it.pixelsPerSecond),
+                document = withLiveTransients(prev, it.document, it.pixelsPerSecond),
                 selectedClipIds = it.selectedClipIds.filter { id -> prev.clips.any { c -> c.id == id } },
                 canUndo = past.isNotEmpty(),
                 canRedo = true,
@@ -246,7 +285,7 @@ open class EditorViewModel {
         past.addLast(document)
         _uiState.update {
             it.copy(
-                document = next.copy(pixelsPerSecond = it.pixelsPerSecond),
+                document = withLiveTransients(next, it.document, it.pixelsPerSecond),
                 canUndo = true,
                 canRedo = future.isNotEmpty(),
             )
@@ -560,22 +599,22 @@ open class EditorViewModel {
      * had, rather than silently discarding a pre-existing shader/LUT the first time this is called.
      */
     fun addFxLayer(clipId: String, layer: com.hereliesaz.guillotine.model.FxLayer) {
-        updateClipFilters(clipId) { it.copy(fxChain = it.effectiveFxChain + layer) }
+        updateClipFilters(clipId) { it.withFxChain(it.effectiveFxChain + layer) }
     }
 
     fun removeFxLayer(clipId: String, layerId: String) {
-        updateClipFilters(clipId) { it.copy(fxChain = it.effectiveFxChain.filterNot { l -> l.id == layerId }) }
+        updateClipFilters(clipId) { it.withFxChain(it.effectiveFxChain.filterNot { l -> l.id == layerId }) }
     }
 
     fun setFxLayerEnabled(clipId: String, layerId: String, enabled: Boolean) {
         updateClipFilters(clipId) {
-            it.copy(fxChain = it.effectiveFxChain.map { l -> if (l.id == layerId) l.copy(enabled = enabled) else l })
+            it.withFxChain(it.effectiveFxChain.map { l -> if (l.id == layerId) l.copy(enabled = enabled) else l })
         }
     }
 
     fun setFxLayerParams(clipId: String, layerId: String, params: Map<String, Float>) {
         updateClipFilters(clipId) {
-            it.copy(fxChain = it.effectiveFxChain.map { l -> if (l.id == layerId) l.copy(params = params) else l })
+            it.withFxChain(it.effectiveFxChain.map { l -> if (l.id == layerId) l.copy(params = params) else l })
         }
     }
 
@@ -587,7 +626,7 @@ open class EditorViewModel {
             if (index !in chain.indices || target !in chain.indices) return@updateClipFilters it
             val item = chain.removeAt(index)
             chain.add(target, item)
-            it.copy(fxChain = chain)
+            it.withFxChain(chain)
         }
     }
 
@@ -637,23 +676,23 @@ open class EditorViewModel {
         val ripple = _uiState.value.autoRippleEnabled
         mutateDocument { doc ->
             if (!ripple) return@mutateDocument doc.copy(clips = doc.clips.filter { it.id !in ids })
-            val byTrack = doc.clips.filter { it.id in ids }.groupBy { it.trackId }
-            var clips = doc.clips.filter { it.id !in ids }
-            for ((trackId, removed) in byTrack) {
-                // Close each removed span on this track, earliest first, against positions already
-                // shifted by an earlier removal on the same track — so several deletions in one track
-                // ripple in sequence rather than each computing against the pre-delete layout.
+            // Per track, the union of the removed spans (overlapping removals must not close the same
+            // time twice). Every survivor shifts left by the total length of the spans that end at or
+            // before its ORIGINAL start — computed against the pre-delete layout throughout, so a
+            // second removal's threshold isn't compared with positions an earlier one already moved.
+            val spansByTrack = doc.clips.filter { it.id in ids }.groupBy { it.trackId }.mapValues { (_, removed) ->
+                val merged = ArrayList<LongArray>()
                 for (r in removed.sortedBy { it.startTimeMs }) {
-                    clips = clips.map { c ->
-                        if (c.trackId == trackId && c.startTimeMs >= r.endTimeMs) {
-                            c.copy(startTimeMs = c.startTimeMs - r.durationMs)
-                        } else {
-                            c
-                        }
-                    }
+                    val last = merged.lastOrNull()
+                    if (last != null && r.startTimeMs <= last[1]) last[1] = maxOf(last[1], r.endTimeMs)
+                    else merged += longArrayOf(r.startTimeMs, r.endTimeMs)
                 }
+                merged
             }
-            doc.copy(clips = clips)
+            doc.copy(clips = doc.clips.filter { it.id !in ids }.map { c ->
+                val shift = spansByTrack[c.trackId].orEmpty().filter { it[1] <= c.startTimeMs }.sumOf { it[1] - it[0] }
+                if (shift == 0L) c else c.copy(startTimeMs = c.startTimeMs - shift)
+            })
         }
     }
 
@@ -725,17 +764,16 @@ open class EditorViewModel {
                     clipTime in 1 until clip.durationMs -> {
                         val first = clip.copy(
                             durationMs = clipTime,
-                            keyframes = clip.keyframes.filter { it.timeMs <= clipTime },
+                            keyframes = sliceKeyframes(clip, 0, clipTime),
                         )
                         val second = clip.copy(
                             id = rightHalfId.getValue(clip.id),
                             startTimeMs = clip.startTimeMs + clipTime,
-                            trimStartMs = clip.trimStartMs + clipTime,
+                            trimStartMs = TimelineMath.sourceTimeMs(clip, now),
                             durationMs = clip.durationMs - clipTime,
                             groupId = rightG,
                             linkedClipId = clip.linkedClipId?.let { rightHalfId[it] ?: it },
-                            keyframes = clip.keyframes.filter { it.timeMs > clipTime }
-                                .map { it.copy(id = newId(), timeMs = it.timeMs - clipTime) },
+                            keyframes = sliceKeyframes(clip, clipTime, clip.durationMs),
                         )
                         listOf(first, second)
                     }
@@ -755,16 +793,14 @@ open class EditorViewModel {
 
             val first = clip.copy(
                 durationMs = clipTimeMs,
-                keyframes = clip.keyframes.filter { it.timeMs <= clipTimeMs },
+                keyframes = sliceKeyframes(clip, 0, clipTimeMs),
             )
             val second = clip.copy(
                 id = newId(),
                 startTimeMs = clip.startTimeMs + clipTimeMs,
-                trimStartMs = clip.trimStartMs + clipTimeMs,
+                trimStartMs = TimelineMath.sourceTimeMs(clip, timelineMs),
                 durationMs = clip.durationMs - clipTimeMs,
-                keyframes = clip.keyframes
-                    .filter { it.timeMs > clipTimeMs }
-                    .map { it.copy(id = newId(), timeMs = it.timeMs - clipTimeMs) },
+                keyframes = sliceKeyframes(clip, clipTimeMs, clip.durationMs),
             )
             doc.copy(clips = doc.clips.flatMap { if (it.id == clipId) listOf(first, second) else listOf(it) })
         }
@@ -780,27 +816,29 @@ open class EditorViewModel {
      * clip is cut in lockstep so sound stays in sync.
      */
     fun splitClipAt(clipId: String, timelineMsList: List<Long>) {
-        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
-        // Accept cut points greedily so every resulting slice (including the head and tail) is at
-        // least MIN_CLIP_DURATION_MS. Pre-filtering here — rather than dropping too-short slices
-        // after splitting — means no footage is ever discarded: cuts that would strand a tiny slice
-        // are simply merged into their neighbour, keeping the timeline gap-free.
-        val candidates = timelineMsList
-            .map { it - clip.startTimeMs }
-            .filter { it > 0 && it < clip.durationMs }
-            .distinct()
-            .sorted()
-        val cuts = ArrayList<Long>()
-        cuts.add(0L)
-        candidates.forEach { c ->
-            if (c - cuts.last() >= MIN_CLIP_DURATION_MS && clip.durationMs - c >= MIN_CLIP_DURATION_MS) {
-                cuts.add(c)
-            }
-        }
-        cuts.add(clip.durationMs)
-        if (cuts.size <= 2) return // no usable internal cut
-
+        // Everything reads the clip from the document mutateDocument hands in (under historyLock), not
+        // a snapshot taken before it — a concurrent edit in between would otherwise be overwritten.
         mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            // Accept cut points greedily so every resulting slice (including the head and tail) is at
+            // least MIN_CLIP_DURATION_MS. Pre-filtering here — rather than dropping too-short slices
+            // after splitting — means no footage is ever discarded: cuts that would strand a tiny slice
+            // are simply merged into their neighbour, keeping the timeline gap-free.
+            val candidates = timelineMsList
+                .map { it - clip.startTimeMs }
+                .filter { it > 0 && it < clip.durationMs }
+                .distinct()
+                .sorted()
+            val cuts = ArrayList<Long>()
+            cuts.add(0L)
+            candidates.forEach { c ->
+                if (c - cuts.last() >= MIN_CLIP_DURATION_MS && clip.durationMs - c >= MIN_CLIP_DURATION_MS) {
+                    cuts.add(c)
+                }
+            }
+            cuts.add(clip.durationMs)
+            if (cuts.size <= 2) return@mutateDocument doc // no usable internal cut
+
             val shadow = doc.clips.firstOrNull { it.linkedClipId == clip.id }
             val videoPieces = mutableListOf<TimelineClip>()
             val shadowPieces = mutableListOf<TimelineClip>()
@@ -814,28 +852,24 @@ open class EditorViewModel {
                 val vid = clip.copy(
                     id = newId(),
                     startTimeMs = clip.startTimeMs + relStart,
-                    trimStartMs = clip.trimStartMs + relStart,
+                    trimStartMs = TimelineMath.sourceTimeMs(clip, clip.startTimeMs + relStart),
                     durationMs = dur,
                     edits = emptyList(),
                     groupId = pairGroup,
                     linkedClipId = null,
-                    keyframes = clip.keyframes
-                        .filter { it.timeMs >= relStart && it.timeMs < relEnd }
-                        .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                    keyframes = sliceKeyframes(clip, relStart, relEnd),
                 )
                 videoPieces += vid
                 if (shadow != null && pairGroup != null) {
                     shadowPieces += shadow.copy(
                         id = newId(),
                         startTimeMs = shadow.startTimeMs + relStart,
-                        trimStartMs = shadow.trimStartMs + relStart,
+                        trimStartMs = TimelineMath.sourceTimeMs(shadow, shadow.startTimeMs + relStart),
                         durationMs = dur,
                         edits = emptyList(),
                         groupId = pairGroup,
                         linkedClipId = vid.id,
-                        keyframes = shadow.keyframes
-                            .filter { it.timeMs >= relStart && it.timeMs < relEnd }
-                            .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                        keyframes = sliceKeyframes(shadow, relStart, relEnd),
                     )
                 }
             }
@@ -866,18 +900,20 @@ open class EditorViewModel {
      * which groups all pieces together).
      */
     fun segmentClip(clipId: String) {
-        val clip = document.clips.firstOrNull { it.id == clipId } ?: return
-        if (clip.edits.isEmpty()) return
-        // Boundaries in clip-relative ms, deduped and sorted.
-        val bounds = sortedSetOf(0L, clip.durationMs)
-        clip.edits.forEach { e ->
-            bounds.add((e.startMs - clip.trimStartMs).coerceIn(0, clip.durationMs))
-            bounds.add((e.endMs - clip.trimStartMs).coerceIn(0, clip.durationMs))
-        }
-        val cuts = bounds.toList()
-        if (cuts.size <= 2) return // no internal boundary → nothing to segment
-
+        // Read under historyLock via mutateDocument's doc (see splitClipAt).
         mutateDocument { doc ->
+            val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
+            if (clip.edits.isEmpty()) return@mutateDocument doc
+            // Boundaries in clip-relative timeline ms (edits are in source ms — map them through the
+            // clip's speed), deduped and sorted.
+            val bounds = sortedSetOf(0L, clip.durationMs)
+            clip.edits.forEach { e ->
+                bounds.add(TimelineMath.timelineRelMs(clip, e.startMs).coerceIn(0, clip.durationMs))
+                bounds.add(TimelineMath.timelineRelMs(clip, e.endMs).coerceIn(0, clip.durationMs))
+            }
+            val cuts = bounds.toList()
+            if (cuts.size <= 2) return@mutateDocument doc // no internal boundary → nothing to segment
+
             val shadow = doc.clips.firstOrNull { it.linkedClipId == clip.id }
             val videoPieces = mutableListOf<TimelineClip>()
             val shadowPieces = mutableListOf<TimelineClip>()
@@ -892,30 +928,26 @@ open class EditorViewModel {
                 val vid = clip.copy(
                     id = newId(),
                     startTimeMs = clip.startTimeMs + relStart,
-                    trimStartMs = clip.trimStartMs + relStart,
+                    trimStartMs = TimelineMath.sourceTimeMs(clip, clip.startTimeMs + relStart),
                     durationMs = dur,
                     edits = emptyList(),
                     groupId = pairGroup,
                     linkedClipId = null,
-                    keyframes = clip.keyframes
-                        .filter { it.timeMs >= relStart && it.timeMs < relEnd }
-                        .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                    keyframes = sliceKeyframes(clip, relStart, relEnd),
                 )
                 videoPieces += vid
                 if (shadow != null && pairGroup != null) {
                     shadowPieces += shadow.copy(
                         id = newId(),
                         startTimeMs = shadow.startTimeMs + relStart,
-                        trimStartMs = shadow.trimStartMs + relStart,
+                        trimStartMs = TimelineMath.sourceTimeMs(shadow, shadow.startTimeMs + relStart),
                         durationMs = dur,
                         edits = emptyList(),
                         groupId = pairGroup,
                         // Re-link this slice to its video piece so preview/export still treat it as
                         // a skipped shadow (the video clip carries the sound).
                         linkedClipId = vid.id,
-                        keyframes = shadow.keyframes
-                            .filter { it.timeMs >= relStart && it.timeMs < relEnd }
-                            .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                        keyframes = sliceKeyframes(shadow, relStart, relEnd),
                     )
                 }
             }
@@ -949,9 +981,12 @@ open class EditorViewModel {
             val c = if (overrideEdits != null) c0.copy(edits = overrideEdits) else c0
             if (c.edits.none { it.action == EditAction.REMOVE }) return@mutateDocument doc
             val shadow = doc.clips.firstOrNull { it.linkedClipId == c.id }
-            // Kept ranges in source ms -> clip-relative (start, end) intervals shared by clip + shadow.
-            val rel = com.hereliesaz.guillotine.model.TimelineMath.keptRanges(c)
-                .map { (it.first - c.trimStartMs) to (it.last + 1 - c.trimStartMs) }
+            // Kept ranges in source ms -> clip-relative timeline (start, end) intervals shared by clip +
+            // shadow, mapped through the clip's speed so a sped-up clip cuts where its footage plays.
+            val rel = TimelineMath.keptRanges(c).map {
+                TimelineMath.timelineRelMs(c, it.first).coerceIn(0, c.durationMs) to
+                    TimelineMath.timelineRelMs(c, it.last + 1).coerceIn(0, c.durationMs)
+            }
             val gid = newId()
             val videoPieces = cutPieces(c, rel, gid)
             // videoPieces empty => every range removed => the clip is deleted outright (removedTotal is
@@ -1043,14 +1078,12 @@ open class EditorViewModel {
                         add(sh.copy(
                             id = newId(),
                             startTimeMs = c.startTimeMs + relStart,
-                            trimStartMs = sh.trimStartMs + relStart,
+                            trimStartMs = TimelineMath.sourceTimeMs(sh, sh.startTimeMs + relStart),
                             durationMs = dur,
                             edits = emptyList(),
                             groupId = gid,
                             linkedClipId = if (isReplaced) null else videoPiece?.id,
-                            keyframes = sh.keyframes
-                                .filter { it.timeMs >= relStart && it.timeMs < relEnd }
-                                .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) },
+                            keyframes = sliceKeyframes(sh, relStart, relEnd),
                         ))
                     }
                 }
@@ -1078,12 +1111,16 @@ open class EditorViewModel {
         return out
     }
 
-    /** A fresh sub-clip of [clip]: trim window [relStart, relStart+dur) placed at [startTimeline]. */
+    /**
+     * A fresh sub-clip of [clip]: the clip-relative timeline window [relStart, relStart+dur) placed at
+     * [startTimeline]. Its source in-point goes through [TimelineMath.sourceTimeMs], so a clip at a
+     * speed other than 1x keeps showing the footage that window actually played.
+     */
     private fun piece(clip: TimelineClip, relStart: Long, dur: Long, startTimeline: Long, groupId: String? = clip.groupId) =
         clip.copy(
             id = newId(),
             startTimeMs = startTimeline,
-            trimStartMs = clip.trimStartMs + relStart,
+            trimStartMs = TimelineMath.sourceTimeMs(clip, clip.startTimeMs + relStart),
             durationMs = dur,
             edits = emptyList(),
             groupId = groupId,
@@ -1092,18 +1129,43 @@ open class EditorViewModel {
             // setAnalyzing(false, oldId) call can ever reach — start it clear rather than inheriting
             // a flag that would otherwise be stuck true forever.
             isAnalyzing = false,
-            keyframes = run {
-                // Half-open [relStart, relStart+dur) assigns a keyframe on an interior cut boundary to the
-                // NEXT piece (where it sits at relStart). But the piece that reaches the clip's END has no
-                // "next" piece, so include its closing boundary there — otherwise a keyframe at the clip's
-                // final ms is dropped (matches splitClip, which keeps it).
-                val end = relStart + dur
-                val includeEnd = end >= clip.durationMs
-                clip.keyframes
-                    .filter { it.timeMs >= relStart && (if (includeEnd) it.timeMs <= end else it.timeMs < end) }
-                    .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) }
-            },
+            keyframes = sliceKeyframes(clip, relStart, relStart + dur),
         )
+
+    /**
+     * [clip]'s keyframes for the clip-relative window [relStart, relEnd), re-based to the window's start.
+     * Half-open, so a keyframe on an interior cut belongs to the NEXT piece — except the piece that
+     * reaches the clip's END, which keeps a keyframe on its final ms. For every animated property, a
+     * keyframe holding the curve's value is added at each cut edge that has none, so a piece keeps the
+     * animation it showed instead of flattening to its first/last surviving keyframe.
+     */
+    private fun sliceKeyframes(clip: TimelineClip, relStart: Long, relEnd: Long): List<Keyframe> {
+        if (clip.keyframes.isEmpty()) return emptyList()
+        val includeEnd = relEnd >= clip.durationMs
+        val out = clip.keyframes
+            .filter { it.timeMs >= relStart && (if (includeEnd) it.timeMs <= relEnd else it.timeMs < relEnd) }
+            .map { it.copy(id = newId(), timeMs = it.timeMs - relStart) }
+            .toMutableList()
+        clip.keyframes.groupBy { it.property }.forEach { (prop, list) ->
+            val sorted = list.sortedBy { it.timeMs }
+            val generated = sorted.all { it.generated }
+            if (relStart > 0 && sorted.none { it.timeMs == relStart }) {
+                // Continue the segment the cut fell in: same easing/hold as the keyframe that opened it.
+                val opener = sorted.lastOrNull { it.timeMs < relStart }
+                out += Keyframe(
+                    id = newId(), timeMs = 0, value = TimelineMath.interpolateSorted(sorted, relStart, 0f), property = prop,
+                    easing = opener?.easing ?: CubicBezier(), hold = opener?.hold ?: false, generated = generated,
+                )
+            }
+            if (!includeEnd && relEnd > relStart) {
+                out += Keyframe(
+                    id = newId(), timeMs = relEnd - relStart, value = TimelineMath.interpolateSorted(sorted, relEnd, 0f),
+                    property = prop, generated = generated,
+                )
+            }
+        }
+        return out.sortedBy { it.timeMs }
+    }
 
     /**
      * Generic ripple delete: cut the timeline span [startMs, endMs) out of every track — clips fully
@@ -1325,9 +1387,6 @@ open class EditorViewModel {
     fun trimClipStart(clipId: String, deltaMs: Long, includeLinked: Boolean = true) {
         mutateDocument { doc ->
             val clip = doc.clips.firstOrNull { it.id == clipId } ?: return@mutateDocument doc
-            var d = deltaMs.coerceAtLeast(-clip.trimStartMs)
-            d = d.coerceAtMost(clip.durationMs - MIN_CLIP_DURATION_MS)
-            if (d == 0L) return@mutateDocument doc
             // The clip's linked waveform shadow (its own audio) trims identically so they stay aligned,
             // unless this is a deliberate independent L/J-cut trim of just this one clip.
             val affected = if (includeLinked) {
@@ -1335,18 +1394,47 @@ open class EditorViewModel {
             } else {
                 setOf(clipId)
             }
-            doc.copy(clips = doc.clips.map {
-                if (it.id !in affected) it
-                else it.copy(
-                    startTimeMs = (it.startTimeMs + d).coerceAtLeast(0),
-                    trimStartMs = it.trimStartMs + d,
-                    durationMs = it.durationMs - d,
-                    keyframes = it.keyframes.map { k -> k.copy(timeMs = k.timeMs - d) }.filter { k -> k.timeMs >= 0 },
-                )
-            })
+            val moving = doc.clips.filter { it.id in affected }
+            // Extending left is bounded by both the source's start (in timeline ms, through the speed at
+            // the in-point) and the timeline's t=0: clamping only the new start at 0 while still pulling
+            // the in-point back would lengthen the clip and push its source out of sync.
+            var d = deltaMs
+            for (c in moving) {
+                d = d.coerceAtLeast(-(c.trimStartMs / TimelineMath.speedAt(c, 0)).toLong())
+                d = d.coerceAtLeast(-c.startTimeMs)
+            }
+            d = d.coerceAtMost(clip.durationMs - MIN_CLIP_DURATION_MS)
+            if (d == 0L) return@mutateDocument doc
+            doc.copy(clips = doc.clips.map { if (it.id !in affected) it else trimmedStart(it, d) })
         }
         actionRecorder.record(RecordedAction("trim_start", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Trim start by ${deltaMs}ms"))
     }
+
+    /**
+     * [c] with its in-point moved by [d] timeline ms (positive = later): the source in-point moves by
+     * however much source that span plays at the clip's speed, and keyframes are re-based — a trim
+     * that cuts into an animation keeps a boundary keyframe instead of dropping the curve.
+     */
+    private fun trimmedStart(c: TimelineClip, d: Long): TimelineClip = c.copy(
+        startTimeMs = c.startTimeMs + d,
+        trimStartMs = c.trimStartMs + sourceOffset(c, d),
+        durationMs = c.durationMs - d,
+        keyframes = if (d > 0) sliceKeyframes(c, d, c.durationMs) else c.keyframes.map { k -> k.copy(timeMs = k.timeMs - d) },
+    )
+
+    /** [c] with its out-point moved by [d] timeline ms; shrinking leaves a boundary keyframe at the new end. */
+    private fun trimmedEnd(c: TimelineClip, d: Long): TimelineClip {
+        val nd = c.durationMs + d
+        return c.copy(durationMs = nd, keyframes = if (d < 0) sliceKeyframes(c, 0, nd) else c.keyframes)
+    }
+
+    /**
+     * Source ms covered by moving [c]'s in-point by [d] timeline ms: through [TimelineMath.sourceTimeMs]
+     * going right; going left (before the clip's current start) at the speed in force at its in-point.
+     */
+    private fun sourceOffset(c: TimelineClip, d: Long): Long =
+        if (d >= 0) TimelineMath.sourceTimeMs(c, c.startTimeMs + d) - c.trimStartMs
+        else (d * TimelineMath.speedAt(c, 0).toDouble()).toLong()
 
     /**
      * Drag the RIGHT edge: change the clip's duration by [deltaMs]. Bounded to a
@@ -1359,7 +1447,8 @@ open class EditorViewModel {
             var d = deltaMs.coerceAtLeast(MIN_CLIP_DURATION_MS - clip.durationMs)
             val media = doc.mediaFor(clip)
             if (media != null && media.kind != com.hereliesaz.guillotine.model.MediaKind.IMAGE && media.durationMs > 0) {
-                val maxDuration = media.durationMs - clip.trimStartMs
+                // Timeline length at which the clip, at its speed, reaches the end of its source.
+                val maxDuration = TimelineMath.timelineRelMs(clip, media.durationMs)
                 d = d.coerceAtMost(maxDuration - clip.durationMs)
             }
             if (d == 0L) return@mutateDocument doc
@@ -1370,13 +1459,7 @@ open class EditorViewModel {
             } else {
                 setOf(clipId)
             }
-            doc.copy(clips = doc.clips.map {
-                if (it.id !in affected) it
-                else {
-                    val nd = it.durationMs + d
-                    it.copy(durationMs = nd, keyframes = it.keyframes.filter { k -> k.timeMs <= nd })
-                }
-            })
+            doc.copy(clips = doc.clips.map { if (it.id !in affected) it else trimmedEnd(it, d) })
         }
         actionRecorder.record(RecordedAction("trim_end", mapOf("clip_id" to clipId, "delta_ms" to deltaMs), "Trim end by ${deltaMs}ms"))
     }
@@ -1393,7 +1476,8 @@ open class EditorViewModel {
             val media = doc.mediaFor(clip)
             var d = deltaMs.coerceAtLeast(-clip.trimStartMs)
             if (media != null && media.kind != com.hereliesaz.guillotine.model.MediaKind.IMAGE && media.durationMs > 0) {
-                val maxTrimStart = (media.durationMs - clip.durationMs).coerceAtLeast(0)
+                // The window is the source span the clip plays at its speed, not its timeline length.
+                val maxTrimStart = (media.durationMs - (TimelineMath.sourceEndMs(clip) - clip.trimStartMs)).coerceAtLeast(0)
                 d = d.coerceAtMost(maxTrimStart - clip.trimStartMs)
             }
             if (d == 0L) return@mutateDocument doc
@@ -1437,7 +1521,7 @@ open class EditorViewModel {
                         if (shrink > 0) {
                             c.copy(
                                 startTimeMs = newStart,
-                                trimStartMs = c.trimStartMs + shrink,
+                                trimStartMs = c.trimStartMs + sourceOffset(c, shrink),
                                 durationMs = (c.durationMs - shrink).coerceAtLeast(MIN_CLIP_DURATION_MS),
                             )
                         } else {
@@ -1467,11 +1551,17 @@ open class EditorViewModel {
         // SAME delta is bounded once and applied to both sides — calling each with an unclamped delta
         // and letting them independently re-clamp could apply a different amount to each side, breaking
         // the roll's "combined span stays fixed" invariant.
-        val lo = maxOf(MIN_CLIP_DURATION_MS - left.durationMs, -right.trimStartMs)
+        // Bounds are in timeline ms, so source limits go through each clip's speed; the right clip also
+        // can't start before t=0 (see trimClipStart).
+        val lo = maxOf(
+            MIN_CLIP_DURATION_MS - left.durationMs,
+            -(right.trimStartMs / TimelineMath.speedAt(right, 0)).toLong(),
+            -right.startTimeMs,
+        )
         var hi = minOf(right.durationMs - MIN_CLIP_DURATION_MS, Long.MAX_VALUE / 2)
         val leftMedia = document.mediaFor(left)
         if (leftMedia != null && leftMedia.kind != com.hereliesaz.guillotine.model.MediaKind.IMAGE && leftMedia.durationMs > 0) {
-            hi = minOf(hi, leftMedia.durationMs - left.trimStartMs - left.durationMs)
+            hi = minOf(hi, TimelineMath.timelineRelMs(left, leftMedia.durationMs) - left.durationMs)
         }
         val d = deltaMs.coerceIn(lo, maxOf(lo, hi))
         if (d == 0L) return
@@ -1480,16 +1570,8 @@ open class EditorViewModel {
             val rightAffected = setOf(rightClipId) + doc.clips.filter { it.linkedClipId == rightClipId }.map { it.id }
             doc.copy(clips = doc.clips.map { c ->
                 when {
-                    c.id in leftAffected -> {
-                        val nd = c.durationMs + d
-                        c.copy(durationMs = nd, keyframes = c.keyframes.filter { k -> k.timeMs <= nd })
-                    }
-                    c.id in rightAffected -> c.copy(
-                        startTimeMs = (c.startTimeMs + d).coerceAtLeast(0),
-                        trimStartMs = c.trimStartMs + d,
-                        durationMs = c.durationMs - d,
-                        keyframes = c.keyframes.map { k -> k.copy(timeMs = k.timeMs - d) }.filter { k -> k.timeMs >= 0 },
-                    )
+                    c.id in leftAffected -> trimmedEnd(c, d)
+                    c.id in rightAffected -> trimmedStart(c, d)
                     else -> c
                 }
             })
@@ -2482,9 +2564,11 @@ open class EditorViewModel {
 
     fun clearSelection() = _uiState.update { it.copy(selectedClipIds = emptyList(), selectedKeyframeId = null) }
 
-    /** Replace the whole document (used by project load); resets history. */
-    fun loadDocument(doc: Document) {
+    /** Replace the whole document (used by project load); resets history and per-project view state. */
+    fun loadDocument(doc: Document) = synchronized(historyLock) {
         past.clear(); future.clear()
+        // A copied clip references media by id in the project it came from; it can't paste here.
+        clipboardClip = null
         _uiState.update {
             it.copy(
                 document = doc,
@@ -2504,6 +2588,13 @@ open class EditorViewModel {
                 // re-show a mismatched suggestion in this one.
                 soloedTrackIds = emptySet(),
                 suggestAspectMatch = false,
+                // Same reasoning: these are keyed by clip/track id or by timeline position of the
+                // previous project, and would land on unrelated content here.
+                selectedKeyframeId = null,
+                playbackRegion = null,
+                beatMaps = emptyMap(),
+                lufsByClip = emptyMap(),
+                trackHeights = emptyMap(),
             )
         }
         // If the loaded project doesn't have a persisted zoom, snap to fit-all once the viewport
