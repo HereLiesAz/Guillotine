@@ -22,14 +22,25 @@ object BeatAnalyzer {
     private const val HOP = 256           // ~23 ms at 11025 Hz
     private const val MIN_BPM = 70f
     private const val MAX_BPM = 180f
+    private const val SILENCE_RMS = 1e-4  // ≈ -80 dBFS
+
+    private fun rms(x: FloatArray): Double {
+        var acc = 0.0
+        for (v in x) acc += v.toDouble() * v
+        return sqrt(acc / x.size)
+    }
 
     /** Analyze already-decoded **mono** [samples] (normalized [-1,1]) at [sampleRate] Hz. */
     fun analyze(samples: FloatArray, sampleRate: Int): BeatMap {
         val sr = sampleRate
         if (samples.size < FFT * 2 || sr <= 0) return BeatMap(0f, emptyList(), emptyList(), emptyList())
 
+        // Silence (or near-silence below ~-80 dBFS) has no tempo. Without this gate the flat onset
+        // envelope makes every autocorrelation lag score 0, the first (shortest) lag wins, and a
+        // fake 180 BPM grid comes back for a silent clip.
+        if (rms(samples) < SILENCE_RMS) return BeatMap(0f, emptyList(), emptyList(), emptyList())
         val flux = onsetEnvelope(samples)
-        if (flux.isEmpty()) return BeatMap(0f, emptyList(), emptyList(), emptyList())
+        if (flux.isEmpty() || flux.all { it <= 0f }) return BeatMap(0f, emptyList(), emptyList(), emptyList())
         val frameMs = HOP * 1000.0 / sr
 
         val bpm = estimateTempo(flux, frameMs)

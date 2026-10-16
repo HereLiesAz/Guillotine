@@ -29,7 +29,7 @@ package com.hereliesaz.guillotine.ai
  * and insert under the lock. This avoids blocking concurrent callers during ML Kit inference.
  */
 object FrameAnalysisCache {
-    /** Default cap — ~13 minutes of 3-fps sampling per signal. Settings can override at runtime. */
+    /** Default cap — ~22 minutes of 3-fps sampling per signal (4096 / 3 fps ≈ 1365 s). Settings can override at runtime. */
     const val DEFAULT_MAX_ENTRIES = 4096
 
     /** Reasonable UI range for the Settings slider. 0 effectively disables the cache. */
@@ -55,9 +55,25 @@ object FrameAnalysisCache {
     private val sceneLabels: MutableMap<FrameKey, List<SceneLabel>> = boundedLru()
     private val detections: MutableMap<FrameKey, List<Detection>> = boundedLru()
 
-    /** Apply a new cap. Takes effect on the next put/get (trim happens as entries arrive). */
+    /**
+     * Apply a new cap and trim every signal down to it now (eldest first), so lowering the cap — or
+     * setting 0 to disable — actually releases memory instead of waiting for new entries to arrive.
+     */
     fun setMaxEntries(n: Int) {
         maxEntries = n.coerceIn(MIN_MAX_ENTRIES, MAX_MAX_ENTRIES)
+        trim(objectLabels); trim(classifierLabels); trim(sceneLabels); trim(detections)
+    }
+
+    /** Drop every cached result for [uri] (e.g. the file behind it was replaced or the clip removed). */
+    fun forget(uri: String) {
+        for (m in listOf<MutableMap<FrameKey, *>>(objectLabels, classifierLabels, sceneLabels, detections)) {
+            synchronized(m) { m.keys.removeAll { it.uri == uri } }
+        }
+    }
+
+    private fun trim(m: MutableMap<FrameKey, *>) = synchronized(m) {
+        val it = m.entries.iterator()
+        while (m.size > maxEntries && it.hasNext()) { it.next(); it.remove() }
     }
 
     fun objectLabels(uri: String, atMs: Long, compute: () -> Set<String>): Set<String> {

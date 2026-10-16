@@ -1101,9 +1101,16 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     }
 
     // Optional outbound, end-to-end-encrypted Cloudflare relay. Re-read on Settings close so
-    // toggling it on/off (or editing the Worker URL) restarts the bridge.
-    DisposableEffect(relayConfig) {
-        val client = if (relayConfig.isUsable) {
+    // toggling it on/off (or editing the Worker URL) restarts the bridge. The room is derived from the
+    // MCP token at connect time, so also key on the token (re-read whenever Settings closes): a
+    // Regenerate there must move the relay to the new room now, not after an app restart.
+    val relayToken by androidx.compose.runtime.produceState("", relayConfig, showSettings) {
+        if (!showSettings) {
+            value = withContext(Dispatchers.IO) { com.hereliesaz.guillotine.mcp.McpAuth.token(context) }
+        }
+    }
+    DisposableEffect(relayConfig, relayToken) {
+        val client = if (relayConfig.isUsable && relayToken.isNotEmpty()) {
             com.hereliesaz.guillotine.mcp.McpRelayClient(
                 sharedMcpTools,
                 { com.hereliesaz.guillotine.mcp.McpAuth.token(context) },

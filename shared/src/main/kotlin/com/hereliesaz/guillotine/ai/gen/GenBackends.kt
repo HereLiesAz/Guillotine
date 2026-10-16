@@ -34,7 +34,7 @@ object GenBackends {
         GenProviderType.GUILLOTINE_FREE -> guillotineFree(req)
         GenProviderType.RUNWAY -> runway(req)
         GenProviderType.LUMA -> luma(req)
-        GenProviderType.GEMINI_VEO -> geminiVeo(req)
+        GenProviderType.GEMINI_VEO -> geminiVeo(req, sink)
         GenProviderType.MINIMAX -> minimax(req)
         GenProviderType.OPENAI_SORA -> openAiSora(req, sink)
         GenProviderType.KLING -> kling(req)
@@ -192,7 +192,7 @@ object GenBackends {
         }
     }
 
-    private fun geminiVeo(req: GenRequest) = object : GenJob {
+    private fun geminiVeo(req: GenRequest, sink: GenSink) = object : GenJob {
         val model = req.model.ifBlank { "veo-3.1-generate-preview" }
         override suspend fun submit(): String {
             val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:predictLongRunning"
@@ -206,13 +206,15 @@ object GenBackends {
             val o = JSONObject(GenHttp.requestJson("GET", url, mapOf("x-goog-api-key" to req.apiKey)))
             if (!o.optBoolean("done", false)) return JobStatus.Running()
             o.optJSONObject("error")?.let { return JobStatus.Failed(it.optString("message", "Veo failed.")) }
-            // Response nests generatedSamples[].video.uri; the file uri needs the key appended.
+            // Response nests generatedSamples[].video.uri. The file uri is key-gated: download it here
+            // with the key in the `x-goog-api-key` header (never in the query string, where it would be
+            // logged/persisted with the result uri), and only when the host is exactly Google's API.
             val uri = firstUrlIn(o.optJSONObject("response") ?: o)
                 ?: return JobStatus.Failed("Veo returned no video.")
-            val withKey = if ("generativelanguage.googleapis.com" in uri && "key=" !in uri) {
-                uri + (if ("?" in uri) "&" else "?") + "key=${req.apiKey}"
-            } else uri
-            return JobStatus.Done(withKey)
+            val host = runCatching { java.net.URI(uri).host }.getOrNull()?.lowercase()
+            if (host != "generativelanguage.googleapis.com") return JobStatus.Done(uri)
+            val bytes = GenHttp.getBytes(uri, mapOf("x-goog-api-key" to req.apiKey))
+            return JobStatus.Done(sink.saveBytes(bytes, "mp4"))
         }
     }
 

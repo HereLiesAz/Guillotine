@@ -126,11 +126,15 @@ val GenProviderType.meta: GenProviderMeta
             keyUrl = "https://pika.art", needsKey = true,
             models = img(GenModel("pika-2.2", "Pika 2.2")),
         )
+        // Serves no GenKind for now: Stability's API is image-to-video only and nothing in the app yet
+        // supplies the required start image (`extra["image_url"]`), so offering it under VIDEO meant every
+        // job failed at submit. The backend stays so it can be re-enabled once a start-image source exists.
         GenProviderType.STABILITY_VIDEO -> GenProviderMeta(
-            this, setOf(GenKind.VIDEO), "Stability AI (video)",
+            this, emptySet(), "Stability AI (video)",
             "Image-to-video (Stable Video Diffusion lineage).",
             keyUrl = "https://platform.stability.ai/account/keys", needsKey = true,
             models = img(GenModel("stable-video-diffusion", "Stable Video Diffusion")),
+            disclaimer = "Needs a start image, which the editor can't supply yet — not offered for generation.",
         )
         // ---------------------------------------------------------------- music
         GenProviderType.ELEVENLABS -> GenProviderMeta(

@@ -96,4 +96,15 @@ class BeatAnalyzerTest {
         assertEquals(0f, map.bpm, 0f)
         assertTrue(map.beatsMs.isEmpty())
     }
+
+    @Test fun silenceHasNoTempoOrBeats() {
+        val silent = FloatArray(sampleRate * 10)
+        val map = BeatAnalyzer.analyze(silent, sampleRate)
+        assertEquals(0f, map.bpm, 0f)
+        assertTrue(map.beatsMs.isEmpty())
+        assertTrue(map.onsetsMs.isEmpty())
+        // Near-silence (dither far below -80 dBFS) is treated the same.
+        val dither = FloatArray(sampleRate * 10) { if (it % 2 == 0) 1e-6f else -1e-6f }
+        assertTrue(BeatAnalyzer.analyze(dither, sampleRate).beatsMs.isEmpty())
+    }
 }
