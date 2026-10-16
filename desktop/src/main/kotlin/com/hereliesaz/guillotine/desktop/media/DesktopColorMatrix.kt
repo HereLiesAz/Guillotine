@@ -2,8 +2,6 @@ package com.hereliesaz.guillotine.desktop.media
 
 import com.hereliesaz.guillotine.media.CubeLut
 import java.awt.image.BufferedImage
-import java.awt.image.ConvolveOp
-import java.awt.image.Kernel
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -229,23 +227,51 @@ object DesktopColorMatrix {
 
     /**
      * Gaussian-ish blur of [image] in place by [radiusPx] pixels (the clip's `filters.blur`), applied as
-     * a separable box kernel via two [ConvolveOp]s (horizontal then vertical) — well-tested Java2D math,
-     * so it's correct without a hand-rolled convolution. Desktop previously ignored blur entirely, so a
+     * a separable running-sum box filter (horizontal then vertical) with edge clamping. Desktop previously ignored blur entirely, so a
      * blurred clip rendered sharp on both preview and export. No-op for a zero/negative radius. The
      * radius is capped so a runaway value can't stall a per-frame render.
      */
     fun blur(image: BufferedImage, radiusPx: Float) {
         val r = radiusPx.roundToInt().coerceIn(0, 40)
-        if (r <= 0 || image.width < 2 || image.height < 2) return
+        val w = image.width
+        val h = image.height
+        if (r <= 0 || w < 2 || h < 2) return
+        // Separable box blur on ARGB ints with CLAMPED edges (edge pixels repeat outward). The old
+        // ConvolveOp(EDGE_NO_OP) left an r-pixel border completely unblurred — a sharp frame around a
+        // blurred picture.
+        val src = image.getRGB(0, 0, w, h, null, 0, w)
+        val tmp = IntArray(w * h)
+        boxPass(src, tmp, w, h, r, horizontal = true)
+        boxPass(tmp, src, w, h, r, horizontal = false)
+        image.setRGB(0, 0, w, h, src, 0, w)
+    }
+
+    /** One running-sum box pass (radius [r]) along rows or columns, sampling clamped to the edge. */
+    private fun boxPass(input: IntArray, output: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
+        val lines = if (horizontal) h else w
+        val len = if (horizontal) w else h
         val size = 2 * r + 1
-        val line = FloatArray(size) { 1f / size } // normalized 1D box kernel
-        val opH = ConvolveOp(Kernel(size, 1, line), ConvolveOp.EDGE_NO_OP, null)
-        val opV = ConvolveOp(Kernel(1, size, line), ConvolveOp.EDGE_NO_OP, null)
-        // ConvolveOp requires distinct src/dst. Let it create a type-compatible scratch (passing null
-        // dest), then blur vertically back into the original — avoids constructing a BufferedImage from a
-        // possibly-TYPE_CUSTOM decoded-frame type.
-        val tmp = opH.filter(image, null)
-        opV.filter(tmp, image)
+        for (line in 0 until lines) {
+            fun at(i: Int): Int {
+                val c = i.coerceIn(0, len - 1)
+                return input[if (horizontal) line * w + c else c * w + line]
+            }
+            var sa = 0; var sr = 0; var sg = 0; var sb = 0
+            for (i in -r..r) {
+                val p = at(i)
+                sa += p ushr 24; sr += (p shr 16) and 0xFF; sg += (p shr 8) and 0xFF; sb += p and 0xFF
+            }
+            for (i in 0 until len) {
+                output[if (horizontal) line * w + i else i * w + line] =
+                    ((sa / size) shl 24) or ((sr / size) shl 16) or ((sg / size) shl 8) or (sb / size)
+                val out = at(i - r)
+                val inn = at(i + r + 1)
+                sa += (inn ushr 24) - (out ushr 24)
+                sr += ((inn shr 16) and 0xFF) - ((out shr 16) and 0xFF)
+                sg += ((inn shr 8) and 0xFF) - ((out shr 8) and 0xFF)
+                sb += (inn and 0xFF) - (out and 0xFF)
+            }
+        }
     }
 
     /** Check if the matrix is effectively identity (no visible change). */

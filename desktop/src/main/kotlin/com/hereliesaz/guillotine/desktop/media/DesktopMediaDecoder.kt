@@ -41,7 +41,6 @@ object DesktopMediaDecoder {
     private val waveformCache = LinkedHashMap<String, Waveform>(64, 0.75f, true)
     private const val THUMB_CACHE_MAX = 96
     private const val WAVE_CACHE_MAX = 64
-    private const val MAX_DECODE_SECS = 30L
 
     /** Decoded mono PCM: normalized [-1,1] samples plus the sample rate they were resampled to. */
     data class Pcm(val samples: FloatArray, val sampleRate: Int)
@@ -293,20 +292,26 @@ object DesktopMediaDecoder {
         }
     }
 
+    /**
+     * Peak envelope over the WHOLE file (it also feeds [normalizeGain], so a truncated scan would
+     * under-estimate the peak and make normalize clip). Decoding is forced to packed S16 stereo:
+     * without that, AAC/Opus decode to planar float, the ShortBuffer cast failed for every frame and
+     * the waveform came out silent. Cancellable between frames instead of wall-clock bounded.
+     */
     private suspend fun decodeWaveform(file: File, buckets: Int): Waveform {
         val left = FloatArray(buckets)
         val right = FloatArray(buckets)
         val grabber = FFmpegFrameGrabber(file)
+        grabber.sampleFormat = avutil.AV_SAMPLE_FMT_S16
+        grabber.audioChannels = 2
         grabber.startOrRelease()
         try {
             val totalUs = grabber.lengthInTime
             if (totalUs <= 0) return Waveform(left, right)
             val channels = grabber.audioChannels.coerceAtLeast(1)
 
-            val deadline = System.nanoTime() + MAX_DECODE_SECS * 1_000_000_000L
             while (true) {
                 kotlin.coroutines.coroutineContext.ensureActive()
-                if (System.nanoTime() > deadline) break
                 val frame = grabber.grabSamples() ?: break
                 val samples = frame.samples ?: continue
                 if (samples.isEmpty()) continue
