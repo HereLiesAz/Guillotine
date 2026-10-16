@@ -6,6 +6,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.Signature
@@ -87,14 +88,18 @@ class AzpHandoffInstallerTest {
         assertTrue(ok.signatureValid)
     }
 
-    @Test fun unsignedPackageInstallsWithoutExtraApproval() {
-        // Unsigned has no provenance claim to warn about — it's exactly as trustworthy as every
-        // install was before the trust gate existed, so it must not require allowUntrusted.
+    @Test fun unsignedPackageRequiresExplicitApproval() {
+        // Unsigned carries no provenance at all, so it is gated like an untrusted signer (the same
+        // rule AzpModelInstall applies) — nothing installs without the user's confirmation.
         val id = "com.hereliesaz.unsigned"
         val bytes = unsignedPackage(id)
         val dir = tmp.newFolder("ext").absolutePath
 
-        val result = AzpHandoffInstaller.install(bytes, dir, hostAppId = HOST)
+        val first = AzpHandoffInstaller.install(bytes, dir, hostAppId = HOST)
+        assertTrue("expected Untrusted, got $first", first is AzpHandoffInstaller.InstallResult.Untrusted)
+        assertTrue(File(dir).listFiles().orEmpty().none { it.name.endsWith(".azp") })
+
+        val result = AzpHandoffInstaller.install(bytes, dir, allowUntrusted = true, hostAppId = HOST)
         val ok = result as? AzpHandoffInstaller.InstallResult.Success ?: error("expected Success, got $result")
         assertEquals(false, ok.signed)
     }
@@ -162,14 +167,14 @@ class AzpHandoffInstallerTest {
 
     @Test fun differentIdsSanitizingToTheSameFilenameCannotOverwriteEachOther() {
         val dir = tmp.newFolder("ext5")
-        val first = AzpHandoffInstaller.install(unsignedPackage("com.foo.my_pack"), dir.absolutePath, hostAppId = HOST)
+        val first = AzpHandoffInstaller.install(unsignedPackage("com.foo.my_pack"), dir.absolutePath, allowUntrusted = true, hostAppId = HOST)
         assertTrue("expected Success, got $first", first is AzpHandoffInstaller.InstallResult.Success)
 
         // A different raw id whose sanitized form collides with the one above — "/" and "_" both
         // collapse to "_", so both ids sanitize to "com.foo.my_pack.azp". This must NOT silently
         // overwrite the first package's installed bytes just because it never carried a publisher
         // pin under this (different) raw id.
-        val second = AzpHandoffInstaller.install(unsignedPackage("com.foo.my/pack"), dir.absolutePath, hostAppId = HOST)
+        val second = AzpHandoffInstaller.install(unsignedPackage("com.foo.my/pack"), dir.absolutePath, allowUntrusted = true, hostAppId = HOST)
         val failure = second as? AzpHandoffInstaller.InstallResult.Failure ?: error("expected Failure, got $second")
         assertTrue(failure.message.contains("com.foo.my_pack"))
 
@@ -183,8 +188,8 @@ class AzpHandoffInstallerTest {
         // (e.g. a version bump) always sanitizes to its own existing file and must overwrite it.
         val dir = tmp.newFolder("ext6")
         val id = "com.hereliesaz.reinstalled"
-        AzpHandoffInstaller.install(unsignedPackage(id), dir.absolutePath, hostAppId = HOST)
-        val second = AzpHandoffInstaller.install(unsignedPackage(id), dir.absolutePath, hostAppId = HOST)
+        AzpHandoffInstaller.install(unsignedPackage(id), dir.absolutePath, allowUntrusted = true, hostAppId = HOST)
+        val second = AzpHandoffInstaller.install(unsignedPackage(id), dir.absolutePath, allowUntrusted = true, hostAppId = HOST)
         assertTrue("expected Success, got $second", second is AzpHandoffInstaller.InstallResult.Success)
     }
 

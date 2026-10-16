@@ -174,6 +174,9 @@ fun DesktopPreviewPlayer(
     val gestureModifier = if (cropMode) cropModifier else panModifier
 
     val now = state.currentTimeMs
+    // Free playback mattes of clips that no longer exist (deleted, split, replaced).
+    val allClipIds = state.document.clips.mapTo(HashSet()) { it.id }
+    LaunchedEffect(allClipIds) { DesktopLiveMatte.retainOnly(allClipIds) }
     val clips = state.document.clips.filterNot { it.trackId in state.effectivePreviewDisabledTrackIds }
     // TEXT clips are "just a clip on a video track" (see Document.videoTracks' own doc comment) and
     // render through the exact same VideoTrackLayer/VideoSlot pipeline as VIDEO clips — see there —
@@ -871,9 +874,14 @@ private fun AudioTrackLayer(
         }
     }
 
-    LaunchedEffect(volume, norm, pan) {
+    // The clip's speed at the playhead (static speed or SPEED curve) — preview audio follows it, as
+    // the picture (TimelineMath.sourceTimeMs) and the export mix do.
+    val rate = active?.let { TimelineMath.speedAt(it, now - it.startTimeMs) } ?: 1f
+
+    LaunchedEffect(volume, norm, pan, rate) {
         player.gain = (volume * norm).coerceAtLeast(0f)
         player.pan = pan.coerceIn(-1f, 1f)
+        player.rate = rate
     }
 
     var lastMediaId by remember { mutableStateOf<String?>(null) }
@@ -886,7 +894,7 @@ private fun AudioTrackLayer(
         val file = uriToFile(media.uri) ?: return@LaunchedEffect
         val src = TimelineMath.sourceTimeMs(active, now).coerceAtLeast(0)
         if (media.id != lastMediaId) {
-            player.start(file, src, 1f)
+            player.start(file, src, TimelineMath.speedAt(active, now - active.startTimeMs))
             lastMediaId = media.id
         }
     }

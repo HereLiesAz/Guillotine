@@ -5,8 +5,12 @@ package com.hereliesaz.guillotine.ai.agent
  * `LlmInference`; modern `.litertlm` models run through LiteRT-LM. Ungated repos download in-app
  * with one tap; gated models link out to their source.
  *
- * Sizes/filenames verified against the litert-community repos. Direct download follows HF's
- * `resolve/main/<file>?download=true`, which 302s ungated files to a public CDN (no auth needed).
+ * Filenames come from the litert-community (and other listed) repos. Sizes are exact only where
+ * [OnDeviceModel.verifyBySize] is true; entries with `verifyBySize = false` (or a "~"/approximate
+ * comment) carry estimates used for the free-space check and progress, not a verified byte count.
+ * Direct download follows HF's `resolve/main/<file>?download=true`, which 302s ungated files to a
+ * public CDN (no auth needed). Downloads are NOT pinned to a commit: they track each repo's `main`,
+ * so an upstream re-upload can change a file (and break an exact-size check) without a code change.
  */
 /**
  * Which on-device runtime a model plugs into — drives where it's stored, how "Use" wires it, and
@@ -359,7 +363,7 @@ val RECOMMENDED_DESKTOP_ASSISTANT_MODELS: List<OnDeviceModel> = listOf(
 /**
  * Recommended general image-embedding models for recognition ("is this the same specific thing?").
  * These are MediaPipe ImageEmbedder-compatible `.tflite` files; "Use" sets `idEmbedModelPath`.
- * Populated with verified Hugging Face downloads.
+ * Populated with Hugging Face downloads (unpinned `main`; see the size notes at the top of this file).
  */
 val RECOMMENDED_RECOGNITION_MODELS: List<OnDeviceModel> = listOf(
     OnDeviceModel(

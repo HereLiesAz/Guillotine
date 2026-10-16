@@ -32,8 +32,17 @@ object AzpPreviewFetcher {
      * could have swapped past an unlisted-payload or path-traversal trick. A package that fails
      * integrity gets no preview at all (the store falls back to its plain listing row) rather than
      * having its unverified bytes executed anyway.
+     *
+     * Integrity only proves the bytes match their own manifest, not who wrote them, and nothing has
+     * been approved by the user yet. So a **shader** preview — code the GPU executes — is produced only
+     * for a package signed by a key in [trustedKeys] (the flagship store by default); anything else gets
+     * no shader preview. A LUT is inert data and previews regardless.
      */
-    fun fetch(id: String, version: String?): PreviewSource? = runCatching {
+    fun fetch(
+        id: String,
+        version: String?,
+        trustedKeys: Set<String> = AzphaltTrust.FLAGSHIP_SIGNING_KEYS,
+    ): PreviewSource? = runCatching {
         val bytes = AzphaltRegistry.download(AzpInstallLink(id, version))
         val loaded = AzpPackage.load(bytes)
         val asset = loaded.manifest.assets.firstOrNull {
@@ -43,6 +52,7 @@ object AzpPreviewFetcher {
         when (AzpInstalledUi.renderKindOf(asset.type)) {
             AzpInstalledUi.RenderKind.LUT -> PreviewSource.Lut(assetBytes.decodeToString())
             AzpInstalledUi.RenderKind.SHADER -> {
+                if (!AzpPackage.verifyTrust(bytes, trustedKeys).trusted) return@runCatching null
                 val defaults = asset.ui
                     ?.let { loaded.payload[it] }
                     ?.let { AzpUiSchema.parse(it.decodeToString()) }

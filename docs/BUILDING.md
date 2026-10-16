@@ -10,8 +10,8 @@ Guillotine ships two apps sharing an editor core:
 
 ## Requirements
 
-- **JDK 17** (Android Studio bundles one). Desktop builds ALSO need JDK 21 available for the
-  `jpackage` step (`gradle/actions/setup-gradle@v6` provisions it in CI).
+- **JDK 21** (the build's toolchain; CI uses Temurin 21 via `actions/setup-java`). Recent Android
+  Studio releases bundle a JDK 21; desktop packaging also uses it for the `jpackage` step.
 - **Android Studio** (current stable) for the Android app.
 - **Android SDK** API 37 (compile) / 36 (target); a device or emulator on **API 26+**.
 - The Gradle wrapper (`gradlew` / `gradlew.bat` + `gradle/wrapper/gradle-wrapper.jar`) is committed,
@@ -135,15 +135,10 @@ OS's natives) for per-host classifier deps auto-selected by `desktop/build.gradl
 `<host-classifier>` is one of `macosx-arm64`, `macosx-x86_64`, `linux-x86_64`, `linux-arm64`,
 `windows-x86_64` — resolved at Gradle configuration time. Installers land ~150-200 MB.
 
-### CI: build installers on every push
-
-`.github/workflows/desktop-build.yml` fans out over `ubuntu-latest` / `macos-latest` /
-`windows-latest` and uploads the produced installer as an artifact on every push.
-
 ### CI: attach installers to a release
 
-`.github/workflows/release-desktop.yml` runs on every `v*` tag: same matrix, but uploads via
-`softprops/action-gh-release@v2` to the GitHub Release matching the tag.
+`.github/workflows/release-desktop.yml` runs on every `v*` tag: it builds the installers on
+Ubuntu / macOS / Windows and attaches them to the GitHub Release matching the tag.
 
 ## Project layout
 

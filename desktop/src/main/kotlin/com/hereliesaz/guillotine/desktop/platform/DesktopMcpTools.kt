@@ -31,6 +31,7 @@ import com.hereliesaz.guillotine.model.LearnedConcept
 import com.hereliesaz.guillotine.model.MediaItem
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
+import com.hereliesaz.guillotine.mcp.FfmpegFilterGuard
 import com.hereliesaz.guillotine.mcp.McpToolsSurface
 import com.hereliesaz.guillotine.mcp.boolProp
 import com.hereliesaz.guillotine.mcp.intProp
@@ -185,7 +186,8 @@ class DesktopMcpTools(
         ))
             
         put(toolDefinition(
-            "set_clip_filter", "Sets static values for a clip filter (e.g., brightness = 1.2, speed = 2.0).",
+            "set_clip_filter", "Sets static values for a clip filter (e.g., brightness = 1.2, speed = 2.0). Values are " +
+                "clamped to the property's range; opacity has no static value (use add_keyframe).",
             objSchema(
                 "clip_id" to stringProp(), "property" to stringProp("e.g. brightness, speed"), "value" to numberProp(),
                 required = listOf("clip_id", "property", "value")
@@ -247,7 +249,7 @@ class DesktopMcpTools(
                 "exported by colour-grading and photo-editing tools and shared in free LUT packs. It grades in both " +
                 "preview and export. Use for \"apply this LUT\", \"grade with a .cube\", \"give it a " +
                 "cinematic/teal-orange look via a LUT\". `path` is a filesystem path to a .cube file " +
-                "(usually one the user picked). clear_lut removes it.",
+                "the user picked or imported (paths elsewhere are refused). clear_lut removes it.",
             objSchema(
                 "clip_id" to stringProp("The clip to grade; defaults to the video clip at the playhead"),
                 "path" to stringProp("Filesystem path to a .cube 3D LUT file"),
@@ -267,9 +269,9 @@ class DesktopMcpTools(
             "Record a custom GLSL shader effect (a standard **ISF** `.isf` shader or a raw `.fs`/`.glsl` " +
                 "fragment) on a clip. Only single-pass, single-image shaders are accepted (multi-pass, " +
                 "feedback, audio, and two-input transition shaders are rejected). `path` is a filesystem " +
-                "path (usually a file the user picked). NOTE: on desktop the shader is saved on the clip " +
-                "but the live GLSL renderer is not implemented yet, so it is NOT visible in preview or " +
-                "export. clear_shader removes it.",
+                "path to a file the user picked or imported (paths elsewhere are refused). On desktop the " +
+                "shader renders in preview and export via Skia when it translates to SkSL; the result's " +
+                "shaderRendered says whether it did. clear_shader removes it.",
             objSchema(
                 "clip_id" to stringProp("The clip to affect; defaults to the video clip at the playhead"),
                 "path" to stringProp("Filesystem path to an .isf / .fs / .glsl fragment shader"),
@@ -464,19 +466,20 @@ class DesktopMcpTools(
         put(toolDefinition(
             "apply_ffmpeg_filter",
             "Bake a standard **FFmpeg `-vf` filtergraph** onto a clip ON-DEVICE and add the result as a new " +
-                "clip — the whole FFmpeg filter ecosystem, and **Frei0r** plugins via `frei0r=<name>:<params>`. " +
+                "clip, from a vetted allowlist of pure pixel/sample filters (no file-reading/writing filters, " +
+                "no frei0r, no file= / textfile= style options — those are refused). " +
                 "The ESCAPE HATCH for effects with no dedicated tool: AUTHOR the `-vf` graph yourself from the " +
                 "user's plain-English request. Frame decimation/stutter — \"cut/remove every other frame\", " +
                 "\"drop every 2nd frame\", \"make it choppy\" → \"framestep=2\" (every third → \"framestep=3\"); " +
                 "\"choppy N-fps look\" → \"fps=8\"; \"frame-blend/motion trail\" → \"tmix=frames=3\". Also " +
-                "\"run a frei0r plugin\", \"vintage/vhs/chromashift\", \"eq/curves/deband this\". `filter` is the " +
-                "raw -vf graph, e.g. \"framestep=2\", \"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Audio is " +
+                "\"vintage/vhs/chromashift\", \"eq/curves/deband this\". `filter` is the " +
+                "raw -vf graph, e.g. \"framestep=2\" or \"hue=s=0, gblur=sigma=2\". Audio is " +
                 "passed through unchanged, so prefer duration-preserving graphs (framestep/fps/tmix/eq) and " +
                 "avoid setpts/trim, which change the video length and desync the audio. Runs in-process " +
                 "via the bundled FFmpeg; this is a bake-to-new-clip step, not a live filter.",
             objSchema(
                 "clip_id" to stringProp("The clip whose video to filter"),
-                "filter" to stringProp("An FFmpeg -vf filtergraph you author from the request, e.g. framestep=2 for \"every other frame\" (Frei0r via frei0r=name:params)"),
+                "filter" to stringProp("An FFmpeg -vf filtergraph you author from the request, e.g. framestep=2 for \"every other frame\""),
                 required = listOf("clip_id", "filter"),
             ),
         ))
@@ -651,8 +654,8 @@ class DesktopMcpTools(
             "Add a cross-dissolve TRANSITION between two clips ON-DEVICE. Use for \"add a crossfade/" +
                 "dissolve between these\", \"put a transition here\". Overlaps the two clips on one track " +
                 "by duration_sec (default 1) so the renderer's built-in crossfade blends them, in both " +
-                "preview and export. type is accepted for API parity but desktop does an opacity " +
-                "cross-dissolve (not per-style xfade wipes).",
+                "preview and export; later clips on that track ripple left so no gap opens. type must be an " +
+                "FFmpeg xfade name (validated) but desktop always renders an opacity cross-dissolve.",
             objSchema(
                 "from_clip_id" to stringProp("The outgoing (first) clip"),
                 "to_clip_id" to stringProp("The incoming (second) clip"),
@@ -791,7 +794,8 @@ class DesktopMcpTools(
         "apply_image_effect" -> applyImageEffect(args.getString("effect"), args.optString("clip_id"))
         "denoise_clip" -> denoiseClip(args.getString("clip_id"))
         "apply_transition" -> applyTransition(
-            args.getString("from_clip_id"), args.getString("to_clip_id"), args.optDouble("duration_sec", 1.0).toFloat(),
+            args.getString("from_clip_id"), args.getString("to_clip_id"), args.optString("type", "fade"),
+            args.optDouble("duration_sec", 1.0).toFloat(),
         )
         "list_azp_plugins" -> listAzpPlugins()
         "apply_azp_plugin" -> applyAzpPlugin(args.getString("clip_id"), args.getString("plugin_id"))
@@ -1268,7 +1272,11 @@ class DesktopMcpTools(
         require(File(model).isFile) { "The face-detection model file does not exist at: $model" }
         val media = vm.uiState.value.document.mediaFor(clip)
             ?: throw IllegalArgumentException("No media for clip: ${clip.id}")
-        val track = DesktopFaceBlur.build(model, media.uri, clip, File(DesktopStorage.dataDir, "faceblur"))
+        val canvas = vm.uiState.value.document.projectCanvasSize()
+        val track = DesktopFaceBlur.build(
+            model, media.uri, clip, File(DesktopStorage.dataDir, "faceblur"),
+            canvasAspect = canvas.width.toFloat() / canvas.height.coerceAtLeast(1),
+        )
             ?: throw IllegalStateException("No faces found to blur — auto-blur needs a face in the shot.")
         val probed = DesktopMediaImport.probe(track.patch)
             ?: throw IllegalStateException("Couldn't load the generated blur patch.")
@@ -1500,18 +1508,58 @@ class DesktopMcpTools(
         return ok().apply { put("humanSummary", "Cleared the applied plugin/preset from clip $clipId.") }
     }
 
-    private fun applyTransition(fromClipId: String, toClipId: String, durationSec: Float): JSONObject {
+    /**
+     * Cross-dissolve [fromClipId] into [toClipId] by overlapping them on [from]'s track. The incoming
+     * clip moves left by up to [durationSec] so it starts that much before [from] ends, and every later
+     * clip on that track ripples left by the same amount so no gap opens where [to] used to sit. [type]
+     * is validated against FFmpeg's `xfade` names ([FfmpegFilterGuard.isValidXfadeTransition]); the
+     * desktop renderer itself always blends with an opacity crossfade.
+     *
+     * Refuses when [to] doesn't start at/after [from] ends (it isn't the next clip), or when moving
+     * [to] onto [from]'s track would land it on top of a third clip.
+     */
+    private fun applyTransition(fromClipId: String, toClipId: String, type: String, durationSec: Float): JSONObject {
+        val t = type.trim().lowercase().ifEmpty { "fade" }
+        require(FfmpegFilterGuard.isValidXfadeTransition(t)) { "Unknown transition type \"$type\"." }
+        require(fromClipId != toClipId) { "Pick two different clips." }
         val doc = vm.uiState.value.document
         val from = doc.clips.firstOrNull { it.id == fromClipId }
             ?: throw IllegalArgumentException("Clip not found: $fromClipId")
         val to = doc.clips.firstOrNull { it.id == toClipId }
             ?: throw IllegalArgumentException("Clip not found: $toClipId")
+        require(to.startTimeMs >= from.endTimeMs) {
+            "The incoming clip must come after the outgoing one (it starts before ${msFmt(from.endTimeMs)})."
+        }
         val durMs = (durationSec.coerceIn(0.1f, 5f) * 1000f).toLong().coerceAtMost(minOf(from.durationMs, to.durationMs))
         val newStart = (from.endTimeMs - durMs).coerceAtLeast(0)
+        val shift = to.startTimeMs - newStart // > 0: how far `to` (and what follows it) moves left
+        // Later clips on the destination track ripple left with `to`, keeping their spacing.
+        val followers = doc.clips.filter {
+            it.id != to.id && it.id != from.id && it.trackId == from.trackId && it.startTimeMs >= to.startTimeMs &&
+                (to.trackId == from.trackId)
+        }
+        val moving = followers.map { it.id }.toSet() + to.id
+        // Collision check: after the move nothing else on the track may overlap `to` or a follower.
+        val placed = (followers + to).map { c -> (c.startTimeMs - shift) until (c.startTimeMs - shift + c.durationMs) }
+        val clash = doc.clips.firstOrNull { c ->
+            c.id != from.id && c.id !in moving && c.trackId == from.trackId &&
+                placed.any { r -> c.startTimeMs < r.last + 1 && c.endTimeMs > r.first }
+        }
+        require(clash == null) {
+            "Can't overlap here: clip ${clash!!.id} on track ${from.trackId} is in the way. Move it first."
+        }
         vm.updateClip(toClipId) { it.copy(startTimeMs = newStart, trackId = from.trackId) }
+        followers.forEach { f -> vm.updateClip(f.id) { it.copy(startTimeMs = it.startTimeMs - shift) } }
         return ok().apply {
             put("overlapMs", durMs)
-            put("humanSummary", "Cross-dissolve: overlapped the clips by ${msFmt(durMs)} so they blend on-device.")
+            put("type", t)
+            put("rippledClips", followers.size)
+            put(
+                "humanSummary",
+                "Cross-dissolve: overlapped the clips by ${msFmt(durMs)} so they blend" +
+                    (if (followers.isNotEmpty()) "; moved ${followers.size} later clip(s) left to close the gap" else "") +
+                    (if (t != "fade") ". (Desktop renders \"$t\" as an opacity crossfade.)" else "."),
+            )
         }
     }
 
@@ -1659,8 +1707,7 @@ class DesktopMcpTools(
         val clip = resolveClipOrPlayhead(clipId)
         val bg: MediaItem = when {
             imagePath.isNotBlank() -> {
-                val f = File(imagePath)
-                require(f.isFile) { "Background image not found: $imagePath" }
+                val f = resolveAsset(imagePath)
                 DesktopMediaImport.probe(f)?.copy(durationMs = clip.durationMs)
                     ?: throw IllegalStateException("Couldn't load background image: $imagePath")
             }
@@ -2082,16 +2129,15 @@ class DesktopMcpTools(
         return ok().apply { put("humanSummary", "Recording discarded.") }
     }
 
-    private fun setClipFilter(clipId: String, property: String, value: Float): JSONObject {
+    private fun setClipFilter(clipId: String, property: String, rawValue: Float): JSONObject {
         val doc = vm.uiState.value.document
         doc.clips.firstOrNull { it.id == clipId } ?: throw IllegalArgumentException("Clip not found: $clipId")
-        
-        val prop = try {
-            com.hereliesaz.guillotine.model.KeyframeProperty.valueOf(property.uppercase())
-        } catch (e: Exception) {
-            throw IllegalArgumentException("Unknown property: $property")
-        }
-        
+        // Rejects unknown/unsupported properties (opacity has no static slot) and non-finite values;
+        // clamps into the property's UI range.
+        val checked = ClipFilterValidation.validate(property, rawValue)
+        val prop = checked.property
+        val value = checked.value
+
         vm.updateClipFilters(clipId) { f ->
             when (prop) {
                 com.hereliesaz.guillotine.model.KeyframeProperty.BRIGHTNESS -> f.copy(brightness = value)
@@ -2105,7 +2151,7 @@ class DesktopMcpTools(
                 else -> f
             }
         }
-        
+
         if (prop in com.hereliesaz.guillotine.model.KeyframeProperty.TRANSFORM) {
             vm.updateClip(clipId) { c ->
                 when (prop) {
@@ -2118,7 +2164,15 @@ class DesktopMcpTools(
             }
         }
 
-        return ok().apply { put("humanSummary", "Set $property to $value on clip $clipId.") }
+        return ok().apply {
+            put("value", value.toDouble())
+            put("clamped", checked.clamped)
+            put(
+                "humanSummary",
+                "Set ${prop.name.lowercase()} to $value on clip $clipId" +
+                    (if (checked.clamped) " (clamped from $rawValue to the allowed range)." else "."),
+            )
+        }
     }
 
     private fun setFrameStep(clipId: String, step: Int): JSONObject {
@@ -2288,33 +2342,22 @@ class DesktopMcpTools(
         }
     }
 
+    /**
+     * Confine a caller-supplied asset path ([DesktopAssetPaths.resolveAssetPath]): it must be a real file
+     * under the app data dir, a folder the user picked in a file dialog, or a folder holding media
+     * already imported into this project.
+     */
+    private fun resolveAsset(path: String): File {
+        val mediaRoots = vm.uiState.value.document.mediaItems.mapNotNull { DesktopAssetPaths.folderOfMediaUri(it.uri) }
+        return DesktopAssetPaths.resolveAssetPath(path, mediaRoots)
+    }
+
     /** Apply a `.cube` 3D LUT color grade to a clip (path validated + parseable). Stacks onto the clip's
      *  FX chain — see [com.hereliesaz.guillotine.model.FxLayer] — so it renders in preview + export
      *  alongside whatever else (an azphalt shader/LUT, an earlier applyLut call) is already on the clip. */
-    /**
-     * Reject an FFmpeg filtergraph that opens its own arbitrary local file instead of the clip's own
-     * media. `movie=`/`amovie=` (and the other listed sources) read a path directly from the filter
-     * string, bypassing any path check the MCP surface applies elsewhere — a caller could read any
-     * file this process can access. Mirrors the identical guard in the Android MCP tool surface
-     * (`app/.../mcp/McpTools.kt`).
-     */
-    private fun rejectUnsafeFfmpegFilterSources(filterGraph: String) {
-        val unsafeSource = Regex("""(?i)(?:^|[,;\]])\s*(movie|amovie|subtitles|ass|afir)\s*=""")
-        val match = unsafeSource.find(filterGraph)
-        if (match != null) {
-            val name = match.groupValues[1]
-            throw IllegalArgumentException(
-                "The \"$name\" filter reads its own file path and isn't allowed in apply_ffmpeg_filter " +
-                    "— it can read any file on this machine, not just this clip's media. Use a filter " +
-                    "that operates only on the clip's own video/audio streams.",
-            )
-        }
-    }
-
     private fun applyLut(clipId: String, path: String): JSONObject {
         require(path.isNotBlank()) { "Provide the path to a .cube LUT file." }
-        val file = File(path)
-        require(file.isFile) { "No .cube file at: $path" }
+        val file = resolveAsset(path)
         // Parse up front so a bad file fails here with a clear message rather than silently doing nothing.
         runCatching { com.hereliesaz.guillotine.media.CubeLut.parse(file.readText()) }
             .onFailure { throw IllegalArgumentException("Not a valid 3D .cube LUT: ${it.message}") }
@@ -2338,8 +2381,7 @@ class DesktopMcpTools(
      */
     private fun applyShader(clipId: String, path: String, params: JSONObject?): JSONObject {
         require(path.isNotBlank()) { "Provide the path to an .isf / .fs / .glsl shader file." }
-        val file = File(path)
-        require(file.isFile) { "No shader file at: $path" }
+        val file = resolveAsset(path)
         // Parse up front so unsupported/malformed shaders fail here with a clear message.
         val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
             .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
@@ -2381,8 +2423,7 @@ class DesktopMcpTools(
 
     /** List a shader's adjustable scalar inputs (name, type, default, min, max). No render needed. */
     private fun listShaderParams(path: String): JSONObject {
-        val file = File(path)
-        require(file.isFile) { "No shader file at: $path" }
+        val file = resolveAsset(path)
         val program = runCatching { com.hereliesaz.guillotine.media.GlslShader.parse(file.readText()) }
             .getOrElse { throw IllegalArgumentException("Unsupported shader: ${it.message}") }
         val arr = JSONArray()
@@ -2873,7 +2914,8 @@ class DesktopMcpTools(
     /** Bake an FFmpeg/Frei0r `-vf` filtergraph onto a clip's video in-process, adding a new clip. */
     private fun applyFfmpegFilter(clipId: String, filterGraph: String): JSONObject {
         require(filterGraph.isNotBlank()) { "Provide an FFmpeg -vf filtergraph." }
-        rejectUnsafeFfmpegFilterSources(filterGraph)
+        // Allowlist (not a denylist): every filter must be a vetted pure-processing one with no file options.
+        FfmpegFilterGuard.requireAllowed(filterGraph)
         val doc = vm.uiState.value.document
         val clip = doc.clips.firstOrNull { it.id == clipId }
             ?: throw IllegalArgumentException("Clip not found: $clipId")

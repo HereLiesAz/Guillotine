@@ -63,9 +63,10 @@ allprojects {
             when {
                 // Netty — ~30 CVEs across codec/http/http2/handler/common/proxy (smuggling, DoS, request
                 // smuggling, the late-2025 HttpProxyHandler injection). netty-tcnative is on its own 2.0.x
-                // line, so never rewrite it.
+                // line, so never rewrite it. Single source of truth for project configurations; the
+                // buildscript block above forces the same version for the plugin classpath.
                 g == "io.netty" && n.startsWith("netty-") && !n.contains("tcnative") ->
-                    useVersion("4.2.16.Final")
+                    useVersion("4.2.18.Final")
                 // Bouncy Castle — GOST CTR keystream reuse (critical), bcpkix broken algorithm, LDAP injection.
                 // bcprov and bcpkix don't always cut patch releases in lockstep — bcprov-jdk18on has a
                 // 1.85.2, but bcpkix-jdk18on's latest published version is still 1.85 (verified against

@@ -1,6 +1,9 @@
 package com.hereliesaz.guillotine.azphalt
 
 import android.net.Uri
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -55,6 +58,34 @@ object AzpExternalOpen {
 
     /** Convenience for the deep-link route: an already-parsed, already-validated install link. */
     fun offer(link: AzpInstallLink) = offer(Incoming.Link(link))
+
+    /**
+     * Ceiling on the raw `.azp` bytes read from an external URI (a file manager, share sheet, or the
+     * store app's result). These are untrusted and read wholly into memory, so an unbounded
+     * `readBytes()` on a huge or endless stream could OOM the editor. Matches the scale of
+     * AzpPackage's own decompression caps while staying well inside the heap.
+     */
+    val MAX_PACKAGE_BYTES: Long = minOf(256L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 4)
+
+    /**
+     * Read [input] fully, refusing (with [java.io.IOException]) anything over [maxBytes] — without
+     * ever buffering more than `maxBytes + 1` bytes.
+     */
+    fun readBounded(input: InputStream, maxBytes: Long = MAX_PACKAGE_BYTES): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > maxBytes) {
+                throw IOException("Package is larger than ${maxBytes / (1024 * 1024)} MB — refusing to read it.")
+            }
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
+    }
 
     /** Clears the pending package once the install flow has finished with it (or been dismissed). */
     fun consume() {

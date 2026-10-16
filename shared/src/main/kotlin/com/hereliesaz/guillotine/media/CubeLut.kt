@@ -30,9 +30,11 @@ object CubeLut {
     }
 
     /**
-     * Parse `.cube` [text] into a [Lut3d]. Supports `LUT_3D_SIZE`, comments (`#`), `TITLE`, and
-     * `DOMAIN_MIN`/`DOMAIN_MAX` (values are rescaled from the domain into `[0,1]`). Throws
-     * [IllegalArgumentException] for 1D LUTs or malformed data. A big LUT is tens of thousands of lines,
+     * Parse `.cube` [text] into a [Lut3d]. Supports `LUT_3D_SIZE`, comments (`#`), `TITLE`,
+     * `DOMAIN_MIN`/`DOMAIN_MAX` and Resolve's `LUT_3D_INPUT_RANGE min max` (the same domain for all
+     * three channels; values are rescaled from the domain into `[0,1]`). Throws
+     * [IllegalArgumentException] for 1D LUTs or malformed data, including a size line with no number
+     * and non-finite (`NaN`/`Infinity`) values. A big LUT is tens of thousands of lines,
      * so the whitespace regex is pre-compiled and the output is a pre-sized primitive `FloatArray`
      * (no per-line regex compile, no boxing).
      */
@@ -49,7 +51,8 @@ object CubeLut {
             val upper = line.uppercase()
             when {
                 upper.startsWith("LUT_3D_SIZE") -> {
-                    size = line.split(WHITESPACE)[1].toInt()
+                    size = line.split(WHITESPACE).getOrNull(1)?.toIntOrNull()
+                        ?: throw IllegalArgumentException("Invalid LUT_3D_SIZE line: \"$line\"")
                     require(size in 2..129) { "Invalid LUT_3D_SIZE: $size" }
                     data = FloatArray(size * size * size * 3)
                 }
@@ -58,7 +61,14 @@ object CubeLut {
                 upper.startsWith("TITLE") -> Unit
                 upper.startsWith("DOMAIN_MIN") -> readTriple(line, domainMin)
                 upper.startsWith("DOMAIN_MAX") -> readTriple(line, domainMax)
-                upper.startsWith("LUT_3D_INPUT_RANGE") -> Unit // rare; ignore (domain covers rescale)
+                upper.startsWith("LUT_3D_INPUT_RANGE") -> {
+                    val parts = line.split(WHITESPACE)
+                    val lo = parts.getOrNull(1)?.toFloatOrNull()
+                    val hi = parts.getOrNull(2)?.toFloatOrNull()
+                    require(lo != null && hi != null && lo.isFinite() && hi.isFinite()) { "Invalid LUT_3D_INPUT_RANGE line: \"$line\"" }
+                    domainMin.fill(lo)
+                    domainMax.fill(hi)
+                }
                 else -> {
                     // A data row: three floats. Anything else (stray keyword) is skipped.
                     val parts = line.split(WHITESPACE)
@@ -67,6 +77,8 @@ object CubeLut {
                         val g = parts[1].toFloatOrNull()
                         val b = parts[2].toFloatOrNull()
                         if (r != null && g != null && b != null) {
+                            // toFloatOrNull accepts "NaN"/"Infinity", and coerceIn passes NaN straight through.
+                            require(r.isFinite() && g.isFinite() && b.isFinite()) { "Non-finite LUT value in: \"$line\"" }
                             val array = data
                                 ?: throw IllegalArgumentException("LUT_3D_SIZE must precede the data rows.")
                             // Guard against extra rows; the count check below reports the mismatch.
@@ -93,7 +105,7 @@ object CubeLut {
 
     private fun readTriple(line: String, into: FloatArray) {
         val parts = line.split(WHITESPACE)
-        for (i in 0 until 3) parts.getOrNull(i + 1)?.toFloatOrNull()?.let { into[i] = it }
+        for (i in 0 until 3) parts.getOrNull(i + 1)?.toFloatOrNull()?.takeIf { it.isFinite() }?.let { into[i] = it }
     }
 
     private fun rescale(v: Float, min: Float, max: Float): Float {

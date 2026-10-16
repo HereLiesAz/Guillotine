@@ -65,8 +65,7 @@ touch the tool surface, use the Android impl as the behavior spec for the deskto
 - **Android:** requires the Android SDK. `./gradlew :app:assembleGithubDebug` (the ad-free
   direct-download flavor; `play` is the Play Store flavor with AdMob).
 - **Desktop:** `./gradlew :desktop:packageDistributionForCurrentOS` (CI packages `.deb`/`.dmg`/`.msi`
-  across Ubuntu/macOS/Windows via `.github/workflows/desktop-build.yml` — that workflow is the
-  authoritative cross-platform compile check).
+  across Ubuntu/macOS/Windows via `.github/workflows/release-desktop.yml` on `v*` tags).
 
 If you add or move pure-Kotlin logic into `:shared`, add unit tests for it.
 

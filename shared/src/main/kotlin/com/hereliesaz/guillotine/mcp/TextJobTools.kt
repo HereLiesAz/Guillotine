@@ -97,7 +97,27 @@ object TextJobTools {
         "Rewrite each numbered caption line: $instruction\n" +
             "Keep the same number of lines and the numbering (\"N. text\"), one caption per line. " +
             "Reply with the numbered lines only.\n\n" +
-            lines.mapIndexed { i, s -> "${i + 1}. ${s.replace('\n', ' ')}" }.joinToString("\n").take(MAX_CHARS)
+            lines.mapIndexed { i, s -> "${i + 1}. ${s.replace('\n', ' ')}" }.joinToString("\n")
+
+    /**
+     * Split caption [lines] into consecutive batches whose numbered text stays within [MAX_CHARS], so a
+     * long clip is rewritten in several calls instead of having its tail truncated off the prompt (which
+     * made the line-count check in [parseRewrite] fail every time). A single over-long line is clipped
+     * on its own rather than dropped, so the count always matches.
+     */
+    fun rewriteBatches(lines: List<String>, maxChars: Int = MAX_CHARS): List<List<String>> {
+        val out = ArrayList<List<String>>()
+        var cur = ArrayList<String>()
+        var size = 0
+        for (raw in lines) {
+            val l = raw.replace('\n', ' ').take(maxChars - 16)
+            val cost = l.length + 8 // "NNNN. " prefix + newline
+            if (cur.isNotEmpty() && size + cost > maxChars) { out.add(cur); cur = ArrayList(); size = 0 }
+            cur.add(l); size += cost
+        }
+        if (cur.isNotEmpty()) out.add(cur)
+        return out
+    }
 
     /** Parse a numbered rewrite back into exactly [count] lines, or null when the model lost lines. */
     fun parseRewrite(raw: String, count: Int): List<String>? {
@@ -131,10 +151,12 @@ object TextJobTools {
     private fun rewrite(vm: EditorViewModel, clipId: String, instruction: String): JSONObject {
         val captions = captionsFor(vm.uiState.value.document, clipId)
         require(captions.isNotEmpty()) { "No captions on $clipId yet. Run transcribe_clip first." }
-        val prompt = rewritePrompt(captions.map { it.text }, instruction)
-        return launch("rewrite_captions", clipId, prompt) { raw ->
-            val lines = parseRewrite(raw, captions.size)
-                ?: throw IllegalStateException("The model didn't return all ${captions.size} caption lines.")
+        val batches = rewriteBatches(captions.map { it.text })
+        return launchBatched("rewrite_captions", clipId, batches.map { rewritePrompt(it, instruction) }) { raws ->
+            val lines = raws.zip(batches).flatMap { (raw, batch) ->
+                parseRewrite(raw, batch.size)
+                    ?: throw IllegalStateException("The model didn't return all ${captions.size} caption lines.")
+            }
             // Only captions that still exist; ones deleted while the job ran stay deleted.
             val live = vm.uiState.value.document.clips.mapTo(HashSet()) { it.id }
             var n = 0
@@ -143,7 +165,16 @@ object TextJobTools {
         }
     }
 
-    private fun launch(kind: String, clipId: String, prompt: String, apply: (String) -> String): JSONObject {
+    private fun launch(kind: String, clipId: String, prompt: String, apply: (String) -> String): JSONObject =
+        launchBatched(kind, clipId, listOf(prompt)) { apply(it.single()) }
+
+    /** Run [prompts] sequentially on the completer, then [apply] all replies in order. */
+    private fun launchBatched(
+        kind: String,
+        clipId: String,
+        prompts: List<String>,
+        apply: (List<String>) -> String,
+    ): JSONObject {
         val complete = completer ?: throw IllegalStateException(
             "No text model available. Configure an assistant brain (Settings → AI) first.",
         )
@@ -151,8 +182,8 @@ object TextJobTools {
         jobs[id] = Job(id, kind, clipId, State.RUNNING)
         scope.launch {
             val done = try {
-                val raw = complete(prompt) ?: throw IllegalStateException("The model returned nothing.")
-                jobs.getValue(id).copy(state = State.DONE, detail = apply(raw))
+                val raws = prompts.map { complete(it) ?: throw IllegalStateException("The model returned nothing.") }
+                jobs.getValue(id).copy(state = State.DONE, detail = apply(raws))
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {

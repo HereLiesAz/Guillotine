@@ -48,7 +48,7 @@ object ModelCatalog {
 
     /** Gemini: { "models": [ { "name": "models/gemini-..." } ] }. */
     private fun gemini(apiKey: String): List<String> {
-        val arr = JSONObject(get("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey", emptyMap()))
+        val arr = JSONObject(get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", mapOf("x-goog-api-key" to apiKey)))
             .optJSONArray("models") ?: return emptyList()
         return (0 until arr.length())
             .mapNotNull { arr.optJSONObject(it)?.optString("name")?.removePrefix("models/")?.takeIf { s -> s.isNotBlank() } }

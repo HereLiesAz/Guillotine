@@ -3,9 +3,11 @@ package com.hereliesaz.guillotine.operation
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -51,9 +53,19 @@ object OperationController {
 
     val isBusy: Boolean get() = _state.value != null
 
+    /**
+     * Pause the running operation — only if it is pausable. Setting the flag for a non-pausable op
+     * (Export) would park a checkpoint the UI offers no Resume for.
+     */
     fun pause() {
-        paused = true
-        _state.update { s -> if (s != null && s.pausable) s.copy(paused = true) else s }
+        _state.update { s ->
+            if (s != null && s.pausable) {
+                paused = true
+                s.copy(paused = true)
+            } else {
+                s
+            }
+        }
     }
 
     fun resume() {
@@ -96,7 +108,10 @@ object OperationController {
     /**
      * Start a long operation on the controller's process scope (survives backgrounding while the
      * app is alive) and show the foreground notification. Returns false if another op is running.
-     * Result handling lives inside [block] / [onComplete] / [onError]; they run off the main thread.
+     * [block] runs off the main thread; exactly one of [onComplete] / [onError] / [onCancel] then
+     * runs on the main thread (so callers can always clear their busy state), followed by
+     * [onFinished]. Keep these callbacks free of Activity references where possible — they live as
+     * long as the operation does, which can outlive the Activity.
      */
     fun start(
         context: Context,
@@ -104,6 +119,31 @@ object OperationController {
         label: String,
         pausable: Boolean,
         onError: (Throwable) -> Unit = {},
+        onCancel: () -> Unit = {},
+        onFinished: () -> Unit = {},
+        onComplete: () -> Unit = {},
+        block: suspend (Sink) -> Unit,
+    ): Boolean {
+        val app = context.applicationContext
+        return startWith(
+            startForeground = { startService(app) },
+            callbackDispatcher = Dispatchers.Main,
+            kind = kind, label = label, pausable = pausable,
+            onError = onError, onCancel = onCancel, onFinished = onFinished, onComplete = onComplete,
+            block = block,
+        )
+    }
+
+    /** Context-free core of [start]; [startForeground] and [callbackDispatcher] are injectable for tests. */
+    internal fun startWith(
+        startForeground: () -> Unit,
+        callbackDispatcher: CoroutineDispatcher,
+        kind: OperationKind,
+        label: String,
+        pausable: Boolean,
+        onError: (Throwable) -> Unit = {},
+        onCancel: () -> Unit = {},
+        onFinished: () -> Unit = {},
         onComplete: () -> Unit = {},
         block: suspend (Sink) -> Unit,
     ): Boolean {
@@ -114,17 +154,25 @@ object OperationController {
         if (!_state.compareAndSet(expect = null, update = OperationState(kind, label, progress = null, paused = false, pausable = pausable))) {
             return false
         }
-        begin(context, kind, label, pausable, alreadyClaimed = true)
+        begin(startForeground)
         val sink = Sink()
         job = scope.launch {
-            try {
+            // Terminal callbacks touch Compose/UI state — run them on the main thread. NonCancellable:
+            // after job.cancel() a plain withContext would itself throw and the callback would never
+            // run, leaving the caller's UI stuck "busy" (the old behaviour).
+            val terminal = callbackDispatcher + NonCancellable
+            val outcome: () -> Unit = try {
                 block(sink)
-                // Terminal callbacks touch Compose/UI state — run them on the main thread.
-                withContext(Dispatchers.Main) { onComplete() }
+                onComplete
             } catch (_: CancellationException) {
-                // Cancelled by the user — no error surfaced.
+                onCancel
             } catch (e: Throwable) {
-                withContext(Dispatchers.Main) { onError(e) }
+                { onError(e) }
+            }
+            try {
+                withContext(terminal) {
+                    try { outcome() } finally { onFinished() }
+                }
             } finally {
                 end()
             }
@@ -151,7 +199,7 @@ object OperationController {
                 update = OperationState(kind, label, progress = null, paused = false, pausable = pausable),
             ),
         ) { "Another operation is already running." }
-        begin(context, kind, label, pausable, alreadyClaimed = true)
+        begin { startService(context.applicationContext) }
         job = null // blocking; cancel via the `cancelled` flag observed in checkpointBlocking
         try {
             return block(Sink())
@@ -160,19 +208,18 @@ object OperationController {
         }
     }
 
-    private fun begin(context: Context, kind: OperationKind, label: String, pausable: Boolean, alreadyClaimed: Boolean = false) {
+    /** Called after the caller claimed the slot via compareAndSet (so the state is already set). */
+    private fun begin(startForeground: () -> Unit) {
         paused = false
         cancelled = false
-        // Skip when the caller already claimed the slot via compareAndSet — otherwise a
-        // concurrent state observer would see the "empty" transition here.
-        if (!alreadyClaimed) {
-            _state.value = OperationState(kind, label, progress = null, paused = false, pausable = pausable)
-        }
-        val app = context.applicationContext
         // Starting a foreground service from the background throws on API 31+ (e.g. an external MCP
         // tool triggering generative removal while the app is backgrounded). Don't crash — the
         // operation still runs, just without the foreground notification.
-        runCatching { ContextCompat.startForegroundService(app, Intent(app, OperationService::class.java)) }
+        runCatching { startForeground() }
+    }
+
+    private fun startService(app: Context) {
+        ContextCompat.startForegroundService(app, Intent(app, OperationService::class.java))
     }
 
     private fun end() {

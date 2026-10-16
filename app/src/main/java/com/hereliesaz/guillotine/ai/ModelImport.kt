@@ -16,8 +16,9 @@ import java.io.IOException
  * on-device model runtimes (Vosk / sherpa-onnx / ONNX Runtime) load a model from a path, not a SAF URI.
  *
  * The methods are `suspend` and do blocking I/O (a model folder can be large) — call them on
- * `Dispatchers.IO`. They cooperate with cancellation (a closed settings sheet aborts a big copy) and
- * clean up any partial output on failure.
+ * `Dispatchers.IO`. They cooperate with cancellation — checked between every buffer of every file, so a
+ * closed settings sheet aborts even a single multi-GB copy promptly — and clean up any partial output on
+ * failure or cancellation.
  */
 object ModelImport {
 
@@ -31,7 +32,7 @@ object ModelImport {
         return try {
             val input = context.contentResolver.openInputStream(uri)
                 ?: throw IOException("could not open $uri")
-            input.use { inp -> dest.outputStream().use { inp.copyTo(it) } }
+            input.use { inp -> dest.outputStream().use { copyCancellable(inp, it) } }
             dest.absolutePath
         } catch (e: Exception) {
             dest.delete()
@@ -84,9 +85,20 @@ object ModelImport {
                     val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
                     val input = context.contentResolver.openInputStream(fileUri)
                         ?: throw IOException("could not open $childName")
-                    input.use { inp -> File(destDir, childName).outputStream().use { inp.copyTo(it) } }
+                    input.use { inp -> File(destDir, childName).outputStream().use { copyCancellable(inp, it) } }
                 }
             }
+        }
+    }
+
+    /** `copyTo`, but checks for cancellation between buffers so one huge file can't outlive the caller. */
+    private suspend fun copyCancellable(input: java.io.InputStream, output: java.io.OutputStream) {
+        val buf = ByteArray(1 shl 16)
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val n = input.read(buf)
+            if (n < 0) break
+            output.write(buf, 0, n)
         }
     }
 

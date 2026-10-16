@@ -17,34 +17,95 @@ import java.nio.file.StandardCopyOption
  * app-internal storage so work is never lost and is restored automatically on next launch —
  * the user never has to explicitly save. Explicit Save/Load (SAF) is for exporting/importing
  * a copy to a user-chosen location.
+ *
+ * Corruption safety: if an existing autosave can't be parsed, [load] moves it aside to a
+ * `.corrupt-<timestamp>` file and **suppresses autosave** until [resume] is called (a successful
+ * load or a real user edit). Otherwise the empty editor that follows a failed load would be
+ * autosaved straight over the user's only copy of their project.
  */
 object ProjectAutosave {
-    private const val FILE = "current_project.gilt"
+    internal const val FILE = "current_project.gilt"
+
+    /** Outcome of [load]. */
+    sealed interface LoadResult {
+        /** No autosave exists yet. */
+        data object None : LoadResult
+        data class Loaded(val document: Document) : LoadResult
+        /**
+         * The autosave existed but couldn't be parsed. It was renamed to [movedTo] (null if even the
+         * rename failed — the original is then left untouched) and autosave is now suppressed.
+         */
+        data class Corrupt(val movedTo: File?, val error: Throwable) : LoadResult
+    }
+
+    // Serializes concurrent saves (the debounced IO-thread writer vs. the main-thread on-pause
+    // flush) so two writers can never interleave their temp-write + rename.
+    private val lock = Any()
+
+    @Volatile private var suppressed = false
+
+    /** True while autosave is held off after a corrupt load (see class doc). */
+    val isSuppressed: Boolean get() = suppressed
+
+    /** Re-enable autosave after a successful load or a genuine user edit. */
+    fun resume() { suppressed = false }
 
     fun save(context: Context, document: Document) {
-        // Guard the write: a failed autosave (disk full / IO error), including the on-pause flush on
-        // the main thread, must not crash the app — a dropped autosave is recoverable, a crash isn't.
-        // Write atomically: a plain writeText() truncates the real file to 0 bytes before writing,
-        // so a process death mid-write (OOM-kill while backgrounded, force-stop) leaves a
-        // truncated/corrupt file that load() silently treats as "no project". Instead write to a
-        // temp file in the same directory, then atomically rename it over the real file — the
-        // real file is either the old complete version or the new complete version, never a
-        // partial write, no matter when the process dies.
-        runCatching {
-            val real = File(context.filesDir, FILE)
-            val tmp = File(context.filesDir, "$FILE.tmp")
-            tmp.writeText(ProjectStore.serialize(document))
-            Files.move(tmp.toPath(), real.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        saveTo(context.filesDir, document)
+    }
+
+    /**
+     * Context-free core of [save]. Returns false if the write was skipped (suppressed) or failed.
+     *
+     * Guarded: a failed autosave (disk full / IO error), including the on-pause flush on the main
+     * thread, must not crash the app — a dropped autosave is recoverable, a crash isn't.
+     * Atomic: write to a UNIQUE temp file in the same directory (two concurrent writers used to
+     * share one fixed `.tmp` name and could rename each other's half-written file into place), then
+     * atomically rename it over the real file — the real file is always either the old complete
+     * version or the new complete version.
+     */
+    internal fun saveTo(dir: File, document: Document): Boolean {
+        if (suppressed) return false
+        return synchronized(lock) {
+            if (suppressed) return@synchronized false
+            var tmp: File? = null
+            runCatching {
+                val real = File(dir, FILE)
+                val text = ProjectStore.serialize(document)
+                tmp = File.createTempFile("$FILE.", ".tmp", dir).also { it.writeText(text) }
+                Files.move(tmp!!.toPath(), real.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            }.onFailure { tmp?.delete() }.isSuccess
         }
     }
 
-    /** The autosaved current project, or null if none exists yet / it can't be read. */
-    fun load(context: Context): Document? {
-        val f = File(context.filesDir, FILE)
-        if (!f.exists()) return null
-        return runCatching {
-            ProjectStore.repairImportedDimensions(context, ProjectStore.deserialize(f.readText()))
-        }.getOrNull()
+    /** Load the autosaved current project. See [LoadResult]. */
+    fun load(context: Context): LoadResult = when (val r = loadFrom(context.filesDir)) {
+        // Re-probing media is best-effort; a probe failure isn't project corruption.
+        is LoadResult.Loaded -> LoadResult.Loaded(
+            runCatching { ProjectStore.repairImportedDimensions(context, r.document) }.getOrDefault(r.document),
+        )
+        else -> r
+    }
+
+    /** Context-free core of [load] (parsing + corrupt-file handling, no media re-probe). */
+    internal fun loadFrom(dir: File, now: Long = System.currentTimeMillis()): LoadResult = synchronized(lock) {
+        val f = File(dir, FILE)
+        if (!f.exists()) return@synchronized LoadResult.None
+        runCatching { ProjectStore.deserialize(f.readText()) }.fold(
+            onSuccess = { doc ->
+                suppressed = false
+                LoadResult.Loaded(doc)
+            },
+            onFailure = { e ->
+                suppressed = true
+                val target = File(dir, "$FILE.corrupt-$now")
+                val moved = runCatching {
+                    Files.move(f.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    target
+                }.getOrNull()
+                LoadResult.Corrupt(moved, e)
+            },
+        )
     }
 }
 

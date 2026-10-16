@@ -285,7 +285,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
         }
         scope.launch {
             val bytes = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+                runCatching { context.contentResolver.openInputStream(uri)?.use { AzpExternalOpen.readBounded(it) } }.getOrNull()
             }
             if (bytes == null) {
                 finish("Could not read the package the Azphalt Store handed back.")
@@ -309,7 +309,7 @@ fun AzphaltStoreScreen(vm: EditorViewModel, incoming: AzpExternalOpen.Incoming? 
     LaunchedEffect(incoming) {
         if (incoming is AzpExternalOpen.Incoming.File) {
             val bytes = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openInputStream(incoming.uri)?.use { it.readBytes() } }.getOrNull()
+                runCatching { context.contentResolver.openInputStream(incoming.uri)?.use { AzpExternalOpen.readBounded(it) } }.getOrNull()
             }
             if (bytes == null) {
                 finish("Could not read that .azp package.")

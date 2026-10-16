@@ -35,7 +35,7 @@ object UpdateSignals {
  * The github-build auto-updater UI: checks GitHub Releases on launch (and on each manual
  * [UpdateSignals.checkNow] bump), and when a newer APK exists shows a dialog to download + install
  * it. Mounted once, near the app root, only in the github distribution (see `MainActivity`). Silent
- * when up to date on the launch check; a manual check surfaces an "up to date" toast so the tap has
+ * when up to date on the launch check; a manual check surfaces an "up to date" (or "couldn't check") toast so the tap has
  * visible feedback.
  */
 @Composable
@@ -49,11 +49,15 @@ fun UpdatePrompt() {
     val manualCheck = UpdateSignals.checkNow.value
 
     LaunchedEffect(manualCheck) {
-        val found = AndroidUpdater.check()
-        if (found != null) {
-            available = found
-        } else if (manualCheck > 0) {
-            Toast.makeText(context, "You're on the latest version.", Toast.LENGTH_SHORT).show()
+        when (val r = AndroidUpdater.check()) {
+            is AndroidUpdater.CheckResult.Update -> available = r.available
+            AndroidUpdater.CheckResult.UpToDate -> if (manualCheck > 0) {
+                Toast.makeText(context, "You're on the latest version.", Toast.LENGTH_SHORT).show()
+            }
+            // The silent launch check stays silent; only a manual check reports the failure.
+            is AndroidUpdater.CheckResult.Failed -> if (manualCheck > 0) {
+                Toast.makeText(context, r.reason, Toast.LENGTH_LONG).show()
+            }
         }
     }
 
