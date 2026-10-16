@@ -85,9 +85,10 @@ object TimelineTools {
 
     fun call(vm: EditorViewModel, name: String, args: JSONObject): JSONObject = when (name) {
         "seek" -> {
-            val ms = args.getLong("time_ms").coerceAtLeast(0L)
-            vm.seekTo(ms)
-            ok("Moved the playhead to ${ms}ms.")
+            vm.seekTo(args.getLong("time_ms").coerceAtLeast(0L))
+            // Report where the playhead actually landed (the editor clamps to the timeline's end).
+            val ms = vm.uiState.value.currentTimeMs
+            ok("Moved the playhead to ${ms}ms.").put("timeMs", ms)
         }
         "undo" -> { vm.undo(); ok("Undid the last edit.") }
         "redo" -> { vm.redo(); ok("Redid the last edit.") }
@@ -141,8 +142,10 @@ object TimelineTools {
                 var out = ts
                 if (args.has("muted")) out = out.copy(muted = args.getBoolean("muted"))
                 if (args.has("disabled")) out = out.copy(disabled = args.getBoolean("disabled"))
-                if (args.has("volume")) out = out.copy(volume = args.getDouble("volume").toFloat())
-                if (args.has("opacity")) out = out.copy(opacity = args.getDouble("opacity").toFloat())
+                // Clamp to the documented ranges (and drop NaN/∞) so a model can't push gain to 50× or
+                // opacity negative.
+                if (args.has("volume")) finite(args.getDouble("volume"))?.let { out = out.copy(volume = it.coerceIn(0.0, 2.0).toFloat()) }
+                if (args.has("opacity")) finite(args.getDouble("opacity"))?.let { out = out.copy(opacity = it.coerceIn(0.0, 1.0).toFloat()) }
                 out
             }
             ok("Updated track $trackId.")
@@ -173,4 +176,6 @@ object TimelineTools {
             ?: throw IllegalArgumentException("Clip not found: $clipId")
 
     private fun ok(summary: String): JSONObject = JSONObject().put("ok", true).put("humanSummary", summary)
+
+    private fun finite(v: Double): Double? = v.takeIf { it.isFinite() }
 }

@@ -85,6 +85,9 @@ object GlslShader {
             for (i in 0 until inputs.length()) {
                 val inp = inputs.getJSONObject(i)
                 val name = inp.getString("NAME")
+                // NAME is spliced into GLSL declarations and into the rewrite regexes below, so it must be
+                // a plain identifier — anything else could inject code or break the pattern.
+                require(GLSL_IDENTIFIER.matches(name)) { "Invalid ISF input NAME: \"$name\"" }
                 when (inp.optString("TYPE")) {
                     "image" -> { imageCount++; imageInput = name }
                     "audio", "audioFFT" -> throw IllegalArgumentException("Audio ISF inputs aren't supported.")
@@ -120,6 +123,8 @@ object GlslShader {
         val body = rewriteIsfBuiltins(stripVersion(text.substring(end + 2)), imageInput)
         return Program(HEADER + decls + body, uniforms)
     }
+
+    private val GLSL_IDENTIFIER = Regex("[A-Za-z_][A-Za-z0-9_]{0,63}")
 
     /** Drop any `#version …` directive — we prepend our own `#version 100` header. */
     private fun stripVersion(src: String): String =

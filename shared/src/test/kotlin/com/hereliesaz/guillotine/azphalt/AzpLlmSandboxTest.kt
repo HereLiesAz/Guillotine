@@ -8,6 +8,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.security.KeyPair
+import java.security.KeyPairGenerator
+import java.security.Signature
 import java.util.Base64
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -96,7 +99,11 @@ class AzpLlmSandboxTest {
         assertEquals(null, AzpLlmSandbox.resultJsonFromZip(zip(mapOf("x" to ByteArray(1)))))
     }
 
-    private fun llmAzp(): ByteArray {
+    private val publisher: KeyPair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+    private val publisherKey: String = Base64.getEncoder().encodeToString(publisher.public.encoded)
+
+    /** The runner package, signed by [signer] (null leaves it unsigned). */
+    private fun llmAzp(signer: KeyPair? = publisher): ByteArray {
         val workflow = "name: runner\n".toByteArray()
         val script = "#!/bin/sh\n".toByteArray()
         val payload = mapOf("setup/workflow.yml" to workflow, "setup/setup.sh" to script)
@@ -110,7 +117,13 @@ class AzpLlmSandboxTest {
                "dataHandling":{"prompts":"logged"}},
              "files":{"setup/workflow.yml":"${d["setup/workflow.yml"]}","setup/setup.sh":"${d["setup/setup.sh"]}"}}
         """.trimIndent()
-        return zip(payload + ("manifest.json" to manifest.toByteArray()))
+        val manifestBytes = manifest.toByteArray()
+        val sig = signer?.let { kp ->
+            val raw = Signature.getInstance("Ed25519").apply { initSign(kp.private); update(manifestBytes) }.sign()
+            val b64 = Base64.getEncoder()
+            """{"alg":"ed25519","publicKey":"${b64.encodeToString(kp.public.encoded)}","signature":"${b64.encodeToString(raw)}"}"""
+        }
+        return zip(payload + ("manifest.json" to manifestBytes) + listOfNotNull(sig?.let { "signature.json" to it.toByteArray() }))
     }
 
     @Test fun installCommitsOnceAndSealsSecrets() = runBlocking {
@@ -135,7 +148,7 @@ class AzpLlmSandboxTest {
             }
         }
         val r = AzpLlmSandbox.install(
-            AzpLlmSandbox.GitHub("tok", transport = gh), "me", "sb", llmAzp(),
+            AzpLlmSandbox.GitHub("tok", transport = gh), "me", "sb", llmAzp(), setOf(publisherKey),
             inputs = mapOf("providerKey" to "s3cret"), runSetup = false,
         )
         assertEquals(install, r.install)
@@ -147,7 +160,8 @@ class AzpLlmSandboxTest {
         val paths = (0 until tree.length()).map { tree.getJSONObject(it).getString("path") }.toSet()
         assertEquals(
             setOf(
-                "llm/com.x.llm/manifest.json", "llm/com.x.llm/setup/workflow.yml", "llm/com.x.llm/setup/setup.sh",
+                "llm/com.x.llm/manifest.json", "llm/com.x.llm/signature.json",
+                "llm/com.x.llm/setup/workflow.yml", "llm/com.x.llm/setup/setup.sh",
                 ".github/workflows/azphalt-llm-com.x.llm.yml",
             ),
             paths,
@@ -165,7 +179,35 @@ class AzpLlmSandboxTest {
             if (method == "GET" && path == "/repos/me/sb") ok("""{"private":false,"default_branch":"main"}""") else null
         }
         val e = runCatching {
-            runBlocking { AzpLlmSandbox.install(AzpLlmSandbox.GitHub("tok", transport = gh), "me", "sb", llmAzp(), runSetup = false) }
+            runBlocking { AzpLlmSandbox.install(AzpLlmSandbox.GitHub("tok", transport = gh), "me", "sb", llmAzp(), setOf(publisherKey), runSetup = false) }
+        }.exceptionOrNull()
+        assertTrue(e?.message.orEmpty().contains("public"))
+    }
+
+    @Test fun unsignedOrUnknownPublisherIsRefusedBeforeAnyGitHubCall() {
+        val gh = FakeGitHub { _, _, _ -> null }
+        val stranger = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+        for (azp in listOf(llmAzp(signer = null), llmAzp(signer = stranger))) {
+            val e = runCatching {
+                runBlocking { AzpLlmSandbox.install(AzpLlmSandbox.GitHub("tok", transport = gh), "me", "sb", azp, setOf(publisherKey), runSetup = false) }
+            }.exceptionOrNull()
+            assertTrue(e?.message.orEmpty(), e?.message.orEmpty().contains("trusted publisher"))
+        }
+        assertTrue(gh.calls.isEmpty())
+    }
+
+    @Test fun aPublisherPinnedAtInstallIsAccepted() {
+        val stranger = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+        val pins = AzpPublisherPins(java.io.File.createTempFile("pins", ".json").apply { deleteOnExit() })
+        pins.pin("com.x.llm", Base64.getEncoder().encodeToString(stranger.public.encoded))
+        val gh = FakeGitHub { method, path, _ ->
+            if (method == "GET" && path == "/repos/me/sb") ok("""{"private":false,"default_branch":"main"}""") else null
+        }
+        // Gets past the trust gate and stops at the next check (public repo), proving the pin counted.
+        val e = runCatching {
+            runBlocking {
+                AzpLlmSandbox.install(AzpLlmSandbox.GitHub("tok", transport = gh), "me", "sb", llmAzp(stranger), emptySet(), pins = pins, runSetup = false)
+            }
         }.exceptionOrNull()
         assertTrue(e?.message.orEmpty().contains("public"))
     }

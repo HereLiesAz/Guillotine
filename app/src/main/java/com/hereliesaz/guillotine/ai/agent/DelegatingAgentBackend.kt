@@ -160,9 +160,16 @@ class DelegatingAgentBackend(
             }
         }
 
-        // Calls are forwarded instead of hard-blocked. The planner only sees routed definitions, but
-        // a provider that remembers a valid prior tool name can still recover instead of dead-ending.
-        override fun call(name: String, args: JSONObject): JSONObject = upstream.call(name, args)
+        // The routed set is enforced, not just advertised: the router narrowed this request to these
+        // tools, and a planner steered by injected text (a transcript, a caption, a tool result) must not
+        // reach a destructive or billed tool it was never offered. The error names the routed set so a
+        // planner that remembered an old tool name can recover with one that's in scope.
+        override fun call(name: String, args: JSONObject): JSONObject {
+            require(name in allowed) {
+                "Tool \"$name\" isn't available for this request. Available tools: ${allowed.joinToString(", ")}."
+            }
+            return upstream.call(name, args)
+        }
         override fun resourceDefinitions(): JSONArray = upstream.resourceDefinitions()
         override fun readResource(uri: String): JSONObject = upstream.readResource(uri)
         override fun cancel(requestId: Any?) = upstream.cancel(requestId)
