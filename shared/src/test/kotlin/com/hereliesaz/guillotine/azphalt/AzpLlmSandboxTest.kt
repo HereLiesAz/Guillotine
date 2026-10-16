@@ -160,7 +160,8 @@ class AzpLlmSandboxTest {
         val paths = (0 until tree.length()).map { tree.getJSONObject(it).getString("path") }.toSet()
         assertEquals(
             setOf(
-                "llm/com.x.llm/manifest.json", "llm/com.x.llm/setup/workflow.yml", "llm/com.x.llm/setup/setup.sh",
+                "llm/com.x.llm/manifest.json", "llm/com.x.llm/signature.json",
+                "llm/com.x.llm/setup/workflow.yml", "llm/com.x.llm/setup/setup.sh",
                 ".github/workflows/azphalt-llm-com.x.llm.yml",
             ),
             paths,
