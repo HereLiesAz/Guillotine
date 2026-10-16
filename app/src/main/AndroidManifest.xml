@@ -36,6 +36,8 @@
     <application
         android:name=".GuillotineApplication"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -46,10 +48,7 @@
              CPU fallback working on devices that do not expose OpenCL. -->
         <uses-native-library android:name="libvndksupport.so" android:required="false" />
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
-
-
-        <!-- Optional OpenCL libs used by the on-device LLM (MediaPipe LLM Inference) GPU backend. -->
-        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <!-- Vendor-specific OpenCL variants some devices ship instead of libOpenCL.so. -->
         <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
         <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
 
