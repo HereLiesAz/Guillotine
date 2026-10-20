@@ -49,7 +49,7 @@ okhttp = "5.5.0"
 # relocates to litert 1.0.1, whose x86_64 libtensorflowlite_jni.so is 4 KB-aligned (Play 16 KB rule).
 litert = "1.4.2"
 sherpaOnnx = "v1.13.8"
-onnxruntime = "1.30.0"
+onnxruntime = "1.31.0"
 commonsCompress = "1.28.0"
 junit = "4.13.2"
 json = "20260814"
