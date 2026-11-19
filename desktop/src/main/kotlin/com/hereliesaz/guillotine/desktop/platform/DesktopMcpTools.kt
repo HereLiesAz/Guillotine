@@ -103,7 +103,8 @@ class DesktopMcpTools(
         put(toolDefinition("ripple_delete_range", "Cut a timeline span [start_ms, end_ms) out of every track and close the gap.",
             objSchema("start_ms" to intProp(), "end_ms" to intProp(), required = listOf("start_ms", "end_ms"))))
 
-        // Media-dependent tools: defined so the schema is discoverable, but return stubs on desktop.
+        // Media/model-dependent tools: real on desktop, run on user-installed ONNX models; each returns an
+        // error naming the missing setting when its model isn't installed.
         put(toolDefinition("analyze_clip", "Prompt-driven cut analysis ON-DEVICE: label the clip's frames and keep the parts matching its prompt (set_prompt first), cutting the rest. Label-based (needs the footage-search model).",
             objSchema("clip_id" to stringProp(), required = listOf("clip_id"))))
         put(toolDefinition("analyze_clip_with_reference", "Like analyze_clip, but uses the clip's CURRENT playhead frame as a visual reference: keeps the parts that look like it and cuts the rest, ON-DEVICE. Use when the user points at the current frame (e.g. \"this is my phone\"). Set the clip's prompt to the object first. Needs the concept-embedding model.",
@@ -522,7 +523,8 @@ class DesktopMcpTools(
         ))
         // ---- learned concepts (teach a specific thing by pointing at it) ----
         // list_concepts / delete_concept are pure data ops on the shared LearnedConcept store — REAL on
-        // desktop. add_reference needs an on-device image/face embedder (ML Kit/TFLite) → honest stub.
+        // desktop. add_reference is real too: it fingerprints the frame with the user-installed ONNX
+        // concept embedder (errors naming the setting when none is set).
         put(toolDefinition(
             "add_reference",
             "Teach the app a SPECIFIC thing by pointing at it in the CURRENT preview frame: captures an " +
@@ -568,8 +570,8 @@ class DesktopMcpTools(
             ),
         ))
 
-        // ---- vision / face / image-model tools: defined for discoverability, honest stubs on desktop
-        // (ML Kit / MediaPipe VLM / TFLite have no clean desktop-JVM equivalent). ----
+        // ---- vision / face / image-model tools: implemented on desktop with ONNX models installed by the
+        // user (in place of Android's ML Kit / MediaPipe / TFLite); missing model → error naming it. ----
         put(toolDefinition(
             "apply_image_effect",
             "Run an ON-DEVICE image model on the current preview frame and add the result as a new image " +
@@ -762,7 +764,7 @@ class DesktopMcpTools(
         "segment_clip" -> segmentClipTool(args.getString("clip_id"))
         "delete_clip" -> deleteClipTool(args.getString("clip_id"))
         "ripple_delete_range" -> rippleDeleteRangeTool(args.getLong("start_ms"), args.getLong("end_ms"))
-        // ---- vision (ML Kit labeling / MediaPipe VLM) → honest stubs ----
+        // ---- vision (ONNX labeling / embedding models on desktop) ----
         "analyze_clip" -> analyzeClipByPrompt(args.getString("clip_id"))
         "analyze_clip_with_reference" -> analyzeClipWithReference(args.getString("clip_id"))
         "analyze_clip_with_concept" -> analyzeClipWithConcept(
@@ -785,7 +787,7 @@ class DesktopMcpTools(
         "replace_background" -> replaceBackgroundTool(
             args.optString("clip_id"), args.optString("color"), args.optString("image_path"),
         )
-        // ---- concept embedder / image models / inpaint → honest stubs ----
+        // ---- concept embedder / image models / inpaint (ONNX, model-gated) ----
         "add_reference" -> addReference(
             args.getString("name"), args.optString("term"), args.optBoolean("negative", false),
         )

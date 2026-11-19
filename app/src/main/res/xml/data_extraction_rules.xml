@@ -7,10 +7,26 @@
         <exclude domain="sharedpref" path="guillotine_secure_settings.xml" />
         <exclude domain="sharedpref" path="guillotine_mcp_secure.xml" />
         <exclude domain="sharedpref" path="guillotine_mcp_relay.xml" />
+        <!-- Large, re-downloadable or device-specific data: models/extensions (hundreds of MB,
+             reinstallable), queued crash reports (stale on another device) and learned concepts
+             (embeddings tied to this device's on-device models). The project autosave is kept. -->
+        <exclude domain="file" path="imported-models" />
+        <exclude domain="file" path="azp-models" />
+        <exclude domain="file" path="extensions" />
+        <exclude domain="file" path="pending_crashes" />
+        <exclude domain="file" path="learned_concepts.json" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="guillotine_secure_settings.xml" />
         <exclude domain="sharedpref" path="guillotine_mcp_secure.xml" />
         <exclude domain="sharedpref" path="guillotine_mcp_relay.xml" />
+        <!-- Large, re-downloadable or device-specific data: models/extensions (hundreds of MB,
+             reinstallable), queued crash reports (stale on another device) and learned concepts
+             (embeddings tied to this device's on-device models). The project autosave is kept. -->
+        <exclude domain="file" path="imported-models" />
+        <exclude domain="file" path="azp-models" />
+        <exclude domain="file" path="extensions" />
+        <exclude domain="file" path="pending_crashes" />
+        <exclude domain="file" path="learned_concepts.json" />
     </device-transfer>
 </data-extraction-rules>

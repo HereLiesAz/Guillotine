@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Publish an AAB to Google Play across four tracks.
+"""Publish an AAB to Google Play: internal (live) plus the staged tracks in `stage_plan`.
+
+Currently staged: alpha only (beta and production are commented out in `main()` until they are
+initialised in the Play Console). No workflow in this repository calls it: .github/workflows/
+release-aab.yml (push to main / manual dispatch) hands off to the central HereLiesAz/workflows
+release run, which owns the publish.
 
 Google's Play Publishing API groups writes into "Edits" — you insert an edit,
 add uploads and track releases to it, then commit once. Committing an edit is
@@ -8,8 +13,8 @@ atomic; uncommitted edits are throwaway.
 Rollout policy (fixed):
   - internal      → completed  (live immediately — internal testers see it with no manual step)
   - alpha         → draft      (closed testing, staged; promote by hand)
-  - beta          → draft      (open testing, staged; promote by hand)
-  - production    → draft      (staged; promote by hand)
+  - beta          → draft      (open testing; DISABLED in stage_plan until initialised)
+  - production    → draft      (DISABLED in stage_plan until initialised)
 
 Why internal is `completed`, not `draft`: internal testing is meant to be the
 zero-friction inner loop — a push to main should just show up for internal
@@ -54,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 
@@ -272,6 +278,25 @@ def stage_track(session: AuthorizedSession, package: str, track: str, status: st
             raise
 
 
+def version_code_on_track(session: AuthorizedSession, package: str, track: str, version_code: int) -> bool:
+    """True when [version_code] is in any release currently on [track] (read via a throwaway edit)."""
+    try:
+        edit_id = insert_edit(session, package)
+    except Exception as e:
+        print(f"Could not open an edit to verify track {track}: {e}", file=sys.stderr)
+        return False
+    try:
+        r = session.get(f"{API}/{package}/edits/{edit_id}/tracks/{track}", timeout=META_TIMEOUT_S)
+        if not r.ok:
+            return False
+        return any(
+            str(version_code) in [str(c) for c in (rel.get("versionCodes") or [])]
+            for rel in (r.json().get("releases") or [])
+        )
+    finally:
+        delete_edit(session, package, edit_id)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--package", required=True, help="applicationId, e.g. com.hereliesaz.guillotine")
@@ -287,14 +312,17 @@ def main() -> int:
     try:
         version_code = publish_internal(session, args.package, args.aab)
     except Exception as e:
-        # Idempotency: a push that has an open PR fires this workflow twice (push + pull_request
-        # events), so two runs build the same commit and compute the same versionCode. The first to
-        # commit the internal release consumes that code; the second then gets
-        # "Version code N has already been used." That means the build is already on Play — treat it
-        # as success, not a failure. (Only this exact collision; every other error still fails.)
+        # Idempotency: two runs of the same commit compute the same versionCode; the second gets
+        # "Version code N has already been used." That is only a success if N is actually live on
+        # the internal track — confirm it through the edits API, otherwise fail (a code burnt by a
+        # different/failed build must not be reported as published).
         if "already been used" in str(e):
-            print(f"::warning::versionCode already published (a concurrent run did it first); treating as success. {e}", file=sys.stderr)
-            return EXIT_OK
+            m = re.search(r"[Vv]ersion code (\d+)", str(e))
+            if m and version_code_on_track(session, args.package, "internal", int(m.group(1))):
+                print(f"::warning::versionCode {m.group(1)} is already on the internal track; treating as success. {e}", file=sys.stderr)
+                return EXIT_OK
+            print(f"::error::versionCode already used but NOT found on the internal track: {e}", file=sys.stderr)
+            return EXIT_FAIL
         print(f"Play publish failed (internal): {e}", file=sys.stderr)
         return EXIT_FAIL
 
