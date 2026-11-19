@@ -22,3 +22,17 @@
 # Android 9 / SDK 28. Keep the public API surface and the GMS-internal glue classes.
 -keep class com.google.mlkit.** { *; }
 -keep class com.google.android.gms.internal.mlkit_vision_** { *; }
+
+# Native-bridge libraries: their JNI code looks Java classes/fields/methods up BY NAME (JNI
+# FindClass/GetFieldID, or JNA's reflective Structure/Callback mapping), which R8 can't see.
+# Vosk (org.vosk) is JNA-based.
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-dontwarn java.awt.**
+-keep class org.vosk.** { *; }
+# sherpa-onnx (ASR / diarization / denoise / stems) — JNI reads its config data classes' fields.
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+# LiteRT-LM on-device assistant engine (JNI-backed Engine/Conversation/config classes).
+-keep class com.google.ai.edge.litertlm.** { *; }
+# NanoHTTPD (embedded MCP server).
+-keep class fi.iki.elonen.** { *; }

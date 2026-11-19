@@ -8,3 +8,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  # npm packages under tools/ (only those with a package.json; tools/crash-relay has none).
+  - package-ecosystem: "npm"
+    directory: "/tools/mcp-relay"
+    schedule:
+      interval: "weekly"

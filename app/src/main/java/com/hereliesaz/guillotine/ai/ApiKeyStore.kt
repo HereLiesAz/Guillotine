@@ -84,6 +84,9 @@ class ApiKeyStore(context: Context) {
         org.json.JSONObject(map.filterValues { it.isNotEmpty() }).toString()
 
     suspend fun save(settings: AiSettings) {
+        // Assistant disabled or its model changed: free the cached LiteRT-LM engine (GBs of native
+        // memory) now rather than holding the old model until the process dies.
+        com.hereliesaz.guillotine.ai.agent.LiteRtLmTextEngine.release(unlessPath = settings.agentModelPath)
         withContext(Dispatchers.IO) {
             prefs.edit().apply {
                 putString(KEY_PROVIDER, settings.provider.name)

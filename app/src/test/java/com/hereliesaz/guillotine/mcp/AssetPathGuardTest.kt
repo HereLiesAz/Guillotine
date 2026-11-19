@@ -44,7 +44,9 @@ class AssetPathGuardTest {
         val root = tmp.newFolder("files")
         val outside = tmp.newFile("outside.glsl")
         val link = File(root, "link.glsl").toPath()
-        runCatching { java.nio.file.Files.createSymbolicLink(link, outside.toPath()) }.getOrElse { return }
+        val linked = runCatching { java.nio.file.Files.createSymbolicLink(link, outside.toPath()) }.isSuccess
+        // Report SKIPPED (not a silent pass) where the FS/OS can't create symlinks.
+        org.junit.Assume.assumeTrue("symlinks unsupported here", linked)
         assertThrows(IllegalArgumentException::class.java) {
             AssetPathGuard.resolve(link.toString(), "a shader", listOf(root))
         }
