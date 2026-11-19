@@ -10,7 +10,7 @@ which already has a large tool/client ecosystem.
 leave the device — a controller drives the editor, it doesn't receive frames.
 
 > **The full tool catalog lives in [TOOLS.md](TOOLS.md)** — every tool's name, description, and JSON
-> schema (generated from the live definitions), alongside the authoritative server spec: port `6274`,
+> schema (generated from the live definitions), alongside the authoritative server spec: ports (`6274`/`6275`/`7865`, loopback only),
 > bearer auth on `POST /mcp`, the JSON-RPC methods, and the read-only resources. This document is the
 > **plugin / extensibility** side — connecting a client, user-defined tool packs, and the draft
 > manifest. The two don't repeat each other: start here to build a plugin, cross to TOOLS.md for the
@@ -21,7 +21,7 @@ leave the device — a controller drives the editor, it doesn't receive frames.
 ## The server
 
 - **Transport:** HTTP, JSON-RPC 2.0. `POST /mcp` with a JSON-RPC body; `GET /health` for liveness.
-- **Port:** `6274` (bound so tools on your network can reach the app).
+- **Port:** Ports: Android **play** flavor `6274`, Android **github** flavor `6275`, desktop `7865`. The server binds loopback (`127.0.0.1`) only — reach it from the same machine, over `adb forward` (Android), or via the relay below; it is not reachable from the network directly.
 - **Protocol version:** `2024-11-05`.
 - **Auth:** every `/mcp` call needs `Authorization: Bearer <token>`. The token is shown in
   **Settings → Advanced** (generated on first use). See
@@ -39,14 +39,20 @@ leave the device — a controller drives the editor, it doesn't receive frames.
 ### Connect
 
 ```bash
+# The server listens on 127.0.0.1 only. Pick the port for your build:
+#   desktop: 7865 (same machine)          → PORT=7865
+#   Android play flavor: 6274, github flavor: 6275 → forward it over USB first:
+#     adb forward tcp:6274 tcp:6274   (or tcp:6275 tcp:6275)
+PORT=7865
+
 # 1. Discover tools
-curl -s http://<device-ip>:6274/mcp \
+curl -s http://127.0.0.1:$PORT/mcp \
   -H "Authorization: Bearer $GUILLOTINE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
 # 2. Call one
-curl -s http://<device-ip>:6274/mcp \
+curl -s http://127.0.0.1:$PORT/mcp \
   -H "Authorization: Bearer $GUILLOTINE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"apply_lut","arguments":{"path":"/sdcard/luts/teal.cube"}}}'
@@ -112,7 +118,7 @@ of truth** for what's callable, so a plugin never has to hard-code a tool list �
 ## See also
 
 - **[TOOLS.md](TOOLS.md)** — the full, generated tool catalog and the authoritative MCP server spec
-  (port `6274`, bearer auth, `/mcp`, JSON-RPC methods, resources).
+  (ports `6274`/`6275`/`7865` on loopback, bearer auth, `/mcp`, JSON-RPC methods, resources).
 - **[ECOSYSTEM.md](ECOSYSTEM.md)** — LUTs, shaders, Frei0r/FFmpeg filters, and transitions.
 - **[SETTINGS.md](SETTINGS.md)** — where the MCP access token and the remote relay are configured.
 - **[MANUAL.md](MANUAL.md)** — using the editor and its AI features.

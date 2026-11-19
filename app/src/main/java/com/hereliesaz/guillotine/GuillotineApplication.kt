@@ -20,4 +20,14 @@ class GuillotineApplication : Application() {
         ClipPanelContributions.register(KineticTypographyContribution())
         ClipPanelContributions.register(AzpAssetContribution())
     }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Backgrounded (UI hidden and beyond) or critically low while running: drop the on-device
+        // assistant LLM; it reloads lazily on the next assistant turn.
+        @Suppress("DEPRECATION") // RUNNING_CRITICAL is deprecated on 34+, still delivered below it
+        if (level >= TRIM_MEMORY_UI_HIDDEN || level == TRIM_MEMORY_RUNNING_CRITICAL) {
+            com.hereliesaz.guillotine.ai.agent.LiteRtLmTextEngine.release()
+        }
+    }
 }

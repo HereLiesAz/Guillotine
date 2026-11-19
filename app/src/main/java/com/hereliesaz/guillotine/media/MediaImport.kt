@@ -23,15 +23,43 @@ object MediaImport {
     val MIME_TYPES = arrayOf("video/*", "audio/*", "image/*")
 
     /**
+     * When the app's persisted URI grants are near the platform cap, release the oldest ones that
+     * aren't in [keep] (URIs the current project references), so new imports can still persist.
+     */
+    private fun releaseGrantsIfNearLimit(context: Context, keep: Set<String>) {
+        val limit = if (android.os.Build.VERSION.SDK_INT >= 30) 512 else 128
+        val resolver = context.contentResolver
+        val held = runCatching { resolver.persistedUriPermissions }.getOrNull() ?: return
+        val excess = held.size - (limit - GRANT_HEADROOM)
+        if (excess <= 0) return
+        held.filter { it.uri.toString() !in keep }
+            .sortedBy { it.persistedTime }
+            .take(excess)
+            .forEach { p ->
+                val flags = (if (p.isReadPermission) Intent.FLAG_GRANT_READ_URI_PERMISSION else 0) or
+                    (if (p.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
+                runCatching { resolver.releasePersistableUriPermission(p.uri, flags) }
+            }
+    }
+
+    private const val GRANT_HEADROOM = 16
+
+    /**
      * Probe a freshly-picked [uri] into a [MediaItem]. Blocking I/O — call from a
      * background dispatcher. Returns null if the URI can't be read.
      */
-    fun probe(context: Context, uri: Uri): MediaItem? {
-        // Persist read access so the URI survives app/process restarts.
+    fun probe(context: Context, uri: Uri, inUse: Set<String> = emptySet()): MediaItem? {
+        // Persist read access so the URI survives app/process restarts. The OS caps persisted
+        // grants per app (128 before API 30, 512 after); free room first so the take can succeed.
+        releaseGrantsIfNearLimit(context, keep = inUse + uri.toString())
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
+        }.onFailure { e ->
+            // Import still works this session, but the media won't reopen after a restart.
+            android.util.Log.w("MediaImport", "takePersistableUriPermission failed for $uri", e)
+            ActivityLog.error("Couldn't keep long-term access to \"${uri.lastPathSegment}\"; it may not reopen after a restart.")
         }
 
         val mime = context.contentResolver.getType(uri).orEmpty()

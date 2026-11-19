@@ -137,8 +137,10 @@ OS's natives) for per-host classifier deps auto-selected by `desktop/build.gradl
 
 ### CI: attach installers to a release
 
-`.github/workflows/release-desktop.yml` runs on every `v*` tag: it builds the installers on
-Ubuntu / macOS / Windows and attaches them to the GitHub Release matching the tag.
+`.github/workflows/release-desktop.yml` triggers on `v*`, `latest-release-v*` and `latest-debug-v*`
+tags (or manual dispatch). It is a hand-off: the installers are built on Ubuntu / macOS / Windows by
+the central `HereLiesAz/workflows` run, which attaches them to the matching GitHub Release and reports
+back as a commit status.
 
 ## Project layout
 

@@ -1,13 +1,12 @@
 [versions]
 # NOTE: AGP / Kotlin / Compose / compileSdk / Gradle (wrapper) must stay mutually compatible.
 # AGP 9.x requires Kotlin 2.1+ (it owns a built-in `kotlin` extension; older KGP collides with
-# "Cannot add extension with name 'kotlin'"), so Kotlin is on latest stable. AGP is on 9.2.0
-# (last stable before 9.2.1, which has had regressions) — Kotlin must move regardless of which
-# 9.x AGP we land on.
-# material3 must stay on the 1.5.0-alpha line: the Expressive components we use
+# "Cannot add extension with name 'kotlin'"), so Kotlin is on latest stable. AGP is on 9.4.1
+# (see `agp` below) — Kotlin must move with whichever 9.x AGP we land on.
+# material3 must stay on the 1.5.0 pre-release line (currently 1.5.0-beta01): the Expressive components we use
 # (MaterialExpressiveTheme, LoadingIndicator) are NOT public in stable 1.4.0 — verified by aar
-# inspection (1.4.0 ships MaterialThemeKt but no LoadingIndicatorKt). The alpha pulls Compose
-# 1.12.0-alpha03, which no stable Compose BOM provides, so we pin the Compose UI artifacts to
+# inspection (1.4.0 ships MaterialThemeKt but no LoadingIndicatorKt). The pre-release needs a
+# pre-release Compose UI (composeUi below), which no stable Compose BOM provides, so we pin the Compose UI artifacts to
 # composeUi explicitly instead of using a BOM. material-icons-extended is frozen at 1.7.8
 # (deprecated upstream) and rides along fine on the newer Compose runtime.
 agp = "9.4.1"
@@ -42,7 +41,6 @@ liteRtLm = "0.17.1"
 # comparison treats 0.20230731 > 0.10.35, so `0.10.+`/`+` would resolve back to the stale 2023 build.
 mediapipeTasksVision = "1.0.0"
 aznavrail = "11.8"
-billing = "9.1.0"
 nanohttpd = "2.3.1"
 okhttp = "5.5.0"
 # LiteRT (TFLite's successor; same org.tensorflow.lite API). org.tensorflow:tensorflow-lite:2.17.0 only
@@ -58,7 +56,7 @@ json = "20260814"
 # Kept in step with the root build.gradle.kts resolutionStrategy force for the same coordinates — that
 # block pins the version the whole graph gets, so a different number here would simply be overridden.
 bouncycastle = "1.86"
-composeMultiplatform = "1.12.1"
+composeMultiplatform = "1.12.2"
 # Bytedeco tri-version pairing (JavaCV 1.5.13 → JavaCPP 1.5.13 → FFmpeg 8.0.1-1.5.13).
 # All three must move in lockstep — mixing versions produces UnsatisfiedLinkError at runtime.
 # The FFmpeg artifact version is <ffmpeg>-<javacpp>, so its JavaCPP suffix MUST equal `javacpp`
@@ -109,7 +107,6 @@ mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision"
 # module resolves cleanly via its Android Maven POM (same `com.hereliesaz.aznavrail` package/API).
 # Do not "simplify" this to the `-cmp-android` artifact or the root coordinate.
 aznavrail = { group = "com.github.HereLiesAz.AzNavRail", name = "aznavrail", version.ref = "aznavrail" }
-billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }

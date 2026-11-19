@@ -320,7 +320,7 @@ Developer / power-user options. These persist to their own stores (noted per con
 - **Token** — **read-only** text field showing the bearer token for the embedded MCP server.
 - **Copy** — copies the token to the clipboard.
 - **Regenerate** — mints a new token immediately (revoking any tool still using the old one).
-- Send it as `Authorization: Bearer <token>` when POSTing to `/mcp` on port `6274`. Backed by
+- Send it as `Authorization: Bearer <token>` when POSTing to `/mcp` on `127.0.0.1` port `6274` (play flavor) / `6275` (github flavor) — use `adb forward` to reach it from a computer. Backed by
   `McpAuth`. See [PLUGINS.md](PLUGINS.md).
 
 ### Encrypted cloud relay (optional)
