@@ -385,7 +385,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showHelp by remember { mutableStateOf(false) }
     var showTutorial by remember { mutableStateOf(false) }
     var showFaq by remember { mutableStateOf(false) }
-    var showAdFree by remember { mutableStateOf(false) }
     var showAzphaltStore by remember { mutableStateOf(false) }
     var showExtensionsManager by remember { mutableStateOf(false) }
     var showMediaBin by remember { mutableStateOf(false) }
@@ -393,8 +392,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // opens a transition picker for this pair; null when no picker is showing.
     var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
     var transitionSwapBusy by remember { mutableStateOf(false) }
-    
-    val billingManager = remember { com.hereliesaz.guillotine.billing.BillingManager(context, scope).apply { initialize() } }
     
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
@@ -455,6 +452,9 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     // If the autosave exists but is unreadable, ProjectAutosave moves it aside and suppresses
     // autosave; the first real edit (a document different from the empty one shown after the
     // failure) re-enables it, so the empty editor never overwrites the user's project.
+    // Set once the autosave restore below has finished. Until then the ON_PAUSE flush must not run:
+    // pausing mid-restore would save the still-empty editor over the user's autosaved project.
+    val autosaveRestored = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
         if (vm.uiState.value.document.clips.isEmpty()) {
             when (val r = withContext(Dispatchers.IO) { ProjectAutosave.load(context) }) {
@@ -468,6 +468,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                 ProjectAutosave.LoadResult.None -> Unit
             }
         }
+        autosaveRestored.set(true)
         val baseline = vm.uiState.value.document
         vm.uiState
             .map { it.document }
@@ -484,7 +485,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE && autosaveRestored.get()) {
                 runCatching { ProjectAutosave.save(context, vm.uiState.value.document) }
             }
         }
@@ -627,8 +628,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             .background(Black)
             .systemBarsPadding(),
     ) {
-        // Editor area (weighted) + the activity-log sheet share this Box; the banner ad sits
-        // below it so the sheet's HIDDEN strip never overlaps the ad.
+        // Editor area (weighted) + the activity-log sheet share this Box.
         Box(Modifier.weight(1f).fillMaxWidth()) {
         Column(
             Modifier
@@ -662,7 +662,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             onHelp = { showHelp = true },
             onTutorial = { showTutorial = true },
             onFaq = { showFaq = true },
-            onAdFree = { showAdFree = true },
         )
 
         // Analysis/export status & errors now stream into the activity-log bottom sheet below,
@@ -977,6 +976,66 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             containerColor = Neutral900,
         )
     }
+    // Export arguments parked while the API < 29 storage-permission prompt is showing.
+    var pendingExport by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    val startExport: (String, Boolean) -> Unit = { name, regionOnly ->
+            exporting = true; exportError = null; exportProgress = 0f
+            ActivityLog.info("Exporting \"$name\"…")
+            // Export in the background via the foreground service (cancel-only — Media3 can't pause
+            // an encode). Progress feeds the in-app sheet and the notification.
+            // Application context only: the operation (and these callbacks) can outlive the Activity.
+            val appContext = context.applicationContext
+            val startedExport = OperationController.start(
+                appContext, OperationKind.EXPORT, "Exporting…", pausable = false,
+                onCancel = {
+                    exportError = "Export cancelled."; exporting = false
+                    vm.setExportPhase(null)
+                    ActivityLog.info("Export cancelled.")
+                },
+                onError = { e ->
+                    val detail = Exporter.describeExportError(e)
+                    exportError = detail; exporting = false
+                    vm.setExportPhase(null)
+                    ActivityLog.error(detail)
+                },
+                onComplete = {
+                    exportDone = "Saved to Movies/Guillotine."; exporting = false
+                    vm.setExportPhase(null)
+                    ActivityLog.success("Exported to Movies/Guillotine.")
+                },
+            ) { sink ->
+                val uri = Exporter.export(
+                    appContext,
+                    vm.uiState.value.document,
+                    name,
+                    onProgress = { p, ms ->
+                        scope.launch { exportProgress = p } // hop to the main thread for Compose state
+                        // ms is relative to the clamped (region) document when regionOnly — offset
+                        // back to the full timeline so the live scrub indicator lands in the right place.
+                        scope.launch { vm.seekTo(ms + (region?.first ?: 0L)) }
+                        sink.report(p, "Exporting…")
+                    },
+                    onPhase = { phase ->
+                        scope.launch { vm.setExportPhase(phase) }
+                    },
+                    region = region,
+                )
+                scope.launch { exportedUri = uri } // for the Share action once done
+            }
+            if (!startedExport) { exportError = "Another operation is already running."; exporting = false }
+    }
+    val storagePermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val args = pendingExport
+        pendingExport = null
+        if (args == null) return@rememberLauncherForActivityResult
+        if (granted) {
+            startExport(args.first, args.second)
+        } else {
+            val msg = "Storage permission denied — Android 9 and below need it to save exports to Movies/Guillotine."
+            exportError = msg
+            ActivityLog.error(msg)
+        }
+    }
     if (showExport) {
         ExportSheet(
             totalDurationMs = state.document.totalDurationMs,
@@ -988,51 +1047,13 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
             errorMessage = exportError,
             playbackRegion = state.playbackRegion,
             onStart = { name, regionOnly ->
-                val region = if (regionOnly) vm.uiState.value.playbackRegion else null
-                exporting = true; exportError = null; exportProgress = 0f
-                ActivityLog.info("Exporting \"$name\"…")
-                // Export in the background via the foreground service (cancel-only — Media3 can't pause
-                // an encode). Progress feeds the in-app sheet and the notification.
-                // Application context only: the operation (and these callbacks) can outlive the Activity.
-                val appContext = context.applicationContext
-                val startedExport = OperationController.start(
-                    appContext, OperationKind.EXPORT, "Exporting…", pausable = false,
-                    onCancel = {
-                        exportError = "Export cancelled."; exporting = false
-                        vm.setExportPhase(null)
-                        ActivityLog.info("Export cancelled.")
-                    },
-                    onError = { e ->
-                        val detail = Exporter.describeExportError(e)
-                        exportError = detail; exporting = false
-                        vm.setExportPhase(null)
-                        ActivityLog.error(detail)
-                    },
-                    onComplete = {
-                        exportDone = "Saved to Movies/Guillotine."; exporting = false
-                        vm.setExportPhase(null)
-                        ActivityLog.success("Exported to Movies/Guillotine.")
-                    },
-                ) { sink ->
-                    val uri = Exporter.export(
-                        appContext,
-                        vm.uiState.value.document,
-                        name,
-                        onProgress = { p, ms ->
-                            scope.launch { exportProgress = p } // hop to the main thread for Compose state
-                            // ms is relative to the clamped (region) document when regionOnly — offset
-                            // back to the full timeline so the live scrub indicator lands in the right place.
-                            scope.launch { vm.seekTo(ms + (region?.first ?: 0L)) }
-                            sink.report(p, "Exporting…")
-                        },
-                        onPhase = { phase ->
-                            scope.launch { vm.setExportPhase(phase) }
-                        },
-                        region = region,
-                    )
-                    scope.launch { exportedUri = uri } // for the Share action once done
+                // API < 29: the gallery save needs WRITE_EXTERNAL_STORAGE; ask first, then resume.
+                if (!Exporter.hasGalleryWritePermission(context)) {
+                    pendingExport = name to regionOnly
+                    storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                } else {
+                    startExport(name, regionOnly)
                 }
-                if (!startedExport) { exportError = "Another operation is already running."; exporting = false }
             },
             onDismiss = { if (!exporting) showExport = false },
             onCancelExport = { OperationController.cancel() },
@@ -1044,7 +1065,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     if (showHelp) HelpKeyDialog(onDismiss = { showHelp = false })
     if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
     if (showFaq) FaqDialog(settings = settings, onDismiss = { showFaq = false })
-    if (showAdFree) AdFreeDialog(billingManager = billingManager, onDismiss = { showAdFree = false })
     if (showAzphaltStore) {
         AzphaltStoreScreen(
             vm = vm,
@@ -1189,7 +1209,6 @@ private fun TopBar(
     onHelp: () -> Unit,
     onTutorial: () -> Unit,
     onFaq: () -> Unit,
-    onAdFree: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().height(44.dp).background(Neutral950).padding(end = 8.dp),
@@ -1225,9 +1244,6 @@ private fun TopBar(
                 azItem("Tutorial") { onTutorial() }
                 azItem("FAQ") { onFaq() }
                 azItem("Icon Key") { onHelp() }
-                if (!com.hereliesaz.guillotine.ads.AdsState.isAdFreePermanently.value) {
-                    azItem("Ad-Free") { onAdFree() }
-                }
                 // AzNavRail draws its own primary-tinted divider above the footer (About / Feedback /
                 // @HereLiesAz) automatically when showFooter = true — an explicit azDivider() here
                 // would double up as two white/red lines. Let the library handle it.
@@ -1914,30 +1930,3 @@ private fun fmtSecs(ms: Long): String {
 }
 
 
-@Composable
-fun AdFreeDialog(billingManager: com.hereliesaz.guillotine.billing.BillingManager, onDismiss: () -> Unit) {
-    val productDetails by billingManager.adFreeProductDetails.collectAsState(initial = null)
-    val context = LocalContext.current as? android.app.Activity
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { androidx.compose.material3.Text("Ad-Free Experience") },
-        text = {
-            androidx.compose.foundation.layout.Column {
-                androidx.compose.material3.Text("Enjoy the app without ads! Unlock the ad-free experience permanently with a one-time purchase.")
-            }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = {
-                context?.let { billingManager.purchaseAdFree(it) }
-                onDismiss()
-            }) {
-                androidx.compose.material3.Text(productDetails?.oneTimePurchaseOfferDetails?.formattedPrice ?: "Buy Ad-Free")
-            }
-        },
-        dismissButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) {
-                androidx.compose.material3.Text("Not now")
-            }
-        }
-    )
-}

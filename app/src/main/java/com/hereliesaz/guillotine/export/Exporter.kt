@@ -76,6 +76,12 @@ object Exporter {
         onPhase: (String) -> Unit = {},
         region: LongRange? = null,
     ): Uri = withContext(Dispatchers.Main) {
+        // Fail fast (before a potentially long encode) if the gallery save can't succeed: below
+        // API 29 the MediaStore insert into shared storage needs WRITE_EXTERNAL_STORAGE, which the
+        // UI requests before starting an export (see NleScreen's export onStart).
+        check(hasGalleryWritePermission(context)) {
+            "Storage permission is required to save exports to Movies/Guillotine on Android 9 and below."
+        }
         val document = if (region != null) document.clampedToRegion(region.first, region.last) else document
         fun phase(name: String) {
             onPhase(name)
@@ -981,6 +987,13 @@ object Exporter {
         }
         return gains
     }
+
+    /** True when [saveToGallery] can write: always on API 29+, else needs WRITE_EXTERNAL_STORAGE. */
+    fun hasGalleryWritePermission(context: Context): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     /** Copy the encoded file into the gallery via MediaStore (no permission on API 29+). */
     private fun saveToGallery(context: Context, file: File, name: String): Uri {

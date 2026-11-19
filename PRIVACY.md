@@ -1,12 +1,13 @@
 # Privacy Policy — Guillotine
 
-**Effective date:** 2026-08-14
+**Effective date:** 2026-11-19
 
 Guillotine is an on-device, non-linear video editor for Android, tablets, Chromebooks, and native
 desktop apps for macOS, Windows, and Linux. This policy explains what the app does and does not
-do with your data. In short: **Guillotine has no servers of its own, no account system, no
-first‑party analytics, and no ads or ad SDK on any platform.** Your media and projects stay on
-your device unless *you* choose to use a third‑party AI service.
+do with your data. In short: **no account system, no first‑party analytics, and no ads, ad SDK,
+or advertising ID on any platform.** Your media and projects stay on your device unless *you*
+use a feature that sends something off it (listed below). The one service the developer runs is
+the free video‑generation Space, which receives only your text prompt.
 
 If you tap the **Report** button in the Export dialog after a render failure, the app opens your
 default browser at `github.com/HereLiesAz/Guillotine/issues/new` with a pre-filled title and body
@@ -15,15 +16,18 @@ the issue on GitHub — the app itself does not upload anything.
 
 ## The short version
 
-- We (the developer) do **not** collect, store, or receive your data on any server we control.
-- The app contains **no ads and no ad SDK**, on any platform.
-- Editing, playback, thumbnails, waveforms, **all frame/audio analysis** (ML Kit + MediaPipe
-  vision and the local silence heuristic), an optional on‑device LLM, and on‑device speech
-  recognition (Vosk) all run **locally on your device**. **Your video is never uploaded** for
-  analysis — cloud AIs only ever act as text controllers (see below).
-- The app only sends data over the network when **you** trigger an action that uses a
-  third‑party service you configured (a cloud AI controller, video/music generation, or crash reporting).
-- API keys you enter are **encrypted on your device** and are sent only to the matching
+- The developer does **not** collect or store your media, projects, or keys. The only
+  developer‑run endpoint is the free video‑generation Space (see below), which receives your
+  text prompt only.
+- **No ads, no ad SDK, no advertising ID**, on any platform.
+- Editing, playback, thumbnails, waveforms, frame/audio analysis (ML Kit + MediaPipe vision and
+  the local silence heuristic), an optional on‑device LLM, and on‑device speech recognition all
+  run **locally on your device** by default.
+- Data leaves the device only when **you** use a feature that needs a network service: a cloud AI
+  controller (text; plus the current frame if you turn on **Let cloud AI see frames**), generative
+  object removal (masked frames), cloud transcription/voice (audio), video/music generation
+  (text prompt), or crash reporting you set up.
+- API keys you enter are **stored encrypted on your device** and are sent only to the matching
   provider, only in requests you initiate.
 
 ## Information stored on your device
@@ -36,8 +40,11 @@ The app stores the following **locally** (in app‑private storage), not on any 
   read access to those files; it does not copy or upload them.
 - **Settings** — including AI provider choice, selected models, prompt history, and a crash‑
   relay URL (if you set one).
-- **API keys** — encrypted at rest using Android’s Jetpack Security
-  (`EncryptedSharedPreferences`, backed by the Android Keystore).
+- **API keys** — on Android, encrypted at rest with Jetpack Security
+  (`EncryptedSharedPreferences`, backed by the Android Keystore). On desktop, encrypted in a local
+  keystore file whose random password is stored **beside it** in the app’s data folder with
+  owner‑only file permissions — this protects against other users on the machine, not against
+  software running as you. It is not an OS keychain.
 - **User‑defined editing tools** — named step‑by‑step editing methods you create or record,
   stored as plain JSON in app‑private storage. These contain only the tool names and parameters
   (e.g. "split at 3000 ms") — no media data.
@@ -49,27 +56,40 @@ The app stores the following **locally** (in app‑private storage), not on any 
 Uninstalling the app removes all app‑private local data (projects, settings, keys, and
 user‑defined tools). Backup files you saved outside the app remain where you put them.
 
+**Android backup.** If Google backup is on for your device, Android may back up the app’s data to
+your Google account, including your project file. The app excludes downloaded models, extensions,
+crash files, face‑recognition concepts (face embeddings), and the encrypted settings (API keys,
+MCP token, relay key) from backup and device transfer.
+
 ## Third‑party AI services (only when you use them)
 
-Guillotine lets you use external AI services by bringing your own API key. **When, and only
-when, you run one of these actions, the relevant content is sent directly from your device to
-the provider you selected** — it does not pass through any server we operate:
+Guillotine lets you use external AI services, mostly by bringing your own API key. **When, and
+only when, you run one of these actions, the relevant content is sent directly from your device
+to the service named** — it does not pass through any other server:
 
 - **AI assistant / editing control** — when you use a **cloud** AI (Google Gemini, OpenAI,
-  Anthropic, OpenRouter, Groq, xAI, or Mistral) as the assistant, only **text** is exchanged:
-  your instructions and the project/timeline state go to the provider, and it replies with
-  tool calls that drive the editor. The provider **does not receive your media or frames** — the
-  actual keep/remove analysis and any background removal run **on your device** (ML Kit +
-  MediaPipe). The free on‑device LLM brain keeps even that text local.
-- **Generative object removal** — the object is detected and masked **on‑device**; only the
-  individual masked frame(s) + mask are sent to **Leonardo.ai** (with your key) to be repainted.
-- **Video / music generation** — only your text prompt is sent to the provider you chose.
-  Guillotine does not generate images.
-- **Transcription / captions** — handled **on‑device** with Vosk if you configure a local
-  speech model; otherwise audio is sent to OpenAI Whisper using your key.
+  Anthropic, OpenRouter, Groq, xAI, or Mistral) as the assistant, your instructions and the
+  project/timeline state go to the provider, and it replies with tool calls that drive the
+  editor. By default it receives **text only**; frame analysis and background removal run on
+  your device. The on‑device LLM keeps even that text local.
+- **Let cloud AI see frames (opt‑in, off by default)** — when on, the assistant can send the
+  **current frame at the playhead, as a JPEG image**, to the cloud AI provider you chose. Turn it
+  off in Settings to keep the assistant text‑only.
+- **Generative object removal** — the object is detected and masked **on‑device**; the masked
+  frame(s) + mask are sent to **Leonardo.ai** (with your key) to be repainted.
+- **Video generation (free, default)** — your **text prompt** (plus a fixed safety negative
+  prompt, the clip length, and a seed) is sent to the developer’s Hugging Face Space
+  (`hereliesaz-guillotine-t2v.hf.space`). The Space code does not log or store prompts; the
+  generated clip is written to temporary storage and deleted after about 15 minutes. Hugging Face
+  hosts the Space and its own [privacy policy](https://huggingface.co/privacy) applies to the
+  request.
+- **Video / music generation (BYO key)** — only your text prompt is sent to the provider you
+  chose. Guillotine does not generate images.
+- **Transcription / captions** — handled **on‑device** if you install a local speech model;
+  otherwise audio is sent to OpenAI Whisper using your key.
 
-Your use of these services is governed by **their** privacy policies and terms. Free,
-no‑key on‑device options (ML Kit vision, Vosk speech, the local heuristic analyzer) never
+Your use of these services is governed by **their** privacy policies and terms. The
+on‑device options (ML Kit vision, local speech models, the local heuristic analyzer) never
 transmit your media off the device. Representative provider policies:
 Google ([Gemini](https://ai.google.dev/gemini-api/terms)),
 [OpenAI](https://openai.com/policies/privacy-policy),
@@ -78,7 +98,8 @@ Google ([Gemini](https://ai.google.dev/gemini-api/terms)),
 [Groq](https://groq.com/privacy-policy/),
 [xAI](https://x.ai/legal/privacy-policy),
 [Mistral](https://mistral.ai/terms/),
-[Leonardo.ai](https://leonardo.ai/privacy-policy/).
+[Leonardo.ai](https://leonardo.ai/privacy-policy/),
+[Hugging Face](https://huggingface.co/privacy).
 
 ## Crash reporting (optional, off by default)
 
@@ -118,8 +139,8 @@ enable it, the app makes no such connection.
 
 ## Permissions
 
-- **Internet** — to call the AI providers, the crash relay you configure, and (if you enable it)
-  the MCP cloud relay you configure.
+- **Internet** — to call the AI and generation services above, the crash relay you configure,
+  and (if you enable it) the MCP cloud relay you configure.
 - **Storage access (Storage Access Framework)** — only the specific media files you pick are
   accessible to the app; it does not scan your library.
 - **Media output (MediaStore)** — to save exported videos to your Movies folder.
@@ -143,8 +164,8 @@ explicitly import.
 
 ## Analytics and tracking
 
-Guillotine contains **no first‑party analytics**, no ad SDK, and no trackers we operate, and we do
-not build a profile of you.
+Guillotine contains **no analytics, no ad SDK, no advertising ID, and no trackers**, and the
+developer does not build a profile of you.
 
 ## Children’s privacy
 

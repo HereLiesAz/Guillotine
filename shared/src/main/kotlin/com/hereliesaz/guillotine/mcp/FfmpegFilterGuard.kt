@@ -7,7 +7,7 @@ package com.hereliesaz.guillotine.mcp
  * files, `metadata=file=`, `psnr`/`ssim` `stats_file=` and `vidstabdetect=result=` WRITE them, and
  * `sendcmd` turns a file into filter commands. So instead of a denylist, a graph is accepted only when
  * every filter in it is in [ALLOWED_FILTERS] (a vetted set of pure pixel/sample processing filters) and
- * no option uses a file-ish key ([FORBIDDEN_OPTION_KEYS]).
+ * no option uses a file-ish key ([FORBIDDEN_OPTION_KEYS]) — including by position ([NAMED_OPTIONS_ONLY]).
  *
  * The parser follows FFmpeg's graph syntax closely enough to be conservative: chains split on `;`,
  * filters on `,`, `[label]` pads stripped, `name@instance` reduced to `name`, options split on `:`,
@@ -69,11 +69,23 @@ object FfmpegFilterGuard {
     )
 
     /**
-     * Filters whose POSITIONAL options can reach a file option (e.g. `drawtext`'s 3rd positional is
-     * `textfile`, `curves`' later positionals include `psfile`): for these, only named `key=value`
-     * options are accepted, except `curves`' first positional (its preset).
+     * Positional options bypass [FORBIDDEN_OPTION_KEYS] (FFmpeg maps the Nth unnamed value to the Nth
+     * declared option), so every allowed filter that declares ANY file-ish option is capped here at the
+     * number of positional values that stay strictly below that option's position; anything past the
+     * cap must be written as `key=value`, where the key check applies.
+     *
+     * Audit (`ffmpeg -h filter=<name>` for every entry of [ALLOWED_FILTERS], FFmpeg 6.1): the only
+     * allowed filters with a file/path option are
+     *  - `drawtext`: `fontfile` is positional #1, `textfile` #3 → named only (cap 0);
+     *  - `curves`: `preset` #1, then master/red/green/blue/all, `psfile` #7 → cap 1 (preset only);
+     *  - `selectivecolor`: `correction_method` #1, nine ranges, `psfile` #11 → cap 1;
+     *  - `deshake`: x,y,w,h,rx,ry,edge,blocksize,contrast,search, `filename` #11 (it WRITES a log)
+     *    → cap 10.
+     * Every other allowed filter has no file option at any position. Re-run the audit when adding a
+     * filter to [ALLOWED_FILTERS] or moving to a newer FFmpeg.
      */
-    private val NAMED_OPTIONS_ONLY: Map<String, Int> = mapOf("drawtext" to 0, "curves" to 1)
+    private val NAMED_OPTIONS_ONLY: Map<String, Int> =
+        mapOf("drawtext" to 0, "curves" to 1, "selectivecolor" to 1, "deshake" to 10)
 
     /** FFmpeg's `xfade` transition names (the built-in set; `custom` needs expressions and is excluded). */
     val XFADE_TRANSITIONS: Set<String> = setOf(

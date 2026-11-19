@@ -241,7 +241,6 @@ dependencies {
     implementation(libs.commons.compress)
     implementation(libs.vosk.android)
     implementation(libs.aznavrail)
-    implementation(libs.billing.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.nanohttpd)

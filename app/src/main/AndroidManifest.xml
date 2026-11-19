@@ -7,8 +7,12 @@
     <!-- Voice-command editing: capture a spoken instruction, transcribe it on-device, run the agent. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Google Play Billing (Ad-Free). -->
-    <uses-permission android:name="com.android.vending.BILLING" />
+    <!-- Saving the export into the shared Movies gallery on API < 29 (no scoped MediaStore insert
+         without it). Requested at runtime before export; API 29+ needs no permission. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
 
     <!-- Run long video operations (analysis / generative removal / export) in the background with a
          progress notification. -->

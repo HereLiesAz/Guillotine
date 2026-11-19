@@ -65,4 +65,23 @@ class FfmpegFilterGuardTest {
         assertFalse(FfmpegFilterGuard.isValidXfadeTransition("FADE"))
         assertFalse(FfmpegFilterGuard.isValidXfadeTransition(""))
     }
+
+    @Test fun positionalOptionsCannotReachFileOptions() {
+        // deshake's 11th positional is `filename` (writes a log file).
+        assertNotNull(FfmpegFilterGuard.check("deshake=0:0:-1:-1:16:16:0:8:125:1:/path/x"))
+        // selectivecolor's 11th positional is `psfile` (reads a file).
+        assertNotNull(FfmpegFilterGuard.check("selectivecolor=absolute:a:b:c:d:e:f:g:h:i:/etc/passwd"))
+        assertNotNull(FfmpegFilterGuard.check("curves=none:0/0 1/1"))
+        assertNotNull(FfmpegFilterGuard.check("drawtext=/f.ttf"))
+        // Named file keys stay blocked too.
+        assertNotNull(FfmpegFilterGuard.check("deshake=filename=/tmp/x"))
+        assertNotNull(FfmpegFilterGuard.check("selectivecolor=psfile=/tmp/x.asv"))
+    }
+
+    @Test fun safePositionalUsageStillAllowed() {
+        assertNull(FfmpegFilterGuard.check("deshake=0:0:-1:-1:16:16:0:8:125:1"))
+        assertNull(FfmpegFilterGuard.check("selectivecolor=relative:reds=0 0 0 0.2"))
+        assertNull(FfmpegFilterGuard.check("curves=vintage"))
+        assertNull(FfmpegFilterGuard.check("scale=1280:720,crop=640:360:0:0,eq=1.1:0.05"))
+    }
 }
