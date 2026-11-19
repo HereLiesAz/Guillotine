@@ -388,11 +388,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     var showAzphaltStore by remember { mutableStateOf(false) }
     var showExtensionsManager by remember { mutableStateOf(false) }
     var showMediaBin by remember { mutableStateOf(false) }
-    // Double-tapping the "X" over two already-overlapping (auto-crossfading) clips on the timeline
-    // opens a transition picker for this pair; null when no picker is showing.
-    var pendingTransitionSwap by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var transitionSwapBusy by remember { mutableStateOf(false) }
-    
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf<String?>(null) }
@@ -404,7 +399,8 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
     val importLauncher = rememberMediaImportLauncher { uris ->
         val target = importTargetTrack
         scope.launch {
-            val items = uris.mapNotNull { withContext(Dispatchers.IO) { MediaImport.probe(context, it) } }
+            val inUse = vm.uiState.value.document.mediaItems.mapTo(HashSet()) { it.uri }
+            val items = uris.mapNotNull { withContext(Dispatchers.IO) { MediaImport.probe(context, it, inUse) } }
             vm.addMedia(items, target)
         }
     }
@@ -826,7 +822,7 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
                     .weight(1f)
                     .fillMaxWidth()
                     .animateContentSize(),
-                onSwapTransition = { from, to -> pendingTransitionSwap = from to to },
+                // Named transitions bake via FFmpeg xfade, which is desktop-only; the plain crossfade stays.
             )
         }
 
@@ -895,232 +891,6 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         FullscreenPreviewOverlay(vm, state, onExit = { fullscreenPreview = false })
     }
 
-    }
-
-    if (showProjectSettings) {
-        ProjectSettingsSheet(
-            current = state.document.settings,
-            onChange = { vm.setGlobalSettings(it) },
-            onDismiss = { showProjectSettings = false },
-        )
-    }
-    if (state.suggestAspectMatch) {
-        // Vegas B.4: the first clip on an empty project offers to match project properties to it,
-        // instead of silently letterboxing a clip that doesn't fit whatever fixed ratio the project
-        // happened to already be set to.
-        val currentLabel = when (state.document.settings.aspectRatio) {
-            com.hereliesaz.guillotine.model.AspectRatio.RATIO_16_9 -> "16:9"
-            com.hereliesaz.guillotine.model.AspectRatio.RATIO_9_16 -> "9:16"
-            com.hereliesaz.guillotine.model.AspectRatio.RATIO_1_1 -> "1:1"
-            com.hereliesaz.guillotine.model.AspectRatio.ORIGINAL -> "Original"
-        }
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { vm.resolveAspectMatchSuggestion(match = false) },
-            title = { Text("Match project to this clip?", color = White) },
-            text = {
-                Text(
-                    "This project is set to $currentLabel, which doesn't match the clip you just added " +
-                        "— it'll be letterboxed. Switch the project to follow the clip's own shape instead?",
-                    color = Neutral400, fontSize = 12.sp,
-                )
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { vm.resolveAspectMatchSuggestion(match = true) }) {
-                    Text("Match to clip")
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { vm.resolveAspectMatchSuggestion(match = false) }) {
-                    Text("Keep $currentLabel")
-                }
-            },
-        )
-    }
-    if (showNameDialog) {
-        NameProjectDialog(
-            current = state.document.name,
-            onConfirm = { vm.setProjectName(it); showNameDialog = false },
-            onDismiss = { showNameDialog = false },
-        )
-    }
-    if (showNewProjectConfirm) {
-        // "New" replaces the autosaved document with a fresh one; confirm before doing that.
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showNewProjectConfirm = false },
-            title = { Text("Start a new project?", color = White) },
-            text = {
-                Text(
-                    "Your current project will be replaced by an empty one and this will overwrite " +
-                        "the autosave. Export any work you want to keep first (menu → Render).",
-                    color = Neutral400, fontSize = 12.sp,
-                )
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = {
-                        vm.loadDocument(com.hereliesaz.guillotine.model.Document())
-                        currentAgentBackend?.reset() // fresh project → fresh conversation
-                        showNewProjectConfirm = false
-                    },
-                ) {
-                    Text("New", color = Red500, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = { showNewProjectConfirm = false },
-                ) {
-                    Text("Cancel", color = Neutral400, fontSize = 14.sp)
-                }
-            },
-            containerColor = Neutral900,
-        )
-    }
-    // Export arguments parked while the API < 29 storage-permission prompt is showing.
-    var pendingExport by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
-    val startExport: (String, Boolean) -> Unit = { name, regionOnly ->
-            exporting = true; exportError = null; exportProgress = 0f
-            ActivityLog.info("Exporting \"$name\"…")
-            // Export in the background via the foreground service (cancel-only — Media3 can't pause
-            // an encode). Progress feeds the in-app sheet and the notification.
-            // Application context only: the operation (and these callbacks) can outlive the Activity.
-            val appContext = context.applicationContext
-            val startedExport = OperationController.start(
-                appContext, OperationKind.EXPORT, "Exporting…", pausable = false,
-                onCancel = {
-                    exportError = "Export cancelled."; exporting = false
-                    vm.setExportPhase(null)
-                    ActivityLog.info("Export cancelled.")
-                },
-                onError = { e ->
-                    val detail = Exporter.describeExportError(e)
-                    exportError = detail; exporting = false
-                    vm.setExportPhase(null)
-                    ActivityLog.error(detail)
-                },
-                onComplete = {
-                    exportDone = "Saved to Movies/Guillotine."; exporting = false
-                    vm.setExportPhase(null)
-                    ActivityLog.success("Exported to Movies/Guillotine.")
-                },
-            ) { sink ->
-                val uri = Exporter.export(
-                    appContext,
-                    vm.uiState.value.document,
-                    name,
-                    onProgress = { p, ms ->
-                        scope.launch { exportProgress = p } // hop to the main thread for Compose state
-                        // ms is relative to the clamped (region) document when regionOnly — offset
-                        // back to the full timeline so the live scrub indicator lands in the right place.
-                        scope.launch { vm.seekTo(ms + (region?.first ?: 0L)) }
-                        sink.report(p, "Exporting…")
-                    },
-                    onPhase = { phase ->
-                        scope.launch { vm.setExportPhase(phase) }
-                    },
-                    region = region,
-                )
-                scope.launch { exportedUri = uri } // for the Share action once done
-            }
-            if (!startedExport) { exportError = "Another operation is already running."; exporting = false }
-    }
-    val storagePermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        val args = pendingExport
-        pendingExport = null
-        if (args == null) return@rememberLauncherForActivityResult
-        if (granted) {
-            startExport(args.first, args.second)
-        } else {
-            val msg = "Storage permission denied — Android 9 and below need it to save exports to Movies/Guillotine."
-            exportError = msg
-            ActivityLog.error(msg)
-        }
-    }
-    if (showExport) {
-        ExportSheet(
-            totalDurationMs = state.document.totalDurationMs,
-            isExporting = exporting,
-            progress = exportProgress,
-            exportPhase = state.exportPhase,
-            doneMessage = exportDone,
-            onShare = exportedUri?.let { uri -> { shareVideo(context, uri) } },
-            errorMessage = exportError,
-            playbackRegion = state.playbackRegion,
-            onStart = { name, regionOnly ->
-                // API < 29: the gallery save needs WRITE_EXTERNAL_STORAGE; ask first, then resume.
-                if (!Exporter.hasGalleryWritePermission(context)) {
-                    pendingExport = name to regionOnly
-                    storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                } else {
-                    startExport(name, regionOnly)
-                }
-            },
-            onDismiss = { if (!exporting) showExport = false },
-            onCancelExport = { OperationController.cancel() },
-        )
-    }
-    if (showAiComparison) {
-        AiComparisonSheet(onDismiss = { showAiComparison = false })
-    }
-    if (showHelp) HelpKeyDialog(onDismiss = { showHelp = false })
-    if (showTutorial) TutorialDialog(onDismiss = { showTutorial = false })
-    if (showFaq) FaqDialog(settings = settings, onDismiss = { showFaq = false })
-    if (showAzphaltStore) {
-        AzphaltStoreScreen(
-            vm = vm,
-            onDismiss = { showAzphaltStore = false }
-        )
-    }
-    if (showExtensionsManager) {
-        ExtensionsManagerScreen(vm = vm, onDismiss = { showExtensionsManager = false })
-    }
-    if (showMediaBin) {
-        MediaBinScreen(vm = vm, onDismiss = { showMediaBin = false })
-    }
-    // Swap the free, instant crossfade an overlap already produces for a named FFmpeg xfade
-    // transition — a deliberate, real bake (needs an ffmpeg binary configured, takes real time), not
-    // something that happens automatically just from overlapping two clips.
-    pendingTransitionSwap?.let { (fromId, toId) ->
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { if (!transitionSwapBusy) pendingTransitionSwap = null },
-            title = { androidx.compose.material3.Text(if (transitionSwapBusy) "Building transition…" else "Swap crossfade for…") },
-            text = {
-                if (transitionSwapBusy) {
-                    androidx.compose.material3.CircularProgressIndicator()
-                } else {
-                    androidx.compose.foundation.layout.Column {
-                        com.hereliesaz.guillotine.model.TransitionCatalog.TYPES.forEach { (type, label) ->
-                            androidx.compose.material3.TextButton(onClick = {
-                                transitionSwapBusy = true
-                                scope.launch {
-                                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        runCatching {
-                                            sharedMcpTools.call(
-                                                "apply_transition",
-                                                org.json.JSONObject()
-                                                    .put("from_clip_id", fromId)
-                                                    .put("to_clip_id", toId)
-                                                    .put("type", type),
-                                            )
-                                        }
-                                    }
-                                    transitionSwapBusy = false
-                                    pendingTransitionSwap = null
-                                    result.onFailure {
-                                        android.widget.Toast.makeText(context, it.message ?: "Couldn't build the transition.", android.widget.Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            }) { androidx.compose.material3.Text(label) }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                if (!transitionSwapBusy) {
-                    androidx.compose.material3.TextButton(onClick = { pendingTransitionSwap = null }) { androidx.compose.material3.Text("Cancel") }
-                }
-            },
-        )
     }
     // A package handed to Guillotine from outside — a .azp opened from a web-store download, a file
     // manager or a share sheet, or an azphalt://install deep link naming one to fetch. Same

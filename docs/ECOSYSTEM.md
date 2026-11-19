@@ -73,7 +73,7 @@ remains a possible follow-up.
 ## 3. MCP plugin protocol — AI-drivable tools 🛠 (foundation ✅ · documented in [PLUGINS.md](PLUGINS.md) + [TOOLS.md](TOOLS.md))
 
 Guillotine's editor is already a standard **[Model Context Protocol](https://modelcontextprotocol.io)**
-server (JSON-RPC 2.0, protocol `2024-11-05`, `tools/list` + `tools/call`, bearer auth on `/mcp`:6274):
+server (JSON-RPC 2.0, protocol `2024-11-05`, `tools/list` + `tools/call`, bearer auth on `/mcp`; loopback-only, port 6274/6275 on Android, 7865 on desktop):
 every capability (cut, filter, LUT, denoise, generate, …) is an MCP tool, and controller LLMs drive the
 editor purely through those tools — exchanging **text only**, never media. **See
 [PLUGINS.md](PLUGINS.md)** for the full protocol, how to connect a client, user-defined tool packs, and
@@ -81,7 +81,7 @@ the draft distributable-manifest proposal, and **[TOOLS.md](TOOLS.md)** for the 
 
 Already shipped:
 
-- **Embedded MCP server.** The app serves `/mcp` over HTTP on port **6274**, gated by a bearer token
+- **Embedded MCP server.** The app serves `/mcp` over HTTP on `127.0.0.1` only — port **6274** (Android play flavor), **6275** (Android github flavor), **7865** (desktop) — gated by a bearer token
   (Settings → Advanced). Any MCP client — Claude Desktop, a script, another app — can list and call
   the editor's tools. See [`McpServer`]/[`McpAuth`](../app/src/main/java/com/hereliesaz/guillotine/mcp/McpAuth.kt).
 - **Remote relay.** [`tools/mcp-relay`](../tools) + a Cloudflare Worker bridges the on-device server to
