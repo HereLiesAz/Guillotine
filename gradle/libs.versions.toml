@@ -35,7 +35,7 @@ vosk = "0.3.75"
 # UnsatisfiedLinkError; linux-x86_64 (CI) and windows-x86_64 are covered.
 voskJvm = "0.3.45"
 mediapipeTasksGenai = "0.10.35"
-liteRtLm = "0.17.1"
+liteRtLm = "0.19.1"
 # Pin EXACTLY to match tasks-genai (aligns MPImage/vision-modality + native libs). Do NOT use a dynamic
 # version: tasks-vision's Maven metadata advertises the old 0.20230731 as <release>, and version
 # comparison treats 0.20230731 > 0.10.35, so `0.10.+`/`+` would resolve back to the stale 2023 build.
