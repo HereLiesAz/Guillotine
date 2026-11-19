@@ -24,7 +24,7 @@ buildscript {
             force("io.netty:netty-handler:$nettyVersion")
             force("io.netty:netty-codec-http:$nettyVersion")
             force("io.netty:netty-codec:$nettyVersion")
-            force("org.bouncycastle:bcprov-jdk18on:1.86")
+            force("org.bouncycastle:bcprov-jdk18on:1.87")
             force("org.bouncycastle:bcpkix-jdk18on:1.86")
             force("org.apache.commons:commons-lang3:3.21.0")
             force("org.bitbucket.b_c:jose4j:0.9.7")
