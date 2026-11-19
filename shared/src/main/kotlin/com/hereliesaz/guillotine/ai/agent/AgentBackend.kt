@@ -293,7 +293,7 @@ val AGENT_SYSTEM_PROMPT = """
         · "frame-blend / smear the motion", "motion-trail" → "tmix=frames=3";
         · "smooth slow-motion / interpolate frames" → "minterpolate=fps=60".
     - Look / color / stylize with no named tool: "hue=s=0", "gblur=sigma=2", "eq=contrast=1.3:saturation=1.4",
-      "curves=…", "vignette", "noise=alls=20:allf=t", "rgbashift=rh=5:bh=-5" (chroma shift), "frei0r=<plugin>".
+      "curves=…", "vignette", "noise=alls=20:allf=t", "rgbashift=rh=5:bh=-5" (chroma shift).
     - Chain several with commas ("framestep=2, eq=contrast=1.3"). Stick to standard, widely-available filters
       — don't invent filter names.
     - IMPORTANT — audio is copied through unchanged (`-c:a copy`), so prefer graphs that KEEP the clip's
@@ -301,8 +301,9 @@ val AGENT_SYSTEM_PROMPT = """
       at the same length, which keeps audio in sync. Avoid speed/trim-style graphs (setpts, trim) that
       change the video length — they desync the copied audio.
     - Needs an ffmpeg executable in Settings → AI Analyzer → FFmpeg filters; if it's unset the tool returns
-      an error naming that setting — relay it and don't retry. Bake-to-new-clip (not live) and heavy —
-      desktop-first.
+      an error naming that setting — relay it and don't retry. Bake-to-new-clip (not live) and heavy.
+    - FFmpeg-based tools (apply_ffmpeg_filter, apply_transition and the named bake effects) exist ONLY on
+      desktop. If they are not in your tool list (Android), say so plainly instead of calling them.
 
     GLSL / ISF SHADER EFFECTS (on-device):
     - "apply this ISF shader", "add a glitch/CRT/kaleidoscope shader", "run this .fs/.glsl on the clip" →

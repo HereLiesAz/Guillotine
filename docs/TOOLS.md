@@ -38,7 +38,7 @@ app — at it and it sees the tools below like any other MCP server.
 | **Transport** | HTTP, JSON-RPC 2.0 |
 | **Endpoint** | `POST /mcp` (bearer-gated) — JSON-RPC request/response |
 | **Liveness** | `GET /health` (open, no token) → `{"status":"ok"}` |
-| **Port** | `6274` (default; bound to loopback (`127.0.0.1`) only — a security fix that stops a bearer token from being sniffable off the LAN. Reach it from another device via the encrypted Cloudflare relay or an `adb`/USB port-forward, not by exposing the port directly) |
+| **Port** | Android play flavor `6274`, Android github flavor `6275`, desktop `7865` (bound to loopback (`127.0.0.1`) only — a security fix that stops a bearer token from being sniffable off the LAN. Reach it from another device via the encrypted Cloudflare relay or an `adb`/USB port-forward, not by exposing the port directly) |
 | **Protocol version** | `2024-11-05` |
 | **Server info** | name `guillotine-editor`, version `1.0.0` |
 | **Auth** | `Authorization: Bearer <token>` on every `/mcp` call |
@@ -76,14 +76,20 @@ Read-only views of editor state (`application/json`):
 ### Connecting
 
 ```bash
+# The server listens on 127.0.0.1 only. Pick the port for your build:
+#   desktop: 7865 (same machine)          → PORT=7865
+#   Android play flavor: 6274, github flavor: 6275 → forward it over USB first:
+#     adb forward tcp:6274 tcp:6274   (or tcp:6275 tcp:6275)
+PORT=7865
+
 # List the tools
-curl -s http://<device-ip>:6274/mcp \
+curl -s http://127.0.0.1:$PORT/mcp \
   -H "Authorization: Bearer $GUILLOTINE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
 # Call one
-curl -s http://<device-ip>:6274/mcp \
+curl -s http://127.0.0.1:$PORT/mcp \
   -H "Authorization: Bearer $GUILLOTINE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"apply_lut","arguments":{"path":"/data/data/com.hereliesaz.guillotine/files/luts/teal.cube"}}}'
