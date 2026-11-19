@@ -14,6 +14,7 @@ pluginManagement {
 
 buildscript {
     configurations.all {
+        val nettyVersion = providers.gradleProperty("guillotine.nettyVersion").get()
         resolutionStrategy {
             force("org.jdom:jdom2:2.0.6.1")
             force("org.apache.httpcomponents:httpclient:4.5.14")
@@ -25,7 +26,7 @@ buildscript {
             force("io.netty:netty-codec:4.2.19.Final")
             force("org.bouncycastle:bcprov-jdk18on:1.86")
             force("org.bouncycastle:bcpkix-jdk18on:1.86")
-            force("org.apache.commons:commons-lang3:3.21.0")
+            force("org.apache.commons:commons-lang3:3.22.0")
             force("org.bitbucket.b_c:jose4j:0.9.7")
         }
     }

@@ -101,7 +101,7 @@ data class AiSettings(
     val leonardoModel: String = LeonardoDefaultModel,
     val frameAnalysisCacheSize: Int = FrameAnalysisCache.DEFAULT_MAX_ENTRIES,
     /** Optional path to an `ffmpeg` executable for baking FFmpeg/Frei0r filtergraphs onto a clip (blank =
-     *  feature off). Desktop-first; on Android, point at a bundled/downloaded ffmpeg binary. */
+     *  feature off). Desktop only — the Android build hides the FFmpeg/Frei0r tools and ignores it. */
     val ffmpegPath: String = "",
     /**
      * Opt-in: allow a CLOUD assistant model to see the current frame. Off by default. When off, cloud

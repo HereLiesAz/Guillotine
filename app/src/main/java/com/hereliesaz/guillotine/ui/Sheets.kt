@@ -226,7 +226,6 @@ fun SettingsScreen(
     }
 
     // MCP access token
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var mcpToken by remember { mutableStateOf(com.hereliesaz.guillotine.mcp.McpAuth.token(context)) }
 
     val scope = rememberCoroutineScope()
@@ -748,15 +747,9 @@ fun SettingsScreen(
                         color = Neutral500, fontSize = 10.sp,
                     )
 
-                    // FFmpeg / Frei0r filtergraph baking (advanced; desktop-first).
-                    Text("FFmpeg / Frei0r filters — bake a -vf graph (advanced)", color = Neutral400, fontSize = 12.sp)
-                    ModelPathField(value = ffmpegPath, hint = "ffmpeg executable", isDirectory = false, importing = modelImporting, onBrowse = ::browseModel) { ffmpegPath = it }
-                    Text(
-                        "Enables \"apply the ffmpeg filter …\" — bakes a standard FFmpeg -vf filtergraph " +
-                            "(and Frei0r plugins via frei0r=name:params) onto a clip. Needs an ffmpeg " +
-                            "binary; heavy — best on desktop or a capable device.",
-                        color = Neutral500, fontSize = 10.sp,
-                    )
+                    // FFmpeg / Frei0r filtergraph baking is DESKTOP-ONLY (no ffmpeg on Android), so its
+                    // path setting isn't shown here; ffmpegPath is still carried through settings
+                    // backup/restore unchanged so a desktop-made backup round-trips.
 
                     // Was in Advanced (a mix of AI model install alongside non-AI backup/updater/crash-
                     // relay controls — see docs/TODO.md) — moved here so every on-device AI model
@@ -837,6 +830,9 @@ fun SettingsScreen(
                     )
 
                     Text("MCP access token (external AI tools)", color = Neutral400, fontSize = 12.sp)
+                    com.hereliesaz.guillotine.mcp.McpServerStatus.startError.value?.let { err ->
+                        Text(err, color = Red500, fontSize = 11.sp)
+                    }
                     OutlinedTextField(
                         value = mcpToken,
                         onValueChange = {},
@@ -849,7 +845,20 @@ fun SettingsScreen(
                         Text(
                             "Copy", color = Red500, fontSize = 11.sp, fontWeight = FontWeight.Medium,
                             modifier = Modifier.clickableText {
-                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(mcpToken))
+                                // Mark the clip sensitive so keyboards/clipboard previews don't show
+                                // the bearer token (official extra on API 33+; the same key string is
+                                // honoured by many OEM/IME clipboards on older releases).
+                                val clip = android.content.ClipData.newPlainText("MCP token", mcpToken)
+                                clip.description.extras = android.os.PersistableBundle().apply {
+                                    val key = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                                        android.content.ClipDescription.EXTRA_IS_SENSITIVE
+                                    } else {
+                                        "android.content.extra.IS_SENSITIVE"
+                                    }
+                                    putBoolean(key, true)
+                                }
+                                context.getSystemService(android.content.ClipboardManager::class.java)
+                                    ?.setPrimaryClip(clip)
                             },
                         )
                         Text(
@@ -860,7 +869,8 @@ fun SettingsScreen(
                         )
                     }
                     Text(
-                        "Send as 'Authorization: Bearer <token>' when POSTing to /mcp on port 6274. " +
+                        "Send as 'Authorization: Bearer <token>' when POSTing to /mcp on port " +
+                            "${com.hereliesaz.guillotine.mcp.McpServerStatus.port}. " +
                             "Regenerate to revoke tools that have the old token.",
                         color = Neutral500, fontSize = 10.sp,
                     )
