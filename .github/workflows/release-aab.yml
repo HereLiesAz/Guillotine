@@ -19,9 +19,10 @@ on:
         default: true
         description: "Push the AAB to Play (false = build only)"
 
-# No concurrency block here on purpose: this job only points at the central run and exits in
-# seconds. The Play publish itself (one open Edit per app) runs in HereLiesAz/workflows, and that is
-# where publishes are serialized; queueing this hand-off job would not serialize anything.
+# Serialize Play publishes across ALL refs: the Play API allows only one open Edit per app, so two
+# release-aab runs publishing at once (e.g. a merge to main overlapping a branch push) collide with
+# "A change was made to the application outside of this Edit". Queue them (don't cancel a publish
+# mid-flight) so each completes before the next starts.
 permissions: {}
 jobs:
   central:
