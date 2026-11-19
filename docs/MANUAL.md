@@ -97,7 +97,7 @@ to bottom you have:
 
 The **menu** (app icon) holds everything that isn't a moment-to-moment editing control: New,
 Open, Save, Rename, Import, Generate, Render, Project settings, Settings, Compare AI,
-Tutorial, FAQ, Icon Key, and Ad-Free. A footer adds About, Feedback, and the author link.
+Tutorial, FAQ, and Icon Key. A footer adds About, Feedback, and the author link.
 
 **Help / Icon Key.** Forgot what a button does? Tap **Help** (the **?**) in the top bar or the
 tool strip to open the icon key, which names every icon button and its action.
@@ -509,8 +509,6 @@ manage bring-your-own-key credentials (stored encrypted on-device), set on-devic
 (LLM brain, speech/ASR, vision), configure the frame-analysis cache and the MCP server token
 and relay, and export or import your whole configuration as a JSON backup. Because it's a large
 surface with its own reference, it lives in a dedicated document — see **[SETTINGS.md](SETTINGS.md)**.
-
-Prefer no ads? Menu → **Ad-Free** offers a one-time purchase that removes ads permanently.
 
 ---
 

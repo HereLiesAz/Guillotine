@@ -126,18 +126,19 @@ export default {
       if (found) {
         const r = await gh(`/issues/${found.number}/comments`, {
           method: "POST",
-          body: JSON.stringify({ body: "Recurred:\n\n```\n" + body + "\n```" }),
+          body: JSON.stringify({ body: "Recurred:\n\n" + fenced(body) }),
         });
         return text(r.ok ? "ok" : "upstream error", r.ok ? 201 : 502);
       }
     }
 
-    // Preface distinguishes an automatic crash upload from a manual Report tap — the manual
-    // path already carries a formatted markdown body, so we don't wrap it in ``` again.
-    const isManual = labels.some((l) => l === "bug" || l === "export");
-    const issueBody =
-      (isManual ? body : "Automatically filed from an app crash.\n\n```\n" + body + "\n```") +
-      `\n\n---\nRelay fingerprint: ${marker}`;
+    // The body is untrusted client text, so it is ALWAYS fenced (client-supplied labels must not
+    // switch it to raw markdown), with a fence longer than any backtick run inside it and @mentions
+    // neutralised — see fenced().
+    const preface = labels.some((l) => l === "bug" || l === "export")
+      ? "Filed from the app's Report action."
+      : "Automatically filed from an app crash.";
+    const issueBody = `${preface}\n\n${fenced(body)}\n\n---\nRelay fingerprint: ${marker}`;
 
     const r = await gh(`/issues`, {
       method: "POST",
@@ -146,3 +147,16 @@ export default {
     return text(r.ok ? "ok" : "upstream error", r.ok ? 201 : 502);
   },
 };
+
+/**
+ * Wrap untrusted text in a code fence GitHub can't break out of: the fence is one backtick longer
+ * than the longest backtick run in the text (min 3), and every `@` gets a zero-width joiner after it
+ * so `@user` / `@org/team` can't notify anyone (fences already stop mentions; this is belt and braces
+ * in case a renderer ever unfences it).
+ */
+function fenced(text) {
+  const safe = String(text).replace(/@/g, "@\u200d");
+  const longest = Math.max(0, ...(safe.match(/`+/g) || []).map((r) => r.length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `${fence}\n${safe}\n${fence}`;
+}

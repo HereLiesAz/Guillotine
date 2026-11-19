@@ -25,7 +25,11 @@ object UserToolStore {
         if (!f.exists()) return emptyList()
         return runCatching {
             json.decodeFromString(ListSerializer(UserTool.serializer()), f.readText())
-        }.getOrDefault(emptyList())
+        }.getOrElse { e ->
+            // Move the unreadable file aside so the next save() can't silently overwrite it.
+            quarantineCorruptFile(f, "UserToolStore", e)
+            emptyList()
+        }
     }
 
     fun save(context: Context, tools: List<UserTool>) {
@@ -51,4 +55,19 @@ object UserToolStore {
 
     fun sanitizeName(name: String): String =
         name.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+}
+
+/**
+ * Rename an undecodable store file to `<name>.corrupt-<timestamp>` and log it, so the data is kept
+ * for recovery instead of being destroyed by the next save (which would otherwise write an empty
+ * list over it). Shared by [UserToolStore] and [LearnedConceptStore].
+ */
+internal fun quarantineCorruptFile(file: File, tag: String, cause: Throwable) {
+    val aside = File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}")
+    val moved = runCatching { Files.move(file.toPath(), aside.toPath()); true }.getOrDefault(false)
+    android.util.Log.e(
+        tag,
+        if (moved) "Could not decode ${file.name}; moved it to ${aside.name}" else "Could not decode ${file.name} (and could not move it aside)",
+        cause,
+    )
 }

@@ -77,7 +77,7 @@ Runway ~5–25 credits/sec; Pika ~80 credits per 10-sec 1080p clip). Pass GPU co
 The app currently runs AdMob (banner/interstitial/app-open). Reality: rewarded eCPM is ~$15–30 *well
 implemented*, but **utility/creator apps run 20–30% below gaming**, sessions are infrequent, and
 **tracking-based ads contradict the privacy positioning.** We already removed the trivially-bypassable
-"Free Session" ad-off (ad-free is now a real one-time purchase). **Decision to make:** keep ads as
+"Free Session" ad-off. (Update: the Ad-Free in-app purchase has since been removed too, and neither build ships an ad SDK.) **Decision to make:** keep ads as
 free-tier monetization for now, but plan to **drop them** as the privacy brand solidifies — the lost
 revenue is small and the brand cost is real. A no-ads, buy-once, privacy-first stance is more coherent.
 

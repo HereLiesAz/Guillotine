@@ -135,7 +135,7 @@ compose.desktop {
                 menuGroup = "Video"
                 appCategory = "AudioVideo"
                 debMaintainer = "hereliesaz@gmail.com"
-                rpmLicenseType = "MIT"
+                rpmLicenseType = "AGPL-3.0"
             }
         }
     }
