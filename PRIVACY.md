@@ -176,6 +176,7 @@ not knowingly collect personal information from children.
 
 - Local data persists until you delete a project, clear the app’s storage, or uninstall.
 - To stop using a third‑party provider, remove its API key in Settings.
+- To stop sending frames to a cloud AI, turn off **Let cloud AI see frames**.
 - To stop crash reporting, clear the crash‑relay URL in Settings.
 - Content already sent to a third‑party provider is subject to that provider’s retention policy.
 

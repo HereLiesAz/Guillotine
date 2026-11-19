@@ -169,17 +169,24 @@ object ModelDownloadManager {
                 fun request(from: Long) = Request.Builder().url(url).apply {
                     if (from > 0) header("Range", "bytes=$from-")
                 }.build()
-                var response = client.newCall(request(resumeFrom)).execute()
-                if (response.code == 416 && resumeFrom > 0) {
-                    // Range Not Satisfiable: the `.part` is already as long as (or longer than) what the
-                    // server now serves — a stale/changed file. Retrying the same range would fail forever,
-                    // so drop the partial and fetch the whole file again.
+                var response: okhttp3.Response? = client.newCall(request(resumeFrom)).execute()
+                if (response!!.code == 416 && resumeFrom > 0) {
+                    // Range Not Satisfiable: nothing left past the `.part`'s end. Usually the previous
+                    // attempt got every byte but died before finishing (e.g. killed mid-extract), so
+                    // treat the `.part` as complete when we can vouch for it: an exact size match, or
+                    // an archive (verified below by extraction + marker). Otherwise it's a stale/changed
+                    // file — drop it and fetch the whole thing again.
                     response.close()
-                    runCatching { partFile.delete() }
-                    resumeFrom = 0L
-                    response = client.newCall(request(0L)).execute()
+                    val complete = model.isArchive || (model.verifyBySize && partFile.length() == model.sizeBytes)
+                    if (complete) {
+                        response = null
+                    } else {
+                        runCatching { partFile.delete() }
+                        resumeFrom = 0L
+                        response = client.newCall(request(0L)).execute()
+                    }
                 }
-                response.use { resp ->
+                response?.use { resp ->
                     if (!resp.isSuccessful) throw IllegalStateException("Download failed (HTTP ${resp.code}).")
                     val body = resp.body ?: throw IllegalStateException("Empty response.")
                     // 206 => server honoured the range, body is the tail to append. Anything else (e.g. 200)
@@ -214,13 +221,25 @@ object ModelDownloadManager {
                 if (model.isArchive) {
                     // Archive sizes are approximate (the exact byte count isn't published), so don't
                     // enforce a size match — verify by extracting and checking the marker file instead.
+                    // Extract into a temp sibling and rename into place only once complete, so
+                    // installedPath()'s marker check can never pass on a half-extracted directory
+                    // (process death / cancel mid-extract). The temp dir is removed on any failure.
                     val destDir = archiveDir(context, model)
-                    runCatching { destDir.deleteRecursively() }
-                    extractTarBz2(partFile, destDir)
-                    partFile.delete()
-                    if (!File(destDir, model.archiveMarker).isFile) {
-                        throw IllegalStateException("Model archive did not contain ${model.archiveMarker}.")
+                    val tmpDir = File(destDir.parentFile, "${destDir.name}.extracting")
+                    try {
+                        runCatching { tmpDir.deleteRecursively() }
+                        extractTarBz2(partFile, tmpDir) { ensureActive() }
+                        if (!File(tmpDir, model.archiveMarker).isFile) {
+                            // A corrupt bundle won't get better by resuming; start fresh next time.
+                            runCatching { partFile.delete() }
+                            throw IllegalStateException("Model archive did not contain ${model.archiveMarker}.")
+                        }
+                        runCatching { destDir.deleteRecursively() }
+                        if (!tmpDir.renameTo(destDir)) throw IllegalStateException("Could not install the model.")
+                    } finally {
+                        runCatching { tmpDir.deleteRecursively() }
                     }
+                    partFile.delete()
                     setStateIfCurrent(self, DownloadState.Done(model.id, destDir.absolutePath))
                 } else {
                     // Enforce an exact-size match only when we trust the published size.
@@ -255,13 +274,14 @@ object ModelDownloadManager {
      * Extract a `.tar.bz2` [archive] into [destDir], stripping the single top-level directory the
      * sherpa-onnx bundles wrap their files in (so the config can point straight at [destDir]).
      */
-    private fun extractTarBz2(archive: File, destDir: File) {
+    private fun extractTarBz2(archive: File, destDir: File, checkActive: () -> Unit) {
         destDir.mkdirs()
         BufferedInputStream(FileInputStream(archive)).use { fis ->
             BZip2CompressorInputStream(fis).use { bz ->
                 TarArchiveInputStream(bz).use { tar ->
                     var entry = tar.nextEntry
                     while (entry != null) {
+                        checkActive() // cooperative cancel: big bundles take a while to extract
                         // Drop the leading path component ("sherpa-onnx-.../foo" -> "foo").
                         val rel = entry.name.substringAfter('/', "")
                         if (rel.isNotEmpty()) {

@@ -1152,12 +1152,21 @@ fun NleScreen(widthClass: WindowWidthSizeClass, modifier: Modifier = Modifier) {
         )
     }
 
-    // Embedded MCP server: external AI tools interact with the editor over HTTP on port 6274.
-    val mcpServer = remember { com.hereliesaz.guillotine.mcp.McpServer() }
+    // Embedded MCP server: external AI tools interact with the editor over HTTP on the per-flavor
+    // port (BuildConfig.MCP_PORT: play 6274, github 6275).
+    val mcpServer = remember { com.hereliesaz.guillotine.mcp.McpServer(com.hereliesaz.guillotine.mcp.McpServerStatus.port) }
     DisposableEffect(Unit) {
         // /mcp requires this bearer token; the supplier reads the (cached) live token so a
         // regenerate from Settings takes effect without restarting the server.
+        val status = com.hereliesaz.guillotine.mcp.McpServerStatus
         runCatching { mcpServer.startServer(sharedMcpTools) { com.hereliesaz.guillotine.mcp.McpAuth.token(context) } }
+            .onSuccess { status.startError.value = null }
+            .onFailure { e ->
+                // Surface it (Settings > MCP) instead of failing silently, e.g. port already bound.
+                val msg = "MCP server failed to start on port ${status.port}: ${e.message ?: e.javaClass.simpleName}"
+                status.startError.value = msg
+                ActivityLog.error(msg)
+            }
         onDispose { runCatching { mcpServer.stop() } }
     }
 

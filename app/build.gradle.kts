@@ -119,10 +119,14 @@ android {
             isDefault = true
             applicationId = "com.hereliesaz.theguillotine"
             buildConfigField("boolean", "UPDATER_ENABLED", "false")
+            // Distinct MCP ports so the Play and GitHub builds can be installed side by side
+            // without the second one failing to bind.
+            buildConfigField("int", "MCP_PORT", "6274")
         }
         create("github") {
             dimension = "distribution"
             buildConfigField("boolean", "UPDATER_ENABLED", "true")
+            buildConfigField("int", "MCP_PORT", "6275")
         }
     }
 
