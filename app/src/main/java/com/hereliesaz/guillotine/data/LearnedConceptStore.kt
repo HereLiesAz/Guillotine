@@ -22,7 +22,11 @@ object LearnedConceptStore {
         if (!f.exists()) return emptyList()
         return runCatching {
             json.decodeFromString(ListSerializer(LearnedConcept.serializer()), f.readText())
-        }.getOrDefault(emptyList())
+        }.getOrElse { e ->
+            // Move the unreadable file aside so the next save() can't silently overwrite it.
+            quarantineCorruptFile(f, "LearnedConceptStore", e)
+            emptyList()
+        }
     }
 
     fun save(context: Context, concepts: List<LearnedConcept>) {

@@ -49,6 +49,26 @@ object LiteRtLmTextEngine {
         }
     }
 
+    /**
+     * Close the cached engine and free its (large, native) model memory. Non-blocking: if a
+     * generation currently holds the engine it is left alone and false is returned — callers are
+     * memory-pressure / settings hooks that can't wait, and the next turn reloads lazily anyway.
+     * [unlessPath]: keep the engine if it's already loaded for exactly this model.
+     */
+    fun release(unlessPath: String? = null): Boolean {
+        if (!mutex.tryLock()) return false
+        try {
+            if (engine == null || (unlessPath != null && path == unlessPath)) return true
+            runCatching { engine?.close() }
+            engine = null
+            path = null
+            backendLabel = ""
+            return true
+        } finally {
+            mutex.unlock()
+        }
+    }
+
     private suspend fun ensureEngineLocked(context: Context, modelPath: String): Engine {
         engine?.let { if (path == modelPath) return it }
 

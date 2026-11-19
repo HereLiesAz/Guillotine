@@ -23,7 +23,9 @@ data class SettingsBundle(
     val genModels: Map<String, String> = emptyMap(),
     val genExtras: Map<String, String> = emptyMap(),
     val genDefaults: Map<String, String> = emptyMap(),
-    val userTools: List<UserTool> = emptyList(),
+    // Nullable: an older backup (or one hand-edited to drop the key) has no `userTools` at all,
+    // and restoring it must leave this device's tools alone rather than wiping them.
+    val userTools: List<UserTool>? = null,
     val speechModelPath: String = "",
     val agentModelPath: String = "",
     val idEmbedModelPath: String = "",
@@ -136,7 +138,7 @@ object SettingsBackup {
         val text = context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
             ?: throw IllegalStateException("Could not read settings file.")
         val bundle = json.decodeFromString(SettingsBundle.serializer(), text)
-        UserToolStore.save(context, bundle.userTools)
+        bundle.userTools?.let { UserToolStore.save(context, it) }
         return fromBundle(bundle, current)
     }
 

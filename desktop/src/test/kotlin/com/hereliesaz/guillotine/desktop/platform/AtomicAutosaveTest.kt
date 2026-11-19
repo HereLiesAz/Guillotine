@@ -56,4 +56,21 @@ class AtomicAutosaveTest {
     fun missingEverythingIsNull() {
         assertNull(DesktopProjectAutosave.loadWithRecovery(file))
     }
+
+    @Test
+    fun keepsThreeRotatingBackupGenerations() {
+        for (n in listOf("a", "b", "c", "d", "e")) DesktopProjectAutosave.saveToFile(file, Document(name = n))
+        assertEquals("d", DesktopProjectAutosave.loadWithRecovery(AtomicFiles.backupOf(file, 1))?.name)
+        assertEquals("c", DesktopProjectAutosave.loadWithRecovery(AtomicFiles.backupOf(file, 2))?.name)
+        assertEquals("b", DesktopProjectAutosave.loadWithRecovery(AtomicFiles.backupOf(file, 3))?.name)
+        assertTrue(!AtomicFiles.backupOf(file, 4).exists())
+    }
+
+    @Test
+    fun recoveryFallsThroughToOlderGenerations() {
+        for (n in listOf("a", "b", "c")) DesktopProjectAutosave.saveToFile(file, Document(name = n))
+        file.writeText("broken")
+        AtomicFiles.backupOf(file, 1).writeText("broken too")
+        assertEquals("a", DesktopProjectAutosave.loadWithRecovery(file)?.name)
+    }
 }

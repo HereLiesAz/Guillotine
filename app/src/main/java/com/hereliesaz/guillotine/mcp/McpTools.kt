@@ -556,43 +556,9 @@ class McpTools(
                 required = listOf("clip_id"),
             ),
         ))
-        put(toolDefinition(
-            "apply_ffmpeg_filter",
-            "Bake a standard **FFmpeg `-vf` filtergraph** onto a clip ON-DEVICE and add the result as a new " +
-                "clip — the whole FFmpeg filter ecosystem, and **Frei0r** plugins via `frei0r=<name>:<params>`. " +
-                "The ESCAPE HATCH for effects with no dedicated tool: AUTHOR the `-vf` graph yourself from the " +
-                "user's plain-English request. Frame decimation/stutter — \"cut/remove every other frame\", " +
-                "\"drop every 2nd frame\", \"make it choppy\" → \"framestep=2\" (every third → \"framestep=3\"); " +
-                "\"choppy N-fps look\" → \"fps=8\"; \"frame-blend/motion trail\" → \"tmix=frames=3\". Also " +
-                "\"run a frei0r plugin\", \"vintage/vhs/chromashift\", \"eq/curves/deband this\". `filter` is the " +
-                "raw -vf graph, e.g. \"framestep=2\", \"hue=s=0, gblur=sigma=2\" or \"frei0r=cartoon\". Audio is " +
-                "copied unchanged (`-c:a copy`), so prefer duration-preserving graphs (framestep/fps/tmix/eq) " +
-                "and avoid setpts/trim, which desync the audio. Requires an ffmpeg executable set in " +
-                "Settings → AI Analyzer → FFmpeg filters (desktop-first; relay its error if unset). This is " +
-                "a bake-to-new-clip step, not a live filter.",
-            objSchema(
-                "clip_id" to stringProp("The clip whose video to filter"),
-                "filter" to stringProp("An FFmpeg -vf filtergraph you author from the request, e.g. framestep=2 for \"every other frame\" (Frei0r via frei0r=name:params)"),
-                required = listOf("clip_id", "filter"),
-            ),
-        ))
-        put(toolDefinition(
-            "apply_transition",
-            "Create a GL-style TRANSITION between two clips ON-DEVICE (FFmpeg `xfade`) and add the combined " +
-                "result as a new clip. Use for \"add a crossfade/dissolve between these\", \"wipe from this " +
-                "to that\", \"put a transition here\". type is any xfade transition: fade, fadeblack, " +
-                "fadewhite, wipeleft/right/up/down, slideleft/right/up/down, circleopen, circleclose, " +
-                "dissolve, pixelize, radial, smoothleft, distance, and more (default fade). duration_sec " +
-                "is the overlap (default 1). Requires an ffmpeg executable (Settings → AI Analyzer → FFmpeg " +
-                "filters); relay its error if unset. Bake-to-new-clip, desktop-first.",
-            objSchema(
-                "from_clip_id" to stringProp("The outgoing (first) clip"),
-                "to_clip_id" to stringProp("The incoming (second) clip"),
-                "type" to stringProp("xfade transition type (default fade)"),
-                "duration_sec" to numberProp("Transition/overlap length in seconds (default 1)"),
-                required = listOf("from_clip_id", "to_clip_id"),
-            ),
-        ))
+        // apply_ffmpeg_filter / apply_transition (xfade) and the FFmpeg-backed named video effects
+        // (VideoFilterCatalog) are DESKTOP-ONLY: Android ships no ffmpeg binary, so they are not
+        // advertised here, and call() answers them with a clear "desktop only" error.
         put(toolDefinition(
             "diarize_clip",
             "Speaker diarization ON-DEVICE (no key): work out WHO spoke WHEN in a clip's audio and return " +
@@ -779,8 +745,7 @@ class McpTools(
                 "and on-device (no ffmpeg, no baking, no new clip). step=2 removes every other frame, step=3 " +
                 "keeps one of every three, step=1 turns it off. The clip stays the SAME length and its audio " +
                 "is untouched, so it stays in sync — this is the go-to for \"cut/remove every other frame\", " +
-                "\"make it choppy/stuttery\", \"low-frame-rate look\". Quantizes against the project frame rate. " +
-                "(For a baked-to-a-new-clip version, apply_ffmpeg_filter with \"framestep=N\" does the same.)",
+                "\"make it choppy/stuttery\", \"low-frame-rate look\". Quantizes against the project frame rate.",
             objSchema(
                 "clip_id" to stringProp("The clip to decimate"),
                 "step" to intProp("Keep 1 of every N frames. 2 = every other frame; 1 = off."),
@@ -837,10 +802,6 @@ class McpTools(
             objSchema("term" to stringProp("The word or phrase to look up, e.g. 'crispy' or 'less warm'."),
                 required = listOf("term")),
         ))
-        // Named one-call video effects (sharpen, film_grain, vhs, mirror, thermal, …), each a standard
-        // FFmpeg -vf graph baked to a new clip. Shared registry so both platforms expose the same set.
-        val videoFx = VideoFilterCatalog.toolDefinitions()
-        for (i in 0 until videoFx.length()) put(videoFx.get(i))
         // Core timeline verbs (seek, move_clip, trim, add_text, tracks, undo/redo, …), shared across
         // platforms and backed by the editor view-model.
         val timelineFx = TimelineTools.toolDefinitions()
@@ -914,8 +875,7 @@ class McpTools(
         "diarize_clip" -> diarizeClip(args.getString("clip_id"), args.optInt("num_speakers", 0))
         "separate_stems" -> separateStems(args.getString("clip_id"))
         "denoise_clip" -> denoiseClip(args.getString("clip_id"))
-        "apply_ffmpeg_filter" -> applyFfmpegFilter(args.getString("clip_id"), args.getString("filter"))
-        "apply_transition" -> applyTransition(args.getString("from_clip_id"), args.getString("to_clip_id"), args.optString("type", "fade").trim().lowercase().ifBlank { "fade" }, args.optDouble("duration_sec", 1.0).toFloat())
+        "apply_ffmpeg_filter", "apply_transition" -> desktopOnly(name)
         "set_clip_filter" -> setClipFilter(args.getString("clip_id"), args.getString("property"), args.getDouble("value").toFloat())
         "set_frame_step" -> setFrameStep(args.getString("clip_id"), args.getInt("step"))
         "add_keyframe" -> addKeyframe(args.getString("clip_id"), args.getString("property"), args.getLong("time_ms"), args.getDouble("value").toFloat())
@@ -926,11 +886,14 @@ class McpTools(
         "lookup_vocabulary" -> com.hereliesaz.guillotine.ai.vocab.VocabularyGraph.lookupJson(args.getString("term"))
         in TimelineTools.names -> TimelineTools.call(vm, name, args)
         in TextJobTools.names -> TextJobTools.call(vm, name, args)
-        in VideoFilterCatalog.names ->
-            applyFfmpegFilter(args.getString("clip_id"), VideoFilterCatalog.graphFor(name, args))
-                .apply { put("humanSummary", VideoFilterCatalog.summaryFor(name)) }
+        in VideoFilterCatalog.names -> desktopOnly(name)
         else -> throw IllegalArgumentException("Unknown tool: $name")
     }
+
+    /** FFmpeg/Frei0r tools exist only in the desktop build (no ffmpeg binary on Android). */
+    private fun desktopOnly(name: String): Nothing = throw UnsupportedOperationException(
+        "$name is only available in Guillotine Desktop (it needs FFmpeg/Frei0r, which the Android app doesn't ship).",
+    )
 
     // ---- resource definitions -----------------------------------------------
 
