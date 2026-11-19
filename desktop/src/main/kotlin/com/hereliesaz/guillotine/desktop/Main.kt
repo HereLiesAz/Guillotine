@@ -16,8 +16,6 @@ import com.hereliesaz.guillotine.desktop.ui.DesktopApp
 import com.hereliesaz.guillotine.desktop.ui.DesktopUpdateGate
 import com.hereliesaz.guillotine.editor.EditorViewModel
 import com.hereliesaz.guillotine.mcp.McpServer
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
@@ -74,8 +72,8 @@ fun main() {
             }.onFailure {
                 System.err.println("Guillotine: failed to start the MCP server on port 7865: ${it.message}")
             }
-            val doc = withContext(Dispatchers.IO) { DesktopProjectAutosave.load() }
-            if (doc != null) editor.loadDocument(doc)
+            // The autosaved project is restored by the editor screen (ui/NleScreen.kt), not here,
+            // so it is loaded exactly once.
         }
 
         DisposableEffect(Unit) {

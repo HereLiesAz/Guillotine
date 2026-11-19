@@ -8,19 +8,21 @@ Built with **Kotlin + Jetpack Compose** (Material 3 Expressive) on Android and *
 Multiplatform** on desktop. Video engine is **Jetpack Media3** on Android (`ExoPlayer` for
 playback, `Transformer` for real on-device mp4 export) and **JavaCV / FFmpeg** on desktop.
 
-**Your video never leaves the device.** All frame/audio analysis runs **on-device**. Cloud AIs
-(Gemini/OpenAI/Anthropic/…) are *controllers only*: they drive the editor as text over the
-in-app MCP server (read the timeline, set prompts, run the on-device analysis, apply edits) and
-never receive your clips or frames. Cloud keys are bring-your-own, stored encrypted on-device,
+**Your video stays on the device by default.** All frame/audio analysis runs **on-device**. Cloud
+AIs (Gemini/OpenAI/Anthropic/…) are *controllers*: they drive the editor as text over the in-app
+MCP server (read the timeline, set prompts, run the on-device analysis, apply edits). Media leaves
+the device only for features you opt into — the **Let cloud AI see frames** setting (sends the
+current frame), generative object removal (masked frames to Leonardo.ai), and cloud transcription
+(audio to Whisper). See [`PRIVACY.md`](PRIVACY.md). Cloud keys are bring-your-own, stored encrypted on-device,
 and there's a free, no-key on-device path (vision + an optional on-device LLM brain) so the app
 is fully usable with zero configuration.
 
 ## Download
 
 - **Android** — [latest APK](https://github.com/HereLiesAz/Guillotine/releases/latest): the
-  direct-download build is **ad-free** and **updates itself** from GitHub Releases (you're prompted
-  when a newer version is available). The [Google Play](https://play.google.com/store/apps/details?id=com.hereliesaz.theguillotine)
-  build (internal / alpha tracks) is ad-supported and updates through Play.
+  direct-download build **updates itself** from GitHub Releases (you're prompted when a newer
+  version is available). The [Google Play](https://play.google.com/store/apps/details?id=com.hereliesaz.theguillotine)
+  build (internal / alpha tracks) updates through Play. No ads on any platform.
 - **macOS** — [`.dmg`](https://github.com/HereLiesAz/Guillotine/releases/latest) (Apple Silicon;
   unsigned — right-click → Open on first launch).
 - **Windows** — [`.msi`](https://github.com/HereLiesAz/Guillotine/releases/latest) (unsigned — if
@@ -64,7 +66,8 @@ GitHub Releases and offer to download and run the newer installer for your OS.
 - **In-app AI assistant:** a minimal command bar where you type what you want and an agent drives the
   editor through the MCP tools. Pick any capable provider (Anthropic / OpenAI-compatible / Gemini) or
   the **on-device LLM brain** (MediaPipe LLM Inference, BYO model) — all of them are *controllers*
-  that only exchange text; the actual analysis runs on-device.
+  that exchange text (plus the current frame, only if you turn on **Let cloud AI see frames**);
+  the actual analysis runs on-device.
 - **On-device vision (no video upload):** free **ML Kit + MediaPipe** — **EfficientDet-Lite2** object
   detection, face detection, and scene classification (~1000 ImageNet categories) — turns a prompt
   like "cut every frame with my phone" into split/deleted clips. Frames are **sampled at 3 fps** and
@@ -87,12 +90,13 @@ GitHub Releases and offer to download and run the newer installer for your OS.
 - **Background removal (on-device, ML Kit):** segment a clip's subject and composite it over the
   layer below — in the live preview and baked into the export.
 - **Looks, LUTs, shaders & filters:** apply `.cube` **LUTs**, adjustable **GLSL/ISF shaders** (with
-  slider parameters), and the **FFmpeg / Frei0r** filter ecosystem to a clip — all on-device. See
+  slider parameters) to a clip — all on-device; the **FFmpeg / Frei0r** filter ecosystem is
+  **desktop-only**. See
   [`docs/ECOSYSTEM.md`](docs/ECOSYSTEM.md).
-- **Transitions & beat-sync:** clip-to-clip transitions (crossfade / wipe / slide / dissolve, via
-  FFmpeg `xfade`) and beat-synced editing tools (detect the beat map, cut and act on the beat).
+- **Transitions & beat-sync:** clip-to-clip transitions (crossfade / wipe / slide / dissolve; FFmpeg
+  `xfade` on desktop) and beat-synced editing tools (detect the beat map, cut and act on the beat).
 - **Media generation:** **video** — a free keyless **Guillotine** Hugging Face
-  Space (LTX-Video) or BYO-key (Runway, Luma, Veo, Sora, Kling, Pika, …); **music / audio** — BYO-key
+  Space (LTX-Video, run by the developer; receives only the prompt) or BYO-key (Runway, Luma, Veo, Sora, Kling, Pika, …); **music / audio** — BYO-key
   (ElevenLabs, Stability Audio, Lyria, MusicGen, …). Only your text prompt is sent — never your media.
   Guillotine does **not** generate images.
   See [`docs/PROVIDERS.md`](docs/PROVIDERS.md).

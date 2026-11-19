@@ -14,15 +14,16 @@ pluginManagement {
 
 buildscript {
     configurations.all {
+        val nettyVersion = providers.gradleProperty("guillotine.nettyVersion").get()
         resolutionStrategy {
             force("org.jdom:jdom2:2.0.6.1")
             force("org.apache.httpcomponents:httpclient:4.5.14")
             force("com.google.protobuf:protobuf-javalite:4.36.2")
             force("com.google.protobuf:protobuf-java:4.36.2")
-            force("io.netty:netty-codec-http2:4.2.19.Final")
-            force("io.netty:netty-handler:4.2.19.Final")
-            force("io.netty:netty-codec-http:4.2.19.Final")
-            force("io.netty:netty-codec:4.2.19.Final")
+            force("io.netty:netty-codec-http2:$nettyVersion")
+            force("io.netty:netty-handler:$nettyVersion")
+            force("io.netty:netty-codec-http:$nettyVersion")
+            force("io.netty:netty-codec:$nettyVersion")
             force("org.bouncycastle:bcprov-jdk18on:1.86")
             force("org.bouncycastle:bcpkix-jdk18on:1.86")
             force("org.apache.commons:commons-lang3:3.21.0")

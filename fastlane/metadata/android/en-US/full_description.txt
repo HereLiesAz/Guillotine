@@ -1,12 +1,12 @@
 Guillotine is a free, on-device video editor for Android — a real multi-track timeline plus an AI that actually does the editing. Tell it what to cut, and it cuts.
 
-No account. No subscription. No cloud required. Your footage never leaves your device.
+No account. No subscription. No ads. No cloud required. Your footage stays on your device unless you choose a cloud feature.
 
 ✂️ TELL IT WHAT TO CUT
 Type a plain-English instruction — “cut the silences,” “keep only the shots with a face,” “delete every frame with my phone in it” — and Guillotine finds the ranges and makes the cuts. Point it at a single frame (“this is my phone”) to track that exact object through the clip. All of this runs on-device with real vision: object, face and scene detection, plus a free silence detector.
 
 🤖 AN AI THAT USES THE REAL TOOLS
-A built-in assistant turns your words into real edits — splitting clips, deleting ranges, applying looks — by driving the same editor you use by hand. Bring your own key for a cloud model, or run a fully on-device LLM. Either way the AI only ever works with text: your video is never uploaded.
+A built-in assistant turns your words into real edits — splitting clips, deleting ranges, applying looks — by driving the same editor you use by hand. Bring your own key for a cloud model, or run a fully on-device LLM. By default the AI works with text only; it sees the current frame only if you turn on “Let cloud AI see frames.”
 
 🎬 A REAL MULTI-TRACK TIMELINE (VEGAS-STYLE)
 • Stack video and audio tracks that truly composite — the top track over the layers below
@@ -23,7 +23,7 @@ A built-in assistant turns your words into real edits — splitting clips, delet
 • Crop, scale and rotate any clip — video, image or text — right on the preview
 
 🪄 GENERATIVE & CREATIVE
-• Remove an unwanted object and repaint the background so it looks natural
+• Remove an unwanted object and repaint the background so it looks natural (masked frames go to Leonardo.ai with your key)
 • Background removal: drop a clip’s background so the layer below shows through
 • Text and captions as overlays; auto-transcribe speech into timed caption clips (on-device or cloud)
 
@@ -41,13 +41,13 @@ One adaptive layout for phones, tablets and Chromebooks, with keyboard shortcuts
 
 🔒 PRIVATE BY DESIGN
 • Editing, playback and all AI analysis run on your device
-• Your video is never uploaded for analysis
+• Media leaves the device only for features you opt into: cloud frame sharing, object removal, cloud transcription
 • Optional cloud-AI keys are stored encrypted on your device and used only for requests you start
-• No first-party servers, no account, no tracking
+• No ads, no account, no analytics, no tracking
 
 💾 NEVER LOSE WORK
 Projects autosave and restore on launch, and save as a portable .gilt file so you can pick up exactly where you left off.
 
 Perfect for trimming dead air out of vlogs and podcasts, pulling clips for social, removing distractions from a shot, captioning talking-head videos, and quick multi-track edits on a phone, tablet or Chromebook — no timeline experience required.
 
-Free and open source. Bring your own AI key, or use the no-key on-device options and keep everything on your device.
+Free and open source. Bring your own AI key, or use the on-device options and keep your media on your device.
