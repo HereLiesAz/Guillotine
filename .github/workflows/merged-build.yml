@@ -19,7 +19,7 @@ on:
 # cancelled (each main commit gets a complete build/test result).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: false
 
 # Least privilege by default. The build job raises `issues: write` only to file build failures.
 permissions:
